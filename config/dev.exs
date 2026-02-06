@@ -16,17 +16,17 @@ config :fizz, Fizz.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :fizz_web, FizzWeb.Endpoint,
+config :fizz, FizzWeb.Endpoint,
   # Binding to loopback ipv4 address prevents access from other machines.
   # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
   http: [ip: {127, 0, 0, 1}],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
-  secret_key_base: "90qzuBZm4pxSi37W2iwPWmwhdN28K0OuLjTXqrOEm7itmWu/UO2Ag8yIY+CbqaU1",
+  secret_key_base: "3xfboGN/BSzcl175jMnJCJLBA4sJd+xYGmBXmgiL3F9Hz/pNzQzEcZUyYJe0rQI+",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:fizz_web, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:fizz_web, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:fizz, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:fizz, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -53,7 +53,7 @@ config :fizz_web, FizzWeb.Endpoint,
 # different ports.
 
 # Reload browser tabs when matching files change.
-config :fizz_web, FizzWeb.Endpoint,
+config :fizz, FizzWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
@@ -68,10 +68,14 @@ config :fizz_web, FizzWeb.Endpoint,
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :fizz_web, dev_routes: true
+config :fizz, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
+
+# Set a higher stacktrace during development. Avoid configuring such
+# in production as building large stacktraces may be expensive.
+config :phoenix, :stacktrace_depth, 20
 
 # Initialize plugs at runtime for faster development compilation
 config :phoenix, :plug_init_mode, :runtime
@@ -86,7 +90,3 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
-
-# Set a higher stacktrace during development. Avoid configuring such
-# in production as building large stacktraces may be expensive.
-config :phoenix, :stacktrace_depth, 20

@@ -1,14 +1,27 @@
-defmodule Fizz.Umbrella.MixProject do
+defmodule Fizz.MixProject do
   use Mix.Project
 
   def project do
     [
-      apps_path: "apps",
+      app: :fizz,
       version: "0.1.0",
+      elixir: "~> 1.15",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      deps: deps(),
       aliases: aliases(),
+      deps: deps(),
+      compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
+    ]
+  end
+
+  # Configuration for the OTP application.
+  #
+  # Type `mix help compile.app` for more information.
+  def application do
+    [
+      mod: {Fizz.Application, []},
+      extra_applications: [:logger, :runtime_tools]
     ]
   end
 
@@ -18,22 +31,42 @@ defmodule Fizz.Umbrella.MixProject do
     ]
   end
 
-  # Dependencies can be Hex packages:
+  # Specifies which paths to compile per environment.
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
+
+  # Specifies your project dependencies.
   #
-  #   {:mydep, "~> 0.3.0"}
-  #
-  # Or git/path repositories:
-  #
-  #   {:mydep, git: "https://github.com/elixir-lang/mydep.git", tag: "0.1.0"}
-  #
-  # Type "mix help deps" for more examples and options.
-  #
-  # Dependencies listed here are available only for this project
-  # and cannot be accessed from applications inside the apps/ folder.
+  # Type `mix help deps` for examples and options.
   defp deps do
     [
-      # Required to run "mix format" on ~H/.heex files from the umbrella root
-      {:phoenix_live_view, ">= 0.0.0"}
+      {:bcrypt_elixir, "~> 3.0"},
+      {:phoenix, "~> 1.8.3"},
+      {:phoenix_ecto, "~> 4.5"},
+      {:ecto_sql, "~> 3.13"},
+      {:postgrex, ">= 0.0.0"},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_live_reload, "~> 1.2", only: :dev},
+      {:phoenix_live_view, "~> 1.1.0"},
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:phoenix_live_dashboard, "~> 0.8.3"},
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:heroicons,
+       github: "tailwindlabs/heroicons",
+       tag: "v2.2.0",
+       sparse: "optimized",
+       app: false,
+       compile: false,
+       depth: 1},
+      {:swoosh, "~> 1.16"},
+      {:req, "~> 0.5"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.0"},
+      {:gettext, "~> 1.0"},
+      {:jason, "~> 1.2"},
+      {:dns_cluster, "~> 0.2.0"},
+      {:bandit, "~> 1.5"}
     ]
   end
 
@@ -43,13 +76,19 @@ defmodule Fizz.Umbrella.MixProject do
   #     $ mix setup
   #
   # See the documentation for `Mix` for more info on aliases.
-  #
-  # Aliases listed here are available only for this project
-  # and cannot be accessed from applications inside the apps/ folder.
   defp aliases do
     [
-      # run `mix setup` in all child apps
-      setup: ["cmd mix setup"],
+      setup: ["deps.get", "ecto.setup", "assets.setup", "assets.build"],
+      "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
+      "ecto.reset": ["ecto.drop", "ecto.setup"],
+      test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["compile", "tailwind fizz", "esbuild fizz"],
+      "assets.deploy": [
+        "tailwind fizz --minify",
+        "esbuild fizz --minify",
+        "phx.digest"
+      ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end
