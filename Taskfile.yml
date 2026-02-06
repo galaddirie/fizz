@@ -1,0 +1,27 @@
+version: '3'
+
+tasks:
+  up:
+    desc: Start development services (PostgreSQL + Adminer)
+    cmds:
+      - docker-compose -f docker-compose.resources.yml up -d
+
+  down:
+    desc: Stop development services
+    cmds:
+      - docker-compose -f docker-compose.resources.yml down
+
+  logs:
+    desc: Show logs from development services
+    cmds:
+      - docker-compose -f docker-compose.resources.yml logs -f
+
+  restart:
+    desc: Restart development services
+    cmds:
+      - docker-compose -f docker-compose.resources.yml restart
+
+  status:
+    desc: Show status of development services
+    cmds:
+      - docker-compose -f docker-compose.resources.yml ps
