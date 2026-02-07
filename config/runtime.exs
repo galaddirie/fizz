@@ -1,4 +1,5 @@
 import Config
+import Nvir
 
 # config/runtime.exs is executed for all environments, including
 # during releases. It is executed after compilation and before the
@@ -6,6 +7,8 @@ import Config
 # and secrets from environment variables or elsewhere. Do not define
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
+
+dotenv!([".env", ".env.#{config_env()}"])
 
 # ## Using releases
 #
@@ -21,6 +24,53 @@ if System.get_env("PHX_SERVER") do
 end
 
 config :fizz, FizzWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+
+workos_sync_enabled = System.get_env("WORKOS_SYNC_ENABLED") in ~w(1 true TRUE)
+config :fizz, :workos_sync_enabled, workos_sync_enabled
+
+workos_api_key = System.get_env("WORKOS_API_KEY")
+workos_client_id = System.get_env("WORKOS_CLIENT_ID")
+
+if workos_api_key && workos_client_id do
+  config :workos, WorkOS.Client,
+    api_key: workos_api_key,
+    client_id: workos_client_id,
+    client: Fizz.WorkOS.ReqClient
+end
+
+if workos_sync_enabled and !(workos_api_key && workos_client_id) do
+  raise "WORKOS_SYNC_ENABLED is true but WORKOS_API_KEY/WORKOS_CLIENT_ID are missing"
+end
+
+if workos_authkit_provider = System.get_env("WORKOS_AUTHKIT_PROVIDER") do
+  config :fizz, :workos_authkit_provider, workos_authkit_provider
+end
+
+if workos_authkit_redirect_uri = System.get_env("WORKOS_AUTHKIT_REDIRECT_URI") do
+  config :fizz, :workos_authkit_redirect_uri, workos_authkit_redirect_uri
+end
+
+if workos_authkit_logout_return_uri = System.get_env("WORKOS_AUTHKIT_LOGOUT_RETURN_URI") do
+  config :fizz, :workos_authkit_logout_return_uri, workos_authkit_logout_return_uri
+end
+
+workos_role_slug_overrides =
+  %{
+    owner: System.get_env("WORKOS_ROLE_SLUG_OWNER"),
+    admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN"),
+    member: System.get_env("WORKOS_ROLE_SLUG_MEMBER")
+  }
+  |> Enum.reject(fn {_role, slug} -> is_nil(slug) or slug == "" end)
+  |> Map.new()
+
+if map_size(workos_role_slug_overrides) > 0 do
+  config :fizz,
+         :workos_role_slug_map,
+         Map.merge(
+           %{owner: "owner", admin: "admin", member: "member"},
+           workos_role_slug_overrides
+         )
+end
 
 if config_env() == :prod do
   database_url =

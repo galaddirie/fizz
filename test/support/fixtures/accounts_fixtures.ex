@@ -7,36 +7,39 @@ defmodule Fizz.AccountsFixtures do
   import Ecto.Query
 
   alias Fizz.Accounts
-  alias Fizz.Accounts.Scope
+  alias Fizz.Accounts.{Scope, User}
 
-  def unique_user_email, do: "user#{System.unique_integer()}@example.com"
-  def valid_user_password, do: "hello world!"
+  def unique_user_email, do: "user#{System.unique_integer([:positive])}@example.com"
+
+  def unique_workos_user_id, do: "user_workos_#{System.unique_integer([:positive])}"
 
   def valid_user_attributes(attrs \\ %{}) do
     Enum.into(attrs, %{
-      email: unique_user_email()
+      email: unique_user_email(),
+      workos_user_id: unique_workos_user_id(),
+      confirmed_at: DateTime.utc_now(:second)
     })
   end
 
   def unconfirmed_user_fixture(attrs \\ %{}) do
-    {:ok, user} =
+    attrs =
       attrs
       |> valid_user_attributes()
-      |> Accounts.register_user()
+      |> Map.put(:confirmed_at, nil)
+
+    {:ok, user} =
+      %User{}
+      |> User.workos_profile_changeset(attrs)
+      |> Fizz.Repo.insert()
 
     user
   end
 
   def user_fixture(attrs \\ %{}) do
-    user = unconfirmed_user_fixture(attrs)
-
-    token =
-      extract_user_token(fn url ->
-        Accounts.deliver_login_instructions(user, url)
-      end)
-
-    {:ok, {user, _expired_tokens}} =
-      Accounts.login_user_by_magic_link(token)
+    {:ok, user} =
+      %User{}
+      |> User.workos_profile_changeset(valid_user_attributes(attrs))
+      |> Fizz.Repo.insert()
 
     user
   end
@@ -50,17 +53,38 @@ defmodule Fizz.AccountsFixtures do
     Scope.for_user(user)
   end
 
-  def set_password(user) do
-    {:ok, {user, _expired_tokens}} =
-      Accounts.update_user_password(user, %{password: valid_user_password()})
+  def tenant_fixture(user \\ user_fixture(), attrs \\ %{}) do
+    scope = Scope.for_user(user)
 
-    user
+    {:ok, tenant} =
+      Accounts.create_tenant(
+        scope,
+        Map.merge(%{name: "Tenant #{System.unique_integer()}"}, attrs),
+        sync_workos: false
+      )
+
+    tenant
   end
 
-  def extract_user_token(fun) do
-    {:ok, captured_email} = fun.(&"[TOKEN]#{&1}[TOKEN]")
-    [_, token | _] = String.split(captured_email.text_body, "[TOKEN]")
-    token
+  def tenant_scope_fixture(opts \\ []) do
+    user = user_fixture()
+    tenant = tenant_fixture(user)
+    tenant_scope_fixture(user, tenant, opts)
+  end
+
+  def tenant_scope_fixture(user, tenant, opts \\ []) do
+    {:ok, scope} = Accounts.build_scope(Scope.for_user(user), tenant.id, opts)
+    scope
+  end
+
+  def workspace_fixture(scope, attrs \\ %{}) do
+    {:ok, workspace} =
+      Accounts.create_workspace(
+        scope,
+        Map.merge(%{name: "Workspace #{System.unique_integer()}"}, attrs)
+      )
+
+    workspace
   end
 
   def override_token_authenticated_at(token, authenticated_at) when is_binary(token) do
@@ -70,12 +94,6 @@ defmodule Fizz.AccountsFixtures do
       ),
       set: [authenticated_at: authenticated_at]
     )
-  end
-
-  def generate_user_magic_link_token(user) do
-    {encoded_token, user_token} = Accounts.UserToken.build_email_token(user, "login")
-    Fizz.Repo.insert!(user_token)
-    {encoded_token, user_token.token}
   end
 
   def offset_user_token(token, amount_to_add, unit) do

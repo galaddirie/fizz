@@ -11,6 +11,7 @@ defmodule FizzWeb.UserAuth do
   # the session validity setting in UserToken.
   @max_cookie_age_in_days 14
   @remember_me_cookie "_fizz_web_user_remember_me"
+  @workos_session_id :workos_session_id
   @remember_me_options [
     sign: true,
     max_age: @max_cookie_age_in_days * 24 * 60 * 60,
@@ -47,16 +48,22 @@ defmodule FizzWeb.UserAuth do
   """
   def log_out_user(conn) do
     user_token = get_session(conn, :user_token)
+    workos_session_id = get_session(conn, @workos_session_id)
     user_token && Accounts.delete_user_session_token(user_token)
 
     if live_socket_id = get_session(conn, :live_socket_id) do
       FizzWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
     end
 
-    conn
-    |> renew_session(nil)
-    |> delete_resp_cookie(@remember_me_cookie)
-    |> redirect(to: ~p"/")
+    conn =
+      conn
+      |> renew_session(nil)
+      |> delete_resp_cookie(@remember_me_cookie)
+
+    case workos_logout_url(workos_session_id, post_logout_return_to()) do
+      {:ok, logout_url} -> redirect(conn, external: logout_url)
+      :error -> redirect(conn, to: ~p"/")
+    end
   end
 
   @doc """
@@ -115,6 +122,7 @@ defmodule FizzWeb.UserAuth do
     conn
     |> renew_session(user)
     |> put_token_in_session(token)
+    |> maybe_put_workos_session_id(params)
     |> maybe_write_remember_me_cookie(token, params, remember_me)
   end
 
@@ -156,11 +164,54 @@ defmodule FizzWeb.UserAuth do
 
   defp maybe_write_remember_me_cookie(conn, _token, _params, _), do: conn
 
+  defp maybe_put_workos_session_id(conn, params) when is_list(params) do
+    maybe_put_workos_session_id_from_value(conn, params[:workos_session_id], true)
+  end
+
+  defp maybe_put_workos_session_id(conn, params) when is_map(params) do
+    cond do
+      Map.has_key?(params, :workos_session_id) ->
+        maybe_put_workos_session_id_from_value(conn, params[:workos_session_id], true)
+
+      Map.has_key?(params, "workos_session_id") ->
+        maybe_put_workos_session_id_from_value(conn, params["workos_session_id"], true)
+
+      true ->
+        conn
+    end
+  end
+
+  defp maybe_put_workos_session_id(conn, _params), do: conn
+
+  defp maybe_put_workos_session_id_from_value(conn, session_id, true)
+       when is_binary(session_id) do
+    put_session(conn, @workos_session_id, session_id)
+  end
+
+  defp maybe_put_workos_session_id_from_value(conn, nil, true),
+    do: delete_session(conn, @workos_session_id)
+
+  defp maybe_put_workos_session_id_from_value(conn, _session_id, _present?), do: conn
+
   defp write_remember_me_cookie(conn, token) do
     conn
     |> put_session(:user_remember_me, true)
     |> put_resp_cookie(@remember_me_cookie, token, @remember_me_options)
   end
+
+  defp post_logout_return_to do
+    Application.get_env(:fizz, :workos_authkit_logout_return_uri) ||
+      FizzWeb.Endpoint.url() <> ~p"/"
+  end
+
+  defp workos_logout_url(session_id, return_to)
+       when is_binary(session_id) and byte_size(session_id) > 0 and is_binary(return_to) do
+    base_url = String.trim_trailing(WorkOS.base_url(), "/")
+    query = URI.encode_query(%{session_id: session_id, return_to: return_to})
+    {:ok, "#{base_url}/user_management/sessions/logout?#{query}"}
+  end
+
+  defp workos_logout_url(_, _), do: :error
 
   defp put_token_in_session(conn, token) do
     conn
@@ -224,22 +275,7 @@ defmodule FizzWeb.UserAuth do
       socket =
         socket
         |> Phoenix.LiveView.put_flash(:error, "You must log in to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/users/log-in")
-
-      {:halt, socket}
-    end
-  end
-
-  def on_mount(:require_sudo_mode, _params, session, socket) do
-    socket = mount_current_scope(socket, session)
-
-    if Accounts.sudo_mode?(socket.assigns.current_scope.user, -10) do
-      {:cont, socket}
-    else
-      socket =
-        socket
-        |> Phoenix.LiveView.put_flash(:error, "You must re-authenticate to access this page.")
-        |> Phoenix.LiveView.redirect(to: ~p"/users/log-in")
+        |> Phoenix.LiveView.redirect(to: ~p"/auth/workos")
 
       {:halt, socket}
     end
@@ -257,11 +293,6 @@ defmodule FizzWeb.UserAuth do
   end
 
   @doc "Returns the path to redirect to after log in."
-  # the user was already logged in, redirect to settings
-  def signed_in_path(%Plug.Conn{assigns: %{current_scope: %Scope{user: %Accounts.User{}}}}) do
-    ~p"/users/settings"
-  end
-
   def signed_in_path(_), do: ~p"/"
 
   @doc """
@@ -274,7 +305,7 @@ defmodule FizzWeb.UserAuth do
       conn
       |> put_flash(:error, "You must log in to access this page.")
       |> maybe_store_return_to()
-      |> redirect(to: ~p"/users/log-in")
+      |> redirect(to: ~p"/auth/workos")
       |> halt()
     end
   end

@@ -1,0 +1,149 @@
+defmodule Fizz.Accounts.WorkOSTest do
+  use ExUnit.Case, async: false
+
+  alias Fizz.Accounts.{Tenant, User}
+  alias Fizz.Accounts.WorkOS, as: AccountsWorkOS
+
+  defmodule ReqMock do
+    def request(opts) do
+      send(self(), {:workos_http_request, opts})
+
+      case Process.get(:workos_http_responses, []) do
+        [response | rest] ->
+          Process.put(:workos_http_responses, rest)
+          response
+
+        [] ->
+          raise "No mocked WorkOS HTTP responses were configured"
+      end
+    end
+  end
+
+  setup do
+    previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
+    previous_sync_enabled = Application.get_env(:fizz, :workos_sync_enabled)
+    previous_role_slug_map = Application.get_env(:fizz, :workos_role_slug_map)
+    previous_workos_client = Application.get_env(:workos, WorkOS.Client)
+
+    Application.put_env(:fizz, :workos_http_client_module, ReqMock)
+    Application.put_env(:fizz, :workos_sync_enabled, true)
+
+    Application.put_env(:fizz, :workos_role_slug_map, %{
+      owner: "owner",
+      admin: "admin",
+      member: "member"
+    })
+
+    Application.put_env(:workos, WorkOS.Client,
+      api_key: "sk_test_123",
+      client_id: "client_test_123",
+      client: Fizz.WorkOS.ReqClient
+    )
+
+    on_exit(fn ->
+      restore_env(:fizz, :workos_http_client_module, previous_http_client)
+      restore_env(:fizz, :workos_sync_enabled, previous_sync_enabled)
+      restore_env(:fizz, :workos_role_slug_map, previous_role_slug_map)
+      restore_env(:workos, WorkOS.Client, previous_workos_client)
+    end)
+
+    :ok
+  end
+
+  test "ensure_organization_membership/3 updates existing membership role when mismatched" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{
+           "data" => [
+             %{
+               "id" => "om_123",
+               "status" => "active",
+               "role" => %{"slug" => "member"}
+             }
+           ]
+         }
+       }},
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "om_123", "status" => "active", "role" => %{"slug" => "admin"}}
+       }}
+    ])
+
+    tenant = %Tenant{workos_organization_id: "org_123"}
+    user = %User{id: 7, email: "owner@example.com", workos_user_id: "user_123"}
+
+    assert {:ok, %{membership_id: "om_123", user_id: "user_123"}} =
+             AccountsWorkOS.ensure_organization_membership(tenant, user, :admin)
+
+    assert_receive {:workos_http_request, first_request}
+    assert first_request[:method] == :get
+    assert first_request[:url] == "/user_management/organization_memberships"
+
+    params = first_request[:params]
+    assert Enum.any?(params, fn {key, value} -> key == :user_id and value == "user_123" end)
+
+    assert Enum.any?(params, fn {key, value} -> key == :organization_id and value == "org_123" end)
+
+    assert_receive {:workos_http_request, second_request}
+    assert second_request[:method] == :put
+    assert second_request[:url] == "/user_management/organization_memberships/om_123"
+    assert second_request[:json] == %{role_slug: "admin"}
+  end
+
+  test "ensure_organization_membership/3 creates membership with mapped role slug" do
+    Application.put_env(:fizz, :workos_role_slug_map, %{
+      owner: "agency_owner",
+      admin: "admin",
+      member: "member"
+    })
+
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"data" => []}}},
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "om_created",
+           "status" => "active",
+           "role" => %{"slug" => "agency_owner"}
+         }
+       }}
+    ])
+
+    tenant = %Tenant{workos_organization_id: "org_987"}
+    user = %User{id: 17, email: "new-owner@example.com", workos_user_id: "user_987"}
+
+    assert {:ok, %{membership_id: "om_created", user_id: "user_987"}} =
+             AccountsWorkOS.ensure_organization_membership(tenant, user, :owner)
+
+    assert_receive {:workos_http_request, _first_request}
+
+    assert_receive {:workos_http_request, second_request}
+    assert second_request[:method] == :post
+    assert second_request[:url] == "/user_management/organization_memberships"
+
+    assert second_request[:json] == %{
+             user_id: "user_987",
+             organization_id: "org_987",
+             role_slug: "agency_owner"
+           }
+  end
+
+  test "ensure_organization_membership/3 is a no-op when sync is disabled" do
+    Application.put_env(:fizz, :workos_sync_enabled, false)
+
+    tenant = %Tenant{workos_organization_id: "org_123"}
+    user = %User{id: 99, email: "member@example.com", workos_user_id: "user_123"}
+
+    assert {:ok, %{membership_id: nil, user_id: "user_123"}} =
+             AccountsWorkOS.ensure_organization_membership(tenant, user, :member)
+
+    refute_receive {:workos_http_request, _request}
+  end
+
+  defp restore_env(app, key, nil), do: Application.delete_env(app, key)
+  defp restore_env(app, key, value), do: Application.put_env(app, key, value)
+end

@@ -4,167 +4,69 @@ defmodule Fizz.Accounts do
   """
 
   import Ecto.Query, warn: false
+
+  alias Fizz.Accounts.{Identity, User, UserToken, WorkOS}
   alias Fizz.Repo
 
-  alias Fizz.Accounts.{User, UserToken, UserNotifier}
+  ## Identity & Tenancy
 
-  ## Database getters
+  defdelegate list_tenants(scope), to: Identity
+  defdelegate create_tenant(scope, attrs, opts \\ []), to: Identity
+  defdelegate build_scope(scope, tenant_id, opts \\ []), to: Identity
+  defdelegate list_workspaces(scope), to: Identity
+  defdelegate create_workspace(scope, attrs), to: Identity
+  defdelegate add_tenant_member(scope, user, attrs), to: Identity
+  defdelegate add_workspace_member(scope, workspace_id, user, attrs), to: Identity
+  defdelegate sync_user_to_workos(scope), to: Identity
+  defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
+
+  ## Users
 
   @doc """
   Gets a user by email.
-
-  ## Examples
-
-      iex> get_user_by_email("foo@example.com")
-      %User{}
-
-      iex> get_user_by_email("unknown@example.com")
-      nil
-
   """
   def get_user_by_email(email) when is_binary(email) do
     Repo.get_by(User, email: email)
   end
 
   @doc """
-  Gets a user by email and password.
-
-  ## Examples
-
-      iex> get_user_by_email_and_password("foo@example.com", "correct_password")
-      %User{}
-
-      iex> get_user_by_email_and_password("foo@example.com", "invalid_password")
-      nil
-
+  Gets a user by WorkOS user id.
   """
-  def get_user_by_email_and_password(email, password)
-      when is_binary(email) and is_binary(password) do
-    user = Repo.get_by(User, email: email)
-    if User.valid_password?(user, password), do: user
+  def get_user_by_workos_user_id(workos_user_id) when is_binary(workos_user_id) do
+    Repo.get_by(User, workos_user_id: workos_user_id)
   end
 
   @doc """
   Gets a single user.
 
   Raises `Ecto.NoResultsError` if the User does not exist.
-
-  ## Examples
-
-      iex> get_user!(123)
-      %User{}
-
-      iex> get_user!(456)
-      ** (Ecto.NoResultsError)
-
   """
   def get_user!(id), do: Repo.get!(User, id)
 
-  ## User registration
-
   @doc """
-  Registers a user.
-
-  ## Examples
-
-      iex> register_user(%{field: value})
-      {:ok, %User{}}
-
-      iex> register_user(%{field: bad_value})
-      {:error, %Ecto.Changeset{}}
-
+  Exchanges a WorkOS AuthKit code and returns/logically provisions the local user.
   """
-  def register_user(attrs) do
-    %User{}
-    |> User.email_changeset(attrs)
-    |> Repo.insert()
-  end
-
-  ## Settings
-
-  @doc """
-  Checks whether the user is in sudo mode.
-
-  The user is in sudo mode when the last authentication was done no further
-  than 20 minutes ago. The limit can be given as second argument in minutes.
-  """
-  def sudo_mode?(user, minutes \\ -20)
-
-  def sudo_mode?(%User{authenticated_at: ts}, minutes) when is_struct(ts, DateTime) do
-    DateTime.after?(ts, DateTime.utc_now() |> DateTime.add(minutes, :minute))
-  end
-
-  def sudo_mode?(_user, _minutes), do: false
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for changing the user email.
-
-  See `Fizz.Accounts.User.email_changeset/3` for a list of supported options.
-
-  ## Examples
-
-      iex> change_user_email(user)
-      %Ecto.Changeset{data: %User{}}
-
-  """
-  def change_user_email(user, attrs \\ %{}, opts \\ []) do
-    User.email_changeset(user, attrs, opts)
+  def authenticate_user_with_workos_code(code, opts \\ %{}) when is_binary(code) do
+    with {:ok, %{user: user}} <- authenticate_user_with_workos_code_and_session(code, opts) do
+      {:ok, user}
+    end
   end
 
   @doc """
-  Updates the user email using the given token.
-
-  If the token matches, the user email is updated and the token is deleted.
+  Exchanges a WorkOS AuthKit code and returns the local user plus WorkOS session id.
   """
-  def update_user_email(user, token) do
-    context = "change:#{user.email}"
+  def authenticate_user_with_workos_code_and_session(code, opts \\ %{}) when is_binary(code) do
+    auth_params = %{
+      code: code,
+      ip_address: opts[:ip_address],
+      user_agent: opts[:user_agent]
+    }
 
-    Repo.transact(fn ->
-      with {:ok, query} <- UserToken.verify_change_email_token_query(token, context),
-           %UserToken{sent_to: email} <- Repo.one(query),
-           {:ok, user} <- Repo.update(User.email_changeset(user, %{email: email})),
-           {_count, _result} <-
-             Repo.delete_all(from(UserToken, where: [user_id: ^user.id, context: ^context])) do
-        {:ok, user}
-      else
-        _ -> {:error, :transaction_aborted}
-      end
-    end)
-  end
-
-  @doc """
-  Returns an `%Ecto.Changeset{}` for changing the user password.
-
-  See `Fizz.Accounts.User.password_changeset/3` for a list of supported options.
-
-  ## Examples
-
-      iex> change_user_password(user)
-      %Ecto.Changeset{data: %User{}}
-
-  """
-  def change_user_password(user, attrs \\ %{}, opts \\ []) do
-    User.password_changeset(user, attrs, opts)
-  end
-
-  @doc """
-  Updates the user password.
-
-  Returns a tuple with the updated user, as well as a list of expired tokens.
-
-  ## Examples
-
-      iex> update_user_password(user, %{password: ...})
-      {:ok, {%User{}, [...]}}
-
-      iex> update_user_password(user, %{password: "too short"})
-      {:error, %Ecto.Changeset{}}
-
-  """
-  def update_user_password(user, attrs) do
-    user
-    |> User.password_changeset(attrs)
-    |> update_user_and_delete_all_tokens()
+    with {:ok, authentication} <- WorkOS.authenticate_with_code(auth_params),
+         {:ok, profile} <- WorkOS.extract_user_profile(authentication),
+         {:ok, user} <- get_or_upsert_user_from_workos_profile(profile) do
+      {:ok, %{user: user, workos_session_id: extract_workos_session_id(authentication)}}
+    end
   end
 
   ## Session
@@ -189,109 +91,82 @@ defmodule Fizz.Accounts do
   end
 
   @doc """
-  Gets the user with the given magic link token.
+  Deletes the signed session token.
   """
-  def get_user_by_magic_link_token(token) do
-    with {:ok, query} <- UserToken.verify_magic_link_token_query(token),
-         {user, _token} <- Repo.one(query) do
-      user
+  def delete_user_session_token(token) do
+    Repo.delete_all(from(UserToken, where: [token: ^token]))
+    :ok
+  end
+
+  ## WorkOS profile sync
+
+  defp get_or_upsert_user_from_workos_profile(%{id: workos_user_id, email: email} = profile) do
+    case get_user_by_workos_user_id(workos_user_id) do
+      %User{} = user ->
+        update_user_from_workos_profile(user, profile)
+
+      nil ->
+        case get_user_by_email(email) do
+          %User{workos_user_id: nil} = user ->
+            update_user_from_workos_profile(user, profile)
+
+          %User{workos_user_id: ^workos_user_id} = user ->
+            update_user_from_workos_profile(user, profile)
+
+          %User{} ->
+            {:error, :workos_account_conflict}
+
+          nil ->
+            register_user_from_workos_profile(profile)
+        end
+    end
+  end
+
+  defp register_user_from_workos_profile(%{
+         id: workos_user_id,
+         email: email,
+         email_verified: verified
+       }) do
+    confirmed_at = if verified, do: DateTime.utc_now(:second), else: nil
+
+    %User{}
+    |> User.workos_profile_changeset(%{
+      email: email,
+      workos_user_id: workos_user_id,
+      confirmed_at: confirmed_at
+    })
+    |> Repo.insert()
+  end
+
+  defp update_user_from_workos_profile(
+         %User{} = user,
+         %{id: workos_user_id, email: email, email_verified: verified}
+       ) do
+    confirmed_at =
+      if verified, do: user.confirmed_at || DateTime.utc_now(:second), else: user.confirmed_at
+
+    user
+    |> User.workos_profile_changeset(%{
+      email: email,
+      workos_user_id: workos_user_id,
+      confirmed_at: confirmed_at
+    })
+    |> Repo.update()
+  end
+
+  defp extract_workos_session_id(%Elixir.WorkOS.UserManagement.Authentication{
+         access_token: access_token
+       })
+       when is_binary(access_token) do
+    with [_header, payload, _signature] <- String.split(access_token, ".", parts: 3),
+         {:ok, decoded_payload} <- Base.url_decode64(payload, padding: false),
+         {:ok, claims} <- Jason.decode(decoded_payload),
+         sid when is_binary(sid) <- claims["sid"] do
+      sid
     else
       _ -> nil
     end
   end
 
-  @doc """
-  Logs the user in by magic link.
-
-  There are three cases to consider:
-
-  1. The user has already confirmed their email. They are logged in
-     and the magic link is expired.
-
-  2. The user has not confirmed their email and no password is set.
-     In this case, the user gets confirmed, logged in, and all tokens -
-     including session ones - are expired. In theory, no other tokens
-     exist but we delete all of them for best security practices.
-
-  3. The user has not confirmed their email but a password is set.
-     This cannot happen in the default implementation but may be the
-     source of security pitfalls. See the "Mixing magic link and password registration" section of
-     `mix help phx.gen.auth`.
-  """
-  def login_user_by_magic_link(token) do
-    {:ok, query} = UserToken.verify_magic_link_token_query(token)
-
-    case Repo.one(query) do
-      # Prevent session fixation attacks by disallowing magic links for unconfirmed users with password
-      {%User{confirmed_at: nil, hashed_password: hash}, _token} when not is_nil(hash) ->
-        raise """
-        magic link log in is not allowed for unconfirmed users with a password set!
-
-        This cannot happen with the default implementation, which indicates that you
-        might have adapted the code to a different use case. Please make sure to read the
-        "Mixing magic link and password registration" section of `mix help phx.gen.auth`.
-        """
-
-      {%User{confirmed_at: nil} = user, _token} ->
-        user
-        |> User.confirm_changeset()
-        |> update_user_and_delete_all_tokens()
-
-      {user, token} ->
-        Repo.delete!(token)
-        {:ok, {user, []}}
-
-      nil ->
-        {:error, :not_found}
-    end
-  end
-
-  @doc ~S"""
-  Delivers the update email instructions to the given user.
-
-  ## Examples
-
-      iex> deliver_user_update_email_instructions(user, current_email, &url(~p"/users/settings/confirm-email/#{&1}"))
-      {:ok, %{to: ..., body: ...}}
-
-  """
-  def deliver_user_update_email_instructions(%User{} = user, current_email, update_email_url_fun)
-      when is_function(update_email_url_fun, 1) do
-    {encoded_token, user_token} = UserToken.build_email_token(user, "change:#{current_email}")
-
-    Repo.insert!(user_token)
-    UserNotifier.deliver_update_email_instructions(user, update_email_url_fun.(encoded_token))
-  end
-
-  @doc """
-  Delivers the magic link login instructions to the given user.
-  """
-  def deliver_login_instructions(%User{} = user, magic_link_url_fun)
-      when is_function(magic_link_url_fun, 1) do
-    {encoded_token, user_token} = UserToken.build_email_token(user, "login")
-    Repo.insert!(user_token)
-    UserNotifier.deliver_login_instructions(user, magic_link_url_fun.(encoded_token))
-  end
-
-  @doc """
-  Deletes the signed token with the given context.
-  """
-  def delete_user_session_token(token) do
-    Repo.delete_all(from(UserToken, where: [token: ^token, context: "session"]))
-    :ok
-  end
-
-  ## Token helper
-
-  defp update_user_and_delete_all_tokens(changeset) do
-    Repo.transact(fn ->
-      with {:ok, user} <- Repo.update(changeset) do
-        tokens_to_expire = Repo.all_by(UserToken, user_id: user.id)
-
-        Repo.delete_all(from(t in UserToken, where: t.id in ^Enum.map(tokens_to_expire, & &1.id)))
-
-        {:ok, {user, tokens_to_expire}}
-      end
-    end)
-  end
+  defp extract_workos_session_id(_), do: nil
 end

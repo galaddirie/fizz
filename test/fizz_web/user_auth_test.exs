@@ -74,13 +74,13 @@ defmodule FizzWeb.UserAuthTest do
       assert max_age == @remember_me_cookie_max_age
     end
 
-    test "redirects to settings when user is already logged in", %{conn: conn, user: user} do
+    test "redirects to signed in path when user is already logged in", %{conn: conn, user: user} do
       conn =
         conn
         |> assign(:current_scope, Scope.for_user(user))
         |> UserAuth.log_in_user(user)
 
-      assert redirected_to(conn) == ~p"/users/settings"
+      assert redirected_to(conn) == ~p"/"
     end
 
     test "writes a cookie if remember_me was set in previous session", %{conn: conn, user: user} do
@@ -103,6 +103,11 @@ defmodule FizzWeb.UserAuthTest do
       assert signed_token != get_session(conn, :user_token)
       assert max_age == @remember_me_cookie_max_age
       assert get_session(conn, :user_remember_me) == true
+    end
+
+    test "stores the WorkOS session id when provided", %{conn: conn, user: user} do
+      conn = UserAuth.log_in_user(conn, user, %{workos_session_id: "session_workos_123"})
+      assert get_session(conn, :workos_session_id) == "session_workos_123"
     end
   end
 
@@ -140,6 +145,29 @@ defmodule FizzWeb.UserAuthTest do
       refute get_session(conn, :user_token)
       assert %{max_age: 0} = conn.resp_cookies[@remember_me_cookie]
       assert redirected_to(conn) == ~p"/"
+    end
+
+    test "redirects to WorkOS session logout when a WorkOS session id exists", %{
+      conn: conn,
+      user: user
+    } do
+      user_token = Accounts.generate_user_session_token(user)
+      return_to = FizzWeb.Endpoint.url() <> "/"
+
+      expected_logout_url =
+        "https://api.workos.com/user_management/sessions/logout?" <>
+          URI.encode_query(%{session_id: "session_workos_123", return_to: return_to})
+
+      conn =
+        conn
+        |> put_session(:user_token, user_token)
+        |> put_session(:workos_session_id, "session_workos_123")
+        |> UserAuth.log_out_user()
+
+      assert redirected_to(conn) == expected_logout_url
+      refute get_session(conn, :user_token)
+      refute get_session(conn, :workos_session_id)
+      refute Accounts.get_user_by_session_token(user_token)
     end
   end
 
@@ -282,38 +310,6 @@ defmodule FizzWeb.UserAuthTest do
     end
   end
 
-  describe "on_mount :require_sudo_mode" do
-    test "allows users that have authenticated in the last 10 minutes", %{conn: conn, user: user} do
-      user_token = Accounts.generate_user_session_token(user)
-      session = conn |> put_session(:user_token, user_token) |> get_session()
-
-      socket = %LiveView.Socket{
-        endpoint: FizzWeb.Endpoint,
-        assigns: %{__changed__: %{}, flash: %{}}
-      }
-
-      assert {:cont, _updated_socket} =
-               UserAuth.on_mount(:require_sudo_mode, %{}, session, socket)
-    end
-
-    test "redirects when authentication is too old", %{conn: conn, user: user} do
-      eleven_minutes_ago = DateTime.utc_now(:second) |> DateTime.add(-11, :minute)
-      user = %{user | authenticated_at: eleven_minutes_ago}
-      user_token = Accounts.generate_user_session_token(user)
-      {user, token_inserted_at} = Accounts.get_user_by_session_token(user_token)
-      assert DateTime.compare(token_inserted_at, user.authenticated_at) == :gt
-      session = conn |> put_session(:user_token, user_token) |> get_session()
-
-      socket = %LiveView.Socket{
-        endpoint: FizzWeb.Endpoint,
-        assigns: %{__changed__: %{}, flash: %{}}
-      }
-
-      assert {:halt, _updated_socket} =
-               UserAuth.on_mount(:require_sudo_mode, %{}, session, socket)
-    end
-  end
-
   describe "require_authenticated_user/2" do
     setup %{conn: conn} do
       %{conn: UserAuth.fetch_current_scope_for_user(conn, [])}
@@ -323,7 +319,7 @@ defmodule FizzWeb.UserAuthTest do
       conn = conn |> fetch_flash() |> UserAuth.require_authenticated_user([])
       assert conn.halted
 
-      assert redirected_to(conn) == ~p"/users/log-in"
+      assert redirected_to(conn) == ~p"/auth/workos"
 
       assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
                "You must log in to access this page."
