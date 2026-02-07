@@ -2,8 +2,8 @@
 ## AI-Native Full-Service Marketing Agency Platform
 ### Codename: Fizz
 
-**Version:** 0.1 — Draft  
-**Status:** Pre-Engineering / Architectural Design  
+**Version:** 1.0 — Baseline  
+**Status:** Implemented / Finalized Design  
 **Date:** February 2026  
 
 ---
@@ -26,13 +26,13 @@ Modern agencies operate across 15–40 disconnected software tools. AI is being 
 
 ### 1.3 Solution Overview
 
-Fizz is a platform built from nine composable engine primitives. These primitives can be combined to power any agency workflow — from competitive research to creative development to campaign optimization to client reporting. A shared intelligence layer ensures that every function benefits from the full context of the agency's knowledge, rather than operating in isolation.
+Fizz is a platform built from nine composable engine primitives. These primitives can be combined to power any agency workflow — from competitive research to creative development to campaign optimization to client reporting. A shared intelligence layer ensures that every function benefits from the full context of the agency's knowledge, rather than operating in disconnected silos.
 
 The future of agency work is human led, AI driven.
 
 ### 1.4 Design Scope
 
-This document covers the architectural design of the platform engine — the primitives, their interfaces, their relationships, and their composition patterns.
+This document covers the architectural design of the platform engine — the primitives, their interfaces, their relationships, and their composition patterns. It also captures finalized access-boundary decisions that are already implemented in the identity and scope model.
 
 ---
 
@@ -46,7 +46,7 @@ This document covers the architectural design of the platform engine — the pri
 
 **P1 — Primitives Over Products.** Build composable engine primitives that can be assembled into any workflow, rather than building fixed-function applications. The application layer is a composition of primitives, not a monolith.
 
-**P2 — Shared Intelligence, Isolated Data.** All modules benefit from a common understanding of clients, brands, campaigns, syndicated research, internal learnings and RFPs. But data isolation between tenants and between clients within a tenant is absolute and cryptographically enforced.
+**P2 — Shared Intelligence, Strict Scope Boundaries.** All modules benefit from a common understanding of clients, brands, campaigns, syndicated research, internal learnings and RFPs. Data access is enforced by resolved scope, with strict tenant and workspace boundaries. Tenant-to-tenant and workspace-to-workspace interaction is not supported.
 
 **P3 — Human-in-the-Loop by Design.** AI handles volume, synthesis, and first drafts. Humans handle judgment, relationships, and final decisions. Every workflow has configurable approval gates. The system should make humans more effective, not replace their judgment.
 
@@ -143,57 +143,48 @@ All primitives depend on Identity & Tenancy for access control. Most primitives 
 
 #### 4.1.1 Purpose
 
-Manages all identity, authentication, authorization, and data isolation across the platform. Defines the hierarchical tenancy model and enforces access boundaries at every layer.
+Manages identity, authentication, authorization, and runtime scope resolution across the platform. Defines tenancy/workspace boundaries and enforces access boundaries at every layer.
 
 #### 4.1.2 Tenancy Hierarchy
 
 ```
 Platform (Fizz)
   └── Agency Tenant
-        ├── Agency-level settings, models, knowledge
-        ├── Team (e.g., Strategy, Creative, Media, Account)
-        │     └── Team-level permissions, workflows
+        ├── Tenant Membership
+        │     └── Roles: owner | admin | member
         ├── Client Workspace
-        │     ├── Client-level brand assets, data, history
-        │     ├── Campaign
-        │     │     ├── Campaign assets, performance data, briefs
-        │     │     └── Project
-        │     │           └── Tasks, deliverables, timelines
-        │     └── Competitor Profiles (scoped to this client)
+        │     └── Workspace Membership
+        │           └── Roles: admin | member | viewer
         └── User
-              ├── Role-based permissions
-              ├── Personal preferences, activity history
-              └── Session context
+              └── Authenticated via WorkOS-backed identity
 ```
 
 #### 4.1.3 Data Isolation Model
 
-**Hard Isolation (cryptographic boundary):**
-- Agency Tenant ↔ Agency Tenant: Complete isolation. No data sharing possible. Separate encryption keys per tenant. One agency on the platform can never access another agency's data, even through AI-mediated channels (e.g., RAG results, model fine-tuning, aggregated benchmarks).
+Fizz uses one strict isolation model enforced through scope:
 
-**Firm Isolation (application-enforced, auditable):**
-- Client Workspace ↔ Client Workspace within the same Agency: Isolated by default. An agency team working on Brand A cannot see Brand B's data unless explicitly granted cross-client access for a defined purpose (e.g., portfolio reporting). All cross-client data access is logged and auditable. AI agents inherit this isolation — an agent operating in Client A's context cannot retrieve Client B's documents from the knowledge base.
-
-**Soft Isolation (permission-based):**
-- Team ↔ Team within the same Client: Visible by default within a client workspace, but specific assets or workstreams can be restricted by role or team. Example: Financial data about a client engagement may be visible to Account leads but not to junior creatives.
+- **Tenant Boundary (absolute):** Tenant A and Tenant B never interact. Cross-tenant data access is not supported.
+- **Workspace Boundary (absolute):** Workspace A and Workspace B never interact, including within the same tenant. Cross-workspace interactions are not supported.
+- **Membership-Gated Access:** Access requires explicit tenant/workspace membership and role checks.
+- **Scope-First Execution:** Every action is evaluated against the caller's resolved scope (`tenant`, optional `workspace`, and effective roles).
 
 #### 4.1.4 AI-Specific Access Control
 
 When an AI agent acts on behalf of a user, it operates under an **effective permission scope** that is the intersection of:
 - The user's permissions
+- The resolved runtime scope (tenant + optional workspace + effective role)
 - The agent's defined scope (agents can be further restricted beyond the user's access)
-- The workflow's scope (a workflow may grant temporary elevated access for a specific step, with audit logging)
 
-This means an agent can never exceed the permissions of the human who invoked it, and can be further constrained.
+This means an agent can never exceed the permissions of the human who invoked it, cannot cross tenant boundaries, and cannot traverse workspace boundaries.
 
 #### 4.1.5 Key Entities
 
 - **Tenant** — top-level organizational boundary (the agency)
 - **Workspace** — client-scoped data container within a tenant
-- **User** — individual human identity with role-based and attribute-based permissions
-- **Service Identity** — machine identity for agents, workflows, and integrations
-- **Permission Policy** — declarative rules defining access (e.g., "Members of the Strategy team can read all documents in Workspace X but can only write to the Strategy folder")
-- **Access Token** — scoped, time-limited credential issued per session or per agent execution, encoding the effective permission scope
+- **User** — individual human identity authenticated through WorkOS-backed flows
+- **Tenant Membership** — user-to-tenant association with role (`owner | admin | member`)
+- **Workspace Membership** — user-to-workspace association with role (`admin | member | viewer`)
+- **Scope** — resolved caller context used for authorization (`user`, `tenant`, optional `workspace`, effective roles)
 
 ### 4.2 Knowledge Base
 
@@ -271,7 +262,7 @@ Vector storage and retrieval layer powering similarity search across all content
 
 **Index Architecture:**
 - Separate vector indices per content modality (text, image, audio/video) optimized for each embedding model
-- Indices are partitioned by tenant and optionally by workspace for query-time performance and isolation
+- Indices are partitioned by tenant and workspace for query-time performance and strict boundary enforcement
 - Supports metadata filtering at query time (e.g., "find similar content but only within Client Y's workspace and only from the last 6 months")
 
 **Embedding Strategy:**
@@ -335,10 +326,7 @@ Each stage has defined rules per data classification tier:
 - No cross-tenant data in embedding model training
 - Aggregated, anonymized benchmarks are only produced with explicit tenant opt-in and are subject to differential privacy techniques
 
-**Within a tenant:** An agency may choose to fine-tune models on their own institutional knowledge (across their clients). This is permitted but:
-- Requires explicit agency-level configuration
-- Respects client workspace isolation (client A's data is not in the fine-tuning set if the agency has restricted cross-client learning)
-- Is transparently logged and auditable
+**Within a tenant:** Training and inference datasets are workspace-scoped by default and do not mix content across workspaces. This is enforced by scope and query filtering and is transparently logged and auditable.
 
 ### 5.4 Data Residency
 
@@ -375,44 +363,21 @@ For tenants with data residency requirements:
 ---
 
 
-## 7. Open Questions & Future Considerations
+## 7. Finalized Decisions & Non-Goals
 
-### 7.1 Open Design Questions
+### 7.1 Finalized Decisions
 
-**Q1: Fine-Tuning Strategy**
-How aggressively should we fine-tune domain-specific models vs. relying on RAG with general-purpose models? Fine-tuning offers better quality for specialized tasks but adds operational complexity and training data governance challenges.
+- Scope is the core access abstraction.
+- Tenant boundaries are absolute. Cross-tenant interactions are not supported.
+- Workspace boundaries are absolute. Workspace-to-workspace interactions are not supported.
+- Authorization is membership and role based, enforced via resolved scope for every operation.
+- AI execution inherits the same scope constraints as the invoking user.
 
-**Q2: Agent Autonomy Defaults**
-What should the default autonomy level be for new tenants? More autonomy = faster workflows but higher risk. More human-in-the-loop = safer but slower. Should this be configurable per tenant, per module, per workflow?
+### 7.2 Explicit Non-Goals
 
-**Q3: Multi-Tenant Benchmarking**
-Agencies would benefit from cross-industry benchmarks ("how does my client's social engagement compare to industry averages?"). How do we build opt-in, privacy-preserving benchmark datasets? What differential privacy guarantees are needed?
-
-**Q4: Real-Time Collaboration**
-Should the platform support real-time collaborative editing of AI-generated content (like Google Docs), or is a review-and-approve model sufficient? Real-time collaboration adds significant architectural complexity.
-
-**Q5: Offline & Edge Capability**
-Do agency teams need any offline capability (e.g., for client presentations in locations without reliable internet)? If so, which primitives need offline-capable variants?
-
-**Q6: White-Labeling**
-Agencies may want to present the platform as their own proprietary technology to clients. How deep does white-labeling need to go — just UI theming, or full domain/branding customization?
-
-### 7.2 Future Considerations
-
-**Multi-Modal Generation Evolution:**
-As AI models evolve to handle video, audio, and interactive content generation natively, the Creative Studio module and Sandbox primitive will need to expand to support these modalities.
-
-**Inter-Agency Collaboration:**
-In some cases, agencies partner on large accounts (e.g., a creative agency and a media agency). The tenancy model may need to support controlled cross-tenant collaboration with strict scope boundaries.
-
-**Client-Facing Portal:**
-Agencies may want to give their clients direct access to certain parts of the platform (dashboards, approval workflows, asset libraries). This requires a separate client-facing tenancy tier with extremely restricted permissions.
-
-**Marketplace for Workflows & Agent Definitions:**
-As agencies build custom workflows and agent configurations, a marketplace for sharing these across the platform (with appropriate anonymization) could accelerate adoption and create network effects.
-
-**Autonomous Campaign Management:**
-As trust in AI grows, the platform should be architecturally ready for increasingly autonomous operations — AI managing campaigns end-to-end with human oversight rather than human execution with AI assistance. The progressive autonomy principle (P5) ensures the architecture supports this evolution without redesign.
+- No cross-tenant collaboration model.
+- No cross-workspace data sharing or aggregate workflows.
+- No temporary elevation model that bypasses tenant/workspace boundaries.
 
 ---
 

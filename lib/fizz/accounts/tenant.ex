@@ -4,12 +4,9 @@ defmodule Fizz.Accounts.Tenant do
 
   alias Fizz.Accounts.{TenantMembership, Workspace}
 
-  @isolation_levels [:hard, :firm, :soft]
-
   schema "tenants" do
     field :name, :string
     field :slug, :string
-    field :isolation_level, Ecto.Enum, values: @isolation_levels, default: :hard
     field :metadata, :map, default: %{}
     field :workos_organization_id, :string
 
@@ -22,8 +19,8 @@ defmodule Fizz.Accounts.Tenant do
   @doc false
   def changeset(tenant, attrs) do
     tenant
-    |> cast(attrs, [:name, :slug, :isolation_level, :metadata, :workos_organization_id])
-    |> validate_required([:name, :slug, :isolation_level])
+    |> cast(attrs, [:name, :slug, :metadata, :workos_organization_id])
+    |> validate_required([:name, :slug])
     |> validate_length(:name, min: 2, max: 120)
     |> validate_slug()
     |> unique_constraint(:slug)
