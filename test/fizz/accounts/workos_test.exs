@@ -144,6 +144,105 @@ defmodule Fizz.Accounts.WorkOSTest do
     refute_receive {:workos_http_request, _request}
   end
 
+  test "get_pipes_access_token/1 normalizes token payload" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{
+           "active" => true,
+           "access_token" => %{
+             "token" => "gh_token",
+             "expires_at" => "2026-02-10T15:30:00.000Z",
+             "scopes" => ["repo", "read:user"],
+             "missing_scopes" => []
+           }
+         }
+       }}
+    ])
+
+    assert {:ok, response} =
+             AccountsWorkOS.get_pipes_access_token(%{
+               provider: "github",
+               user_id: "user_123",
+               organization_id: "org_123"
+             })
+
+    assert response.active
+    assert response.error == nil
+    assert response.access_token.token == "gh_token"
+    assert response.access_token.scopes == ["repo", "read:user"]
+    assert response.access_token.missing_scopes == []
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :post
+    assert request[:url] == "/pipes/access_token"
+
+    assert request[:json] == %{
+             provider: "github",
+             user_id: "user_123",
+             organization_id: "org_123"
+           }
+  end
+
+  test "generate_widget_token/1 returns token" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}}
+    ])
+
+    assert {:ok, "widget_token_123"} =
+             AccountsWorkOS.generate_widget_token(%{
+               user_id: "user_123",
+               organization_id: "org_123",
+               scopes: ["widgets:pipes:manage"]
+             })
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :post
+    assert request[:url] == "/widgets/token"
+
+    assert request[:json] == %{
+             user_id: "user_123",
+             organization_id: "org_123",
+             scopes: ["widgets:pipes:manage"]
+           }
+  end
+
+  test "create_vault_object/1 posts to vault objects endpoint" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 201, body: %{"id" => "vault_obj_123"}}}
+    ])
+
+    assert {:ok, %{"id" => "vault_obj_123"}} =
+             AccountsWorkOS.create_vault_object(%{
+               name: "slack-token",
+               value: "xoxb-example",
+               context: %{"organization_id" => "org_123"}
+             })
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :post
+    assert request[:url] == "/vault/objects"
+
+    assert request[:json] == %{
+             name: "slack-token",
+             value: "xoxb-example",
+             context: %{"organization_id" => "org_123"}
+           }
+  end
+
+  test "delete_vault_object/1 sends delete request" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 204, body: %{}}}
+    ])
+
+    assert :ok = AccountsWorkOS.delete_vault_object("vault_obj_123")
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :delete
+    assert request[:url] == "/vault/objects/vault_obj_123"
+  end
+
   defp restore_env(app, key, nil), do: Application.delete_env(app, key)
   defp restore_env(app, key, value), do: Application.put_env(app, key, value)
 end

@@ -44,6 +44,9 @@ defmodule FizzWeb.Layouts do
       </div>
       <div class="flex-none">
         <ul class="flex flex-column px-1 space-x-4 items-center">
+          <li :if={@current_scope && @current_scope.user}>
+            <.link navigate={~p"/settings/integrations"} class="btn btn-ghost">Integrations</.link>
+          </li>
           <li>
             <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
           </li>
@@ -57,6 +60,11 @@ defmodule FizzWeb.Layouts do
             <a href="https://hexdocs.pm/phoenix/overview.html" class="btn btn-primary">
               Get Started <span aria-hidden="true">&rarr;</span>
             </a>
+          </li>
+          <li :if={@current_scope && @current_scope.user}>
+            <.link href={~p"/users/log-out"} method="delete" class="btn btn-soft btn-error">
+              Log out
+            </.link>
           </li>
         </ul>
       </div>

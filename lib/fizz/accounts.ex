@@ -5,7 +5,7 @@ defmodule Fizz.Accounts do
 
   import Ecto.Query, warn: false
 
-  alias Fizz.Accounts.{Identity, User, UserToken, WorkOS}
+  alias Fizz.Accounts.{Identity, Integrations, User, UserToken, WorkOS}
   alias Fizz.Repo
 
   ## Identity & Tenancy
@@ -19,6 +19,18 @@ defmodule Fizz.Accounts do
   defdelegate add_workspace_member(scope, workspace_id, user, attrs), to: Identity
   defdelegate sync_user_to_workos(scope), to: Identity
   defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
+  defdelegate supported_integration_providers(), to: Integrations, as: :supported_providers
+  defdelegate list_connected_app_statuses(scope), to: Integrations
+  defdelegate list_connected_app_statuses(scope, opts), to: Integrations
+
+  defdelegate generate_workos_widget_token(scope, scopes \\ ["widgets:pipes:manage"]),
+    to: Integrations,
+    as: :generate_widget_token
+
+  defdelegate list_byo_credentials(scope), to: Integrations
+  defdelegate change_byo_credential(attrs \\ %{}), to: Integrations
+  defdelegate create_byo_credential(scope, attrs), to: Integrations
+  defdelegate revoke_byo_credential(scope, credential_id), to: Integrations
 
   ## Users
 

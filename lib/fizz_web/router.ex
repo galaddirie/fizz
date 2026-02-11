@@ -55,4 +55,13 @@ defmodule FizzWeb.Router do
     get "/auth/workos", WorkOSAuthController, :authorize
     get "/auth/workos/callback", WorkOSAuthController, :callback
   end
+
+  scope "/", FizzWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    live_session :require_authenticated_user,
+      on_mount: [{FizzWeb.UserAuth, :require_authenticated}] do
+      live "/settings/integrations", IntegrationsLive, :index
+    end
+  end
 end
