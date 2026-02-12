@@ -54,6 +54,10 @@ if workos_authkit_logout_return_uri = System.get_env("WORKOS_AUTHKIT_LOGOUT_RETU
   config :fizz, :workos_authkit_logout_return_uri, workos_authkit_logout_return_uri
 end
 
+if workos_webhook_secret = System.get_env("WORKOS_WEBHOOK_SECRET") do
+  config :fizz, :workos_webhook_secret, workos_webhook_secret
+end
+
 workos_role_slug_overrides =
   %{
     owner: System.get_env("WORKOS_ROLE_SLUG_OWNER"),

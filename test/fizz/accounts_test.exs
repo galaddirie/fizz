@@ -24,7 +24,8 @@ defmodule Fizz.AccountsTest do
                "email" => "new-user@example.com",
                "email_verified" => true
              },
-             access_token: unsigned_jwt_with_sid("session_workos_new"),
+             access_token: unsigned_jwt("user_workos_new", "session_workos_new"),
+             refresh_token: "refresh_workos_new",
              authentication_method: "sso"
            }}
 
@@ -36,6 +37,8 @@ defmodule Fizz.AccountsTest do
                "email" => "updated@example.com",
                "email_verified" => true
              },
+             access_token: unsigned_jwt("user_workos_existing", "session_workos_existing"),
+             refresh_token: "refresh_workos_existing",
              authentication_method: "sso"
            }}
 
@@ -47,6 +50,8 @@ defmodule Fizz.AccountsTest do
                "email" => "link-existing@example.com",
                "email_verified" => false
              },
+             access_token: unsigned_jwt("user_workos_linked", "session_workos_linked"),
+             refresh_token: "refresh_workos_linked",
              authentication_method: "sso"
            }}
 
@@ -58,6 +63,8 @@ defmodule Fizz.AccountsTest do
                "email" => "conflict@example.com",
                "email_verified" => true
              },
+             access_token: unsigned_jwt("user_workos_conflict", "session_workos_conflict"),
+             refresh_token: "refresh_workos_conflict",
              authentication_method: "sso"
            }}
 
@@ -66,9 +73,19 @@ defmodule Fizz.AccountsTest do
       end
     end
 
-    defp unsigned_jwt_with_sid(sid) do
+    defp unsigned_jwt(sub, sid) do
       header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
-      payload = Base.url_encode64(Jason.encode!(%{sid: sid}), padding: false)
+
+      payload =
+        Base.url_encode64(
+          Jason.encode!(%{
+            sub: sub,
+            sid: sid,
+            exp: System.os_time(:second) + 3600
+          }),
+          padding: false
+        )
+
       "#{header}.#{payload}."
     end
   end
@@ -179,9 +196,14 @@ defmodule Fizz.AccountsTest do
       assert user.workos_user_id == "user_workos_new"
     end
 
-    test "returns nil for workos_session_id when the access token is unavailable" do
-      assert {:ok, %{workos_session_id: nil}} =
+    test "returns the WorkOS session payload when tokens are available" do
+      assert {:ok,
+              %{workos_session: workos_session, workos_session_id: "session_workos_existing"}} =
                Accounts.authenticate_user_with_workos_code_and_session("existing-id")
+
+      assert workos_session.workos_user_id == "user_workos_existing"
+      assert is_binary(workos_session.access_token)
+      assert is_binary(workos_session.refresh_token)
     end
   end
 
@@ -237,6 +259,73 @@ defmodule Fizz.AccountsTest do
       token = Accounts.generate_user_session_token(user_fixture())
       assert :ok = Accounts.delete_user_session_token(token)
       refute Accounts.get_user_by_session_token(token)
+    end
+  end
+
+  describe "upsert_user_from_workos_profile/1" do
+    test "creates a user when workos_user_id does not exist locally" do
+      assert {:ok, user} =
+               Accounts.upsert_user_from_workos_profile(%{
+                 id: "user_workos_webhook_created",
+                 email: "webhook-created@example.com",
+                 email_verified: true
+               })
+
+      assert user.workos_user_id == "user_workos_webhook_created"
+      assert user.email == "webhook-created@example.com"
+      assert user.confirmed_at
+    end
+
+    test "updates user attributes for an existing workos_user_id" do
+      existing =
+        user_fixture(%{
+          workos_user_id: "user_workos_webhook_existing",
+          email: "before-webhook@example.com"
+        })
+
+      assert {:ok, updated} =
+               Accounts.upsert_user_from_workos_profile(%{
+                 id: "user_workos_webhook_existing",
+                 email: "after-webhook@example.com",
+                 email_verified: true
+               })
+
+      assert updated.id == existing.id
+      assert updated.email == "after-webhook@example.com"
+      assert updated.confirmed_at
+    end
+
+    test "returns error for invalid payload" do
+      assert {:error, :invalid_workos_user_profile} =
+               Accounts.upsert_user_from_workos_profile(%{id: "only-id"})
+    end
+  end
+
+  describe "delete_user_by_workos_user_id/1" do
+    test "deletes the local user when present" do
+      user_fixture(%{workos_user_id: "user_workos_webhook_delete"})
+
+      assert :ok = Accounts.delete_user_by_workos_user_id("user_workos_webhook_delete")
+      refute Accounts.get_user_by_workos_user_id("user_workos_webhook_delete")
+    end
+
+    test "returns ok when local user does not exist" do
+      assert :ok = Accounts.delete_user_by_workos_user_id("user_workos_missing_delete")
+    end
+  end
+
+  describe "revoke_user_sessions_by_workos_user_id/1" do
+    test "deletes all local session tokens for the mapped user" do
+      user = user_fixture(%{workos_user_id: "user_workos_revoke"})
+      token = Accounts.generate_user_session_token(user)
+      assert Accounts.get_user_by_session_token(token)
+
+      assert :ok = Accounts.revoke_user_sessions_by_workos_user_id("user_workos_revoke")
+      refute Accounts.get_user_by_session_token(token)
+    end
+
+    test "returns ok when local user does not exist" do
+      assert :ok = Accounts.revoke_user_sessions_by_workos_user_id("user_workos_missing_revoke")
     end
   end
 end

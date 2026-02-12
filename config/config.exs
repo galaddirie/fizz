@@ -26,6 +26,7 @@ config :fizz,
 
 config :fizz, :workos_sync_enabled, false
 config :fizz, :workos_authkit_provider, "authkit"
+config :fizz, :workos_webhook_secret, nil
 config :fizz, :workos_role_slug_map, %{owner: "owner", admin: "admin", member: "member"}
 
 config :workos, WorkOS.Client,

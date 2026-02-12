@@ -7,66 +7,82 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
   alias Fizz.Accounts.User
   alias Fizz.Repo
 
-  defmodule UserManagementMock do
-    def get_authorization_url(params) do
-      send(self(), {:workos_authorization_url, params})
-      {:ok, "https://auth.workos.test/authorize?state=#{params[:state]}"}
-    end
+  defmodule ReqMock do
+    def request(opts) do
+      send(self(), {:workos_http_request, opts})
+      code = get_in(opts, [:json, :code])
 
-    def authenticate_with_code(params) do
-      send(self(), {:workos_authenticate_with_code, params})
-
-      case params[:code] do
+      case code do
         "ok-code" ->
           {:ok,
-           %WorkOS.UserManagement.Authentication{
-             user: %{
-               "id" => "user_workos_123",
-               "email" => "sso-user@example.com",
-               "email_verified" => true
-             },
-             access_token: unsigned_jwt_with_sid("session_workos_123"),
-             authentication_method: "sso"
+           %Req.Response{
+             status: 200,
+             body: %{
+               "user" => %{
+                 "id" => "user_workos_123",
+                 "email" => "sso-user@example.com",
+                 "email_verified" => true
+               },
+               "access_token" => unsigned_jwt("user_workos_123", "session_workos_123"),
+               "refresh_token" => "refresh_workos_123",
+               "authentication_method" => "sso"
+             }
            }}
 
         "conflict-code" ->
           {:ok,
-           %WorkOS.UserManagement.Authentication{
-             user: %{
-               "id" => "user_workos_conflict",
-               "email" => "conflict@example.com",
-               "email_verified" => true
-             },
-             authentication_method: "sso"
+           %Req.Response{
+             status: 200,
+             body: %{
+               "user" => %{
+                 "id" => "user_workos_conflict",
+                 "email" => "conflict@example.com",
+                 "email_verified" => true
+               },
+               "access_token" => unsigned_jwt("user_workos_conflict", "session_workos_conflict"),
+               "refresh_token" => "refresh_workos_conflict",
+               "authentication_method" => "sso"
+             }
            }}
 
         _ ->
-          {:error, {:workos_error, "invalid_grant", "Invalid authorization code"}}
+          {:ok,
+           %Req.Response{
+             status: 400,
+             body: %{"code" => "invalid_grant", "message" => "Invalid authorization code"}
+           }}
       end
     end
 
-    defp unsigned_jwt_with_sid(sid) do
+    defp unsigned_jwt(sub, sid) do
       header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
-      payload = Base.url_encode64(Jason.encode!(%{sid: sid}), padding: false)
+
+      payload =
+        Base.url_encode64(
+          Jason.encode!(%{
+            sub: sub,
+            sid: sid,
+            exp: System.os_time(:second) + 3600
+          }),
+          padding: false
+        )
+
       "#{header}.#{payload}."
     end
-
-    def create_user(_params), do: {:error, :not_implemented}
-    def create_organization_membership(_params), do: {:error, :not_implemented}
   end
 
   setup do
-    previous_module = Application.get_env(:fizz, :workos_user_management_module)
+    previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
     previous_provider = Application.get_env(:fizz, :workos_authkit_provider)
 
-    Application.put_env(:fizz, :workos_user_management_module, UserManagementMock)
+    Application.put_env(:fizz, :workos_http_client_module, ReqMock)
     Application.put_env(:fizz, :workos_authkit_provider, "authkit")
 
     on_exit(fn ->
-      if previous_module do
-        Application.put_env(:fizz, :workos_user_management_module, previous_module)
+      if previous_http_client do
+        Application.put_env(:fizz, :workos_http_client_module, previous_http_client)
       else
-        Application.delete_env(:fizz, :workos_user_management_module)
+        Application.delete_env(:fizz, :workos_http_client_module)
       end
 
       if previous_provider do
@@ -82,43 +98,57 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
   test "GET /auth/workos redirects to WorkOS hosted UI", %{conn: conn} do
     conn = get(conn, ~p"/auth/workos")
 
-    assert_receive {:workos_authorization_url, params}
-    assert params[:provider] == "authkit"
-    assert is_binary(params[:state])
-    assert byte_size(params[:state]) > 10
-    assert String.ends_with?(params[:redirect_uri], "/auth/workos/callback")
+    redirect_url = redirected_to(conn)
+    query = redirect_url |> URI.parse() |> Map.get(:query, "") |> URI.decode_query()
 
-    assert redirected_to(conn) =~ "https://auth.workos.test/authorize"
-    assert get_session(conn, :workos_auth_state) == params[:state]
+    assert String.starts_with?(redirect_url, "https://api.workos.com/user_management/authorize")
+    assert query["provider"] == "authkit"
+    assert query["code_challenge_method"] == "S256"
+    assert is_binary(query["state"])
+    assert byte_size(query["state"]) > 10
+    assert is_binary(query["code_challenge"])
+    assert get_session(conn, :workos_auth_state) == query["state"]
+    assert is_binary(get_session(conn, :workos_pkce_verifier))
   end
 
   test "GET /users/log-in redirects directly to WorkOS hosted UI", %{conn: conn} do
     conn = get(conn, ~p"/users/log-in")
 
-    assert_receive {:workos_authorization_url, params}
-    assert params[:provider] == "authkit"
-    assert is_binary(params[:state])
-    assert byte_size(params[:state]) > 10
-    assert String.ends_with?(params[:redirect_uri], "/auth/workos/callback")
+    redirect_url = redirected_to(conn)
+    query = redirect_url |> URI.parse() |> Map.get(:query, "") |> URI.decode_query()
 
-    assert redirected_to(conn) =~ "https://auth.workos.test/authorize"
-    assert get_session(conn, :workos_auth_state) == params[:state]
+    assert String.starts_with?(redirect_url, "https://api.workos.com/user_management/authorize")
+    assert query["provider"] == "authkit"
+    assert query["code_challenge_method"] == "S256"
+    assert is_binary(query["state"])
+    assert byte_size(query["state"]) > 10
+    assert is_binary(query["code_challenge"])
+    assert get_session(conn, :workos_auth_state) == query["state"]
+    assert is_binary(get_session(conn, :workos_pkce_verifier))
   end
 
   test "GET /auth/workos/callback logs in user for valid code and state", %{conn: conn} do
     conn =
       conn
-      |> init_test_session(%{workos_auth_state: "known-state"})
+      |> init_test_session(%{
+        workos_auth_state: "known-state",
+        workos_pkce_verifier: "known-verifier"
+      })
       |> get(~p"/auth/workos/callback", %{"code" => "ok-code", "state" => "known-state"})
 
-    assert_receive {:workos_authenticate_with_code, params}
-    assert params[:code] == "ok-code"
-    assert params[:ip_address]
+    assert_receive {:workos_http_request, params}
+    assert params[:json][:code] == "ok-code"
+    assert params[:json][:code_verifier] == "known-verifier"
+    assert params[:json][:ip_address]
 
     assert redirected_to(conn) == ~p"/"
     assert get_session(conn, :user_token)
     assert get_session(conn, :workos_session_id) == "session_workos_123"
+    assert get_session(conn, :workos_user_id) == "user_workos_123"
+    assert get_session(conn, :workos_access_token)
+    assert get_session(conn, :workos_refresh_token)
     refute get_session(conn, :workos_auth_state)
+    refute get_session(conn, :workos_pkce_verifier)
 
     assert user = Accounts.get_user_by_workos_user_id("user_workos_123")
     assert user.email == "sso-user@example.com"
@@ -128,7 +158,10 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
   test "GET /auth/workos/callback rejects invalid state", %{conn: conn} do
     conn =
       conn
-      |> init_test_session(%{workos_auth_state: "known-state"})
+      |> init_test_session(%{
+        workos_auth_state: "known-state",
+        workos_pkce_verifier: "known-verifier"
+      })
       |> get(~p"/auth/workos/callback", %{"code" => "ok-code", "state" => "wrong-state"})
 
     assert redirected_to(conn) == ~p"/"
@@ -149,7 +182,10 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
 
     conn =
       conn
-      |> init_test_session(%{workos_auth_state: "known-state"})
+      |> init_test_session(%{
+        workos_auth_state: "known-state",
+        workos_pkce_verifier: "known-verifier"
+      })
       |> get(~p"/auth/workos/callback", %{"code" => "conflict-code", "state" => "known-state"})
 
     assert redirected_to(conn) == ~p"/"

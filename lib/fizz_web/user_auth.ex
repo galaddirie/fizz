@@ -12,6 +12,11 @@ defmodule FizzWeb.UserAuth do
   @max_cookie_age_in_days 14
   @remember_me_cookie "_fizz_web_user_remember_me"
   @workos_session_id :workos_session_id
+  @workos_access_token :workos_access_token
+  @workos_refresh_token :workos_refresh_token
+  @workos_user_id :workos_user_id
+  @workos_access_token_expires_at :workos_access_token_expires_at
+  @workos_access_token_expiry_leeway_seconds 30
   @remember_me_options [
     sign: true,
     max_age: @max_cookie_age_in_days * 24 * 60 * 60,
@@ -73,11 +78,13 @@ defmodule FizzWeb.UserAuth do
   """
   def fetch_current_scope_for_user(conn, _opts) do
     with {token, conn} <- ensure_user_token(conn),
-         {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
+         {user, token_inserted_at} <- Accounts.get_user_by_session_token(token),
+         {:ok, conn, user} <- ensure_workos_session(conn, user) do
       conn
       |> assign(:current_scope, Scope.for_user(user))
       |> maybe_reissue_user_session_token(user, token_inserted_at)
     else
+      {:error, conn} -> assign(conn, :current_scope, Scope.for_user(nil))
       nil -> assign(conn, :current_scope, Scope.for_user(nil))
     end
   end
@@ -107,6 +114,54 @@ defmodule FizzWeb.UserAuth do
     end
   end
 
+  defp ensure_workos_session(conn, %{workos_user_id: workos_user_id} = user)
+       when is_binary(workos_user_id) and byte_size(workos_user_id) > 0 do
+    with {:ok, workos_session} <- read_workos_session(conn),
+         :ok <- ensure_workos_user_match(workos_user_id, workos_session.workos_user_id) do
+      if access_token_expired?(workos_session.access_token_expires_at) do
+        refresh_workos_session(conn, user, workos_session)
+      else
+        {:ok, conn, user}
+      end
+    else
+      _ ->
+        {:error, invalidate_local_session(conn)}
+    end
+  end
+
+  defp ensure_workos_session(conn, user), do: {:ok, clear_workos_session(conn), user}
+
+  defp refresh_workos_session(conn, user, workos_session) do
+    case Accounts.refresh_user_workos_session(workos_session.refresh_token,
+           ip_address: client_ip(conn),
+           user_agent: List.first(get_req_header(conn, "user-agent"))
+         ) do
+      {:ok, %{user: refreshed_user, workos_session: refreshed_session}} ->
+        with :ok <- ensure_same_local_user(user, refreshed_user),
+             :ok <-
+               ensure_workos_user_match(user.workos_user_id, refreshed_session.workos_user_id) do
+          {:ok, put_workos_session(conn, refreshed_session), refreshed_user}
+        else
+          _ -> {:error, invalidate_local_session(conn)}
+        end
+
+      _ ->
+        {:error, invalidate_local_session(conn)}
+    end
+  end
+
+  defp ensure_same_local_user(%{id: id}, %{id: id}), do: :ok
+  defp ensure_same_local_user(_user, _refreshed_user), do: {:error, :local_user_mismatch}
+
+  defp ensure_workos_user_match(workos_user_id, workos_user_id), do: :ok
+  defp ensure_workos_user_match(_expected, _actual), do: {:error, :workos_user_mismatch}
+
+  defp access_token_expired?(expires_at) when is_integer(expires_at) do
+    expires_at <= System.os_time(:second) + @workos_access_token_expiry_leeway_seconds
+  end
+
+  defp access_token_expired?(_), do: true
+
   # This function is the one responsible for creating session tokens
   # and storing them safely in the session and cookies. It may be called
   # either when logging in, during sudo mode, or to renew a session which
@@ -122,7 +177,7 @@ defmodule FizzWeb.UserAuth do
     conn
     |> renew_session(user)
     |> put_token_in_session(token)
-    |> maybe_put_workos_session_id(params)
+    |> maybe_put_workos_session(params)
     |> maybe_write_remember_me_cookie(token, params, remember_me)
   end
 
@@ -164,40 +219,153 @@ defmodule FizzWeb.UserAuth do
 
   defp maybe_write_remember_me_cookie(conn, _token, _params, _), do: conn
 
-  defp maybe_put_workos_session_id(conn, params) when is_list(params) do
-    maybe_put_workos_session_id_from_value(conn, params[:workos_session_id], true)
+  defp maybe_put_workos_session(conn, params) when is_list(params) do
+    maybe_put_workos_session(conn, Map.new(params))
   end
 
-  defp maybe_put_workos_session_id(conn, params) when is_map(params) do
+  defp maybe_put_workos_session(conn, params) when is_map(params) do
     cond do
+      Map.has_key?(params, :workos_session) ->
+        maybe_put_workos_session_from_value(conn, params[:workos_session], true)
+
+      Map.has_key?(params, "workos_session") ->
+        maybe_put_workos_session_from_value(conn, params["workos_session"], true)
+
       Map.has_key?(params, :workos_session_id) ->
-        maybe_put_workos_session_id_from_value(conn, params[:workos_session_id], true)
+        put_session(conn, @workos_session_id, params[:workos_session_id])
 
       Map.has_key?(params, "workos_session_id") ->
-        maybe_put_workos_session_id_from_value(conn, params["workos_session_id"], true)
+        put_session(conn, @workos_session_id, params["workos_session_id"])
 
       true ->
         conn
     end
   end
 
-  defp maybe_put_workos_session_id(conn, _params), do: conn
+  defp maybe_put_workos_session(conn, _params), do: conn
 
-  defp maybe_put_workos_session_id_from_value(conn, session_id, true)
-       when is_binary(session_id) do
-    put_session(conn, @workos_session_id, session_id)
+  defp maybe_put_workos_session_from_value(conn, %{} = workos_session, true) do
+    access_token = read_value(workos_session, [:access_token, "access_token"])
+    refresh_token = read_value(workos_session, [:refresh_token, "refresh_token"])
+    session_id = read_value(workos_session, [:session_id, "session_id"])
+    workos_user_id = read_value(workos_session, [:workos_user_id, "workos_user_id"])
+
+    expires_at =
+      workos_session
+      |> read_value([:access_token_expires_at, "access_token_expires_at"])
+      |> normalize_integer()
+
+    conn
+    |> maybe_put_session(@workos_access_token, access_token)
+    |> maybe_put_session(@workos_refresh_token, refresh_token)
+    |> maybe_put_session(@workos_session_id, session_id)
+    |> maybe_put_session(@workos_user_id, workos_user_id)
+    |> maybe_put_session(@workos_access_token_expires_at, expires_at)
   end
 
-  defp maybe_put_workos_session_id_from_value(conn, nil, true),
-    do: delete_session(conn, @workos_session_id)
-
-  defp maybe_put_workos_session_id_from_value(conn, _session_id, _present?), do: conn
+  defp maybe_put_workos_session_from_value(conn, nil, true), do: clear_workos_session(conn)
+  defp maybe_put_workos_session_from_value(conn, _workos_session, _present?), do: conn
 
   defp write_remember_me_cookie(conn, token) do
     conn
     |> put_session(:user_remember_me, true)
     |> put_resp_cookie(@remember_me_cookie, token, @remember_me_options)
   end
+
+  defp read_workos_session(conn) do
+    access_token = get_session(conn, @workos_access_token)
+    refresh_token = get_session(conn, @workos_refresh_token)
+    session_id = get_session(conn, @workos_session_id)
+    workos_user_id = get_session(conn, @workos_user_id)
+    expires_at = normalize_integer(get_session(conn, @workos_access_token_expires_at))
+
+    if is_binary(access_token) and is_binary(refresh_token) and is_binary(session_id) and
+         is_binary(workos_user_id) and is_integer(expires_at) do
+      {:ok,
+       %{
+         access_token: access_token,
+         refresh_token: refresh_token,
+         session_id: session_id,
+         workos_user_id: workos_user_id,
+         access_token_expires_at: expires_at
+       }}
+    else
+      {:error, :missing_workos_session}
+    end
+  end
+
+  defp put_workos_session(conn, %{} = workos_session) do
+    conn
+    |> maybe_put_session(
+      @workos_access_token,
+      read_value(workos_session, [:access_token, "access_token"])
+    )
+    |> maybe_put_session(
+      @workos_refresh_token,
+      read_value(workos_session, [:refresh_token, "refresh_token"])
+    )
+    |> maybe_put_session(
+      @workos_session_id,
+      read_value(workos_session, [:session_id, "session_id"])
+    )
+    |> maybe_put_session(
+      @workos_user_id,
+      read_value(workos_session, [:workos_user_id, "workos_user_id"])
+    )
+    |> maybe_put_session(
+      @workos_access_token_expires_at,
+      workos_session
+      |> read_value([:access_token_expires_at, "access_token_expires_at"])
+      |> normalize_integer()
+    )
+  end
+
+  defp clear_workos_session(conn) do
+    conn
+    |> delete_session(@workos_access_token)
+    |> delete_session(@workos_refresh_token)
+    |> delete_session(@workos_session_id)
+    |> delete_session(@workos_user_id)
+    |> delete_session(@workos_access_token_expires_at)
+  end
+
+  defp invalidate_local_session(conn) do
+    user_token = get_session(conn, :user_token)
+    user_token && Accounts.delete_user_session_token(user_token)
+
+    conn
+    |> renew_session(nil)
+    |> delete_resp_cookie(@remember_me_cookie)
+  end
+
+  defp maybe_put_session(conn, key, value) when is_binary(value) and byte_size(value) > 0 do
+    put_session(conn, key, value)
+  end
+
+  defp maybe_put_session(conn, key, value) when is_integer(value),
+    do: put_session(conn, key, value)
+
+  defp maybe_put_session(conn, key, _value), do: delete_session(conn, key)
+
+  defp read_value(data, keys) do
+    Enum.find_value(keys, fn key ->
+      case data do
+        %{} -> Map.get(data, key)
+        _ -> nil
+      end
+    end)
+  end
+
+  defp normalize_integer(value) when is_integer(value), do: value
+
+  defp normalize_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, ""} -> parsed
+      _ -> nil
+    end
+  end
+
+  defp normalize_integer(_value), do: nil
 
   defp post_logout_return_to do
     Application.get_env(:fizz, :workos_authkit_logout_return_uri) ||
@@ -315,4 +483,10 @@ defmodule FizzWeb.UserAuth do
   end
 
   defp maybe_store_return_to(conn), do: conn
+
+  defp client_ip(conn) do
+    conn.remote_ip
+    |> :inet.ntoa()
+    |> to_string()
+  end
 end

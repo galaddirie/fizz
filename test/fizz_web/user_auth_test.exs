@@ -176,7 +176,10 @@ defmodule FizzWeb.UserAuthTest do
       user_token = Accounts.generate_user_session_token(user)
 
       conn =
-        conn |> put_session(:user_token, user_token) |> UserAuth.fetch_current_scope_for_user([])
+        conn
+        |> put_session(:user_token, user_token)
+        |> put_workos_session(user)
+        |> UserAuth.fetch_current_scope_for_user([])
 
       assert conn.assigns.current_scope.user.id == user.id
       assert conn.assigns.current_scope.user.authenticated_at == user.authenticated_at
@@ -185,13 +188,19 @@ defmodule FizzWeb.UserAuthTest do
 
     test "authenticates user from cookies", %{conn: conn, user: user} do
       logged_in_conn =
-        conn |> fetch_cookies() |> UserAuth.log_in_user(user, %{"remember_me" => "true"})
+        conn
+        |> fetch_cookies()
+        |> UserAuth.log_in_user(user, %{
+          "remember_me" => "true",
+          "workos_session" => workos_session(user)
+        })
 
       user_token = logged_in_conn.cookies[@remember_me_cookie]
       %{value: signed_token} = logged_in_conn.resp_cookies[@remember_me_cookie]
 
       conn =
         conn
+        |> init_test_session(workos_session_from_conn(logged_in_conn))
         |> put_req_cookie(@remember_me_cookie, signed_token)
         |> UserAuth.fetch_current_scope_for_user([])
 
@@ -213,7 +222,12 @@ defmodule FizzWeb.UserAuthTest do
 
     test "reissues a new token after a few days and refreshes cookie", %{conn: conn, user: user} do
       logged_in_conn =
-        conn |> fetch_cookies() |> UserAuth.log_in_user(user, %{"remember_me" => "true"})
+        conn
+        |> fetch_cookies()
+        |> UserAuth.log_in_user(user, %{
+          "remember_me" => "true",
+          "workos_session" => workos_session(user)
+        })
 
       token = logged_in_conn.cookies[@remember_me_cookie]
       %{value: signed_token} = logged_in_conn.resp_cookies[@remember_me_cookie]
@@ -225,6 +239,7 @@ defmodule FizzWeb.UserAuthTest do
         conn
         |> put_session(:user_token, token)
         |> put_session(:user_remember_me, true)
+        |> put_workos_session(user)
         |> put_req_cookie(@remember_me_cookie, signed_token)
         |> UserAuth.fetch_current_scope_for_user([])
 
@@ -382,5 +397,49 @@ defmodule FizzWeb.UserAuthTest do
         topic: "users_sessions:dG9rZW4y"
       }
     end
+  end
+
+  defp put_workos_session(conn, user) do
+    session = workos_session(user)
+
+    conn
+    |> put_session(:workos_access_token, session.access_token)
+    |> put_session(:workos_refresh_token, session.refresh_token)
+    |> put_session(:workos_session_id, session.session_id)
+    |> put_session(:workos_user_id, session.workos_user_id)
+    |> put_session(:workos_access_token_expires_at, session.access_token_expires_at)
+  end
+
+  defp workos_session_from_conn(conn) do
+    %{
+      workos_access_token: get_session(conn, :workos_access_token),
+      workos_refresh_token: get_session(conn, :workos_refresh_token),
+      workos_session_id: get_session(conn, :workos_session_id),
+      workos_user_id: get_session(conn, :workos_user_id),
+      workos_access_token_expires_at: get_session(conn, :workos_access_token_expires_at)
+    }
+  end
+
+  defp workos_session(user) do
+    workos_user_id = user.workos_user_id || "user_#{user.id}"
+    session_id = "session_#{user.id}"
+    expires_at = System.os_time(:second) + 3600
+
+    claims = %{
+      "sub" => workos_user_id,
+      "sid" => session_id,
+      "exp" => expires_at
+    }
+
+    header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
+    payload = Base.url_encode64(Jason.encode!(claims), padding: false)
+
+    %{
+      access_token: "#{header}.#{payload}.",
+      refresh_token: "refresh_#{user.id}",
+      session_id: session_id,
+      workos_user_id: workos_user_id,
+      access_token_expires_at: expires_at
+    }
   end
 end

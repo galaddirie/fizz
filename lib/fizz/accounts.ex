@@ -565,6 +565,38 @@ defmodule Fizz.Accounts do
   end
 
   @doc """
+  Upserts a local user from a normalized WorkOS profile payload.
+  """
+  def upsert_user_from_workos_profile(%{id: id, email: email} = profile)
+      when is_binary(id) and is_binary(email) do
+    get_or_upsert_user_from_workos_profile(%{
+      id: id,
+      email: email,
+      email_verified: Map.get(profile, :email_verified) in [true, "true"]
+    })
+  end
+
+  def upsert_user_from_workos_profile(_profile), do: {:error, :invalid_workos_user_profile}
+
+  @doc """
+  Deletes a local user linked to the provided WorkOS user id.
+  """
+  def delete_user_by_workos_user_id(workos_user_id) when is_binary(workos_user_id) do
+    case get_user_by_workos_user_id(workos_user_id) do
+      %User{} = user ->
+        case Repo.delete(user) do
+          {:ok, _deleted_user} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      nil ->
+        :ok
+    end
+  end
+
+  def delete_user_by_workos_user_id(_workos_user_id), do: {:error, :invalid_workos_user_id}
+
+  @doc """
   Gets a single user.
 
   Raises `Ecto.NoResultsError` if the User does not exist.
@@ -581,19 +613,42 @@ defmodule Fizz.Accounts do
   end
 
   @doc """
-  Exchanges a WorkOS AuthKit code and returns the local user plus WorkOS session id.
+  Exchanges a WorkOS AuthKit code and returns the local user plus WorkOS session payload.
   """
   def authenticate_user_with_workos_code_and_session(code, opts \\ %{}) when is_binary(code) do
     auth_params = %{
       code: code,
+      code_verifier: opts[:code_verifier],
       ip_address: opts[:ip_address],
       user_agent: opts[:user_agent]
     }
 
     with {:ok, authentication} <- WorkOS.authenticate_with_code(auth_params),
          {:ok, profile} <- WorkOS.extract_user_profile(authentication),
-         {:ok, user} <- get_or_upsert_user_from_workos_profile(profile) do
-      {:ok, %{user: user, workos_session_id: extract_workos_session_id(authentication)}}
+         {:ok, user} <- get_or_upsert_user_from_workos_profile(profile),
+         {:ok, workos_session} <- WorkOS.extract_session(authentication) do
+      {:ok,
+       %{user: user, workos_session: workos_session, workos_session_id: workos_session.session_id}}
+    end
+  end
+
+  @doc """
+  Refreshes a WorkOS AuthKit session and returns the local user plus rotated session payload.
+  """
+  def refresh_user_workos_session(refresh_token, opts \\ []) when is_binary(refresh_token) do
+    auth_params = %{
+      refresh_token: refresh_token,
+      organization_id: opts[:organization_id],
+      ip_address: opts[:ip_address],
+      user_agent: opts[:user_agent]
+    }
+
+    with {:ok, authentication} <- WorkOS.authenticate_with_refresh_token(auth_params),
+         {:ok, profile} <- WorkOS.extract_user_profile(authentication),
+         {:ok, user} <- get_or_upsert_user_from_workos_profile(profile),
+         {:ok, workos_session} <- WorkOS.extract_session(authentication) do
+      {:ok,
+       %{user: user, workos_session: workos_session, workos_session_id: workos_session.session_id}}
     end
   end
 
@@ -625,6 +680,23 @@ defmodule Fizz.Accounts do
     Repo.delete_all(from(UserToken, where: [token: ^token]))
     :ok
   end
+
+  @doc """
+  Revokes all local sessions for a user identified by a WorkOS user id.
+  """
+  def revoke_user_sessions_by_workos_user_id(workos_user_id) when is_binary(workos_user_id) do
+    case get_user_by_workos_user_id(workos_user_id) do
+      %User{id: user_id} ->
+        Repo.delete_all(from(token in UserToken, where: token.user_id == ^user_id))
+        :ok
+
+      nil ->
+        :ok
+    end
+  end
+
+  def revoke_user_sessions_by_workos_user_id(_workos_user_id),
+    do: {:error, :invalid_workos_user_id}
 
   ## WorkOS profile sync
 
@@ -681,20 +753,4 @@ defmodule Fizz.Accounts do
     })
     |> Repo.update()
   end
-
-  defp extract_workos_session_id(%Elixir.WorkOS.UserManagement.Authentication{
-         access_token: access_token
-       })
-       when is_binary(access_token) do
-    with [_header, payload, _signature] <- String.split(access_token, ".", parts: 3),
-         {:ok, decoded_payload} <- Base.url_decode64(payload, padding: false),
-         {:ok, claims} <- Jason.decode(decoded_payload),
-         sid when is_binary(sid) <- claims["sid"] do
-      sid
-    else
-      _ -> nil
-    end
-  end
-
-  defp extract_workos_session_id(_), do: nil
 end

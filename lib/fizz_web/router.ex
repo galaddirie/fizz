@@ -23,6 +23,12 @@ defmodule FizzWeb.Router do
     get "/", PageController, :home
   end
 
+  scope "/webhooks", FizzWeb do
+    pipe_through :api
+
+    post "/workos", WorkOSWebhookController, :create
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", FizzWeb do
   #   pipe_through :api
