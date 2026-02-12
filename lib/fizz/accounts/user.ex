@@ -1,6 +1,5 @@
 defmodule Fizz.Accounts.User do
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Fizz.Schema
 
   schema "users" do
     field :email, :string
@@ -8,10 +7,10 @@ defmodule Fizz.Accounts.User do
     field :authenticated_at, :utc_datetime, virtual: true
     field :workos_user_id, :string
 
-    has_many :tenant_memberships, Fizz.Accounts.TenantMembership
+    has_many :organization_memberships, Fizz.Accounts.OrganizationMembership
     has_many :workspace_memberships, Fizz.Accounts.WorkspaceMembership
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   @doc """

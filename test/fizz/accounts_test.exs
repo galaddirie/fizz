@@ -108,8 +108,10 @@ defmodule Fizz.AccountsTest do
     end
 
     test "get_user!/1 raises for unknown id" do
+      unknown_id = Ecto.UUID.generate()
+
       assert_raise Ecto.NoResultsError, fn ->
-        Accounts.get_user!(-1)
+        Accounts.get_user!(unknown_id)
       end
     end
 

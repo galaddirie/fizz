@@ -9,7 +9,7 @@ defmodule Fizz.Accounts.WorkOS do
 
   require Logger
 
-  alias Fizz.Accounts.{Tenant, User}
+  alias Fizz.Accounts.{Organization, User}
 
   @doc """
   Returns whether WorkOS sync is enabled.
@@ -17,9 +17,9 @@ defmodule Fizz.Accounts.WorkOS do
   def enabled?, do: Application.get_env(:fizz, :workos_sync_enabled, false)
 
   @doc """
-  Creates and links WorkOS organization/user/membership for a tenant owner.
+  Creates and links WorkOS organization/user/membership for a organization owner.
   """
-  @spec sync_tenant_and_owner(%Tenant{}, %User{}, atom() | String.t() | nil) ::
+  @spec sync_organization_and_owner(%Organization{}, %User{}, atom() | String.t() | nil) ::
           {:ok,
            %{
              organization_id: String.t() | nil,
@@ -27,10 +27,10 @@ defmodule Fizz.Accounts.WorkOS do
              membership_id: String.t() | nil
            }}
           | {:error, term()}
-  def sync_tenant_and_owner(%Tenant{} = tenant, %User{} = user, role \\ :owner) do
+  def sync_organization_and_owner(%Organization{} = organization, %User{} = user, role \\ :owner) do
     if enabled?() do
       with {:ok, workos_user_id} <- ensure_user(user),
-           {:ok, organization_id} <- ensure_organization(tenant),
+           {:ok, organization_id} <- ensure_organization(organization),
            {:ok, membership_id} <-
              find_or_create_organization_membership(workos_user_id, organization_id, role) do
         {:ok,
@@ -57,7 +57,7 @@ defmodule Fizz.Accounts.WorkOS do
     with {:ok, created_user} <-
            user_management_module().create_user(%{
              email: user.email,
-             external_id: Integer.to_string(user.id),
+             external_id: to_string(user.id),
              email_verified: not is_nil(user.confirmed_at)
            }) do
       {:ok, created_user.id}
@@ -73,14 +73,14 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   @doc """
-  Ensures a user has organization membership in WorkOS for the given tenant.
+  Ensures a user has organization membership in WorkOS for the given organization.
   """
-  @spec ensure_organization_membership(%Tenant{}, %User{}, atom() | String.t() | nil) ::
+  @spec ensure_organization_membership(%Organization{}, %User{}, atom() | String.t() | nil) ::
           {:ok, %{user_id: String.t() | nil, membership_id: String.t() | nil}} | {:error, term()}
-  def ensure_organization_membership(tenant, user, role \\ :member)
+  def ensure_organization_membership(organization, user, role \\ :member)
 
   def ensure_organization_membership(
-        %Tenant{workos_organization_id: workos_organization_id},
+        %Organization{workos_organization_id: workos_organization_id},
         %User{} = user,
         role
       )
@@ -96,7 +96,7 @@ defmodule Fizz.Accounts.WorkOS do
     end
   end
 
-  def ensure_organization_membership(%Tenant{}, %User{} = user, _role) do
+  def ensure_organization_membership(%Organization{}, %User{} = user, _role) do
     if enabled?() do
       {:error, :missing_workos_organization_id}
     else
@@ -105,14 +105,14 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   @doc """
-  Creates a WorkOS organization for a tenant.
+  Creates a WorkOS organization for a organization.
   """
-  @spec create_organization(%Tenant{}) ::
+  @spec create_organization(%Organization{}) ::
           {:ok, WorkOS.Organizations.Organization.t()} | {:error, term()}
-  def create_organization(%Tenant{} = tenant) do
+  def create_organization(%Organization{} = organization) do
     options = %{
-      name: tenant.name,
-      idempotency_key: "tenant-#{tenant.slug}"
+      name: organization.name,
+      idempotency_key: "organization-#{organization.slug}"
     }
 
     case organizations_module().create_organization(options) do
@@ -157,12 +157,12 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   @doc """
-  Emits an audit event to WorkOS for a tenant organization.
+  Emits an audit event to WorkOS for a organization organization.
   """
-  @spec create_audit_event(%Tenant{}, %User{}, String.t(), [map()], map()) ::
+  @spec create_audit_event(%Organization{}, %User{}, String.t(), [map()], map()) ::
           :ok | {:error, term()}
   def create_audit_event(
-        %Tenant{workos_organization_id: workos_organization_id},
+        %Organization{workos_organization_id: workos_organization_id},
         %User{} = actor,
         action,
         targets,
@@ -174,7 +174,7 @@ defmodule Fizz.Accounts.WorkOS do
         action: action,
         actor: %{
           type: "user",
-          id: actor.workos_user_id || Integer.to_string(actor.id)
+          id: actor.workos_user_id || to_string(actor.id)
         },
         occurred_at: DateTime.utc_now(:second) |> DateTime.to_iso8601(),
         targets: normalize_targets(targets),
@@ -204,7 +204,7 @@ defmodule Fizz.Accounts.WorkOS do
       {:error, :workos_not_configured}
   end
 
-  def create_audit_event(_tenant, _actor, _action, _targets, _context), do: :ok
+  def create_audit_event(_organization, _actor, _action, _targets, _context), do: :ok
 
   @doc """
   Generates a WorkOS User Management authorization URL.
@@ -383,12 +383,12 @@ defmodule Fizz.Accounts.WorkOS do
 
   def extract_user_profile(_), do: {:error, :invalid_workos_authentication}
 
-  defp ensure_organization(%Tenant{workos_organization_id: workos_organization_id})
+  defp ensure_organization(%Organization{workos_organization_id: workos_organization_id})
        when is_binary(workos_organization_id),
        do: {:ok, workos_organization_id}
 
-  defp ensure_organization(%Tenant{} = tenant) do
-    with {:ok, organization} <- create_organization(tenant) do
+  defp ensure_organization(%Organization{} = organization) do
+    with {:ok, organization} <- create_organization(organization) do
       {:ok, organization.id}
     end
   end

@@ -1,6 +1,5 @@
 defmodule Fizz.Accounts.WorkspaceMembership do
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Fizz.Schema
 
   alias Fizz.Accounts.{User, Workspace}
 
@@ -13,7 +12,7 @@ defmodule Fizz.Accounts.WorkspaceMembership do
     belongs_to :workspace, Workspace
     belongs_to :user, User
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   @doc false

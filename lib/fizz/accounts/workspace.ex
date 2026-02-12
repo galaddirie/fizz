@@ -1,8 +1,7 @@
 defmodule Fizz.Accounts.Workspace do
-  use Ecto.Schema
-  import Ecto.Changeset
+  use Fizz.Schema
 
-  alias Fizz.Accounts.{Tenant, WorkspaceMembership}
+  alias Fizz.Accounts.{Organization, WorkspaceMembership}
 
   schema "workspaces" do
     field :name, :string
@@ -10,10 +9,10 @@ defmodule Fizz.Accounts.Workspace do
     field :description, :string
     field :metadata, :map, default: %{}
 
-    belongs_to :tenant, Tenant
+    belongs_to :organization, Organization
     has_many :memberships, WorkspaceMembership
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   @doc false
@@ -24,8 +23,8 @@ defmodule Fizz.Accounts.Workspace do
     |> validate_length(:name, min: 2, max: 120)
     |> validate_length(:description, max: 280)
     |> validate_slug()
-    |> foreign_key_constraint(:tenant_id)
-    |> unique_constraint(:slug, name: :workspaces_tenant_id_slug_index)
+    |> foreign_key_constraint(:organization_id)
+    |> unique_constraint(:slug, name: :workspaces_organization_id_slug_index)
   end
 
   defp validate_slug(changeset) do

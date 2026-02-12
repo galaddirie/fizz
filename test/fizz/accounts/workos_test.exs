@@ -1,7 +1,7 @@
 defmodule Fizz.Accounts.WorkOSTest do
   use ExUnit.Case, async: false
 
-  alias Fizz.Accounts.{Tenant, User}
+  alias Fizz.Accounts.{Organization, User}
   alias Fizz.Accounts.WorkOS, as: AccountsWorkOS
 
   defmodule ReqMock do
@@ -72,11 +72,11 @@ defmodule Fizz.Accounts.WorkOSTest do
        }}
     ])
 
-    tenant = %Tenant{workos_organization_id: "org_123"}
+    organization = %Organization{workos_organization_id: "org_123"}
     user = %User{id: 7, email: "owner@example.com", workos_user_id: "user_123"}
 
     assert {:ok, %{membership_id: "om_123", user_id: "user_123"}} =
-             AccountsWorkOS.ensure_organization_membership(tenant, user, :admin)
+             AccountsWorkOS.ensure_organization_membership(organization, user, :admin)
 
     assert_receive {:workos_http_request, first_request}
     assert first_request[:method] == :get
@@ -113,11 +113,11 @@ defmodule Fizz.Accounts.WorkOSTest do
        }}
     ])
 
-    tenant = %Tenant{workos_organization_id: "org_987"}
+    organization = %Organization{workos_organization_id: "org_987"}
     user = %User{id: 17, email: "new-owner@example.com", workos_user_id: "user_987"}
 
     assert {:ok, %{membership_id: "om_created", user_id: "user_987"}} =
-             AccountsWorkOS.ensure_organization_membership(tenant, user, :owner)
+             AccountsWorkOS.ensure_organization_membership(organization, user, :owner)
 
     assert_receive {:workos_http_request, _first_request}
 
@@ -135,11 +135,11 @@ defmodule Fizz.Accounts.WorkOSTest do
   test "ensure_organization_membership/3 is a no-op when sync is disabled" do
     Application.put_env(:fizz, :workos_sync_enabled, false)
 
-    tenant = %Tenant{workos_organization_id: "org_123"}
+    organization = %Organization{workos_organization_id: "org_123"}
     user = %User{id: 99, email: "member@example.com", workos_user_id: "user_123"}
 
     assert {:ok, %{membership_id: nil, user_id: "user_123"}} =
-             AccountsWorkOS.ensure_organization_membership(tenant, user, :member)
+             AccountsWorkOS.ensure_organization_membership(organization, user, :member)
 
     refute_receive {:workos_http_request, _request}
   end

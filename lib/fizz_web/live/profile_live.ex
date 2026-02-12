@@ -91,7 +91,7 @@ defmodule FizzWeb.ProfileLive do
 
   defp organization_options(organizations) do
     Enum.map(organizations, fn organization ->
-      {"#{organization.tenant_name} (#{organization.organization_id})",
+      {"#{organization.organization_name} (#{organization.organization_id})",
        organization.organization_id}
     end)
   end

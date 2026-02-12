@@ -58,7 +58,7 @@ defmodule FizzWeb.ProfileLiveTest do
     setup :register_and_log_in_user
 
     test "renders user identifiers and pipes widget", %{conn: conn, user: user} do
-      _tenant = tenant_fixture(user, %{workos_organization_id: "org_123"})
+      _organization = organization_fixture(user, %{workos_organization_id: "org_123"})
 
       put_http_responses([
         {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}},
@@ -99,8 +99,11 @@ defmodule FizzWeb.ProfileLiveTest do
     end
 
     test "switches organizations and refreshes widget token", %{conn: conn, user: user} do
-      _tenant1 = tenant_fixture(user, %{name: "Alpha", workos_organization_id: "org_123"})
-      _tenant2 = tenant_fixture(user, %{name: "Beta", workos_organization_id: "org_456"})
+      _organization1 =
+        organization_fixture(user, %{name: "Alpha", workos_organization_id: "org_123"})
+
+      _organization2 =
+        organization_fixture(user, %{name: "Beta", workos_organization_id: "org_456"})
 
       put_http_responses([
         {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}},

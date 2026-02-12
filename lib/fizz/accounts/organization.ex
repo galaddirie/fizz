@@ -1,24 +1,23 @@
-defmodule Fizz.Accounts.Tenant do
-  use Ecto.Schema
-  import Ecto.Changeset
+defmodule Fizz.Accounts.Organization do
+  use Fizz.Schema
 
-  alias Fizz.Accounts.{TenantMembership, Workspace}
+  alias Fizz.Accounts.{OrganizationMembership, Workspace}
 
-  schema "tenants" do
+  schema "organizations" do
     field :name, :string
     field :slug, :string
     field :metadata, :map, default: %{}
     field :workos_organization_id, :string
 
-    has_many :memberships, TenantMembership
+    has_many :memberships, OrganizationMembership
     has_many :workspaces, Workspace
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   @doc false
-  def changeset(tenant, attrs) do
-    tenant
+  def changeset(organization, attrs) do
+    organization
     |> cast(attrs, [:name, :slug, :metadata, :workos_organization_id])
     |> validate_required([:name, :slug])
     |> validate_length(:name, min: 2, max: 120)

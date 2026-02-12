@@ -53,27 +53,27 @@ defmodule Fizz.AccountsFixtures do
     Scope.for_user(user)
   end
 
-  def tenant_fixture(user \\ user_fixture(), attrs \\ %{}) do
+  def organization_fixture(user \\ user_fixture(), attrs \\ %{}) do
     scope = Scope.for_user(user)
 
-    {:ok, tenant} =
-      Accounts.create_tenant(
+    {:ok, organization} =
+      Accounts.create_organization(
         scope,
-        Map.merge(%{name: "Tenant #{System.unique_integer()}"}, attrs),
+        Map.merge(%{name: "Organization #{System.unique_integer()}"}, attrs),
         sync_workos: false
       )
 
-    tenant
+    organization
   end
 
-  def tenant_scope_fixture(opts \\ []) do
+  def organization_scope_fixture(opts \\ []) do
     user = user_fixture()
-    tenant = tenant_fixture(user)
-    tenant_scope_fixture(user, tenant, opts)
+    organization = organization_fixture(user)
+    organization_scope_fixture(user, organization, opts)
   end
 
-  def tenant_scope_fixture(user, tenant, opts \\ []) do
-    {:ok, scope} = Accounts.build_scope(Scope.for_user(user), tenant.id, opts)
+  def organization_scope_fixture(user, organization, opts \\ []) do
+    {:ok, scope} = Accounts.build_scope(Scope.for_user(user), organization.id, opts)
     scope
   end
 

@@ -3,32 +3,32 @@ defmodule Fizz.Accounts.Scope do
   Caller scope used for authentication and role-based authorization.
 
   WorkOS is the source of truth for user/org identity. This scope mirrors
-  the resolved tenant/workspace context and effective local roles.
+  the resolved organization/workspace context and effective local roles.
   """
 
-  alias Fizz.Accounts.{Tenant, User, Workspace}
+  alias Fizz.Accounts.{Organization, User, Workspace}
 
-  @tenant_roles [:owner, :admin, :member]
+  @organization_roles [:owner, :admin, :member]
   @workspace_roles [:admin, :member, :viewer]
 
   defstruct user: nil,
             actor: :anonymous,
-            tenant: nil,
+            organization: nil,
             workspace: nil,
-            tenant_role: nil,
+            organization_role: nil,
             workspace_role: nil,
             metadata: %{}
 
-  @type tenant_role :: :owner | :admin | :member | nil
+  @type organization_role :: :owner | :admin | :member | nil
   @type workspace_role :: :admin | :member | :viewer | nil
 
   @typedoc "A resolved caller scope"
   @type t :: %__MODULE__{
           user: %User{} | nil,
           actor: :anonymous | :user,
-          tenant: %Tenant{} | nil,
+          organization: %Organization{} | nil,
           workspace: %Workspace{} | nil,
-          tenant_role: tenant_role(),
+          organization_role: organization_role(),
           workspace_role: workspace_role(),
           metadata: map()
         }
@@ -43,10 +43,11 @@ defmodule Fizz.Accounts.Scope do
   def for_user(nil), do: nil
 
   @doc """
-  Assigns the active tenant on the scope.
+  Assigns the active organization on the scope.
   """
-  @spec with_tenant(t(), %Tenant{}) :: t()
-  def with_tenant(%__MODULE__{} = scope, %Tenant{} = tenant), do: %{scope | tenant: tenant}
+  @spec with_organization(t(), %Organization{}) :: t()
+  def with_organization(%__MODULE__{} = scope, %Organization{} = organization),
+    do: %{scope | organization: organization}
 
   @doc """
   Assigns the active workspace on the scope.
@@ -56,13 +57,13 @@ defmodule Fizz.Accounts.Scope do
     do: %{scope | workspace: workspace}
 
   @doc """
-  Assigns the tenant role.
+  Assigns the organization role.
   """
-  @spec with_tenant_role(t(), tenant_role()) :: t()
-  def with_tenant_role(%__MODULE__{} = scope, role) when role in @tenant_roles,
-    do: %{scope | tenant_role: role}
+  @spec with_organization_role(t(), organization_role()) :: t()
+  def with_organization_role(%__MODULE__{} = scope, role) when role in @organization_roles,
+    do: %{scope | organization_role: role}
 
-  def with_tenant_role(%__MODULE__{} = scope, nil), do: %{scope | tenant_role: nil}
+  def with_organization_role(%__MODULE__{} = scope, nil), do: %{scope | organization_role: nil}
 
   @doc """
   Assigns the workspace role.
@@ -81,18 +82,22 @@ defmodule Fizz.Accounts.Scope do
   def authenticated?(_), do: false
 
   @doc """
-  Whether scope has tenant admin privileges.
+  Whether scope has organization admin privileges.
   """
-  @spec tenant_admin?(t()) :: boolean()
-  def tenant_admin?(%__MODULE__{tenant_role: role}) when role in [:owner, :admin], do: true
-  def tenant_admin?(%__MODULE__{}), do: false
+  @spec organization_admin?(t()) :: boolean()
+  def organization_admin?(%__MODULE__{organization_role: role}) when role in [:owner, :admin],
+    do: true
+
+  def organization_admin?(%__MODULE__{}), do: false
 
   @doc """
-  Whether scope has any tenant membership.
+  Whether scope has any organization membership.
   """
-  @spec tenant_member?(t()) :: boolean()
-  def tenant_member?(%__MODULE__{tenant_role: role}) when role in @tenant_roles, do: true
-  def tenant_member?(%__MODULE__{}), do: false
+  @spec organization_member?(t()) :: boolean()
+  def organization_member?(%__MODULE__{organization_role: role}) when role in @organization_roles,
+    do: true
+
+  def organization_member?(%__MODULE__{}), do: false
 
   @doc """
   Whether scope has workspace admin privileges.

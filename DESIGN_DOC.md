@@ -46,7 +46,7 @@ This document covers the architectural design of the platform engine — the pri
 
 **P1 — Primitives Over Products.** Build composable engine primitives that can be assembled into any workflow, rather than building fixed-function applications. The application layer is a composition of primitives, not a monolith.
 
-**P2 — Shared Intelligence, Strict Scope Boundaries.** All modules benefit from a common understanding of clients, brands, campaigns, syndicated research, internal learnings and RFPs. Data access is enforced by resolved scope, with strict tenant and workspace boundaries. Tenant-to-tenant and workspace-to-workspace interaction is not supported.
+**P2 — Shared Intelligence, Strict Scope Boundaries.** All modules benefit from a common understanding of clients, brands, campaigns, syndicated research, internal learnings and RFPs. Data access is enforced by resolved scope, with strict organization and workspace boundaries. Organization-to-organization and workspace-to-workspace interaction is not supported.
 
 **P3 — Human-in-the-Loop by Design.** AI handles volume, synthesis, and first drafts. Humans handle judgment, relationships, and final decisions. Every workflow has configurable approval gates. The system should make humans more effective, not replace their judgment.
 
@@ -149,8 +149,8 @@ Manages identity, authentication, authorization, and runtime scope resolution ac
 
 ```
 Platform (Fizz)
-  └── Agency Tenant
-        ├── Tenant Membership
+  └── Agency Organization
+        ├── Organization Membership
         │     └── Roles: owner | admin | member
         ├── Client Workspace
         │     └── Workspace Membership
@@ -163,28 +163,28 @@ Platform (Fizz)
 
 Fizz uses one strict isolation model enforced through scope:
 
-- **Tenant Boundary (absolute):** Tenant A and Tenant B never interact. Cross-tenant data access is not supported.
-- **Workspace Boundary (absolute):** Workspace A and Workspace B never interact, including within the same tenant. Cross-workspace interactions are not supported.
-- **Membership-Gated Access:** Access requires explicit tenant/workspace membership and role checks.
-- **Scope-First Execution:** Every action is evaluated against the caller's resolved scope (`tenant`, optional `workspace`, and effective roles).
+- **Organization Boundary (absolute):** Organization A and Organization B never interact. Cross-organization data access is not supported.
+- **Workspace Boundary (absolute):** Workspace A and Workspace B never interact, including within the same organization. Cross-workspace interactions are not supported.
+- **Membership-Gated Access:** Access requires explicit organization/workspace membership and role checks.
+- **Scope-First Execution:** Every action is evaluated against the caller's resolved scope (`organization`, optional `workspace`, and effective roles).
 
 #### 4.1.4 AI-Specific Access Control
 
 When an AI agent acts on behalf of a user, it operates under an **effective permission scope** that is the intersection of:
 - The user's permissions
-- The resolved runtime scope (tenant + optional workspace + effective role)
+- The resolved runtime scope (organization + optional workspace + effective role)
 - The agent's defined scope (agents can be further restricted beyond the user's access)
 
-This means an agent can never exceed the permissions of the human who invoked it, cannot cross tenant boundaries, and cannot traverse workspace boundaries.
+This means an agent can never exceed the permissions of the human who invoked it, cannot cross organization boundaries, and cannot traverse workspace boundaries.
 
 #### 4.1.5 Key Entities
 
-- **Tenant** — top-level organizational boundary (the agency)
-- **Workspace** — client-scoped data container within a tenant
+- **Organization** — top-level organizational boundary (the agency)
+- **Workspace** — client-scoped data container within a organization
 - **User** — individual human identity authenticated through WorkOS-backed flows
-- **Tenant Membership** — user-to-tenant association with role (`owner | admin | member`)
+- **Organization Membership** — user-to-organization association with role (`owner | admin | member`)
 - **Workspace Membership** — user-to-workspace association with role (`admin | member | viewer`)
-- **Scope** — resolved caller context used for authorization (`user`, `tenant`, optional `workspace`, effective roles)
+- **Scope** — resolved caller context used for authorization (`user`, `organization`, optional `workspace`, effective roles)
 
 ### 4.2 Knowledge Base
 
@@ -262,7 +262,7 @@ Vector storage and retrieval layer powering similarity search across all content
 
 **Index Architecture:**
 - Separate vector indices per content modality (text, image, audio/video) optimized for each embedding model
-- Indices are partitioned by tenant and workspace for query-time performance and strict boundary enforcement
+- Indices are partitioned by organization and workspace for query-time performance and strict boundary enforcement
 - Supports metadata filtering at query time (e.g., "find similar content but only within Client Y's workspace and only from the last 6 months")
 
 **Embedding Strategy:**
@@ -302,7 +302,7 @@ All data in the platform is classified into tiers:
 | Tier | Description | Examples | Handling |
 |---|---|---|---|
 | **Public** | Publicly available information | Published competitor ads, public financial filings, news articles | Minimal restrictions; can be used in anonymized benchmarks |
-| **Internal** | Agency-internal information | Internal processes, team communications, agency financial data | Tenant-isolated; not available outside the agency tenant |
+| **Internal** | Agency-internal information | Internal processes, team communications, agency financial data | Organization-isolated; not available outside the agency organization |
 | **Client Confidential** | Client-specific proprietary information | Brand strategy documents, unreleased creative, campaign budgets | Workspace-isolated; additional encryption; strict access logging |
 | **Regulated** | Subject to regulatory requirements | Healthcare client PHI, financial client PII, children's data | Compliance controls; data residency requirements; retention policies; enhanced audit |
 
@@ -313,24 +313,24 @@ Ingestion → Processing → Active Use → Archival → Deletion
 ```
 
 Each stage has defined rules per data classification tier:
-- **Retention policies** — how long data is retained before archival/deletion (configurable per tenant, overridden by regulatory requirements)
+- **Retention policies** — how long data is retained before archival/deletion (configurable per organization, overridden by regulatory requirements)
 - **Archival** — archived data is moved to cold storage, removed from active indices, but retrievable on demand
 - **Deletion** — permanent removal from all stores, including backups (within the defined backup retention window). Supports "right to be forgotten" workflows.
-- **Data export** — tenants can export all their data in standard formats at any time (data portability)
+- **Data export** — organizations can export all their data in standard formats at any time (data portability)
 
 ### 5.3 AI Training Data Governance
 
-**Absolute rule: Tenant data is never used to train or fine-tune models that serve other tenants.** This includes:
-- No cross-tenant data in fine-tuning datasets
-- No cross-tenant data in few-shot examples
-- No cross-tenant data in embedding model training
-- Aggregated, anonymized benchmarks are only produced with explicit tenant opt-in and are subject to differential privacy techniques
+**Absolute rule: Organization data is never used to train or fine-tune models that serve other organizations.** This includes:
+- No cross-organization data in fine-tuning datasets
+- No cross-organization data in few-shot examples
+- No cross-organization data in embedding model training
+- Aggregated, anonymized benchmarks are only produced with explicit organization opt-in and are subject to differential privacy techniques
 
-**Within a tenant:** Training and inference datasets are workspace-scoped by default and do not mix content across workspaces. This is enforced by scope and query filtering and is transparently logged and auditable.
+**Within a organization:** Training and inference datasets are workspace-scoped by default and do not mix content across workspaces. This is enforced by scope and query filtering and is transparently logged and auditable.
 
 ### 5.4 Data Residency
 
-For tenants with data residency requirements:
+For organizations with data residency requirements:
 - Knowledge base storage, compute, and processing can be pinned to specific geographic regions
 - Cross-region data transfer is prohibited unless explicitly configured
 - Model inference requests are routed to region-appropriate endpoints
@@ -350,7 +350,7 @@ For tenants with data residency requirements:
 | **Sandbox Execution Failure** | Analysis or processing tasks fail | Retry with increased resources. Log failure details for debugging. Fall back to cached results if available. |
 | **Workflow Step Failure** | Multi-step process stalls | Retry the failed step. If retries exhausted, pause workflow and notify the responsible human with context. |
 | **Event Bus Backlog** | Events process with delay | Scale consumers. Prioritize critical events (permissions, security) over informational events. |
-| **Tenant Data Breach Attempt** | Unauthorized cross-tenant data access | Defense in depth — encryption boundaries, access control at every layer, anomaly detection. Automatic lockout on suspicious patterns. |
+| **Organization Data Breach Attempt** | Unauthorized cross-organization data access | Defense in depth — encryption boundaries, access control at every layer, anomaly detection. Automatic lockout on suspicious patterns. |
 
 ### 6.2 Resilience Principles
 
@@ -368,16 +368,16 @@ For tenants with data residency requirements:
 ### 7.1 Finalized Decisions
 
 - Scope is the core access abstraction.
-- Tenant boundaries are absolute. Cross-tenant interactions are not supported.
+- Organization boundaries are absolute. Cross-organization interactions are not supported.
 - Workspace boundaries are absolute. Workspace-to-workspace interactions are not supported.
 - Authorization is membership and role based, enforced via resolved scope for every operation.
 - AI execution inherits the same scope constraints as the invoking user.
 
 ### 7.2 Explicit Non-Goals
 
-- No cross-tenant collaboration model.
+- No cross-organization collaboration model.
 - No cross-workspace data sharing or aggregate workflows.
-- No temporary elevation model that bypasses tenant/workspace boundaries.
+- No temporary elevation model that bypasses organization/workspace boundaries.
 
 ---
 
@@ -396,9 +396,9 @@ For tenants with data residency requirements:
 | **Sandbox** | An isolated execution environment for running code safely |
 | **Scope** | The set of data and actions accessible to an identity (user or agent) in a given context |
 | **Span** | A single operation within a distributed trace |
-| **Tenant** | The top-level organizational boundary (an agency) |
+| **Organization** | The top-level organizational boundary (an agency) |
 | **Trace** | A complete record of an execution path across all primitives |
-| **Workspace** | A client-scoped data container within a tenant |
+| **Workspace** | A client-scoped data container within a organization |
 | **Workflow Definition** | A declarative specification of a multi-step process |
 | **Workflow Instance** | A running execution of a workflow definition |
 

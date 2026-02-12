@@ -5,19 +5,489 @@ defmodule Fizz.Accounts do
 
   import Ecto.Query, warn: false
 
-  alias Fizz.Accounts.{Identity, Scope, Tenant, TenantMembership, User, UserToken, WorkOS}
+  alias Fizz.Accounts.{
+    Organization,
+    OrganizationMembership,
+    Scope,
+    User,
+    UserToken,
+    WorkOS,
+    Workspace,
+    WorkspaceMembership
+  }
+
   alias Fizz.Repo
 
-  ## Identity & Tenancy
+  ## Organization & Workspace
 
-  defdelegate list_tenants(scope), to: Identity
-  defdelegate create_tenant(scope, attrs, opts \\ []), to: Identity
-  defdelegate build_scope(scope, tenant_id, opts \\ []), to: Identity
-  defdelegate list_workspaces(scope), to: Identity
-  defdelegate create_workspace(scope, attrs), to: Identity
-  defdelegate add_tenant_member(scope, user, attrs), to: Identity
-  defdelegate add_workspace_member(scope, workspace_id, user, attrs), to: Identity
-  defdelegate sync_user_to_workos(scope), to: Identity
+  @doc """
+  Lists organizations accessible to the current user scope.
+  """
+  def list_organizations(%Scope{user: %User{id: user_id}}) do
+    from(o in Organization,
+      join: om in OrganizationMembership,
+      on: om.organization_id == o.id,
+      where: om.user_id == ^user_id,
+      order_by: [asc: o.name]
+    )
+    |> Repo.all()
+  end
+
+  def list_organizations(_scope), do: []
+
+  @doc """
+  Creates an organization and owner membership for the scope user.
+
+  WorkOS sync defaults to `WorkOS.enabled?/0`, but can be overridden with
+  `sync_workos: true | false` for explicit control in tests and scripts.
+  """
+  def create_organization(scope, attrs, opts \\ [])
+
+  def create_organization(%Scope{user: %User{} = user}, attrs, opts) do
+    organization_attrs =
+      attrs
+      |> normalize_attrs()
+      |> ensure_slug(:name)
+
+    Repo.transaction(fn ->
+      with {:ok, organization} <- insert_organization(organization_attrs),
+           {:ok, membership} <-
+             upsert_organization_membership(organization.id, user.id, %{role: :owner}),
+           {:ok, sync_payload} <-
+             maybe_sync_organization_and_owner(organization, user, :owner, opts),
+           {:ok, organization} <-
+             maybe_store_workos_org_id(organization, sync_payload.organization_id),
+           {:ok, _membership} <-
+             maybe_store_workos_membership_id(membership, sync_payload.membership_id),
+           {:ok, _user} <- maybe_store_workos_user_id(user, sync_payload.user_id),
+           :ok <-
+             maybe_emit_audit_event(
+               organization,
+               user,
+               "organization.created",
+               [%{type: "organization", id: to_string(organization.id)}],
+               %{organization_slug: organization.slug}
+             ) do
+        organization
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+    |> unwrap_transaction()
+  end
+
+  def create_organization(_scope, _attrs, _opts), do: {:error, :unauthenticated}
+
+  @doc """
+  Builds an organization/workspace-aware scope for the current user.
+  """
+  def build_scope(scope, organization_id, opts \\ [])
+
+  def build_scope(%Scope{user: %User{id: user_id}} = scope, organization_id, opts) do
+    workspace_id = Keyword.get(opts, :workspace_id)
+
+    with {:ok, organization_membership} <-
+           fetch_organization_membership(organization_id, user_id),
+         %Organization{} = organization <- Repo.get(Organization, organization_id),
+         {:ok, workspace_membership, workspace} <-
+           fetch_workspace_membership(
+             organization_id,
+             user_id,
+             workspace_id,
+             organization_membership.role
+           ) do
+      resolved_scope =
+        scope
+        |> Scope.with_organization(organization)
+        |> Scope.with_organization_role(organization_membership.role)
+        |> maybe_put_workspace(workspace)
+        |> Scope.with_workspace_role(workspace_role(workspace_membership))
+
+      {:ok, resolved_scope}
+    else
+      {:error, reason} -> {:error, reason}
+      nil -> {:error, :organization_not_found}
+    end
+  end
+
+  def build_scope(_scope, _organization_id, _opts), do: {:error, :unauthenticated}
+
+  @doc """
+  Creates a workspace inside the active organization.
+  """
+  def create_workspace(%Scope{organization: %Organization{} = organization} = scope, attrs) do
+    with :ok <- require_organization_admin(scope) do
+      workspace_attrs =
+        attrs
+        |> normalize_attrs()
+        |> ensure_slug(:name)
+
+      Repo.transaction(fn ->
+        workspace_changeset =
+          %Workspace{organization_id: organization.id}
+          |> Workspace.changeset(workspace_attrs)
+
+        with {:ok, workspace} <- Repo.insert(workspace_changeset),
+             {:ok, _membership} <- maybe_add_workspace_admin_membership(workspace, scope.user),
+             :ok <-
+               maybe_emit_audit_event(
+                 organization,
+                 scope.user,
+                 "workspace.created",
+                 [
+                   %{type: "organization", id: to_string(organization.id)},
+                   %{type: "workspace", id: to_string(workspace.id)}
+                 ],
+                 %{workspace_slug: workspace.slug}
+               ) do
+          workspace
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+      |> unwrap_transaction()
+    end
+  end
+
+  def create_workspace(_scope, _attrs), do: {:error, :organization_scope_required}
+
+  @doc """
+  Lists workspaces for the active organization and current user scope.
+  """
+  def list_workspaces(
+        %Scope{organization: %Organization{id: organization_id}, user: %User{id: user_id}} = scope
+      ) do
+    query =
+      if Scope.organization_admin?(scope) do
+        from(w in Workspace,
+          where: w.organization_id == ^organization_id,
+          order_by: [asc: w.name]
+        )
+      else
+        from(w in Workspace,
+          join: wm in WorkspaceMembership,
+          on: wm.workspace_id == w.id,
+          where: w.organization_id == ^organization_id and wm.user_id == ^user_id,
+          order_by: [asc: w.name]
+        )
+      end
+
+    {:ok, Repo.all(query)}
+  end
+
+  def list_workspaces(_scope), do: {:error, :organization_scope_required}
+
+  @doc """
+  Adds or updates organization membership for a user.
+  """
+  def add_organization_member(
+        %Scope{organization: %Organization{} = organization} = scope,
+        %User{} = user,
+        attrs
+      ) do
+    with :ok <- require_organization_admin(scope) do
+      attrs = attrs |> normalize_attrs() |> Map.take([:role])
+
+      Repo.transaction(fn ->
+        with {:ok, membership} <- upsert_organization_membership(organization.id, user.id, attrs),
+             {:ok, sync_payload} <-
+               maybe_sync_organization_member(organization, user, membership.role),
+             {:ok, membership} <-
+               maybe_store_workos_membership_id(membership, sync_payload.membership_id),
+             {:ok, _user} <- maybe_store_workos_user_id(user, sync_payload.user_id),
+             :ok <-
+               maybe_emit_audit_event(
+                 organization,
+                 scope.user,
+                 "organization.member_upserted",
+                 [
+                   %{type: "organization", id: to_string(organization.id)},
+                   %{type: "user", id: to_string(user.id)}
+                 ],
+                 %{role: to_string(membership.role)}
+               ) do
+          membership
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+      |> unwrap_transaction()
+    end
+  end
+
+  def add_organization_member(_scope, _user, _attrs), do: {:error, :organization_scope_required}
+
+  @doc """
+  Adds or updates workspace membership for a user.
+  """
+  def add_workspace_member(
+        %Scope{organization: %Organization{id: organization_id}, user: %User{id: actor_user_id}} =
+          scope,
+        workspace_id,
+        %User{} = user,
+        attrs
+      ) do
+    attrs = normalize_attrs(attrs)
+
+    with {:ok, workspace} <- fetch_workspace(organization_id, workspace_id),
+         :ok <- require_workspace_admin(scope, workspace.id, actor_user_id) do
+      attrs = Map.take(attrs, [:role, :access_purpose])
+
+      membership =
+        Repo.get_by(WorkspaceMembership, workspace_id: workspace.id, user_id: user.id) ||
+          %WorkspaceMembership{workspace_id: workspace.id, user_id: user.id}
+
+      Repo.transaction(fn ->
+        with {:ok, membership} <-
+               membership |> WorkspaceMembership.changeset(attrs) |> Repo.insert_or_update(),
+             :ok <-
+               maybe_emit_audit_event(
+                 scope.organization,
+                 scope.user,
+                 "workspace.member_upserted",
+                 [
+                   %{type: "workspace", id: to_string(workspace.id)},
+                   %{type: "user", id: to_string(user.id)}
+                 ],
+                 %{role: to_string(membership.role)}
+               ) do
+          membership
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+      |> unwrap_transaction()
+    else
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def add_workspace_member(_scope, _workspace_id, _user, _attrs),
+    do: {:error, :organization_scope_required}
+
+  @doc """
+  Ensures the current user exists in WorkOS and persists its external ID.
+  """
+  def sync_user_to_workos(%Scope{user: %User{} = user}) do
+    with {:ok, workos_user_id} <- WorkOS.ensure_user(user),
+         {:ok, user} <- maybe_store_workos_user_id(user, workos_user_id) do
+      {:ok, user}
+    end
+  end
+
+  def sync_user_to_workos(_scope), do: {:error, :unauthenticated}
+
+  defp insert_organization(attrs) do
+    %Organization{}
+    |> Organization.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  defp upsert_organization_membership(organization_id, user_id, attrs) do
+    membership =
+      Repo.get_by(OrganizationMembership, organization_id: organization_id, user_id: user_id) ||
+        %OrganizationMembership{organization_id: organization_id, user_id: user_id}
+
+    membership
+    |> OrganizationMembership.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  defp fetch_organization_membership(organization_id, user_id) do
+    case Repo.get_by(OrganizationMembership, organization_id: organization_id, user_id: user_id) do
+      %OrganizationMembership{} = membership -> {:ok, membership}
+      nil -> {:error, :forbidden}
+    end
+  end
+
+  defp fetch_workspace_membership(_organization_id, _user_id, nil, _organization_role),
+    do: {:ok, nil, nil}
+
+  defp fetch_workspace_membership(organization_id, user_id, workspace_id, organization_role) do
+    with {:ok, workspace} <- fetch_workspace(organization_id, workspace_id) do
+      case Repo.get_by(WorkspaceMembership, workspace_id: workspace.id, user_id: user_id) do
+        %WorkspaceMembership{} = membership -> {:ok, membership, workspace}
+        nil when organization_role in [:owner, :admin] -> {:ok, nil, workspace}
+        nil -> {:error, :workspace_forbidden}
+      end
+    end
+  end
+
+  defp fetch_workspace(organization_id, %Workspace{id: workspace_id}) do
+    fetch_workspace(organization_id, workspace_id)
+  end
+
+  defp fetch_workspace(organization_id, workspace_id) when is_binary(workspace_id) do
+    case Repo.get_by(Workspace, id: workspace_id, organization_id: organization_id) do
+      %Workspace{} = workspace -> {:ok, workspace}
+      nil -> {:error, :workspace_not_found}
+    end
+  end
+
+  defp fetch_workspace(_organization_id, _workspace_id), do: {:error, :workspace_not_found}
+
+  defp workspace_role(nil), do: nil
+  defp workspace_role(%WorkspaceMembership{role: role}), do: role
+
+  defp maybe_put_workspace(scope, nil), do: scope
+  defp maybe_put_workspace(scope, workspace), do: Scope.with_workspace(scope, workspace)
+
+  defp require_organization_admin(scope) do
+    if Scope.organization_admin?(scope) do
+      :ok
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  defp require_workspace_admin(scope, workspace_id, actor_user_id) do
+    cond do
+      Scope.organization_admin?(scope) ->
+        :ok
+
+      scope.workspace && scope.workspace.id == workspace_id && Scope.workspace_admin?(scope) ->
+        :ok
+
+      true ->
+        case Repo.get_by(WorkspaceMembership, workspace_id: workspace_id, user_id: actor_user_id) do
+          %WorkspaceMembership{role: :admin} -> :ok
+          _ -> {:error, :forbidden}
+        end
+    end
+  end
+
+  defp maybe_add_workspace_admin_membership(_workspace, nil), do: {:ok, :noop}
+
+  defp maybe_add_workspace_admin_membership(%Workspace{id: workspace_id}, %User{id: user_id}) do
+    membership =
+      Repo.get_by(WorkspaceMembership, workspace_id: workspace_id, user_id: user_id) ||
+        %WorkspaceMembership{workspace_id: workspace_id, user_id: user_id}
+
+    membership
+    |> WorkspaceMembership.changeset(%{role: :admin})
+    |> Repo.insert_or_update()
+  end
+
+  defp maybe_sync_organization_and_owner(organization, user, role, opts) do
+    sync_workos? = Keyword.get(opts, :sync_workos, WorkOS.enabled?())
+
+    if sync_workos? do
+      WorkOS.sync_organization_and_owner(organization, user, role)
+    else
+      {:ok, %{organization_id: nil, membership_id: nil, user_id: nil}}
+    end
+  end
+
+  defp maybe_sync_organization_member(organization, user, role) do
+    if WorkOS.enabled?() do
+      WorkOS.ensure_organization_membership(organization, user, role)
+    else
+      {:ok, %{membership_id: nil, user_id: nil}}
+    end
+  end
+
+  defp maybe_store_workos_org_id(%Organization{} = organization, nil), do: {:ok, organization}
+
+  defp maybe_store_workos_org_id(%Organization{} = organization, workos_organization_id) do
+    organization
+    |> Organization.changeset(%{workos_organization_id: workos_organization_id})
+    |> Repo.update()
+  end
+
+  defp maybe_store_workos_membership_id(%OrganizationMembership{} = membership, nil),
+    do: {:ok, membership}
+
+  defp maybe_store_workos_membership_id(
+         %OrganizationMembership{} = membership,
+         workos_membership_id
+       ) do
+    membership
+    |> OrganizationMembership.changeset(%{
+      workos_organization_membership_id: workos_membership_id
+    })
+    |> Repo.update()
+  end
+
+  defp maybe_store_workos_user_id(%User{} = user, nil), do: {:ok, user}
+
+  defp maybe_store_workos_user_id(%User{workos_user_id: existing} = user, workos_user_id)
+       when is_binary(existing) and existing == workos_user_id,
+       do: {:ok, user}
+
+  defp maybe_store_workos_user_id(%User{} = user, workos_user_id) do
+    user
+    |> User.workos_changeset(%{workos_user_id: workos_user_id})
+    |> Repo.update()
+  end
+
+  defp maybe_emit_audit_event(
+         %Organization{} = organization,
+         %User{} = actor,
+         action,
+         targets,
+         context
+       ) do
+    case WorkOS.create_audit_event(organization, actor, action, targets, context) do
+      :ok -> :ok
+      {:error, _reason} -> :ok
+    end
+  end
+
+  defp maybe_emit_audit_event(_organization, _actor, _action, _targets, _context), do: :ok
+
+  defp normalize_attrs(attrs) when is_map(attrs) do
+    Enum.reduce(attrs, %{}, fn
+      {key, value}, acc when is_binary(key) ->
+        case safe_to_existing_atom(key) do
+          {:ok, atom} -> Map.put(acc, atom, value)
+          :error -> acc
+        end
+
+      {key, value}, acc when is_atom(key) ->
+        Map.put(acc, key, value)
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp normalize_attrs(_attrs), do: %{}
+
+  defp ensure_slug(attrs, source_key) do
+    case attr(attrs, :slug) do
+      slug when is_binary(slug) and byte_size(slug) > 0 ->
+        Map.put(attrs, :slug, slug)
+
+      _ ->
+        source_value =
+          attrs
+          |> attr(source_key)
+          |> to_string()
+
+        Map.put(attrs, :slug, slugify(source_value))
+    end
+  end
+
+  defp slugify(value) do
+    value
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, "-")
+    |> String.trim("-")
+  end
+
+  defp attr(attrs, key), do: Map.get(attrs, key) || Map.get(attrs, to_string(key))
+
+  defp safe_to_existing_atom(key) do
+    try do
+      {:ok, String.to_existing_atom(key)}
+    rescue
+      ArgumentError -> :error
+    end
+  end
+
+  defp unwrap_transaction({:ok, value}), do: {:ok, value}
+  defp unwrap_transaction({:error, reason}), do: {:error, reason}
+
   defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
 
   @doc """
@@ -40,15 +510,15 @@ defmodule Fizz.Accounts do
   def list_user_workos_organizations(_scope), do: []
 
   defp list_local_user_workos_organizations(user_id) do
-    from(tm in TenantMembership,
-      join: t in Tenant,
-      on: t.id == tm.tenant_id,
+    from(tm in OrganizationMembership,
+      join: t in Organization,
+      on: t.id == tm.organization_id,
       where: tm.user_id == ^user_id and not is_nil(t.workos_organization_id),
       order_by: [asc: t.name],
       select: %{
         organization_id: t.workos_organization_id,
-        tenant_id: t.id,
-        tenant_name: t.name,
+        local_organization_id: t.id,
+        organization_name: t.name,
         role: tm.role
       }
     )
@@ -132,9 +602,9 @@ defmodule Fizz.Accounts do
   end
 
   defp local_user_has_workos_organization?(user_id, organization_id) do
-    from(tm in TenantMembership,
-      join: t in Tenant,
-      on: t.id == tm.tenant_id,
+    from(tm in OrganizationMembership,
+      join: t in Organization,
+      on: t.id == tm.organization_id,
       where: tm.user_id == ^user_id and t.workos_organization_id == ^organization_id
     )
     |> Repo.exists?()
@@ -163,8 +633,8 @@ defmodule Fizz.Accounts do
   defp remote_organization_entry(organization_id) do
     %{
       organization_id: organization_id,
-      tenant_id: nil,
-      tenant_name: "WorkOS organization",
+      local_organization_id: nil,
+      organization_name: "WorkOS organization",
       role: nil
     }
   end

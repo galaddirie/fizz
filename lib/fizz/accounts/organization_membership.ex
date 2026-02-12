@@ -1,19 +1,18 @@
-defmodule Fizz.Accounts.TenantMembership do
-  use Ecto.Schema
-  import Ecto.Changeset
+defmodule Fizz.Accounts.OrganizationMembership do
+  use Fizz.Schema
 
-  alias Fizz.Accounts.{Tenant, User}
+  alias Fizz.Accounts.{Organization, User}
 
   @roles [:owner, :admin, :member]
 
-  schema "tenant_memberships" do
+  schema "organization_memberships" do
     field :role, Ecto.Enum, values: @roles, default: :member
     field :workos_organization_membership_id, :string
 
-    belongs_to :tenant, Tenant
+    belongs_to :organization, Organization
     belongs_to :user, User
 
-    timestamps(type: :utc_datetime)
+    timestamps()
   end
 
   @doc false
@@ -21,9 +20,9 @@ defmodule Fizz.Accounts.TenantMembership do
     membership
     |> cast(attrs, [:role, :workos_organization_membership_id])
     |> validate_required([:role])
-    |> foreign_key_constraint(:tenant_id)
+    |> foreign_key_constraint(:organization_id)
     |> foreign_key_constraint(:user_id)
-    |> unique_constraint(:user_id, name: :tenant_memberships_tenant_id_user_id_index)
+    |> unique_constraint(:user_id, name: :organization_memberships_organization_id_user_id_index)
     |> unique_constraint(:workos_organization_membership_id)
   end
 end

@@ -1,5 +1,5 @@
 defmodule Fizz.Accounts.UserToken do
-  use Ecto.Schema
+  use Fizz.Schema
   import Ecto.Query
 
   alias Fizz.Accounts.UserToken
@@ -12,7 +12,7 @@ defmodule Fizz.Accounts.UserToken do
     field :authenticated_at, :utc_datetime
     belongs_to :user, Fizz.Accounts.User
 
-    timestamps(type: :utc_datetime, updated_at: false)
+    timestamps(updated_at: false)
   end
 
   @doc """
