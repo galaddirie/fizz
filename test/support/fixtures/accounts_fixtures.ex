@@ -53,28 +53,17 @@ defmodule Fizz.AccountsFixtures do
     Scope.for_user(user)
   end
 
-  def organization_fixture(user \\ user_fixture(), attrs \\ %{}) do
-    scope = Scope.for_user(user)
-
-    {:ok, organization} =
-      Accounts.create_organization(
-        scope,
-        Map.merge(%{name: "Organization #{System.unique_integer()}"}, attrs),
-        sync_workos: false
-      )
-
-    organization
-  end
-
   def organization_scope_fixture(opts \\ []) do
-    user = user_fixture()
-    organization = organization_fixture(user)
-    organization_scope_fixture(user, organization, opts)
-  end
+    user = Keyword.get(opts, :user, user_fixture())
 
-  def organization_scope_fixture(user, organization, opts \\ []) do
-    {:ok, scope} = Accounts.build_scope(Scope.for_user(user), organization.id, opts)
-    scope
+    organization_id =
+      Keyword.get(opts, :organization_id, "org_#{System.unique_integer([:positive])}")
+
+    organization_role = Keyword.get(opts, :organization_role, :owner)
+
+    Scope.for_user(user)
+    |> Scope.with_organization_id(organization_id)
+    |> Scope.with_organization_role(organization_role)
   end
 
   def workspace_fixture(scope, attrs \\ %{}) do

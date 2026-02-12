@@ -7,6 +7,11 @@ defmodule Fizz.Accounts.ScopeTest do
     assert Scope.for_user(nil) == nil
   end
 
+  test "with_organization_id/2 stores the active WorkOS organization id" do
+    scope = Scope.with_organization_id(%Scope{}, "org_123")
+    assert scope.organization_id == "org_123"
+  end
+
   test "organization_admin?/1 checks owner and admin roles" do
     owner_scope = %Scope{} |> Scope.with_organization_role(:owner)
     admin_scope = %Scope{} |> Scope.with_organization_role(:admin)

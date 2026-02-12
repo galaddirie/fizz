@@ -3,17 +3,17 @@ defmodule Fizz.Accounts.Scope do
   Caller scope used for authentication and role-based authorization.
 
   WorkOS is the source of truth for user/org identity. This scope mirrors
-  the resolved organization/workspace context and effective local roles.
+  the resolved WorkOS organization/workspace context and effective local roles.
   """
 
-  alias Fizz.Accounts.{Organization, User, Workspace}
+  alias Fizz.Accounts.{User, Workspace}
 
   @organization_roles [:owner, :admin, :member]
   @workspace_roles [:admin, :member, :viewer]
 
   defstruct user: nil,
             actor: :anonymous,
-            organization: nil,
+            organization_id: nil,
             workspace: nil,
             organization_role: nil,
             workspace_role: nil,
@@ -26,7 +26,7 @@ defmodule Fizz.Accounts.Scope do
   @type t :: %__MODULE__{
           user: %User{} | nil,
           actor: :anonymous | :user,
-          organization: %Organization{} | nil,
+          organization_id: String.t() | nil,
           workspace: %Workspace{} | nil,
           organization_role: organization_role(),
           workspace_role: workspace_role(),
@@ -43,11 +43,14 @@ defmodule Fizz.Accounts.Scope do
   def for_user(nil), do: nil
 
   @doc """
-  Assigns the active organization on the scope.
+  Assigns the active WorkOS organization on the scope.
   """
-  @spec with_organization(t(), %Organization{}) :: t()
-  def with_organization(%__MODULE__{} = scope, %Organization{} = organization),
-    do: %{scope | organization: organization}
+  @spec with_organization_id(t(), String.t() | nil) :: t()
+  def with_organization_id(%__MODULE__{} = scope, organization_id)
+      when is_binary(organization_id) and byte_size(organization_id) > 0,
+      do: %{scope | organization_id: organization_id}
+
+  def with_organization_id(%__MODULE__{} = scope, nil), do: %{scope | organization_id: nil}
 
   @doc """
   Assigns the active workspace on the scope.

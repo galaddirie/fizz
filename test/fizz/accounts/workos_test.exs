@@ -1,7 +1,7 @@
 defmodule Fizz.Accounts.WorkOSTest do
   use ExUnit.Case, async: false
 
-  alias Fizz.Accounts.{Organization, User}
+  alias Fizz.Accounts.User
   alias Fizz.Accounts.WorkOS, as: AccountsWorkOS
 
   defmodule ReqMock do
@@ -72,11 +72,10 @@ defmodule Fizz.Accounts.WorkOSTest do
        }}
     ])
 
-    organization = %Organization{workos_organization_id: "org_123"}
     user = %User{id: 7, email: "owner@example.com", workos_user_id: "user_123"}
 
     assert {:ok, %{membership_id: "om_123", user_id: "user_123"}} =
-             AccountsWorkOS.ensure_organization_membership(organization, user, :admin)
+             AccountsWorkOS.ensure_organization_membership("org_123", user, :admin)
 
     assert_receive {:workos_http_request, first_request}
     assert first_request[:method] == :get
@@ -113,11 +112,10 @@ defmodule Fizz.Accounts.WorkOSTest do
        }}
     ])
 
-    organization = %Organization{workos_organization_id: "org_987"}
     user = %User{id: 17, email: "new-owner@example.com", workos_user_id: "user_987"}
 
     assert {:ok, %{membership_id: "om_created", user_id: "user_987"}} =
-             AccountsWorkOS.ensure_organization_membership(organization, user, :owner)
+             AccountsWorkOS.ensure_organization_membership("org_987", user, :owner)
 
     assert_receive {:workos_http_request, _first_request}
 
@@ -135,11 +133,10 @@ defmodule Fizz.Accounts.WorkOSTest do
   test "ensure_organization_membership/3 is a no-op when sync is disabled" do
     Application.put_env(:fizz, :workos_sync_enabled, false)
 
-    organization = %Organization{workos_organization_id: "org_123"}
     user = %User{id: 99, email: "member@example.com", workos_user_id: "user_123"}
 
     assert {:ok, %{membership_id: nil, user_id: "user_123"}} =
-             AccountsWorkOS.ensure_organization_membership(organization, user, :member)
+             AccountsWorkOS.ensure_organization_membership("org_123", user, :member)
 
     refute_receive {:workos_http_request, _request}
   end
@@ -293,6 +290,19 @@ defmodule Fizz.Accounts.WorkOSTest do
     assert Enum.any?(params, fn {key, value} -> key == :limit and value == 10 end)
 
     refute Enum.any?(params, fn {key, _value} -> key == :organization_id end)
+  end
+
+  test "get_user_organization_membership/2 returns forbidden when membership is missing" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"data" => []}}}
+    ])
+
+    assert {:error, :forbidden} =
+             AccountsWorkOS.get_user_organization_membership("user_123", "org_404")
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :get
+    assert request[:url] == "/user_management/organization_memberships"
   end
 
   test "user_has_organization_membership?/2 checks active membership in organization" do

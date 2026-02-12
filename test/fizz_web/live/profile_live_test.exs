@@ -2,7 +2,6 @@ defmodule FizzWeb.ProfileLiveTest do
   use FizzWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
-  import Fizz.AccountsFixtures
 
   defmodule ReqMock do
     def request(opts) do
@@ -58,11 +57,21 @@ defmodule FizzWeb.ProfileLiveTest do
     setup :register_and_log_in_user
 
     test "renders user identifiers and pipes widget", %{conn: conn, user: user} do
-      _organization = organization_fixture(user, %{workos_organization_id: "org_123"})
-
       put_http_responses([
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}},
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}}
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
+        widget_response("widget_token_123"),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
+        widget_response("widget_token_123")
       ])
 
       {:ok, view, _html} = live(conn, ~p"/settings/profile")
@@ -77,38 +86,43 @@ defmodule FizzWeb.ProfileLiveTest do
                "#profile-pipes-widget-org_123[data-auth-token=\"widget_token_123\"]"
              )
 
-      assert_receive {:workos_http_request, first_request}
-      assert first_request[:method] == :post
-      assert first_request[:url] == "/widgets/token"
+      requests = receive_workos_requests(6)
 
-      assert first_request[:json] == %{
-               organization_id: "org_123",
-               scopes: [],
-               user_id: user.workos_user_id
-             }
+      assert Enum.count(requests, &(&1[:url] == "/user_management/organization_memberships")) == 4
+      assert Enum.count(requests, &(&1[:url] == "/widgets/token")) == 2
 
-      assert_receive {:workos_http_request, second_request}
-      assert second_request[:method] == :post
-      assert second_request[:url] == "/widgets/token"
-
-      assert second_request[:json] == %{
-               organization_id: "org_123",
-               scopes: [],
-               user_id: user.workos_user_id
-             }
+      assert Enum.any?(requests, fn request ->
+               request[:url] == "/widgets/token" and
+                 request[:json] == %{
+                   organization_id: "org_123",
+                   scopes: [],
+                   user_id: user.workos_user_id
+                 }
+             end)
     end
 
     test "switches organizations and refreshes widget token", %{conn: conn, user: user} do
-      _organization1 =
-        organization_fixture(user, %{name: "Alpha", workos_organization_id: "org_123"})
-
-      _organization2 =
-        organization_fixture(user, %{name: "Beta", workos_organization_id: "org_456"})
-
       put_http_responses([
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}},
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}},
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_456"}}}
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"},
+          %{"id" => "om_2", "organization_id" => "org_456", "status" => "active"}
+        ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
+        widget_response("widget_token_123"),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"},
+          %{"id" => "om_2", "organization_id" => "org_456", "status" => "active"}
+        ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
+        widget_response("widget_token_123"),
+        memberships_response([
+          %{"id" => "om_2", "organization_id" => "org_456", "status" => "active"}
+        ]),
+        widget_response("widget_token_456")
       ])
 
       {:ok, view, _html} = live(conn, ~p"/settings/profile")
@@ -127,118 +141,24 @@ defmodule FizzWeb.ProfileLiveTest do
                "#profile-pipes-widget-org_456[data-auth-token=\"widget_token_456\"]"
              )
 
-      assert_receive {:workos_http_request, first_request}
-      assert first_request[:url] == "/widgets/token"
+      requests = receive_workos_requests(8)
 
-      assert first_request[:json] == %{
-               organization_id: "org_123",
-               scopes: [],
-               user_id: user.workos_user_id
-             }
-
-      assert_receive {:workos_http_request, second_request}
-      assert second_request[:url] == "/widgets/token"
-
-      assert second_request[:json] == %{
-               organization_id: "org_123",
-               scopes: [],
-               user_id: user.workos_user_id
-             }
-
-      assert_receive {:workos_http_request, third_request}
-      assert third_request[:url] == "/widgets/token"
-
-      assert third_request[:json] == %{
-               organization_id: "org_456",
-               scopes: [],
-               user_id: user.workos_user_id
-             }
-    end
-
-    test "uses WorkOS memberships when local organization mapping is missing", %{
-      conn: conn,
-      user: user
-    } do
-      put_http_responses([
-        {:ok,
-         %Req.Response{
-           status: 200,
-           body: %{
-             "data" => [
-               %{"id" => "om_123", "organization_id" => "org_789", "status" => "active"}
-             ]
-           }
-         }},
-        {:ok,
-         %Req.Response{
-           status: 200,
-           body: %{
-             "data" => [
-               %{"id" => "om_123", "organization_id" => "org_789", "status" => "active"}
-             ]
-           }
-         }},
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_789"}}},
-        {:ok,
-         %Req.Response{
-           status: 200,
-           body: %{
-             "data" => [
-               %{"id" => "om_123", "organization_id" => "org_789", "status" => "active"}
-             ]
-           }
-         }},
-        {:ok,
-         %Req.Response{
-           status: 200,
-           body: %{
-             "data" => [
-               %{"id" => "om_123", "organization_id" => "org_789", "status" => "active"}
-             ]
-           }
-         }},
-        {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_789"}}}
-      ])
-
-      {:ok, view, _html} = live(conn, ~p"/settings/profile")
-
-      assert has_element?(
-               view,
-               "#profile-pipes-widget-org_789[data-auth-token=\"widget_token_789\"]"
-             )
-
-      refute has_element?(view, "#profile-no-organization")
-
-      assert_receive {:workos_http_request, first_request}
-      assert first_request[:method] == :get
-      assert first_request[:url] == "/user_management/organization_memberships"
-      refute Enum.any?(first_request[:params], fn {key, _value} -> key == :organization_id end)
-
-      assert_receive {:workos_http_request, second_request}
-      assert second_request[:method] == :get
-      assert second_request[:url] == "/user_management/organization_memberships"
-
-      assert Enum.any?(second_request[:params], fn {key, value} ->
-               key == :organization_id and value == "org_789"
+      assert Enum.any?(requests, fn request ->
+               request[:url] == "/widgets/token" and
+                 request[:json] == %{
+                   organization_id: "org_456",
+                   scopes: [],
+                   user_id: user.workos_user_id
+                 }
              end)
-
-      assert_receive {:workos_http_request, third_request}
-      assert third_request[:method] == :post
-      assert third_request[:url] == "/widgets/token"
-
-      assert third_request[:json] == %{
-               organization_id: "org_789",
-               scopes: [],
-               user_id: user.workos_user_id
-             }
     end
 
     test "shows a single no-organization state when no WorkOS organization is linked", %{
       conn: conn
     } do
       put_http_responses([
-        {:ok, %Req.Response{status: 200, body: %{"data" => []}}},
-        {:ok, %Req.Response{status: 200, body: %{"data" => []}}}
+        memberships_response([]),
+        memberships_response([])
       ])
 
       {:ok, view, _html} = live(conn, ~p"/settings/profile")
@@ -247,18 +167,38 @@ defmodule FizzWeb.ProfileLiveTest do
       refute has_element?(view, "#profile-pipes-widget-error")
       refute has_element?(view, "[id^='profile-pipes-widget-org_']")
 
-      assert_receive {:workos_http_request, first_request}
-      assert first_request[:method] == :get
-      assert first_request[:url] == "/user_management/organization_memberships"
-
-      assert_receive {:workos_http_request, second_request}
-      assert second_request[:method] == :get
-      assert second_request[:url] == "/user_management/organization_memberships"
+      requests = receive_workos_requests(2)
+      assert Enum.all?(requests, &(&1[:url] == "/user_management/organization_memberships"))
     end
   end
 
   test "requires authentication", %{conn: conn} do
     assert {:error, {:redirect, %{to: "/auth/workos"}}} = live(conn, ~p"/settings/profile")
+  end
+
+  defp memberships_response(memberships) do
+    {:ok,
+     %Req.Response{
+       status: 200,
+       body: %{"data" => memberships}
+     }}
+  end
+
+  defp widget_response(token) do
+    {:ok,
+     %Req.Response{
+       status: 200,
+       body: %{"token" => token}
+     }}
+  end
+
+  defp receive_workos_requests(0), do: []
+
+  defp receive_workos_requests(count) when is_integer(count) and count > 0 do
+    Enum.map(1..count, fn _index ->
+      assert_receive {:workos_http_request, request}
+      request
+    end)
   end
 
   defp restore_env(app, key, nil), do: Application.delete_env(app, key)

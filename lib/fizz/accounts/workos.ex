@@ -9,41 +9,12 @@ defmodule Fizz.Accounts.WorkOS do
 
   require Logger
 
-  alias Fizz.Accounts.{Organization, User}
+  alias Fizz.Accounts.User
 
   @doc """
   Returns whether WorkOS sync is enabled.
   """
   def enabled?, do: Application.get_env(:fizz, :workos_sync_enabled, false)
-
-  @doc """
-  Creates and links WorkOS organization/user/membership for a organization owner.
-  """
-  @spec sync_organization_and_owner(%Organization{}, %User{}, atom() | String.t() | nil) ::
-          {:ok,
-           %{
-             organization_id: String.t() | nil,
-             user_id: String.t() | nil,
-             membership_id: String.t() | nil
-           }}
-          | {:error, term()}
-  def sync_organization_and_owner(%Organization{} = organization, %User{} = user, role \\ :owner) do
-    if enabled?() do
-      with {:ok, workos_user_id} <- ensure_user(user),
-           {:ok, organization_id} <- ensure_organization(organization),
-           {:ok, membership_id} <-
-             find_or_create_organization_membership(workos_user_id, organization_id, role) do
-        {:ok,
-         %{
-           organization_id: organization_id,
-           user_id: workos_user_id,
-           membership_id: membership_id
-         }}
-      end
-    else
-      {:ok, %{organization_id: nil, user_id: user.workos_user_id, membership_id: nil}}
-    end
-  end
 
   @doc """
   Ensures a local user has a WorkOS user record.
@@ -75,12 +46,12 @@ defmodule Fizz.Accounts.WorkOS do
   @doc """
   Ensures a user has organization membership in WorkOS for the given organization.
   """
-  @spec ensure_organization_membership(%Organization{}, %User{}, atom() | String.t() | nil) ::
+  @spec ensure_organization_membership(String.t(), %User{}, atom() | String.t() | nil) ::
           {:ok, %{user_id: String.t() | nil, membership_id: String.t() | nil}} | {:error, term()}
-  def ensure_organization_membership(organization, user, role \\ :member)
+  def ensure_organization_membership(workos_organization_id, user, role \\ :member)
 
   def ensure_organization_membership(
-        %Organization{workos_organization_id: workos_organization_id},
+        workos_organization_id,
         %User{} = user,
         role
       )
@@ -96,40 +67,12 @@ defmodule Fizz.Accounts.WorkOS do
     end
   end
 
-  def ensure_organization_membership(%Organization{}, %User{} = user, _role) do
+  def ensure_organization_membership(_workos_organization_id, %User{} = user, _role) do
     if enabled?() do
       {:error, :missing_workos_organization_id}
     else
       {:ok, %{user_id: user.workos_user_id, membership_id: nil}}
     end
-  end
-
-  @doc """
-  Creates a WorkOS organization for a organization.
-  """
-  @spec create_organization(%Organization{}) ::
-          {:ok, WorkOS.Organizations.Organization.t()} | {:error, term()}
-  def create_organization(%Organization{} = organization) do
-    options = %{
-      name: organization.name,
-      idempotency_key: "organization-#{organization.slug}"
-    }
-
-    case organizations_module().create_organization(options) do
-      {:ok, organization} ->
-        {:ok, organization}
-
-      {:error, error} ->
-        log_error("create organization", error)
-        {:error, normalize_error(error)}
-    end
-  rescue
-    error in RuntimeError ->
-      Logger.error(
-        "WorkOS configuration error when creating organization: #{Exception.message(error)}"
-      )
-
-      {:error, :workos_not_configured}
   end
 
   @doc """
@@ -157,12 +100,12 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   @doc """
-  Emits an audit event to WorkOS for a organization organization.
+  Emits an audit event to WorkOS for a WorkOS organization.
   """
-  @spec create_audit_event(%Organization{}, %User{}, String.t(), [map()], map()) ::
+  @spec create_audit_event(String.t(), %User{}, String.t(), [map()], map()) ::
           :ok | {:error, term()}
   def create_audit_event(
-        %Organization{workos_organization_id: workos_organization_id},
+        workos_organization_id,
         %User{} = actor,
         action,
         targets,
@@ -306,6 +249,25 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   @doc """
+  Returns the active membership for a WorkOS user in a specific organization.
+  """
+  @spec get_user_organization_membership(String.t(), String.t()) ::
+          {:ok, map()} | {:error, :forbidden | term()}
+  def get_user_organization_membership(workos_user_id, organization_id)
+      when is_binary(workos_user_id) and is_binary(organization_id) do
+    case list_organization_memberships(workos_user_id, organization_id) do
+      {:ok, memberships} ->
+        case Enum.find(memberships, &membership_active?/1) do
+          nil -> {:error, :forbidden}
+          membership -> {:ok, membership}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Returns true when the WorkOS user has an active membership in the organization.
   """
   @spec user_has_organization_membership?(String.t(), String.t()) ::
@@ -382,16 +344,6 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   def extract_user_profile(_), do: {:error, :invalid_workos_authentication}
-
-  defp ensure_organization(%Organization{workos_organization_id: workos_organization_id})
-       when is_binary(workos_organization_id),
-       do: {:ok, workos_organization_id}
-
-  defp ensure_organization(%Organization{} = organization) do
-    with {:ok, organization} <- create_organization(organization) do
-      {:ok, organization.id}
-    end
-  end
 
   defp find_or_create_organization_membership(workos_user_id, workos_organization_id, role) do
     desired_role_slug = role_slug_for(role)
@@ -713,10 +665,6 @@ defmodule Fizz.Accounts.WorkOS do
 
   defp user_management_module do
     Application.get_env(:fizz, :workos_user_management_module, WorkOS.UserManagement)
-  end
-
-  defp organizations_module do
-    Application.get_env(:fizz, :workos_organizations_module, WorkOS.Organizations)
   end
 
   defp audit_logs_module do
