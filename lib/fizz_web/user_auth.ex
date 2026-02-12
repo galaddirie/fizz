@@ -7,30 +7,13 @@ defmodule FizzWeb.UserAuth do
   alias Fizz.Accounts
   alias Fizz.Accounts.Scope
 
-  # Make the remember me cookie valid for 14 days. This should match
-  # the session validity setting in UserToken.
-  @max_cookie_age_in_days 14
-  @remember_me_cookie "_fizz_web_user_remember_me"
   @workos_session_id :workos_session_id
   @workos_access_token :workos_access_token
   @workos_refresh_token :workos_refresh_token
   @workos_user_id :workos_user_id
   @workos_access_token_expires_at :workos_access_token_expires_at
+  @live_socket_id :live_socket_id
   @workos_access_token_expiry_leeway_seconds 30
-  @remember_me_options [
-    sign: true,
-    max_age: @max_cookie_age_in_days * 24 * 60 * 60,
-    same_site: "Lax"
-  ]
-
-  # How old the session token should be before a new one is issued. When a request is made
-  # with a session token older than this value, then a new session token will be created
-  # and the session and remember-me cookies (if set) will be updated with the new token.
-  # Lowering this value will result in more tokens being created by active users. Increasing
-  # it will result in less time before a session token expires for a user to get issued a new
-  # token. This can be set to a value greater than `@max_cookie_age_in_days` to disable
-  # the reissuing of tokens completely.
-  @session_reissue_age_in_days 7
 
   @doc """
   Logs the user in.
@@ -52,18 +35,13 @@ defmodule FizzWeb.UserAuth do
   It clears all session data for safety. See renew_session.
   """
   def log_out_user(conn) do
-    user_token = get_session(conn, :user_token)
     workos_session_id = get_session(conn, @workos_session_id)
-    user_token && Accounts.delete_user_session_token(user_token)
 
-    if live_socket_id = get_session(conn, :live_socket_id) do
+    if live_socket_id = get_session(conn, @live_socket_id) do
       FizzWeb.Endpoint.broadcast(live_socket_id, "disconnect", %{})
     end
 
-    conn =
-      conn
-      |> renew_session(nil)
-      |> delete_resp_cookie(@remember_me_cookie)
+    conn = renew_session(conn, nil)
 
     case workos_logout_url(workos_session_id, post_logout_return_to()) do
       {:ok, logout_url} -> redirect(conn, external: logout_url)
@@ -72,52 +50,32 @@ defmodule FizzWeb.UserAuth do
   end
 
   @doc """
-  Authenticates the user by looking into the session and remember me token.
-
-  Will reissue the session token if it is older than the configured age.
+  Authenticates the user from the WorkOS session data stored in the Plug session.
   """
   def fetch_current_scope_for_user(conn, _opts) do
-    with {token, conn} <- ensure_user_token(conn),
-         {user, token_inserted_at} <- Accounts.get_user_by_session_token(token),
-         {:ok, conn, user} <- ensure_workos_session(conn, user) do
-      conn
-      |> assign(:current_scope, Scope.for_user(user))
-      |> maybe_reissue_user_session_token(user, token_inserted_at)
-    else
-      {:error, conn} -> assign(conn, :current_scope, Scope.for_user(nil))
-      nil -> assign(conn, :current_scope, Scope.for_user(nil))
+    case authenticate_user_from_workos_session(conn) do
+      {:ok, conn, user} ->
+        assign(conn, :current_scope, Scope.for_user(user))
+
+      {:error, conn} ->
+        assign(conn, :current_scope, Scope.for_user(nil))
     end
   end
 
-  defp ensure_user_token(conn) do
-    if token = get_session(conn, :user_token) do
-      {token, conn}
-    else
-      conn = fetch_cookies(conn, signed: [@remember_me_cookie])
-
-      if token = conn.cookies[@remember_me_cookie] do
-        {token, conn |> put_token_in_session(token) |> put_session(:user_remember_me, true)}
-      else
-        nil
-      end
-    end
-  end
-
-  # Reissue the session token if it is older than the configured reissue age.
-  defp maybe_reissue_user_session_token(conn, user, token_inserted_at) do
-    token_age = DateTime.diff(DateTime.utc_now(:second), token_inserted_at, :day)
-
-    if token_age >= @session_reissue_age_in_days do
-      create_or_extend_session(conn, user, %{})
-    else
-      conn
-    end
-  end
-
-  defp ensure_workos_session(conn, %{workos_user_id: workos_user_id} = user)
-       when is_binary(workos_user_id) and byte_size(workos_user_id) > 0 do
+  defp authenticate_user_from_workos_session(conn) do
     with {:ok, workos_session} <- read_workos_session(conn),
-         :ok <- ensure_workos_user_match(workos_user_id, workos_session.workos_user_id) do
+         %{} = user <- Accounts.get_user_by_workos_user_id(workos_session.workos_user_id),
+         {:ok, conn, user} <- ensure_workos_session(conn, user, workos_session) do
+      {:ok, conn, user}
+    else
+      _ ->
+        {:error, invalidate_local_session(conn)}
+    end
+  end
+
+  defp ensure_workos_session(conn, %{workos_user_id: workos_user_id} = user, workos_session)
+       when is_binary(workos_user_id) and byte_size(workos_user_id) > 0 do
+    with :ok <- ensure_workos_user_match(workos_user_id, workos_session.workos_user_id) do
       if access_token_expired?(workos_session.access_token_expires_at) do
         refresh_workos_session(conn, user, workos_session)
       else
@@ -129,7 +87,8 @@ defmodule FizzWeb.UserAuth do
     end
   end
 
-  defp ensure_workos_session(conn, user), do: {:ok, clear_workos_session(conn), user}
+  defp ensure_workos_session(conn, _user, _workos_session),
+    do: {:error, invalidate_local_session(conn)}
 
   defp refresh_workos_session(conn, user, workos_session) do
     case Accounts.refresh_user_workos_session(workos_session.refresh_token,
@@ -162,23 +121,11 @@ defmodule FizzWeb.UserAuth do
 
   defp access_token_expired?(_), do: true
 
-  # This function is the one responsible for creating session tokens
-  # and storing them safely in the session and cookies. It may be called
-  # either when logging in, during sudo mode, or to renew a session which
-  # will soon expire.
-  #
-  # When the session is created, rather than extended, the renew_session
-  # function will clear the session to avoid fixation attacks. See the
-  # renew_session function to customize this behaviour.
+  # This function stores WorkOS session state as the only local auth source.
   defp create_or_extend_session(conn, user, params) do
-    token = Accounts.generate_user_session_token(user)
-    remember_me = get_session(conn, :user_remember_me)
-
     conn
     |> renew_session(user)
-    |> put_token_in_session(token)
     |> maybe_put_workos_session(params)
-    |> maybe_write_remember_me_cookie(token, params, remember_me)
   end
 
   # Do not renew session if the user is already logged in
@@ -211,14 +158,6 @@ defmodule FizzWeb.UserAuth do
     |> clear_session()
   end
 
-  defp maybe_write_remember_me_cookie(conn, token, %{"remember_me" => "true"}, _),
-    do: write_remember_me_cookie(conn, token)
-
-  defp maybe_write_remember_me_cookie(conn, token, _params, true),
-    do: write_remember_me_cookie(conn, token)
-
-  defp maybe_write_remember_me_cookie(conn, _token, _params, _), do: conn
-
   defp maybe_put_workos_session(conn, params) when is_list(params) do
     maybe_put_workos_session(conn, Map.new(params))
   end
@@ -231,12 +170,6 @@ defmodule FizzWeb.UserAuth do
       Map.has_key?(params, "workos_session") ->
         maybe_put_workos_session_from_value(conn, params["workos_session"], true)
 
-      Map.has_key?(params, :workos_session_id) ->
-        put_session(conn, @workos_session_id, params[:workos_session_id])
-
-      Map.has_key?(params, "workos_session_id") ->
-        put_session(conn, @workos_session_id, params["workos_session_id"])
-
       true ->
         conn
     end
@@ -244,33 +177,11 @@ defmodule FizzWeb.UserAuth do
 
   defp maybe_put_workos_session(conn, _params), do: conn
 
-  defp maybe_put_workos_session_from_value(conn, %{} = workos_session, true) do
-    access_token = read_value(workos_session, [:access_token, "access_token"])
-    refresh_token = read_value(workos_session, [:refresh_token, "refresh_token"])
-    session_id = read_value(workos_session, [:session_id, "session_id"])
-    workos_user_id = read_value(workos_session, [:workos_user_id, "workos_user_id"])
-
-    expires_at =
-      workos_session
-      |> read_value([:access_token_expires_at, "access_token_expires_at"])
-      |> normalize_integer()
-
-    conn
-    |> maybe_put_session(@workos_access_token, access_token)
-    |> maybe_put_session(@workos_refresh_token, refresh_token)
-    |> maybe_put_session(@workos_session_id, session_id)
-    |> maybe_put_session(@workos_user_id, workos_user_id)
-    |> maybe_put_session(@workos_access_token_expires_at, expires_at)
-  end
+  defp maybe_put_workos_session_from_value(conn, %{} = workos_session, true),
+    do: put_workos_session(conn, workos_session)
 
   defp maybe_put_workos_session_from_value(conn, nil, true), do: clear_workos_session(conn)
   defp maybe_put_workos_session_from_value(conn, _workos_session, _present?), do: conn
-
-  defp write_remember_me_cookie(conn, token) do
-    conn
-    |> put_session(:user_remember_me, true)
-    |> put_resp_cookie(@remember_me_cookie, token, @remember_me_options)
-  end
 
   defp read_workos_session(conn) do
     access_token = get_session(conn, @workos_access_token)
@@ -295,6 +206,8 @@ defmodule FizzWeb.UserAuth do
   end
 
   defp put_workos_session(conn, %{} = workos_session) do
+    session_id = read_value(workos_session, [:session_id, "session_id"])
+
     conn
     |> maybe_put_session(
       @workos_access_token,
@@ -306,7 +219,7 @@ defmodule FizzWeb.UserAuth do
     )
     |> maybe_put_session(
       @workos_session_id,
-      read_value(workos_session, [:session_id, "session_id"])
+      session_id
     )
     |> maybe_put_session(
       @workos_user_id,
@@ -318,6 +231,7 @@ defmodule FizzWeb.UserAuth do
       |> read_value([:access_token_expires_at, "access_token_expires_at"])
       |> normalize_integer()
     )
+    |> maybe_put_live_socket_id(session_id)
   end
 
   defp clear_workos_session(conn) do
@@ -327,15 +241,11 @@ defmodule FizzWeb.UserAuth do
     |> delete_session(@workos_session_id)
     |> delete_session(@workos_user_id)
     |> delete_session(@workos_access_token_expires_at)
+    |> delete_session(@live_socket_id)
   end
 
   defp invalidate_local_session(conn) do
-    user_token = get_session(conn, :user_token)
-    user_token && Accounts.delete_user_session_token(user_token)
-
-    conn
-    |> renew_session(nil)
-    |> delete_resp_cookie(@remember_me_cookie)
+    clear_workos_session(conn)
   end
 
   defp maybe_put_session(conn, key, value) when is_binary(value) and byte_size(value) > 0 do
@@ -346,6 +256,13 @@ defmodule FizzWeb.UserAuth do
     do: put_session(conn, key, value)
 
   defp maybe_put_session(conn, key, _value), do: delete_session(conn, key)
+
+  defp maybe_put_live_socket_id(conn, session_id)
+       when is_binary(session_id) and byte_size(session_id) > 0 do
+    put_session(conn, @live_socket_id, workos_session_topic(session_id))
+  end
+
+  defp maybe_put_live_socket_id(conn, _session_id), do: delete_session(conn, @live_socket_id)
 
   defp read_value(data, keys) do
     Enum.find_value(keys, fn key ->
@@ -381,22 +298,25 @@ defmodule FizzWeb.UserAuth do
 
   defp workos_logout_url(_, _), do: :error
 
-  defp put_token_in_session(conn, token) do
-    conn
-    |> put_session(:user_token, token)
-    |> put_session(:live_socket_id, user_session_topic(token))
+  @doc """
+  Disconnects existing sockets for the given WorkOS session ids.
+  """
+  def disconnect_workos_sessions(session_ids) do
+    Enum.each(session_ids, &disconnect_workos_session/1)
   end
 
   @doc """
-  Disconnects existing sockets for the given tokens.
+  Disconnects existing sockets for a WorkOS session id.
   """
-  def disconnect_sessions(tokens) do
-    Enum.each(tokens, fn %{token: token} ->
-      FizzWeb.Endpoint.broadcast(user_session_topic(token), "disconnect", %{})
-    end)
+  def disconnect_workos_session(session_id)
+      when is_binary(session_id) and byte_size(session_id) > 0 do
+    FizzWeb.Endpoint.broadcast(workos_session_topic(session_id), "disconnect", %{})
   end
 
-  defp user_session_topic(token), do: "users_sessions:#{Base.url_encode64(token)}"
+  def disconnect_workos_session(_session_id), do: :ok
+
+  defp workos_session_topic(session_id),
+    do: "workos_sessions:#{Base.url_encode64(session_id, padding: false)}"
 
   @doc """
   Handles mounting and authenticating the current_scope in LiveViews.
@@ -404,12 +324,12 @@ defmodule FizzWeb.UserAuth do
   ## `on_mount` arguments
 
     * `:mount_current_scope` - Assigns current_scope
-      to socket assigns based on user_token, or nil if
-      there's no user_token or no matching user.
+      to socket assigns based on WorkOS session fields, or nil if
+      there is no valid WorkOS session.
 
     * `:require_authenticated` - Authenticates the user from the session,
       and assigns the current_scope to socket assigns based
-      on user_token.
+      on WorkOS session fields.
       Redirects to login page if there's no logged user.
 
   ## Examples
@@ -451,10 +371,14 @@ defmodule FizzWeb.UserAuth do
 
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      {user, _} =
-        if user_token = session["user_token"] do
-          Accounts.get_user_by_session_token(user_token)
-        end || {nil, nil}
+      user =
+        case session["workos_user_id"] do
+          workos_user_id when is_binary(workos_user_id) and byte_size(workos_user_id) > 0 ->
+            Accounts.get_user_by_workos_user_id(workos_user_id)
+
+          _ ->
+            nil
+        end
 
       Scope.for_user(user)
     end)

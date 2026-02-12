@@ -85,9 +85,12 @@ defmodule FizzWeb.WorkOSWebhookControllerTest do
     assert response(conn, 200) == ""
   end
 
-  test "POST /webhooks/workos handles session.revoked by revoking local sessions", %{conn: conn} do
-    user = user_fixture(%{workos_user_id: "user_workos_session_revoke"})
-    token = Accounts.generate_user_session_token(user)
+  test "POST /webhooks/workos handles session.revoked by disconnecting local sockets", %{
+    conn: conn
+  } do
+    topic = "workos_sessions:#{Base.url_encode64("session_revoked_123", padding: false)}"
+    FizzWeb.Endpoint.subscribe(topic)
+    user_fixture(%{workos_user_id: "user_workos_session_revoke"})
 
     body =
       webhook_payload("session.revoked", %{
@@ -103,7 +106,7 @@ defmodule FizzWeb.WorkOSWebhookControllerTest do
       |> post(~p"/webhooks/workos", body)
 
     assert response(conn, 200) == ""
-    refute Accounts.get_user_by_session_token(token)
+    assert_receive %Phoenix.Socket.Broadcast{event: "disconnect", topic: ^topic}
   end
 
   test "POST /webhooks/workos handles user.created", %{conn: conn} do

@@ -2,7 +2,7 @@ defmodule Fizz.AccountsTest do
   use Fizz.DataCase
 
   alias Fizz.Accounts
-  alias Fizz.Accounts.{User, UserToken}
+  alias Fizz.Accounts.User
   alias Fizz.Repo
 
   import Fizz.AccountsFixtures
@@ -207,61 +207,6 @@ defmodule Fizz.AccountsTest do
     end
   end
 
-  describe "generate_user_session_token/1" do
-    test "stores a unique session token" do
-      token = Accounts.generate_user_session_token(user_fixture())
-      assert user_token = Repo.get_by(UserToken, token: token)
-      assert user_token.authenticated_at
-
-      assert_raise Ecto.ConstraintError, fn ->
-        Repo.insert!(%UserToken{
-          token: user_token.token,
-          user_id: user_fixture().id,
-          authenticated_at: DateTime.utc_now(:second)
-        })
-      end
-    end
-
-    test "copies authenticated_at from the given user when present" do
-      user = %{user_fixture() | authenticated_at: DateTime.add(DateTime.utc_now(:second), -3600)}
-      token = Accounts.generate_user_session_token(user)
-      assert user_token = Repo.get_by(UserToken, token: token)
-      assert user_token.authenticated_at == user.authenticated_at
-      assert DateTime.compare(user_token.inserted_at, user.authenticated_at) == :gt
-    end
-  end
-
-  describe "get_user_by_session_token/1" do
-    test "returns user and inserted_at when token is valid" do
-      user = user_fixture()
-      token = Accounts.generate_user_session_token(user)
-
-      assert {session_user, token_inserted_at} = Accounts.get_user_by_session_token(token)
-      assert session_user.id == user.id
-      assert token_inserted_at
-    end
-
-    test "returns nil for an invalid token" do
-      refute Accounts.get_user_by_session_token("oops")
-    end
-
-    test "returns nil for an expired token" do
-      user = user_fixture()
-      token = Accounts.generate_user_session_token(user)
-      offset_user_token(token, -15, :day)
-
-      refute Accounts.get_user_by_session_token(token)
-    end
-  end
-
-  describe "delete_user_session_token/1" do
-    test "deletes the token and invalidates the session" do
-      token = Accounts.generate_user_session_token(user_fixture())
-      assert :ok = Accounts.delete_user_session_token(token)
-      refute Accounts.get_user_by_session_token(token)
-    end
-  end
-
   describe "upsert_user_from_workos_profile/1" do
     test "creates a user when workos_user_id does not exist locally" do
       assert {:ok, user} =
@@ -315,17 +260,18 @@ defmodule Fizz.AccountsTest do
   end
 
   describe "revoke_user_sessions_by_workos_user_id/1" do
-    test "deletes all local session tokens for the mapped user" do
-      user = user_fixture(%{workos_user_id: "user_workos_revoke"})
-      token = Accounts.generate_user_session_token(user)
-      assert Accounts.get_user_by_session_token(token)
-
+    test "returns ok when local user exists" do
+      user_fixture(%{workos_user_id: "user_workos_revoke"})
       assert :ok = Accounts.revoke_user_sessions_by_workos_user_id("user_workos_revoke")
-      refute Accounts.get_user_by_session_token(token)
     end
 
     test "returns ok when local user does not exist" do
       assert :ok = Accounts.revoke_user_sessions_by_workos_user_id("user_workos_missing_revoke")
+    end
+
+    test "returns error for invalid workos_user_id" do
+      assert {:error, :invalid_workos_user_id} =
+               Accounts.revoke_user_sessions_by_workos_user_id(nil)
     end
   end
 end

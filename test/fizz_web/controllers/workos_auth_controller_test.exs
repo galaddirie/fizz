@@ -142,11 +142,14 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
     assert params[:json][:ip_address]
 
     assert redirected_to(conn) == ~p"/"
-    assert get_session(conn, :user_token)
     assert get_session(conn, :workos_session_id) == "session_workos_123"
     assert get_session(conn, :workos_user_id) == "user_workos_123"
     assert get_session(conn, :workos_access_token)
     assert get_session(conn, :workos_refresh_token)
+
+    assert get_session(conn, :live_socket_id) ==
+             "workos_sessions:#{Base.url_encode64("session_workos_123", padding: false)}"
+
     refute get_session(conn, :workos_auth_state)
     refute get_session(conn, :workos_pkce_verifier)
 
@@ -169,7 +172,7 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
     assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
              "Your login session expired. Please try again."
 
-    refute get_session(conn, :user_token)
+    refute get_session(conn, :workos_session_id)
   end
 
   test "GET /auth/workos/callback handles WorkOS account conflict", %{conn: conn} do
@@ -193,6 +196,6 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
     assert Phoenix.Flash.get(conn.assigns.flash, :error) ==
              "An account conflict was detected for this WorkOS identity. Contact support."
 
-    refute get_session(conn, :user_token)
+    refute get_session(conn, :workos_session_id)
   end
 end

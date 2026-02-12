@@ -8,7 +8,6 @@ defmodule Fizz.Accounts do
   alias Fizz.Accounts.{
     Scope,
     User,
-    UserToken,
     WorkOS,
     Workspace,
     WorkspaceMembership
@@ -665,48 +664,13 @@ defmodule Fizz.Accounts do
     end
   end
 
-  ## Session
-
   @doc """
-  Generates a session token.
+  No-op local session revocation. WorkOS is the session source of truth.
+
+  We keep this function for compatibility with existing webhook handling paths.
   """
-  def generate_user_session_token(user) do
-    {token, user_token} = UserToken.build_session_token(user)
-    Repo.insert!(user_token)
-    token
-  end
-
-  @doc """
-  Gets the user with the given signed token.
-
-  If the token is valid `{user, token_inserted_at}` is returned, otherwise `nil` is returned.
-  """
-  def get_user_by_session_token(token) do
-    {:ok, query} = UserToken.verify_session_token_query(token)
-    Repo.one(query)
-  end
-
-  @doc """
-  Deletes the signed session token.
-  """
-  def delete_user_session_token(token) do
-    Repo.delete_all(from(UserToken, where: [token: ^token]))
-    :ok
-  end
-
-  @doc """
-  Revokes all local sessions for a user identified by a WorkOS user id.
-  """
-  def revoke_user_sessions_by_workos_user_id(workos_user_id) when is_binary(workos_user_id) do
-    case get_user_by_workos_user_id(workos_user_id) do
-      %User{id: user_id} ->
-        Repo.delete_all(from(token in UserToken, where: token.user_id == ^user_id))
-        :ok
-
-      nil ->
-        :ok
-    end
-  end
+  def revoke_user_sessions_by_workos_user_id(workos_user_id) when is_binary(workos_user_id),
+    do: :ok
 
   def revoke_user_sessions_by_workos_user_id(_workos_user_id),
     do: {:error, :invalid_workos_user_id}

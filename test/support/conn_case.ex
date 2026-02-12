@@ -44,16 +44,11 @@ defmodule FizzWeb.ConnCase do
   It stores an updated connection and a registered user in the
   test context.
   """
-  def register_and_log_in_user(%{conn: conn} = context) do
+  def register_and_log_in_user(%{conn: conn}) do
     user = Fizz.AccountsFixtures.user_fixture()
     scope = Fizz.Accounts.Scope.for_user(user)
 
-    opts =
-      context
-      |> Map.take([:token_authenticated_at])
-      |> Enum.into([])
-
-    %{conn: log_in_user(conn, user, opts), user: user, scope: scope}
+    %{conn: log_in_user(conn, user), user: user, scope: scope}
   end
 
   @doc """
@@ -62,34 +57,27 @@ defmodule FizzWeb.ConnCase do
   It returns an updated `conn`.
   """
   def log_in_user(conn, user, opts \\ []) do
-    token = Fizz.Accounts.generate_user_session_token(user)
-
-    maybe_set_token_authenticated_at(token, opts[:token_authenticated_at])
-    workos_session = fake_workos_session_for_user(user)
+    workos_session = fake_workos_session_for_user(user, opts)
 
     conn
     |> Phoenix.ConnTest.init_test_session(%{})
-    |> Plug.Conn.put_session(:user_token, token)
     |> Plug.Conn.put_session(:workos_access_token, workos_session.access_token)
     |> Plug.Conn.put_session(:workos_refresh_token, workos_session.refresh_token)
     |> Plug.Conn.put_session(:workos_session_id, workos_session.session_id)
     |> Plug.Conn.put_session(:workos_user_id, workos_session.workos_user_id)
+    |> Plug.Conn.put_session(:live_socket_id, workos_session_topic(workos_session.session_id))
     |> Plug.Conn.put_session(
       :workos_access_token_expires_at,
       workos_session.access_token_expires_at
     )
   end
 
-  defp maybe_set_token_authenticated_at(_token, nil), do: nil
-
-  defp maybe_set_token_authenticated_at(token, authenticated_at) do
-    Fizz.AccountsFixtures.override_token_authenticated_at(token, authenticated_at)
-  end
-
-  defp fake_workos_session_for_user(user) do
+  defp fake_workos_session_for_user(user, opts) do
     workos_user_id = user.workos_user_id || "user_#{user.id}"
     session_id = "session_#{user.id}"
-    expires_at = System.os_time(:second) + 3600
+
+    expires_at =
+      Keyword.get(opts, :workos_access_token_expires_at, System.os_time(:second) + 3600)
 
     claims = %{
       "sub" => workos_user_id,
@@ -108,4 +96,7 @@ defmodule FizzWeb.ConnCase do
       access_token_expires_at: expires_at
     }
   end
+
+  defp workos_session_topic(session_id),
+    do: "workos_sessions:#{Base.url_encode64(session_id, padding: false)}"
 end

@@ -23,6 +23,10 @@ defmodule Fizz.Accounts.WorkOSWebhooks do
 
   defp handle_event("session.revoked", data) do
     with workos_user_id when is_binary(workos_user_id) <- extract_workos_user_id(data) do
+      data
+      |> extract_value([:id, "id"])
+      |> FizzWeb.UserAuth.disconnect_workos_session()
+
       Accounts.revoke_user_sessions_by_workos_user_id(workos_user_id)
     else
       _ -> {:error, :invalid_workos_session_payload}
