@@ -68,7 +68,9 @@ defmodule Fizz.MixProject do
       {:jason, "~> 1.2"},
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
-      {:nvir, "~> 0.16"}
+      {:nvir, "~> 0.16"},
+      {:runic, git: "https://github.com/galaddirie/runic.git", branch: "main"},
+      {:oban, "~> 2.20"}
     ]
   end
 

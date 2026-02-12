@@ -7,6 +7,12 @@
 # General application configuration
 import Config
 
+config :fizz, Oban,
+  engine: Oban.Engines.Basic,
+  notifier: Oban.Notifiers.Postgres,
+  queues: [default: 10],
+  repo: Fizz.Repo
+
 config :live_vue, ssr: true
 
 config :phoenix_vite, PhoenixVite.Npm,

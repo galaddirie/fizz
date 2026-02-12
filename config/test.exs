@@ -1,4 +1,5 @@
 import Config
+config :fizz, Oban, testing: :manual
 
 # Configure your database
 #
