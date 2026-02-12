@@ -1,0 +1,283 @@
+<Layouts.app flash={@flash} current_scope={@current_scope} current_path="/sprites">
+  <:page_header>
+    <div class="w-full space-y-3">
+      <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Compute</p>
+      <h1 class="text-3xl font-semibold tracking-tight text-base-content">
+        {@sprite.display_name}
+      </h1>
+      <p class="max-w-3xl text-sm text-muted">
+        Sprite Name: <span class="font-mono text-xs">{@sprite.sprite_name}</span>
+        • Status: {@sprite.status}
+      </p>
+    </div>
+  </:page_header>
+
+  <div id="sprite-show-page" class="mx-auto w-full max-w-6xl space-y-6">
+    <p
+      :if={@console_error}
+      id="sprite-show-console-error"
+      class="rounded-box border border-error/40 bg-error/10 p-3 text-sm"
+    >
+      {console_error_message(@console_error)}
+    </p>
+
+    <p
+      :if={@checkpoint_error}
+      id="sprite-show-checkpoint-error"
+      class="rounded-box border border-error/40 bg-error/10 p-3 text-sm"
+    >
+      {console_error_message(@checkpoint_error)}
+    </p>
+
+    <p
+      :if={@policy_error}
+      id="sprite-show-policy-error"
+      class="rounded-box border border-error/40 bg-error/10 p-3 text-sm"
+    >
+      {console_error_message(@policy_error)}
+    </p>
+
+    <div class="grid gap-6 lg:grid-cols-2">
+      <section class="rounded-box border border-base-300 bg-base-100 p-5">
+        <h2 class="text-lg font-semibold text-base-content">Run Command</h2>
+        <p class="mt-1 text-sm text-muted">
+          Executes once and stores metadata only.
+        </p>
+        <.form
+          :if={can_execute?(@sprite_scope)}
+          for={@command_form}
+          id="sprite-run-command-form"
+          phx-change="validate_command"
+          phx-submit="run_command"
+          class="mt-4 space-y-3"
+        >
+          <.input field={@command_form[:command]} type="text" label="Command" required />
+          <.input field={@command_form[:args]} type="text" label="Args" />
+          <.input field={@command_form[:cwd]} type="text" label="Working Directory" />
+          <.button type="submit" id="sprite-run-command-submit">Run Command</.button>
+        </.form>
+
+        <div
+          :if={@command_result}
+          id="sprite-run-command-result"
+          class="mt-4 rounded-box border border-base-300 p-3"
+        >
+          <p class="text-xs font-medium text-muted">
+            Exit Code: {@command_result.exit_code}
+          </p>
+          <pre class="mt-2 max-h-64 overflow-auto rounded-box bg-base-200 p-3 text-xs">{@command_result.output}</pre>
+        </div>
+      </section>
+
+      <section class="rounded-box border border-base-300 bg-base-100 p-5">
+        <h2 class="text-lg font-semibold text-base-content">Interactive Console</h2>
+        <p class="mt-1 text-sm text-muted">
+          Single-user interactive terminal with detachable sessions.
+        </p>
+
+        <.form
+          :if={can_execute?(@sprite_scope)}
+          for={@console_form}
+          id="sprite-start-console-form"
+          phx-change="validate_console"
+          phx-submit="start_console"
+          class="mt-4 grid gap-3 md:grid-cols-3"
+        >
+          <.input field={@console_form[:command]} type="text" label="Command" />
+          <.input field={@console_form[:args]} type="text" label="Args" />
+          <.input
+            field={@console_form[:idle_timeout]}
+            type="select"
+            label="Idle Timeout"
+            options={timeout_options()}
+          />
+          <div class="md:col-span-3 flex items-center gap-2">
+            <.button id="sprite-start-console-submit" type="submit">Start Console</.button>
+            <button
+              :if={@active_session_id}
+              id="sprite-detach-console"
+              type="button"
+              class="btn btn-soft"
+              phx-click="detach_console"
+            >
+              Detach
+            </button>
+            <button
+              :if={@active_session_id}
+              id="sprite-close-console"
+              type="button"
+              class="btn btn-error btn-soft"
+              phx-click="close_console"
+              phx-value-session-id={@active_session_id}
+            >
+              Close
+            </button>
+          </div>
+        </.form>
+
+        <div
+          id="sprite-console-terminal"
+          phx-hook="SpriteTerminal"
+          phx-update="ignore"
+          data-session-id={@active_session_id}
+          class="mt-4 h-80 rounded-box border border-base-300 bg-base-200 p-2"
+        >
+        </div>
+      </section>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-2">
+      <section class="rounded-box border border-base-300 bg-base-100 p-5">
+        <h2 class="text-lg font-semibold text-base-content">Sessions</h2>
+        <div id="sprite-session-list" class="mt-4 space-y-2">
+          <div
+            :for={session <- @sessions}
+            id={"sprite-session-#{session.id}"}
+            class="rounded-box border border-base-300 p-3"
+          >
+            <p class="text-sm font-medium text-base-content">{session.interactive_command}</p>
+            <p class="text-xs text-muted">
+              Status: {session.status} • Timeout: {session.idle_timeout_seconds || "never"}
+            </p>
+            <div class="mt-2 flex gap-2">
+              <button
+                :if={can_execute?(@sprite_scope)}
+                id={"sprite-attach-session-#{session.id}"}
+                type="button"
+                class="btn btn-xs btn-outline"
+                phx-click="attach_console"
+                phx-value-session-id={session.id}
+              >
+                Attach
+              </button>
+              <button
+                :if={can_execute?(@sprite_scope)}
+                id={"sprite-close-session-#{session.id}"}
+                type="button"
+                class="btn btn-xs btn-error btn-outline"
+                phx-click="close_console"
+                phx-value-session-id={session.id}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+          <p :if={@sessions == []} id="sprite-session-empty" class="text-sm text-muted">
+            No console sessions yet.
+          </p>
+        </div>
+      </section>
+
+      <section class="rounded-box border border-base-300 bg-base-100 p-5">
+        <h2 class="text-lg font-semibold text-base-content">Checkpoints</h2>
+        <.form
+          :if={can_manage?(@sprite_scope)}
+          for={@checkpoint_form}
+          id="sprite-checkpoint-form"
+          phx-change="validate_checkpoint"
+          phx-submit="create_checkpoint"
+          class="mt-4 space-y-3"
+        >
+          <.input field={@checkpoint_form[:comment]} type="text" label="Comment" />
+          <.button id="sprite-checkpoint-create" type="submit">Create Checkpoint</.button>
+        </.form>
+
+        <div id="sprite-checkpoint-list" class="mt-4 space-y-2">
+          <div
+            :for={checkpoint <- @checkpoints}
+            id={"sprite-checkpoint-#{checkpoint[:id]}"}
+            class="rounded-box border border-base-300 p-3"
+          >
+            <p class="text-sm font-medium text-base-content">{checkpoint[:id]}</p>
+            <p class="text-xs text-muted">
+              {checkpoint[:create_time] || "Unknown create time"}
+            </p>
+            <button
+              :if={can_manage?(@sprite_scope)}
+              id={"sprite-checkpoint-restore-#{checkpoint[:id]}"}
+              type="button"
+              class="btn btn-xs btn-outline mt-2"
+              phx-click="restore_checkpoint"
+              phx-value-checkpoint-id={checkpoint[:id]}
+            >
+              Restore
+            </button>
+          </div>
+          <p :if={@checkpoints == []} id="sprite-checkpoint-empty" class="text-sm text-muted">
+            No checkpoints found.
+          </p>
+        </div>
+
+        <pre
+          :if={@checkpoint_messages != []}
+          id="sprite-checkpoint-messages"
+          class="mt-4 max-h-52 overflow-auto rounded-box bg-base-200 p-3 text-xs"
+        >{inspect(@checkpoint_messages, pretty: true)}</pre>
+      </section>
+    </div>
+
+    <div class="grid gap-6 lg:grid-cols-2">
+      <section class="rounded-box border border-base-300 bg-base-100 p-5">
+        <h2 class="text-lg font-semibold text-base-content">Network Egress Policy</h2>
+        <p class="mt-1 text-sm text-muted">
+          Default is deny-all. Use preset or custom newline-separated allowlist domains.
+        </p>
+
+        <.form
+          :if={can_manage?(@sprite_scope)}
+          for={@policy_form}
+          id="sprite-policy-form"
+          phx-change="validate_policy"
+          phx-submit="update_policy"
+          class="mt-4 space-y-3"
+        >
+          <.input
+            field={@policy_form[:preset]}
+            type="select"
+            label="Preset"
+            options={[{"Minimal Agent", "minimal_agent"}]}
+          />
+          <.input
+            field={@policy_form[:custom_rules]}
+            type="textarea"
+            label="Custom Allowlist Domains (one per line)"
+            rows="6"
+          />
+          <.button id="sprite-policy-update" type="submit">Update Policy</.button>
+        </.form>
+
+        <pre
+          id="sprite-policy-current"
+          class="mt-4 max-h-52 overflow-auto rounded-box bg-base-200 p-3 text-xs"
+        >{inspect(@network_policy, pretty: true)}</pre>
+      </section>
+
+      <section class="rounded-box border border-base-300 bg-base-100 p-5">
+        <h2 class="text-lg font-semibold text-base-content">HTTP URL Settings</h2>
+        <p class="mt-1 text-sm text-muted">
+          URL authentication defaults to private bearer.
+        </p>
+        <p id="sprite-url-value" class="mt-2 text-xs font-mono text-muted">
+          URL: {@url_settings[:url] || "Unavailable"}
+        </p>
+
+        <.form
+          :if={can_manage?(@sprite_scope)}
+          for={@url_form}
+          id="sprite-url-form"
+          phx-change="validate_url"
+          phx-submit="update_url"
+          class="mt-4 space-y-3"
+        >
+          <.input
+            field={@url_form[:auth]}
+            type="select"
+            label="Access Mode"
+            options={[{"Private bearer", "bearer"}, {"Public", "public"}]}
+          />
+          <.button id="sprite-url-update" type="submit">Update URL Mode</.button>
+        </.form>
+      </section>
+    </div>
+  </div>
+</Layouts.app>

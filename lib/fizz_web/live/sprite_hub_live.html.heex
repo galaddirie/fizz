@@ -1,0 +1,67 @@
+<Layouts.app flash={@flash} current_scope={@current_scope} current_path="/sprites">
+  <:page_header>
+    <div class="w-full space-y-3">
+      <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Compute</p>
+      <h1 class="text-3xl font-semibold tracking-tight text-base-content">Sprites</h1>
+      <p class="max-w-3xl text-sm text-muted">
+        Select an organization and workspace to manage isolated Sprite environments.
+      </p>
+    </div>
+  </:page_header>
+
+  <div id="sprite-hub-page" class="mx-auto w-full max-w-3xl space-y-6">
+    <p
+      :if={@organizations == []}
+      id="sprite-hub-no-organization"
+      class="rounded-box border border-warning/40 bg-warning/10 p-4 text-sm"
+    >
+      No active WorkOS organization memberships were found for this account.
+    </p>
+
+    <%= if @organizations != [] do %>
+      <.form
+        for={@organization_form}
+        id="sprite-hub-organization-form"
+        phx-change="change_organization"
+        class="rounded-box border border-base-300 bg-base-100 p-4"
+      >
+        <.input
+          field={@organization_form[:organization_id]}
+          type="select"
+          label="Organization"
+          options={@organization_options}
+        />
+      </.form>
+
+      <div class="rounded-box border border-base-300 bg-base-100 p-6">
+        <h2 class="text-lg font-semibold text-base-content">Create First Workspace</h2>
+        <p class="mt-2 text-sm text-muted">
+          This organization has no workspaces yet. Create one to start managing sprites.
+        </p>
+
+        <p
+          :if={@workspace_error}
+          id="sprite-hub-workspace-error"
+          class="mt-4 rounded-box border border-error/40 bg-error/10 p-3 text-sm"
+        >
+          {workspace_error_message(@workspace_error)}
+        </p>
+
+        <.form
+          for={@workspace_form}
+          id="sprite-hub-workspace-form"
+          phx-change="validate_workspace"
+          phx-submit="create_workspace"
+          class="mt-4 space-y-3"
+        >
+          <.input field={@workspace_form[:name]} type="text" label="Workspace Name" required />
+          <.input field={@workspace_form[:description]} type="text" label="Description" />
+
+          <.button type="submit" id="sprite-hub-create-workspace">
+            Create Workspace
+          </.button>
+        </.form>
+      </div>
+    <% end %>
+  </div>
+</Layouts.app>

@@ -47,7 +47,7 @@ defmodule FizzWeb.Layouts do
     ]}>
       <%= if !@hide_nav do %>
         <header class="sticky top-0 z-50 border-b border-base-200 bg-base-100/85 backdrop-blur supports-[backdrop-filter]:bg-base-100/70">
-          <div class="navbar mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div class="navbar mx-auto w-full  px-4 sm:px-6 lg:px-8">
             <div class="navbar-start gap-2">
               <div class="dropdown lg:hidden">
                 <button tabindex="0" class="btn btn-ghost btn-sm" aria-label="Open menu">
@@ -63,8 +63,8 @@ defmodule FizzWeb.Layouts do
                     </.link>
                   </li>
                   <li :if={@current_scope && @current_scope.user}>
-                    <.link href={~p"/settings/"} class="gap-2">
-                      <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                    <.link href={~p"/sprites"} class="gap-2">
+                      <.icon name="hero-command-line" class="size-4" /> Sprites
                     </.link>
                   </li>
                   <li><hr class="my-1 border-base-300" /></li>
@@ -108,12 +108,13 @@ defmodule FizzWeb.Layouts do
                     <.icon name="hero-home" class="size-5" /> Overview
                   </.link>
                 </li>
+
                 <li :if={@current_scope && @current_scope.user}>
                   <.link
-                    href={~p"/settings/"}
-                    class={["btn btn-ghost gap-2", @current_path == "/settings/" && "btn-active"]}
+                    href={~p"/sprites"}
+                    class={["btn btn-ghost gap-2", @current_path == "/sprites" && "btn-active"]}
                   >
-                    <.icon name="hero-cog-6-tooth" class="size-5" /> Settings
+                    <.icon name="hero-command-line" class="size-5" /> Sprites
                   </.link>
                 </li>
               </ul>
@@ -142,6 +143,11 @@ defmodule FizzWeb.Layouts do
                     <li>
                       <.link href={~p"/settings/"} class="gap-2">
                         <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
+                      </.link>
+                    </li>
+                    <li>
+                      <.link href={~p"/sprites"} class="gap-2">
+                        <.icon name="hero-command-line" class="size-4" /> Sprites
                       </.link>
                     </li>
                     <li>

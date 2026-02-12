@@ -10,6 +10,7 @@ import Config
 config :fizz, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
+  plugins: [],
   queues: [default: 10],
   repo: Fizz.Repo
 
@@ -44,6 +45,22 @@ config :fizz, :workos_sync_enabled, false
 config :fizz, :workos_authkit_provider, "authkit"
 config :fizz, :workos_webhook_secret, nil
 config :fizz, :workos_role_slug_map, %{owner: "owner", admin: "admin", member: "member"}
+config :fizz, :sprites_provider_module, Fizz.Sprites.Providers.SpritesEx
+
+config :fizz, :sprites_egress_presets, %{
+  "minimal_agent" => %{
+    rules: [
+      %{domain: "api.openai.com", action: "allow"},
+      %{domain: "api.anthropic.com", action: "allow"},
+      %{domain: "api.github.com", action: "allow"},
+      %{domain: "raw.githubusercontent.com", action: "allow"},
+      %{domain: "registry.npmjs.org", action: "allow"},
+      %{domain: "pypi.org", action: "allow"},
+      %{domain: "files.pythonhosted.org", action: "allow"},
+      %{domain: "*", action: "deny"}
+    ]
+  }
+}
 
 config :workos, WorkOS.Client,
   api_key: System.get_env("WORKOS_API_KEY"),
