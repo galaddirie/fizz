@@ -47,6 +47,7 @@ defmodule FizzWeb.Router do
       pipe_through :browser
 
       live_dashboard "/dashboard", metrics: FizzWeb.Telemetry
+      live "/vue_demo", FizzWeb.VueDemoLive
       forward "/mailbox", Plug.Swoosh.MailboxPreview
     end
   end

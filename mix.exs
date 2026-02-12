@@ -40,6 +40,8 @@ defmodule Fizz.MixProject do
   # Type `mix help deps` for examples and options.
   defp deps do
     [
+      {:live_vue, "~> 1.0"},
+      {:igniter, "~> 0.6", only: [:dev, :test]},
       {:tidewave, "~> 0.5", only: :dev},
       {:phoenix, "~> 1.8.3"},
       {:phoenix_ecto, "~> 4.5"},
@@ -50,8 +52,6 @@ defmodule Fizz.MixProject do
       {:phoenix_live_view, "~> 1.1.0"},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
-      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
-      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
       {:heroicons,
        github: "tailwindlabs/heroicons",
        tag: "v2.2.0",
@@ -84,12 +84,13 @@ defmodule Fizz.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
-      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["compile", "tailwind fizz", "esbuild fizz"],
+      "assets.setup": ["phoenix_vite.npm assets install"],
+      "assets.build": [
+        "phoenix_vite.npm vite build --manifest --emptyOutDir true",
+        "phoenix_vite.npm vite build --ssrManifest --emptyOutDir false --ssr js/server.js --outDir ../priv/static"
+      ],
       "assets.deploy": [
-        "tailwind fizz --minify",
-        "esbuild fizz --minify",
-        "phx.digest"
+        "assets.build"
       ],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]

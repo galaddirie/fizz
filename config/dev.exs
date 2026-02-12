@@ -1,4 +1,5 @@
 import Config
+config :live_vue, vite_host: "http://localhost:5173", ssr_module: LiveVue.SSR.ViteJS
 
 # Configure your database
 config :fizz, Fizz.Repo,
@@ -24,10 +25,8 @@ config :fizz, FizzWeb.Endpoint,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "3xfboGN/BSzcl175jMnJCJLBA4sJd+xYGmBXmgiL3F9Hz/pNzQzEcZUyYJe0rQI+",
-  watchers: [
-    esbuild: {Esbuild, :install_and_run, [:fizz, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:fizz, ~w(--watch)]}
-  ]
+  watchers: [vite: {PhoenixVite.Npm, :run, [:vite, ~w(dev)]}],
+  static_url: [host: "localhost", port: 5173]
 
 # ## SSL Support
 #
@@ -57,8 +56,6 @@ config :fizz, FizzWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
-      # Static assets, except user uploads
-      ~r"priv/static/(?!uploads/).*\.(js|css|png|jpeg|jpg|gif|svg)$",
       # Gettext translations
       ~r"priv/gettext/.*\.po$",
       # Router, Controllers, LiveViews and LiveComponents

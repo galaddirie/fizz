@@ -8,6 +8,7 @@ defmodule Fizz.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      {NodeJS.Supervisor, [path: LiveVue.SSR.NodeJS.server_path(), pool_size: 4]},
       FizzWeb.Telemetry,
       Fizz.Repo,
       {DNSCluster, query: Application.get_env(:fizz, :dns_cluster_query) || :ignore},
