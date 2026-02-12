@@ -106,27 +106,39 @@ defmodule Fizz.SpritesTest do
              Sprites.update_network_policy(member_scope, sprite.id, %{preset: "minimal_agent"})
   end
 
-  test "start_console/4 streams output and can be closed", %{sprite_scope: sprite_scope} do
+  test "open_console_client/5 creates a session and streams output", %{sprite_scope: sprite_scope} do
     assert {:ok, sprite} =
              Sprites.create_sprite(sprite_scope, %{
                "display_name" => "Console Sandbox"
              })
 
     assert {:ok, session} =
-             Sprites.start_console(sprite_scope, sprite.id, %{
-               "command" => "bash",
-               "idle_timeout" => "60"
-             })
+             Sprites.open_console_client(sprite_scope, sprite.id, "pane-1", "client-a",
+               focused: true
+             )
 
-    session_id = session.id
+    session_id = session.session_id
     console_pid = Fizz.Sprites.Console.Registry.whereis(session_id)
 
-    assert {:ok, []} = Sprites.subscribe_console(sprite_scope, sprite.id, session.id, self())
-    assert :ok = Sprites.send_console_input(sprite_scope, sprite.id, session.id, "echo hi\n")
-    assert_receive {:console_output, ^session_id, %{stream: "stdout", data: "echo hi\n"}}
+    assert :ok =
+             Sprites.send_console_input(
+               sprite_scope,
+               sprite.id,
+               session_id,
+               "client-a",
+               "echo hi\n"
+             )
 
-    assert :ok = Sprites.close_console(sprite_scope, sprite.id, session.id)
-    assert_receive {:console_exit, ^session_id, _exit_code, _reason}
+    assert_receive {:console_session_event, ^session_id,
+                    %{type: "output_chunk", chunk: %{stream: "stdout", data: "echo hi\n"}}}
+
+    assert :ok = Sprites.terminate_console_session(sprite_scope, sprite.id, session_id)
+
+    assert_receive {:sprites_provider_call, {:kill_session, _sprite_name, provider_session_id}}
+    assert is_binary(provider_session_id)
+
+    assert_receive {:console_session_event, ^session_id,
+                    %{type: "session_exit", reason: "terminated_by_user"}}
 
     if is_pid(console_pid) do
       monitor_ref = Process.monitor(console_pid)
@@ -134,7 +146,7 @@ defmodule Fizz.SpritesTest do
     end
   end
 
-  test "kill_console/3 terminates runtime session and calls provider kill", %{
+  test "open_console_client/5 reuses running pane sessions", %{
     sprite_scope: sprite_scope
   } do
     assert {:ok, sprite} =
@@ -142,61 +154,58 @@ defmodule Fizz.SpritesTest do
                "display_name" => "Kill Session Sprite"
              })
 
-    assert {:ok, session} =
-             Sprites.start_console(sprite_scope, sprite.id, %{
-               "command" => "bash",
-               "idle_timeout" => "60"
-             })
+    assert {:ok, first} =
+             Sprites.open_console_client(sprite_scope, sprite.id, "pane-1", "client-a",
+               focused: true
+             )
 
-    session_id = session.id
-    assert {:ok, []} = Sprites.subscribe_console(sprite_scope, sprite.id, session_id, self())
-    assert :ok = Sprites.kill_console(sprite_scope, sprite.id, session_id)
+    assert {:ok, second} =
+             Sprites.open_console_client(sprite_scope, sprite.id, "pane-1", "client-a",
+               focused: true
+             )
 
-    assert_receive {:sprites_provider_call, {:kill_session, _sprite_name, ^session_id}}
-    assert_receive {:console_exit, ^session_id, nil, "killed_by_user"}
+    assert first.session_id == second.session_id
+    assert :ok = Sprites.terminate_console_session(sprite_scope, sprite.id, first.session_id)
   end
 
-  test "start_console/4 defaults bash sessions to interactive mode", %{sprite_scope: sprite_scope} do
+  test "open_console_client/5 defaults bash sessions to interactive mode", %{
+    sprite_scope: sprite_scope
+  } do
     assert {:ok, sprite} =
              Sprites.create_sprite(sprite_scope, %{
                "display_name" => "Interactive Console Sprite"
              })
 
     assert {:ok, _session} =
-             Sprites.start_console(sprite_scope, sprite.id, %{
-               "command" => "bash",
-               "args" => ""
-             })
+             Sprites.open_console_client(sprite_scope, sprite.id, "pane-1", "client-a",
+               focused: true
+             )
 
     assert_receive {:sprites_provider_call, {:start_console, _sprite_name, "bash", ["-i"]}}
+    assert {:ok, [session]} = Sprites.list_sessions(sprite_scope, sprite.id)
+    assert :ok = Sprites.terminate_console_session(sprite_scope, sprite.id, session.id)
   end
 
   test "session server child spec does not restart exited sessions" do
     assert %{restart: :temporary} = Fizz.Sprites.Console.SessionServer.child_spec([])
   end
 
-  test "list_sessions/3 reads provider sessions as source of truth", %{sprite_scope: sprite_scope} do
+  test "list_sessions/3 reads persisted console sessions", %{sprite_scope: sprite_scope} do
     assert {:ok, sprite} =
              Sprites.create_sprite(sprite_scope, %{
                "display_name" => "Session Source Sprite"
              })
 
-    Fizz.SpritesProviderMock.put_responses(:list_sessions, [
-      {:ok,
-       [
-         %{
-           id: "provider-session-1",
-           command: "bash",
-           is_active: true,
-           tty: true
-         }
-       ]}
-    ])
+    assert {:ok, opened} =
+             Sprites.open_console_client(sprite_scope, sprite.id, "pane-1", "client-a",
+               focused: true
+             )
 
     assert {:ok, [session]} = Sprites.list_sessions(sprite_scope, sprite.id)
-    assert session.id == "provider-session-1"
-    assert session.status == "running"
+    assert session.id == opened.session_id
+    assert session.state in ["starting", "attached", "grace_detaching", "detached"]
     assert session.interactive_command == "bash"
+    assert :ok = Sprites.terminate_console_session(sprite_scope, sprite.id, opened.session_id)
   end
 
   defp member_scope_for_workspace(workspace, organization_id) do

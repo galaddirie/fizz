@@ -2,7 +2,7 @@ defmodule Fizz.Sprites.ManagedSprite do
   use Fizz.Schema
 
   alias Fizz.Accounts.Workspace
-  alias Fizz.Sprites.{SpriteCommand, SpriteEvent}
+  alias Fizz.Sprites.{SpriteCommand, SpriteEvent, SpriteSession}
 
   @url_auth_modes ~w(bearer public)
 
@@ -23,6 +23,7 @@ defmodule Fizz.Sprites.ManagedSprite do
 
     has_many :commands, SpriteCommand
     has_many :events, SpriteEvent
+    has_many :sprite_sessions, SpriteSession
 
     timestamps()
   end

@@ -27,7 +27,7 @@ defmodule Fizz.Sprites.Provider do
   @callback write_console(command_handle(), iodata()) :: :ok | {:error, term()}
   @callback resize_console(command_handle(), pos_integer(), pos_integer()) ::
               :ok | {:error, term()}
-  @callback close_console(command_handle()) :: :ok | {:error, term()}
+  @callback detach_console(command_handle()) :: :ok | {:error, term()}
   @callback await_console(command_handle(), timeout()) ::
               {:ok, non_neg_integer()} | {:error, term()}
 

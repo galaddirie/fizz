@@ -8,19 +8,22 @@ defmodule Fizz.Sprites do
   alias Fizz.Accounts
   alias Fizz.Accounts.Scope
   alias Fizz.Repo
+  alias FizzWeb.Presence
 
   alias Fizz.Sprites.{
     Console.Registry,
     Console.SessionServer,
     Console.Supervisor,
     ManagedSprite,
+    SpriteConsoleChunk,
     SpriteCommand,
-    SpriteEvent
+    SpriteEvent,
+    SpriteSession
   }
 
-  @idle_timeout_presets [60, 300, 900, 3600, nil]
-  @default_idle_timeout_seconds 60
   @default_egress_preset "minimal_agent"
+  @default_console_grace_seconds 20
+  @active_session_states ~w(starting attached grace_detaching detached)
 
   @type scope :: Scope.t()
 
@@ -185,152 +188,141 @@ defmodule Fizz.Sprites do
     end
   end
 
-  @spec start_console(scope(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
-  def start_console(%Scope{} = scope, sprite_id, attrs, _opts \\ [])
-      when is_binary(sprite_id) and is_map(attrs) do
-    with :ok <- require_execute(scope),
-         :ok <- ensure_provider_configured(),
-         {:ok, sprite} <- fetch_sprite(scope, sprite_id),
-         command <- normalize_console_command(read_value(attrs, [:command, "command"])),
-         args <-
-           normalize_console_args(command, normalize_args(read_value(attrs, [:args, "args"]))),
-         idle_timeout_seconds <-
-           normalize_idle_timeout(read_value(attrs, [:idle_timeout, "idle_timeout"])),
-         session_id <- runtime_session_id(),
-         {:ok, _pid} <-
-           Supervisor.start_session(
-             provider_module: provider_module(),
-             sprite_name: sprite.sprite_name,
-             session_id: session_id,
-             owner_user_id: scope.user.id,
-             mode: :start,
-             command: command,
-             args: args,
-             tty: true,
-             idle_timeout_seconds: idle_timeout_seconds
-           ) do
-      public_session_id =
-        case SessionServer.snapshot(session_id, scope.user.id) do
-          {:ok, %{id: discovered_session_id}} when is_binary(discovered_session_id) ->
-            discovered_session_id
-
-          _ ->
-            session_id
-        end
-
-      emit_event(sprite, scope.user, "sprite.console.started", %{session_id: session_id})
-      {:ok, runtime_session(public_session_id, command, idle_timeout_seconds)}
-    else
-      {:error, {:already_started, _pid}} ->
-        {:error, :console_already_running}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  @spec attach_console(scope(), String.t(), String.t(), keyword()) ::
+  @spec open_console_client(scope(), String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def attach_console(%Scope{} = scope, sprite_id, session_id, opts \\ [])
-      when is_binary(sprite_id) and is_binary(session_id) and is_list(opts) do
+  def open_console_client(%Scope{} = scope, sprite_id, pane_id, client_id, opts \\ [])
+      when is_binary(sprite_id) and is_binary(pane_id) and is_binary(client_id) and
+             is_list(opts) do
     with :ok <- require_execute(scope),
          :ok <- ensure_provider_configured(),
          {:ok, sprite} <- fetch_sprite(scope, sprite_id),
-         normalized_session_id when is_binary(normalized_session_id) <-
-           normalize_provider_session_id(session_id),
-         {:ok, _pid} <- ensure_attached_session(scope, sprite, normalized_session_id, opts) do
-      {:ok, runtime_session(normalized_session_id, "attached", nil)}
-    else
-      nil -> {:error, :sprite_session_not_found}
-      {:error, reason} -> {:error, reason}
+         pane_id when is_binary(pane_id) <- normalize_pane_id(pane_id),
+         command <- normalize_console_command(Keyword.get(opts, :command)),
+         args <- normalize_console_args(command, normalize_args(Keyword.get(opts, :args, []))),
+         focused <- truthy?(Keyword.get(opts, :focused, true)),
+         {:ok, session} <- ensure_open_session(scope, sprite, pane_id, command, args),
+         {:ok, session} <- ensure_session_runtime(scope, sprite, session, pane_id, command, args),
+         {:ok, snapshot} <-
+           SessionServer.register_client(
+             session.id,
+             scope.user.id,
+             client_id,
+             pane_id,
+             self(),
+             focused
+           ),
+         :ok <-
+           track_console_presence(
+             self(),
+             session.id,
+             client_id,
+             scope.user.id,
+             pane_id,
+             focused
+           ) do
+      emit_event(sprite, scope.user, "sprite.console.client_opened", %{
+        session_id: session.id,
+        pane_id: pane_id
+      })
+
+      {:ok,
+       %{
+         session_id: snapshot.id,
+         provider_session_id: snapshot.provider_session_id,
+         generation: snapshot.generation,
+         state: snapshot.state,
+         lease_state: lease_state_for(snapshot.lease_client_id, client_id),
+         lease_client_id: snapshot.lease_client_id,
+         command: snapshot.command,
+         chunks: snapshot.chunks
+       }}
     end
   end
 
-  @spec send_console_input(scope(), String.t(), String.t(), iodata()) :: :ok | {:error, term()}
-  def send_console_input(%Scope{} = scope, sprite_id, session_id, data)
-      when is_binary(sprite_id) and is_binary(session_id) do
+  @spec heartbeat_console_client(scope(), String.t(), String.t(), String.t(), boolean()) ::
+          {:ok, map()} | {:error, term()}
+  def heartbeat_console_client(%Scope{} = scope, sprite_id, session_id, client_id, focused)
+      when is_binary(sprite_id) and is_binary(session_id) and is_binary(client_id) and
+             is_boolean(focused) do
     with :ok <- require_execute(scope),
          {:ok, _sprite} <- fetch_sprite(scope, sprite_id),
-         :ok <- ensure_runtime_session(session_id),
-         :ok <- SessionServer.send_input(session_id, scope.user.id, data) do
-      :ok
+         :ok <- ensure_runtime_session_exists(scope, sprite_id, session_id),
+         {:ok, lease} <- SessionServer.heartbeat(session_id, scope.user.id, client_id, focused),
+         :ok <- update_console_presence(session_id, client_id, focused) do
+      {:ok, Map.put(lease, :lease_state, lease_state_for(lease.lease_client_id, client_id))}
     end
   end
 
-  @spec resize_console(scope(), String.t(), String.t(), pos_integer(), pos_integer()) ::
+  @spec request_write_lease(scope(), String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, term()}
+  def request_write_lease(%Scope{} = scope, sprite_id, session_id, client_id)
+      when is_binary(sprite_id) and is_binary(session_id) and is_binary(client_id) do
+    with :ok <- require_execute(scope),
+         {:ok, _sprite} <- fetch_sprite(scope, sprite_id),
+         :ok <- ensure_runtime_session_exists(scope, sprite_id, session_id),
+         {:ok, lease} <- SessionServer.request_write_lease(session_id, scope.user.id, client_id) do
+      {:ok, Map.put(lease, :lease_state, lease_state_for(lease.lease_client_id, client_id))}
+    end
+  end
+
+  @spec send_console_input(scope(), String.t(), String.t(), String.t(), iodata()) ::
           :ok | {:error, term()}
-  def resize_console(%Scope{} = scope, sprite_id, session_id, rows, cols)
-      when is_binary(sprite_id) and is_binary(session_id) and is_integer(rows) and
-             is_integer(cols) do
+  def send_console_input(%Scope{} = scope, sprite_id, session_id, client_id, data)
+      when is_binary(sprite_id) and is_binary(session_id) and is_binary(client_id) do
     with :ok <- require_execute(scope),
          {:ok, _sprite} <- fetch_sprite(scope, sprite_id),
-         :ok <- ensure_runtime_session(session_id),
-         :ok <- SessionServer.resize(session_id, scope.user.id, rows, cols) do
+         :ok <- ensure_runtime_session_exists(scope, sprite_id, session_id),
+         :ok <- SessionServer.send_input(session_id, scope.user.id, client_id, data) do
       :ok
     end
   end
 
-  @spec close_console(scope(), String.t(), String.t()) :: :ok | {:error, term()}
-  def close_console(%Scope{} = scope, sprite_id, session_id)
-      when is_binary(sprite_id) and is_binary(session_id) do
+  @spec resize_console(scope(), String.t(), String.t(), String.t(), pos_integer(), pos_integer()) ::
+          :ok | {:error, term()}
+  def resize_console(%Scope{} = scope, sprite_id, session_id, client_id, rows, cols)
+      when is_binary(sprite_id) and is_binary(session_id) and is_binary(client_id) and
+             is_integer(rows) and is_integer(cols) do
     with :ok <- require_execute(scope),
-         :ok <- ensure_provider_configured(),
-         {:ok, sprite} <- fetch_sprite(scope, sprite_id),
-         normalized_session_id when is_binary(normalized_session_id) <-
-           normalize_provider_session_id(session_id),
-         {:ok, _pid} <- ensure_attached_session(scope, sprite, normalized_session_id, []),
-         :ok <- SessionServer.close(normalized_session_id, scope.user.id) do
+         {:ok, _sprite} <- fetch_sprite(scope, sprite_id),
+         :ok <- ensure_runtime_session_exists(scope, sprite_id, session_id),
+         :ok <- SessionServer.resize(session_id, scope.user.id, client_id, rows, cols) do
       :ok
-    else
-      nil -> {:error, :sprite_session_not_found}
-      {:error, reason} -> {:error, reason}
     end
   end
 
-  @spec kill_console(scope(), String.t(), String.t()) :: :ok | {:error, term()}
-  def kill_console(%Scope{} = scope, sprite_id, session_id)
-      when is_binary(sprite_id) and is_binary(session_id) do
-    with :ok <- require_execute(scope),
-         :ok <- ensure_provider_configured(),
-         {:ok, sprite} <- fetch_sprite(scope, sprite_id),
-         normalized_session_id when is_binary(normalized_session_id) <-
-           normalize_provider_session_id(session_id),
-         provider_session_id <-
-           provider_session_id_for_session(normalized_session_id, scope.user.id),
-         :ok <- provider_module().kill_session(sprite.sprite_name, provider_session_id) do
-      _ = maybe_close_runtime_session(normalized_session_id, scope.user.id, "killed_by_user")
-
-      if provider_session_id != normalized_session_id do
-        _ = maybe_close_runtime_session(provider_session_id, scope.user.id, "killed_by_user")
-      end
-
-      :ok
-    else
-      nil -> {:error, :sprite_session_not_found}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @spec subscribe_console(scope(), String.t(), String.t(), pid()) ::
+  @spec replay_console(scope(), String.t(), String.t(), non_neg_integer(), keyword()) ::
           {:ok, [map()]} | {:error, term()}
-  def subscribe_console(%Scope{} = scope, sprite_id, session_id, subscriber_pid \\ self())
-      when is_binary(sprite_id) and is_binary(session_id) and is_pid(subscriber_pid) do
+  def replay_console(%Scope{} = scope, sprite_id, session_id, from_seq, opts \\ [])
+      when is_binary(sprite_id) and is_binary(session_id) and is_integer(from_seq) and
+             from_seq >= 0 do
+    limit =
+      Keyword.get(opts, :limit, 500)
+      |> normalize_replay_limit()
+
     with :ok <- require_execute(scope),
          {:ok, _sprite} <- fetch_sprite(scope, sprite_id),
-         :ok <- ensure_runtime_session(session_id),
-         {:ok, chunks} <-
-           SessionServer.subscribe(session_id, scope.user.id, subscriber_pid) do
-      {:ok, chunks}
+         {:ok, session} <- fetch_owned_session(scope, sprite_id, session_id),
+         runtime_chunks <- replay_runtime_chunks(session_id, scope.user.id, from_seq, limit),
+         db_chunks <- replay_persisted_chunks(session.id, from_seq, limit) do
+      merged =
+        (runtime_chunks ++ db_chunks)
+        |> Enum.uniq_by(& &1.seq)
+        |> Enum.sort_by(& &1.seq)
+        |> Enum.take(limit)
+
+      {:ok, merged}
     end
   end
 
-  @spec detach_console(scope(), String.t(), String.t(), pid()) :: :ok | {:error, term()}
-  def detach_console(%Scope{} = scope, sprite_id, session_id, subscriber_pid \\ self())
-      when is_binary(sprite_id) and is_binary(session_id) and is_pid(subscriber_pid) do
+  @spec terminate_console_session(scope(), String.t(), String.t()) :: :ok | {:error, term()}
+  def terminate_console_session(%Scope{} = scope, sprite_id, session_id)
+      when is_binary(sprite_id) and is_binary(session_id) do
     with :ok <- require_execute(scope),
-         {:ok, _sprite} <- fetch_sprite(scope, sprite_id),
-         :ok <- ensure_runtime_session(session_id),
-         :ok <- SessionServer.detach(session_id, scope.user.id, subscriber_pid) do
+         {:ok, sprite} <- fetch_sprite(scope, sprite_id),
+         {:ok, _session} <- fetch_owned_session(scope, sprite_id, session_id),
+         :ok <- ensure_runtime_session_exists(scope, sprite_id, session_id),
+         :ok <- SessionServer.terminate_session(session_id, scope.user.id, "terminated_by_user") do
+      emit_event(sprite, scope.user, "sprite.console.terminated", %{session_id: session_id})
       :ok
     end
   end
@@ -338,12 +330,18 @@ defmodule Fizz.Sprites do
   @spec list_sessions(scope(), String.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def list_sessions(%Scope{} = scope, sprite_id, _opts \\ []) when is_binary(sprite_id) do
     with :ok <- require_read(scope),
-         :ok <- ensure_provider_configured(),
-         {:ok, sprite} <- fetch_sprite(scope, sprite_id),
-         {:ok, provider_sessions} <- provider_module().list_sessions(sprite.sprite_name) do
-      runtime_sessions = list_runtime_sessions_for_user(scope.user.id)
-      remote_sessions = Enum.map(provider_sessions, &provider_session_to_map/1)
-      {:ok, merge_runtime_and_remote_sessions(runtime_sessions, remote_sessions)}
+         {:ok, _sprite} <- fetch_sprite(scope, sprite_id) do
+      sessions =
+        from(session in SpriteSession,
+          where:
+            session.owner_user_id == ^scope.user.id and
+              session.managed_sprite_id == ^sprite_id,
+          order_by: [desc: session.updated_at]
+        )
+        |> Repo.all()
+        |> Enum.map(&sprite_session_to_map/1)
+
+      {:ok, sessions}
     end
   end
 
@@ -463,12 +461,6 @@ defmodule Fizz.Sprites do
       :ok
     end
   end
-
-  @spec idle_timeout_presets() :: [integer() | nil]
-  def idle_timeout_presets, do: @idle_timeout_presets
-
-  @spec default_idle_timeout_seconds() :: integer()
-  def default_idle_timeout_seconds, do: @default_idle_timeout_seconds
 
   @spec egress_presets() :: map()
   def egress_presets do
@@ -610,133 +602,227 @@ defmodule Fizz.Sprites do
     |> Repo.insert()
   end
 
-  defp ensure_attached_session(scope, sprite, session_id, _opts) do
-    case Registry.whereis(session_id) do
+  defp ensure_open_session(scope, sprite, pane_id, command, args) do
+    case latest_active_session(scope.user.id, sprite.id, pane_id) do
+      %SpriteSession{} = session ->
+        {:ok, session}
+
+      nil ->
+        create_console_session(scope, sprite, pane_id, command, args)
+    end
+  end
+
+  defp latest_active_session(user_id, managed_sprite_id, pane_id) do
+    from(session in SpriteSession,
+      where:
+        session.owner_user_id == ^user_id and
+          session.managed_sprite_id == ^managed_sprite_id and
+          session.pane_id == ^pane_id and
+          session.state in ^@active_session_states,
+      order_by: [desc: session.updated_at],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  defp create_console_session(scope, sprite, pane_id, command, args) do
+    generation =
+      from(session in SpriteSession,
+        where:
+          session.owner_user_id == ^scope.user.id and
+            session.managed_sprite_id == ^sprite.id and
+            session.pane_id == ^pane_id,
+        select: max(session.generation)
+      )
+      |> Repo.one()
+      |> case do
+        nil -> 1
+        value when is_integer(value) -> value + 1
+      end
+
+    %SpriteSession{}
+    |> SpriteSession.changeset(%{
+      managed_sprite_id: sprite.id,
+      owner_user_id: scope.user.id,
+      pane_id: pane_id,
+      interactive_command: command,
+      tty: true,
+      state: "starting",
+      generation: generation,
+      metadata: %{"args" => args, "grace_seconds" => @default_console_grace_seconds},
+      last_seq: 0
+    })
+    |> Repo.insert()
+  end
+
+  defp ensure_runtime_session(scope, sprite, session) do
+    case Registry.whereis(session.id) do
       pid when is_pid(pid) ->
         {:ok, pid}
 
       nil ->
-        Supervisor.start_session(
-          provider_module: provider_module(),
-          sprite_name: sprite.sprite_name,
-          session_id: session_id,
-          owner_user_id: scope.user.id,
-          mode: :attach,
-          provider_session_id: session_id,
-          tty: true,
-          idle_timeout_seconds: nil
-        )
+        start_runtime_session(scope, sprite, session)
     end
   end
 
-  defp runtime_session(session_id, interactive_command, idle_timeout_seconds) do
+  defp ensure_session_runtime(scope, sprite, session, pane_id, command, args) do
+    case ensure_runtime_session(scope, sprite, session) do
+      {:ok, _pid} ->
+        {:ok, session}
+
+      {:error, _reason} ->
+        with {:ok, replacement} <- create_console_session(scope, sprite, pane_id, command, args),
+             {:ok, _pid} <- ensure_runtime_session(scope, sprite, replacement) do
+          {:ok, replacement}
+        end
+    end
+  end
+
+  defp start_runtime_session(scope, sprite, session) do
+    args =
+      session.metadata
+      |> read_value([:args, "args"])
+      |> normalize_args()
+
+    opts = [
+      provider_module: provider_module(),
+      sprite_name: sprite.sprite_name,
+      session_id: session.id,
+      owner_user_id: scope.user.id,
+      command: session.interactive_command,
+      tty: session.tty,
+      generation: session.generation,
+      next_seq: session.last_seq + 1,
+      grace_seconds:
+        read_value(session.metadata, [:grace_seconds, "grace_seconds"]) ||
+          @default_console_grace_seconds
+    ]
+
+    mode_opts =
+      case session.provider_session_id do
+        provider_session_id when is_binary(provider_session_id) and provider_session_id != "" ->
+          [mode: :attach, provider_session_id: provider_session_id]
+
+        _ ->
+          [mode: :start, args: args]
+      end
+
+    case Supervisor.start_session(opts ++ mode_opts) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      {:error, reason} ->
+        mark_session_failed(session.id, reason)
+        {:error, reason}
+    end
+  end
+
+  defp ensure_runtime_session_exists(scope, sprite_id, session_id) do
+    with {:ok, session} <- fetch_owned_session(scope, sprite_id, session_id),
+         true <- is_pid(Registry.whereis(session.id)) do
+      :ok
+    else
+      false -> {:error, :sprite_session_not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp fetch_owned_session(scope, sprite_id, session_id) do
+    query =
+      from(session in SpriteSession,
+        where:
+          session.id == ^session_id and
+            session.managed_sprite_id == ^sprite_id and
+            session.owner_user_id == ^scope.user.id
+      )
+
+    case Repo.one(query) do
+      %SpriteSession{} = session -> {:ok, session}
+      nil -> {:error, :sprite_session_not_found}
+    end
+  end
+
+  defp replay_runtime_chunks(session_id, user_id, from_seq, limit) do
+    if is_pid(Registry.whereis(session_id)) do
+      case SessionServer.replay(session_id, user_id, from_seq, limit) do
+        {:ok, chunks} -> chunks
+        _ -> []
+      end
+    else
+      []
+    end
+  end
+
+  defp replay_persisted_chunks(sprite_session_id, from_seq, limit) do
+    from(chunk in SpriteConsoleChunk,
+      where: chunk.sprite_session_id == ^sprite_session_id and chunk.seq > ^from_seq,
+      order_by: [asc: chunk.seq],
+      limit: ^limit
+    )
+    |> Repo.all()
+    |> Enum.map(fn chunk -> %{seq: chunk.seq, stream: chunk.stream, data: chunk.data} end)
+  end
+
+  defp sprite_session_to_map(session) do
     %{
-      id: session_id,
-      provider_session_id: nil,
-      interactive_command: interactive_command,
-      status: "running",
-      idle_timeout_seconds: idle_timeout_seconds,
-      tty: true
+      id: session.id,
+      provider_session_id: session.provider_session_id,
+      pane_id: session.pane_id,
+      interactive_command: session.interactive_command,
+      state: session.state,
+      generation: session.generation,
+      lease_client_id: session.lease_client_id,
+      tty: session.tty,
+      last_seq: session.last_seq,
+      last_activity_at: session.last_activity_at,
+      closed_reason: session.closed_reason,
+      exit_code: session.exit_code
     }
   end
 
-  defp list_runtime_sessions_for_user(user_id) do
-    Registry.list_session_ids()
-    |> Enum.reduce([], fn session_id, acc ->
-      case SessionServer.snapshot(session_id, user_id) do
-        {:ok, snapshot} ->
-          [
-            %{
-              id: snapshot.id,
-              provider_session_id: snapshot.provider_session_id,
-              interactive_command: snapshot.command,
-              status: "running",
-              idle_timeout_seconds: snapshot.idle_timeout_seconds,
-              tty: snapshot.tty
-            }
-            | acc
-          ]
+  defp mark_session_failed(session_id, reason) do
+    now = DateTime.utc_now()
 
-        _ ->
-          acc
-      end
+    Repo.update_all(
+      from(session in SpriteSession, where: session.id == ^session_id),
+      set: [state: "failed", closed_reason: inspect(reason), updated_at: now]
+    )
+
+    :ok
+  end
+
+  defp track_console_presence(pid, session_id, client_id, user_id, pane_id, focused) do
+    topic = console_presence_topic(session_id)
+
+    Presence.track(pid, topic, client_id, %{
+      user_id: user_id,
+      pane_id: pane_id,
+      focused: focused,
+      at: DateTime.utc_now()
+    })
+    |> case do
+      {:ok, _meta} -> :ok
+      {:error, {:already_tracked, _pid, _meta}} -> :ok
+      {:error, _reason} -> :ok
+    end
+  end
+
+  defp update_console_presence(session_id, client_id, focused) do
+    topic = console_presence_topic(session_id)
+
+    Presence.update(self(), topic, client_id, fn meta ->
+      Map.merge(meta, %{focused: focused, at: DateTime.utc_now()})
     end)
-    |> Enum.reverse()
-    |> Enum.uniq_by(& &1.id)
-  end
-
-  defp provider_session_to_map(session) do
-    session_id = read_value(session, [:id, "id"])
-    command = read_value(session, [:command, "command"]) || ""
-    is_active = truthy?(read_value(session, [:is_active, "is_active"]))
-
-    %{
-      id: session_id,
-      provider_session_id: session_id,
-      interactive_command: command,
-      status: if(is_active, do: "running", else: "exited"),
-      idle_timeout_seconds: nil,
-      tty: truthy?(read_value(session, [:tty, "tty"])),
-      last_activity_at:
-        read_value(session, [:last_activity, "last_activity"])
-        |> normalize_datetime()
-    }
-  end
-
-  defp merge_runtime_and_remote_sessions(runtime_sessions, remote_sessions) do
-    runtime_by_id = Map.new(runtime_sessions, &{&1.id, &1})
-
-    merged_remote =
-      Enum.map(remote_sessions, fn session ->
-        Map.merge(session, Map.get(runtime_by_id, session.id, %{}))
-      end)
-
-    runtime_only =
-      Enum.reject(runtime_sessions, fn runtime_session ->
-        Enum.any?(remote_sessions, &(&1.id == runtime_session.id))
-      end)
-
-    merged_remote ++ runtime_only
-  end
-
-  defp ensure_runtime_session(session_id) do
-    if is_pid(Registry.whereis(session_id)) do
-      :ok
-    else
-      {:error, :sprite_session_not_found}
+    |> case do
+      {:ok, _meta} -> :ok
+      {:error, _reason} -> :ok
     end
   end
 
-  defp provider_session_id_for_session(session_id, user_id) do
-    if is_pid(Registry.whereis(session_id)) do
-      case SessionServer.snapshot(session_id, user_id) do
-        {:ok, %{provider_session_id: provider_session_id}}
-        when is_binary(provider_session_id) and provider_session_id != "" ->
-          provider_session_id
-
-        {:ok, %{id: public_session_id}}
-        when is_binary(public_session_id) and public_session_id != "" ->
-          public_session_id
-
-        _ ->
-          session_id
-      end
-    else
-      session_id
-    end
-  end
-
-  defp maybe_close_runtime_session(session_id, user_id, reason) do
-    if is_binary(session_id) and is_pid(Registry.whereis(session_id)) do
-      try do
-        SessionServer.close(session_id, user_id, reason)
-      catch
-        :exit, _ -> :ok
-      end
-    else
-      :ok
-    end
-  end
+  defp console_presence_topic(session_id), do: "sprites:console:session:#{session_id}"
 
   defp require_read(scope) do
     if can_read_scope?(scope), do: :ok, else: {:error, :forbidden}
@@ -867,15 +953,6 @@ defmodule Fizz.Sprites do
     "fizz-#{display_key}-#{uid}"
   end
 
-  defp runtime_session_id do
-    uid =
-      System.unique_integer([:positive])
-      |> Integer.to_string(36)
-      |> String.downcase()
-
-    "runtime-#{uid}"
-  end
-
   defp apply_post_create_defaults(provider, sprite_name) do
     warnings =
       case provider.update_network_policy(sprite_name, default_egress_policy()) do
@@ -967,31 +1044,28 @@ defmodule Fizz.Sprites do
 
   defp normalize_console_args(_command, args) when is_list(args), do: args
 
-  defp normalize_provider_session_id(session_id) when is_binary(session_id) do
-    case String.trim(session_id) do
-      "" -> nil
-      value -> value
+  defp normalize_pane_id(value) when is_binary(value) do
+    value =
+      value
+      |> String.trim()
+
+    if value == "" do
+      nil
+    else
+      value
     end
   end
 
-  defp normalize_idle_timeout(nil), do: @default_idle_timeout_seconds
-  defp normalize_idle_timeout("never"), do: nil
-  defp normalize_idle_timeout(:never), do: nil
+  defp normalize_pane_id(_value), do: nil
 
-  defp normalize_idle_timeout(value) when is_integer(value) do
-    if value in Enum.reject(@idle_timeout_presets, &is_nil/1),
-      do: value,
-      else: @default_idle_timeout_seconds
-  end
+  defp normalize_replay_limit(value) when is_integer(value), do: min(max(value, 1), 2000)
+  defp normalize_replay_limit(_value), do: 500
 
-  defp normalize_idle_timeout(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {seconds, ""} -> normalize_idle_timeout(seconds)
-      _ -> @default_idle_timeout_seconds
-    end
-  end
+  defp lease_state_for(lease_client_id, client_id)
+       when is_binary(lease_client_id) and is_binary(client_id) and lease_client_id == client_id,
+       do: "writer"
 
-  defp normalize_idle_timeout(_value), do: @default_idle_timeout_seconds
+  defp lease_state_for(_lease_client_id, _client_id), do: "viewer"
 
   defp normalize_comment(comment) when is_binary(comment) do
     case String.trim(comment) do
@@ -1024,17 +1098,6 @@ defmodule Fizz.Sprites do
   end
 
   defp normalize_remote_status(_status), do: nil
-
-  defp normalize_datetime(datetime) when is_struct(datetime, DateTime), do: datetime
-
-  defp normalize_datetime(datetime) when is_binary(datetime) do
-    case DateTime.from_iso8601(datetime) do
-      {:ok, value, _offset} -> value
-      _ -> nil
-    end
-  end
-
-  defp normalize_datetime(_datetime), do: nil
 
   defp maybe_exclude_archived(query, true), do: query
 

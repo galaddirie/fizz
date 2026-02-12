@@ -16,6 +16,7 @@ defmodule Fizz.Application do
       {Registry, keys: :unique, name: Fizz.Sprites.Console.Registry},
       Fizz.Sprites.Console.Supervisor,
       {Phoenix.PubSub, name: Fizz.PubSub},
+      FizzWeb.Presence,
       # Start a worker by calling: Fizz.Worker.start_link(arg)
       # {Fizz.Worker, arg},
       # Start to serve requests, typically the last entry

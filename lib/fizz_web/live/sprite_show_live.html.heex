@@ -7,7 +7,6 @@
       </h1>
       <p class="max-w-3xl text-sm text-muted">
         Sprite Name: <span class="font-mono text-xs">{@sprite.sprite_name}</span>
-        • Status: {@sprite.status}
       </p>
     </div>
   </:page_header>
@@ -40,9 +39,7 @@
     <div class="grid gap-6 lg:grid-cols-2">
       <section class="rounded-box border border-base-300 bg-base-100 p-5">
         <h2 class="text-lg font-semibold text-base-content">Run Command</h2>
-        <p class="mt-1 text-sm text-muted">
-          Executes once and stores metadata only.
-        </p>
+        <p class="mt-1 text-sm text-muted">Executes once and stores metadata only.</p>
         <.form
           :if={can_execute?(@sprite_scope)}
           for={@command_form}
@@ -62,66 +59,132 @@
           id="sprite-run-command-result"
           class="mt-4 rounded-box border border-base-300 p-3"
         >
-          <p class="text-xs font-medium text-muted">
-            Exit Code: {@command_result.exit_code}
-          </p>
+          <p class="text-xs font-medium text-muted">Exit Code: {@command_result.exit_code}</p>
           <pre class="mt-2 max-h-64 overflow-auto rounded-box bg-base-200 p-3 text-xs">{@command_result.output}</pre>
         </div>
       </section>
 
-      <section class="rounded-box border border-base-300 bg-base-100 p-5">
-        <h2 class="text-lg font-semibold text-base-content">Interactive Console</h2>
-        <p class="mt-1 text-sm text-muted">
-          Single-user interactive terminal with detachable sessions.
-        </p>
+      <section class="rounded-box border border-base-300 bg-base-100 p-5" id="sprite-console-v2">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-base-content">Interactive Console</h2>
+            <p class="mt-1 text-sm text-muted">
+              Presence-driven sessions with auto-reattach and lease-based input control.
+            </p>
+          </div>
 
-        <.form
-          :if={can_execute?(@sprite_scope)}
-          for={@console_form}
-          id="sprite-start-console-form"
-          phx-change="validate_console"
-          phx-submit="start_console"
-          class="mt-4 grid gap-3 md:grid-cols-3"
-        >
-          <.input field={@console_form[:command]} type="text" label="Command" />
-          <.input field={@console_form[:args]} type="text" label="Args" />
-          <.input
-            field={@console_form[:idle_timeout]}
-            type="select"
-            label="Idle Timeout"
-            options={timeout_options()}
-          />
-          <div class="md:col-span-3 flex items-center gap-2">
-            <.button id="sprite-start-console-submit" type="submit">Start Console</.button>
+          <div class="flex items-center gap-2">
             <button
-              :if={@active_session_id}
-              id="sprite-detach-console"
+              :if={can_execute?(@sprite_scope)}
+              id="sprite-console-add-tab"
               type="button"
-              class="btn btn-soft"
-              phx-click="detach_console"
+              class="btn btn-sm btn-outline"
+              phx-click="console_add_tab"
             >
-              Detach
+              New Tab
             </button>
             <button
-              :if={@active_session_id}
-              id="sprite-kill-console"
+              :if={can_execute?(@sprite_scope)}
+              id="sprite-console-toggle-split"
               type="button"
-              class="btn btn-error btn-soft"
-              phx-click="kill_console"
-              phx-value-session-id={@active_session_id}
+              class="btn btn-sm btn-outline"
+              phx-click="console_split_toggle"
             >
-              Kill
+              {if(@split_consoles, do: "Single View", else: "Split View")}
             </button>
           </div>
-        </.form>
+        </div>
+
+        <div id="sprite-console-tabs" class="mt-4 flex flex-wrap items-center gap-2">
+          <div
+            :for={pane <- @panes}
+            id={"sprite-console-tab-#{pane.id}"}
+            class={[
+              "rounded-box border px-2 py-1 text-xs",
+              if(@active_pane_id == pane.id,
+                do: "border-base-content bg-base-200 text-base-content",
+                else: "border-base-300 text-muted"
+              )
+            ]}
+          >
+            <button
+              type="button"
+              class="font-medium"
+              phx-click="console_focus_tab"
+              phx-value-pane-id={pane.id}
+            >
+              {pane.label}
+            </button>
+            <button
+              :if={length(@panes) > 1}
+              type="button"
+              class="ml-2 text-muted hover:text-base-content"
+              phx-click="console_close_tab"
+              phx-value-pane-id={pane.id}
+            >
+              <.icon name="hero-x-mark" class="h-3 w-3" />
+            </button>
+          </div>
+        </div>
 
         <div
-          id="sprite-console-terminal"
-          phx-hook="SpriteTerminal"
-          phx-update="ignore"
-          data-session-id={@active_session_id}
-          class="mt-4 h-80 rounded-box border border-base-300 bg-base-200 p-2"
+          id="sprite-console-pane-grid"
+          class={[
+            "mt-4 gap-3",
+            if(@split_consoles, do: "grid md:grid-cols-2", else: "grid grid-cols-1")
+          ]}
         >
+          <div
+            :for={pane <- rendered_panes(@panes, @active_pane_id, @split_consoles)}
+            id={"sprite-console-pane-#{pane.id}"}
+            class="rounded-box border border-base-300 bg-base-200/40 p-2"
+          >
+            <div class="mb-2 flex items-center justify-between gap-2 text-xs">
+              <div class="flex items-center gap-2">
+                <span class="font-mono">{pane.session_id || "pending"}</span>
+                <span class="rounded border border-base-300 px-1.5 py-0.5">{pane.state}</span>
+                <span class="rounded border border-base-300 px-1.5 py-0.5">
+                  {if pane.lease_state == "writer", do: "writer", else: "view-only"}
+                </span>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="btn btn-xs btn-outline"
+                  phx-click="console_focus_tab"
+                  phx-value-pane-id={pane.id}
+                >
+                  Focus
+                </button>
+                <button
+                  :if={can_execute?(@sprite_scope)}
+                  type="button"
+                  class="btn btn-xs btn-error btn-outline"
+                  phx-click="console_terminate"
+                  phx-value-pane-id={pane.id}
+                >
+                  Terminate
+                </button>
+              </div>
+            </div>
+
+            <p :if={pane.status_message} class="mb-2 text-xs text-muted">{pane.status_message}</p>
+
+            <div
+              id={"sprite-console-terminal-#{pane.id}"}
+              phx-hook="SpriteTerminal"
+              phx-update="ignore"
+              data-pane-id={pane.id}
+              data-session-id={pane.session_id}
+              data-client-id={pane.client_id}
+              data-active={pane.id == @active_pane_id}
+              data-lease-state={pane.lease_state}
+              data-last-seq={pane.last_seq || 0}
+              class="h-80 rounded-box border border-base-300 bg-base-100 p-2"
+            >
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -137,30 +200,8 @@
           >
             <p class="text-sm font-medium text-base-content">{session.interactive_command}</p>
             <p class="text-xs text-muted">
-              Status: {session.status} • Timeout: {session.idle_timeout_seconds || "never"}
+              State: {session.state} • Pane: {session.pane_id} • Gen: {session.generation}
             </p>
-            <div class="mt-2 flex gap-2">
-              <button
-                :if={can_execute?(@sprite_scope)}
-                id={"sprite-attach-session-#{session.id}"}
-                type="button"
-                class="btn btn-xs btn-outline"
-                phx-click="attach_console"
-                phx-value-session-id={session.id}
-              >
-                Attach
-              </button>
-              <button
-                :if={can_execute?(@sprite_scope)}
-                id={"sprite-kill-session-#{session.id}"}
-                type="button"
-                class="btn btn-xs btn-error btn-outline"
-                phx-click="kill_console"
-                phx-value-session-id={session.id}
-              >
-                Kill
-              </button>
-            </div>
           </div>
           <p :if={@sessions == []} id="sprite-session-empty" class="text-sm text-muted">
             No console sessions yet.
@@ -189,9 +230,7 @@
             class="rounded-box border border-base-300 p-3"
           >
             <p class="text-sm font-medium text-base-content">{checkpoint[:id]}</p>
-            <p class="text-xs text-muted">
-              {checkpoint[:create_time] || "Unknown create time"}
-            </p>
+            <p class="text-xs text-muted">{checkpoint[:create_time] || "Unknown create time"}</p>
             <button
               :if={can_manage?(@sprite_scope)}
               id={"sprite-checkpoint-restore-#{checkpoint[:id]}"}
@@ -254,9 +293,7 @@
 
       <section class="rounded-box border border-base-300 bg-base-100 p-5">
         <h2 class="text-lg font-semibold text-base-content">HTTP URL Settings</h2>
-        <p class="mt-1 text-sm text-muted">
-          URL authentication defaults to private bearer.
-        </p>
+        <p class="mt-1 text-sm text-muted">URL authentication defaults to private bearer.</p>
         <p id="sprite-url-value" class="mt-2 text-xs font-mono text-muted">
           URL: {@url_settings[:url] || "Unavailable"}
         </p>

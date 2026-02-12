@@ -97,17 +97,9 @@ defmodule Fizz.Sprites.Providers.SpritesEx do
   def resize_console(command_handle, rows, cols), do: Sprites.resize(command_handle, rows, cols)
 
   @impl true
-  def close_console(command_handle) do
-    case {read_sprite_name(command_handle), read_provider_session_id(command_handle)} do
-      {sprite_name, provider_session_id}
-      when is_binary(sprite_name) and byte_size(sprite_name) > 0 and
-             is_binary(provider_session_id) and byte_size(provider_session_id) > 0 ->
-        kill_session(sprite_name, provider_session_id)
-
-      _ ->
-        Sprites.close_stdin(command_handle)
-        :ok
-    end
+  def detach_console(command_handle) do
+    Sprites.close_stdin(command_handle)
+    :ok
   end
 
   @impl true
@@ -323,16 +315,6 @@ defmodule Fizz.Sprites.Providers.SpritesEx do
     do: {:error, {:api_error, status, nil}}
 
   defp normalize_kill_response({:error, reason}), do: {:error, reason}
-
-  defp read_provider_session_id(command_handle) do
-    read_value(command_handle, [:provider_session_id, "provider_session_id"])
-  end
-
-  defp read_sprite_name(command_handle) do
-    command_handle
-    |> read_value([:sprite, "sprite"])
-    |> read_value([:name, "name"])
-  end
 
   defp list_session_ids(sprite) do
     case Sprites.list_sessions(sprite) do

@@ -147,7 +147,8 @@ defmodule FizzWeb.SpriteLiveTest do
         live(conn, ~p"/org/#{organization_id}/workspaces/#{workspace.id}/sprites/#{sprite.id}")
 
       assert has_element?(view, "#sprite-show-page")
-      assert has_element?(view, "#sprite-console-terminal")
+      assert has_element?(view, "#sprite-console-v2")
+      assert has_element?(view, "#sprite-console-terminal-pane-1")
       assert has_element?(view, "#sprite-policy-form")
       assert has_element?(view, "#sprite-url-form")
       assert has_element?(view, "#sprite-checkpoint-form")

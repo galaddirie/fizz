@@ -109,12 +109,11 @@ defmodule Fizz.SpritesProviderMock do
   end
 
   @impl true
-  def close_console(command_handle) do
-    notify({:close_console, command_handle})
+  def detach_console(command_handle) do
+    notify({:detach_console, command_handle})
 
     case command_handle do
-      %{owner: owner, ref: ref} ->
-        send(owner, {:exit, %{ref: ref}, 0})
+      %{owner: _owner, ref: _ref} ->
         :ok
 
       _ ->
