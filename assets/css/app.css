@@ -6,6 +6,9 @@
 @source "../js";
 @source "../../lib/fizz_web";
 
+@import "@radix-ui/themes/styles.css";
+@import "@workos-inc/widgets/styles.css";
+
 /* A Tailwind plugin that makes "hero-#{ICON}" classes available.
    The heroicons installation itself is managed by your mix.exs */
 @plugin "../vendor/heroicons";

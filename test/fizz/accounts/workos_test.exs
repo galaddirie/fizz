@@ -144,10 +144,6 @@ defmodule Fizz.Accounts.WorkOSTest do
     refute_receive {:workos_http_request, _request}
   end
 
-
-
-
-
   test "create_vault_object/1 posts to vault objects endpoint" do
     Process.put(:workos_http_responses, [
       {:ok, %Req.Response{status: 201, body: %{"id" => "vault_obj_123"}}}
@@ -181,6 +177,149 @@ defmodule Fizz.Accounts.WorkOSTest do
     assert_receive {:workos_http_request, request}
     assert request[:method] == :delete
     assert request[:url] == "/vault/objects/vault_obj_123"
+  end
+
+  test "generate_widget_token/1 posts to widgets token endpoint" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}}
+    ])
+
+    assert {:ok, "widget_token_123"} =
+             AccountsWorkOS.generate_widget_token(%{
+               organization_id: "org_123",
+               user_id: "user_123",
+               scopes: []
+             })
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :post
+    assert request[:url] == "/widgets/token"
+
+    assert request[:json] == %{
+             organization_id: "org_123",
+             user_id: "user_123",
+             scopes: []
+           }
+  end
+
+  test "get_pipes_access_token/3 posts to data integrations token endpoint" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{
+           "active" => true,
+           "access_token" => %{
+             "access_token" => "gho_123",
+             "expires_at" => "2025-12-31T23:59:59.000Z",
+             "scopes" => ["repo"],
+             "missing_scopes" => ["read:org"]
+           }
+         }
+       }}
+    ])
+
+    assert {:ok, response} =
+             AccountsWorkOS.get_pipes_access_token("github", "user_123", "org_123")
+
+    assert response == %{
+             active: true,
+             access_token: "gho_123",
+             expires_at: "2025-12-31T23:59:59.000Z",
+             scopes: ["repo"],
+             missing_scopes: ["read:org"],
+             error: nil
+           }
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :post
+    assert request[:url] == "/data-integrations/github/token"
+
+    assert request[:json] == %{
+             user_id: "user_123",
+             organization_id: "org_123"
+           }
+  end
+
+  test "get_pipes_access_token/3 normalizes provider error response" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"active" => false, "error" => "not_installed"}}}
+    ])
+
+    assert {:ok, response} =
+             AccountsWorkOS.get_pipes_access_token("google", "user_456", "org_456")
+
+    assert response == %{
+             active: false,
+             access_token: nil,
+             expires_at: nil,
+             scopes: [],
+             missing_scopes: [],
+             error: :not_installed
+           }
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :post
+    assert request[:url] == "/data-integrations/google/token"
+  end
+
+  test "list_user_organization_memberships/1 returns active memberships" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{
+           "data" => [
+             %{"id" => "om_1", "organization_id" => "org_active", "status" => "active"},
+             %{"id" => "om_2", "organization_id" => "org_inactive", "status" => "inactive"},
+             %{"id" => "om_3", "organization_id" => "org_unknown"}
+           ]
+         }
+       }}
+    ])
+
+    assert {:ok, memberships} = AccountsWorkOS.list_user_organization_memberships("user_123")
+
+    assert Enum.map(memberships, fn membership ->
+             membership["organization_id"]
+           end) == ["org_active", "org_unknown"]
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :get
+    assert request[:url] == "/user_management/organization_memberships"
+
+    params = request[:params]
+    assert Enum.any?(params, fn {key, value} -> key == :user_id and value == "user_123" end)
+    assert Enum.any?(params, fn {key, value} -> key == :limit and value == 10 end)
+
+    refute Enum.any?(params, fn {key, _value} -> key == :organization_id end)
+  end
+
+  test "user_has_organization_membership?/2 checks active membership in organization" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{
+           "data" => [
+             %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+           ]
+         }
+       }}
+    ])
+
+    assert {:ok, true} = AccountsWorkOS.user_has_organization_membership?("user_123", "org_123")
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :get
+    assert request[:url] == "/user_management/organization_memberships"
+
+    params = request[:params]
+    assert Enum.any?(params, fn {key, value} -> key == :user_id and value == "user_123" end)
+
+    assert Enum.any?(params, fn {key, value} ->
+             key == :organization_id and value == "org_123"
+           end)
   end
 
   defp restore_env(app, key, nil), do: Application.delete_env(app, key)

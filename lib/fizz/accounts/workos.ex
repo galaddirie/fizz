@@ -237,8 +237,89 @@ defmodule Fizz.Accounts.WorkOS do
       {:error, :workos_not_configured}
   end
 
+  @doc """
+  Generates a WorkOS widget token.
+  """
+  @spec generate_widget_token(map()) :: {:ok, String.t()} | {:error, term()}
+  def generate_widget_token(params) when is_map(params) do
+    body =
+      compact_map(%{
+        organization_id:
+          read_value(params, [
+            :organization_id,
+            "organization_id",
+            :organizationId,
+            "organizationId"
+          ]),
+        user_id: read_value(params, [:user_id, "user_id", :userId, "userId"]),
+        scopes: normalize_widget_scopes(read_value(params, [:scopes, "scopes"]))
+      })
 
+    case api_request(:post, "/widgets/token", json: body) do
+      {:ok, response} ->
+        case read_value(response, [:token, "token"]) do
+          token when is_binary(token) ->
+            {:ok, token}
 
+          _ ->
+            {:error, :invalid_widget_token_response}
+        end
+
+      {:error, error} ->
+        log_error("generate widget token", error)
+        {:error, normalize_error(error)}
+    end
+  end
+
+  @doc """
+  Fetches an access token for a Pipes provider connection.
+  """
+  @spec get_pipes_access_token(String.t(), String.t(), String.t() | nil) ::
+          {:ok, map()} | {:error, term()}
+  def get_pipes_access_token(provider, user_id, organization_id \\ nil)
+      when is_binary(provider) and is_binary(user_id) do
+    path = "/data-integrations/#{URI.encode_www_form(provider)}/token"
+    body = compact_map(%{user_id: user_id, organization_id: organization_id})
+
+    case api_request(:post, path, json: body) do
+      {:ok, response} ->
+        {:ok, normalize_pipes_access_token_response(response)}
+
+      {:error, error} ->
+        log_error("get pipes access token", error)
+        {:error, normalize_error(error)}
+    end
+  end
+
+  @doc """
+  Lists organization memberships for a WorkOS user.
+  """
+  @spec list_user_organization_memberships(String.t()) :: {:ok, [map()]} | {:error, term()}
+  def list_user_organization_memberships(workos_user_id) when is_binary(workos_user_id) do
+    case list_organization_memberships(workos_user_id, nil) do
+      {:ok, memberships} ->
+        {:ok, Enum.filter(memberships, &membership_active?/1)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Returns true when the WorkOS user has an active membership in the organization.
+  """
+  @spec user_has_organization_membership?(String.t(), String.t()) ::
+          {:ok, boolean()} | {:error, term()}
+  def user_has_organization_membership?(workos_user_id, organization_id)
+      when is_binary(workos_user_id) and is_binary(organization_id) do
+    case list_organization_memberships(workos_user_id, organization_id) do
+      {:ok, memberships} ->
+        {:ok, Enum.any?(memberships, &membership_active?/1)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   @doc """
   Creates a Vault object.
@@ -385,11 +466,19 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   defp select_active_membership(memberships) when is_list(memberships) do
-    Enum.find(memberships, fn membership -> membership_status(membership) == "active" end) ||
+    Enum.find(memberships, &membership_active?/1) ||
       List.first(memberships)
   end
 
   defp select_active_membership(_memberships), do: nil
+
+  defp membership_active?(membership) do
+    case membership_status(membership) do
+      "active" -> true
+      "" -> true
+      _ -> false
+    end
+  end
 
   defp membership_status(membership) do
     membership
@@ -508,12 +597,60 @@ defmodule Fizz.Accounts.WorkOS do
   defp normalize_vault_context(context) when is_map(context), do: context
   defp normalize_vault_context(_context), do: nil
 
+  defp normalize_pipes_access_token_response(response) do
+    access_token_payload = read_value(response, [:access_token, "access_token"])
+    provider_error = read_value(response, [:error, "error"]) |> normalize_pipes_error_code()
+
+    token =
+      case access_token_payload do
+        %{} = payload -> read_value(payload, [:access_token, "access_token"])
+        _ -> nil
+      end
+
+    expires_at =
+      case access_token_payload do
+        %{} = payload -> read_value(payload, [:expires_at, "expires_at"])
+        _ -> nil
+      end
+
+    scopes =
+      case access_token_payload do
+        %{} = payload -> normalize_string_list(read_value(payload, [:scopes, "scopes"]))
+        _ -> []
+      end
+
+    missing_scopes =
+      case access_token_payload do
+        %{} = payload ->
+          normalize_string_list(read_value(payload, [:missing_scopes, "missing_scopes"]))
+
+        _ ->
+          []
+      end
+
+    active = read_value(response, [:active, "active"]) in [true, "true"]
+
+    %{
+      active: active,
+      access_token: token,
+      expires_at: expires_at,
+      scopes: scopes,
+      missing_scopes: missing_scopes,
+      error: provider_error
+    }
+  end
 
   defp normalize_string_list(value) when is_list(value) do
     Enum.filter(value, &is_binary/1)
   end
 
   defp normalize_string_list(_value), do: []
+
+  defp normalize_pipes_error_code(nil), do: nil
+  defp normalize_pipes_error_code("not_installed"), do: :not_installed
+  defp normalize_pipes_error_code("needs_reauthorization"), do: :needs_reauthorization
+  defp normalize_pipes_error_code(value) when is_binary(value), do: value
+  defp normalize_pipes_error_code(value), do: value
 
   defp role_slug_for(nil), do: nil
 
