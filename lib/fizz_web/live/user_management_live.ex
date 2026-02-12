@@ -3,35 +3,41 @@ defmodule FizzWeb.UserManagementLive do
 
   alias Fizz.Accounts
 
-  @widget_configs [
+  @tabs [
     %{
-      dom_id: "users-management",
-      title: "Directory",
-      description: "Manage members, roles, and invitations for this organization.",
-      widget_name: "users-management"
-    },
-    %{
-      dom_id: "organization-switcher",
-      title: "Organization Switcher",
-      description: "Preview and validate org switching behavior for this authenticated user.",
-      widget_name: "organization-switcher"
-    },
-    %{
-      dom_id: "user-profile",
-      title: "User Profile",
-      description: "Let users update core identity profile details.",
+      id: "profile",
+      title: "Profile",
+      icon: "hero-user",
       widget_name: "user-profile"
     },
     %{
-      dom_id: "user-security",
-      title: "Security Settings",
-      description: "Manage password and MFA controls in a hosted widget.",
+      id: "security",
+      title: "Security",
+      icon: "hero-shield-check",
       widget_name: "user-security"
     },
     %{
-      dom_id: "api-keys",
+      id: "connections",
+      title: "Connections",
+      icon: "hero-link",
+      widget_name: "pipes"
+    },
+    %{
+      id: "sessions",
+      title: "Sessions",
+      icon: "hero-computer-desktop",
+      widget_name: "user-sessions"
+    },
+    %{
+      id: "members",
+      title: "Members",
+      icon: "hero-user-group",
+      widget_name: "users-management"
+    },
+    %{
+      id: "api-keys",
       title: "API Keys",
-      description: "Create and revoke organization API keys from the same page.",
+      icon: "hero-key",
       widget_name: "api-keys"
     }
   ]
@@ -43,14 +49,15 @@ defmodule FizzWeb.UserManagementLive do
 
     socket =
       socket
-      |> assign(:page_title, "User Management")
+      |> assign(:page_title, "Settings")
       |> assign(:organizations, organizations)
       |> assign(:organization_options, organization_options(organizations))
       |> assign(:selected_organization_id, selected_organization_id)
       |> assign(:workos_user_id, socket.assigns.current_scope.user.workos_user_id)
       |> assign(:widget_token, nil)
       |> assign(:widget_error, nil)
-      |> assign(:widget_configs, @widget_configs)
+      |> assign(:tabs, @tabs)
+      |> assign(:active_tab, "profile")
       |> assign_organization_form(selected_organization_id)
       |> assign_widget_token()
 
@@ -77,6 +84,14 @@ defmodule FizzWeb.UserManagementLive do
 
   def handle_event("refresh_widget_token", _params, socket) do
     {:noreply, assign_widget_token(socket)}
+  end
+
+  def handle_event("switch_tab", %{"tab" => tab_id}, socket) do
+    if Enum.any?(@tabs, &(&1.id == tab_id)) do
+      {:noreply, assign(socket, :active_tab, tab_id)}
+    else
+      {:noreply, socket}
+    end
   end
 
   defp assign_widget_token(
@@ -138,6 +153,10 @@ defmodule FizzWeb.UserManagementLive do
     else
       default_organization_id(organizations)
     end
+  end
+
+  defp active_tab_config(tabs, active_tab) do
+    Enum.find(tabs, List.first(tabs), &(&1.id == active_tab))
   end
 
   defp widget_error_message(:missing_workos_organization_id) do
