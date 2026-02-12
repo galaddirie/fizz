@@ -45,7 +45,7 @@ defmodule FizzWeb.Layouts do
       <div class="flex-none">
         <ul class="flex flex-column px-1 space-x-4 items-center">
           <li :if={@current_scope && @current_scope.user}>
-            <.link navigate={~p"/settings/integrations"} class="btn btn-ghost">Integrations</.link>
+              <.link navigate={~p"/settings/profile"} class="btn btn-ghost">Profile</.link>
           </li>
           <li>
             <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>

@@ -237,90 +237,8 @@ defmodule Fizz.Accounts.WorkOS do
       {:error, :workos_not_configured}
   end
 
-  @doc """
-  Fetches a valid Pipes access token for a provider/user/organization tuple.
-  """
-  @spec get_pipes_access_token(map()) ::
-          {:ok,
-           %{
-             active: boolean(),
-             error: String.t() | nil,
-             access_token: %{
-               token: String.t() | nil,
-               expires_at: String.t() | nil,
-               scopes: [String.t()],
-               missing_scopes: [String.t()]
-             }
-           }}
-          | {:error, term()}
-  def get_pipes_access_token(params) when is_map(params) do
-    body =
-      compact_map(%{
-        provider: read_value(params, [:provider, "provider"]),
-        user_id: read_value(params, [:user_id, "user_id", :userId, "userId"]),
-        organization_id:
-          read_value(params, [
-            :organization_id,
-            "organization_id",
-            :organizationId,
-            "organizationId"
-          ])
-      })
 
-    case api_request(:post, "/pipes/access_token", json: body) do
-      {:ok, response} ->
-        {:ok, normalize_pipes_access_token(response)}
 
-      {:error, :workos_not_configured} ->
-        {:error, :workos_not_configured}
-
-      {:error, {:workos_http_error, status, _body} = error}
-      when status in [400, 401, 403, 404] ->
-        {:error, normalize_error(error)}
-
-      {:error, {:workos_error, _code, _message, status} = error}
-      when status in [400, 401, 403, 404] ->
-        {:error, normalize_error(error)}
-
-      {:error, error} ->
-        log_error("get pipes access token", error)
-        {:error, normalize_error(error)}
-    end
-  end
-
-  @doc """
-  Generates a WorkOS Widget token.
-  """
-  @spec generate_widget_token(map()) :: {:ok, String.t()} | {:error, term()}
-  def generate_widget_token(params) when is_map(params) do
-    body =
-      compact_map(%{
-        user_id: read_value(params, [:user_id, "user_id", :userId, "userId"]),
-        organization_id:
-          read_value(params, [
-            :organization_id,
-            "organization_id",
-            :organizationId,
-            "organizationId"
-          ]),
-        scopes: normalize_widget_scopes(read_value(params, [:scopes, "scopes"]))
-      })
-
-    case api_request(:post, "/widgets/token", json: body) do
-      {:ok, response} ->
-        token = read_value(response, [:token, "token"])
-
-        if is_binary(token) do
-          {:ok, token}
-        else
-          {:error, :invalid_workos_widget_token}
-        end
-
-      {:error, error} ->
-        log_error("generate widget token", error)
-        {:error, normalize_error(error)}
-    end
-  end
 
   @doc """
   Creates a Vault object.
@@ -590,30 +508,6 @@ defmodule Fizz.Accounts.WorkOS do
   defp normalize_vault_context(context) when is_map(context), do: context
   defp normalize_vault_context(_context), do: nil
 
-  defp normalize_pipes_access_token(response) do
-    access_token = read_value(response, [:access_token, "access_token"]) || %{}
-
-    %{
-      active: read_value(response, [:active, "active"]) in [true, "true"],
-      error: normalize_pipes_error(read_value(response, [:error, "error"])),
-      access_token: %{
-        token: read_value(access_token, [:token, "token"]),
-        expires_at: read_value(access_token, [:expires_at, "expires_at"]),
-        scopes: normalize_string_list(read_value(access_token, [:scopes, "scopes"])),
-        missing_scopes:
-          normalize_string_list(read_value(access_token, [:missing_scopes, "missing_scopes"]))
-      }
-    }
-  end
-
-  defp normalize_pipes_error(nil), do: nil
-  defp normalize_pipes_error(error) when is_binary(error), do: error
-
-  defp normalize_pipes_error(%{} = error) do
-    read_value(error, [:code, "code", :message, "message"])
-  end
-
-  defp normalize_pipes_error(error), do: to_string(error)
 
   defp normalize_string_list(value) when is_list(value) do
     Enum.filter(value, &is_binary/1)
