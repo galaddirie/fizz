@@ -27,13 +27,19 @@ import {hooks as colocatedHooks} from "phoenix-colocated/fizz"
 import topbar from "topbar"
 import {getHooks} from "live_vue"
 import liveVueApp from "../vue"
+import {PipesWidget, WorkOSReactWidget} from "./hooks/workos_react_widgets"
 
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks:  {...colocatedHooks},
+  hooks:  {
+    ...colocatedHooks,
+    ...getHooks(liveVueApp),
+    PipesWidget,
+    WorkOSReactWidget,
+  },
 })
 
 // Show progress bar on live navigation and form submits

@@ -1,12 +1,12 @@
-defmodule FizzWeb.ProfileLiveTest do
+defmodule FizzWeb.UserManagementLiveTest do
   use FizzWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
   defmodule ReqMock do
     def request(opts) do
-      owner = :persistent_term.get({FizzWeb.ProfileLiveTest, :owner}, nil)
-      mock_store = :persistent_term.get({FizzWeb.ProfileLiveTest, :mock_store}, nil)
+      owner = :persistent_term.get({FizzWeb.UserManagementLiveTest, :owner}, nil)
+      mock_store = :persistent_term.get({FizzWeb.UserManagementLiveTest, :mock_store}, nil)
 
       if owner do
         send(owner, {:workos_http_request, opts})
@@ -53,10 +53,10 @@ defmodule FizzWeb.ProfileLiveTest do
     :ok
   end
 
-  describe "authenticated profile page" do
+  describe "authenticated users management page" do
     setup :register_and_log_in_user
 
-    test "renders user identifiers and pipes widget", %{conn: conn, user: user} do
+    test "renders all management widget mounts", %{conn: conn, user: user} do
       put_http_responses([
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
@@ -74,16 +74,35 @@ defmodule FizzWeb.ProfileLiveTest do
         widget_response("widget_token_123")
       ])
 
-      {:ok, view, _html} = live(conn, ~p"/settings/profile")
+      {:ok, view, _html} = live(conn, ~p"/settings/")
 
-      assert has_element?(view, "#profile-page")
-      assert has_element?(view, "#profile-local-user-id")
-      assert has_element?(view, "#profile-workos-user-id")
-      assert has_element?(view, "#profile-workos-organization-id")
+      assert has_element?(view, "#user-management-page")
+      assert has_element?(view, "#user-management-context")
+      assert has_element?(view, "#user-management-organization-form")
 
       assert has_element?(
                view,
-               "#profile-pipes-widget-org_123[data-auth-token=\"widget_token_123\"]"
+               "#user-management-users-management-widget-org_123[data-widget=\"users-management\"][data-auth-token=\"widget_token_123\"]"
+             )
+
+      assert has_element?(
+               view,
+               "#user-management-organization-switcher-widget-org_123[data-widget=\"organization-switcher\"][data-auth-token=\"widget_token_123\"]"
+             )
+
+      assert has_element?(
+               view,
+               "#user-management-user-profile-widget-org_123[data-widget=\"user-profile\"][data-auth-token=\"widget_token_123\"]"
+             )
+
+      assert has_element?(
+               view,
+               "#user-management-user-security-widget-org_123[data-widget=\"user-security\"][data-auth-token=\"widget_token_123\"]"
+             )
+
+      assert has_element?(
+               view,
+               "#user-management-api-keys-widget-org_123[data-widget=\"api-keys\"][data-auth-token=\"widget_token_123\"]"
              )
 
       requests = receive_workos_requests(6)
@@ -101,7 +120,7 @@ defmodule FizzWeb.ProfileLiveTest do
              end)
     end
 
-    test "switches organizations and refreshes widget token", %{conn: conn, user: user} do
+    test "switches organizations and refreshes token", %{conn: conn, user: user} do
       put_http_responses([
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"},
@@ -125,20 +144,20 @@ defmodule FizzWeb.ProfileLiveTest do
         widget_response("widget_token_456")
       ])
 
-      {:ok, view, _html} = live(conn, ~p"/settings/profile")
+      {:ok, view, _html} = live(conn, ~p"/settings/")
 
       assert has_element?(
                view,
-               "#profile-pipes-widget-org_123[data-auth-token=\"widget_token_123\"]"
+               "#user-management-users-management-widget-org_123[data-auth-token=\"widget_token_123\"]"
              )
 
       view
-      |> element("#profile-organization-form")
+      |> element("#user-management-organization-form")
       |> render_change(%{"organization" => %{"organization_id" => "org_456"}})
 
       assert has_element?(
                view,
-               "#profile-pipes-widget-org_456[data-auth-token=\"widget_token_456\"]"
+               "#user-management-users-management-widget-org_456[data-auth-token=\"widget_token_456\"]"
              )
 
       requests = receive_workos_requests(8)
@@ -161,11 +180,11 @@ defmodule FizzWeb.ProfileLiveTest do
         memberships_response([])
       ])
 
-      {:ok, view, _html} = live(conn, ~p"/settings/profile")
+      {:ok, view, _html} = live(conn, ~p"/settings/")
 
-      assert has_element?(view, "#profile-no-organization")
-      refute has_element?(view, "#profile-pipes-widget-error")
-      refute has_element?(view, "[id^='profile-pipes-widget-org_']")
+      assert has_element?(view, "#user-management-no-organization")
+      refute has_element?(view, "#user-management-widget-error")
+      refute has_element?(view, "[id^='user-management-users-management-widget-org_']")
 
       requests = receive_workos_requests(2)
       assert Enum.all?(requests, &(&1[:url] == "/user_management/organization_memberships"))
@@ -173,7 +192,8 @@ defmodule FizzWeb.ProfileLiveTest do
   end
 
   test "requires authentication", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/auth/workos"}}} = live(conn, ~p"/settings/profile")
+    assert {:error, {:redirect, %{to: "/auth/workos"}}} =
+             live(conn, ~p"/settings/")
   end
 
   defp memberships_response(memberships) do

@@ -459,26 +459,16 @@ defmodule Fizz.Accounts do
   """
   @spec generate_pipes_widget_token(Scope.t() | nil, String.t()) ::
           {:ok, String.t()} | {:error, term()}
-  def generate_pipes_widget_token(
-        %Scope{user: %User{workos_user_id: workos_user_id} = user},
-        organization_id
-      )
-      when is_binary(workos_user_id) and is_binary(organization_id) do
-    if user_has_workos_organization?(user, organization_id) do
-      WorkOS.generate_widget_token(%{
-        organization_id: organization_id,
-        user_id: workos_user_id,
-        scopes: []
-      })
-    else
-      {:error, :forbidden}
-    end
-  end
+  def generate_pipes_widget_token(scope, organization_id),
+    do: generate_widget_token_for_scope(scope, organization_id, [])
 
-  def generate_pipes_widget_token(%Scope{}, _organization_id),
-    do: {:error, :missing_workos_user_id}
-
-  def generate_pipes_widget_token(_scope, _organization_id), do: {:error, :unauthenticated}
+  @doc """
+  Generates a WorkOS Users Management widget token for the given organization.
+  """
+  @spec generate_user_management_widget_token(Scope.t() | nil, String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def generate_user_management_widget_token(scope, organization_id),
+    do: generate_widget_token_for_scope(scope, organization_id, [])
 
   @doc """
   Fetches a Pipes provider access token for the current scope user.
@@ -512,6 +502,29 @@ defmodule Fizz.Accounts do
   end
 
   defp user_has_workos_organization?(_user, _organization_id), do: false
+
+  defp generate_widget_token_for_scope(
+         %Scope{user: %User{workos_user_id: workos_user_id} = user},
+         organization_id,
+         scopes
+       )
+       when is_binary(workos_user_id) and is_binary(organization_id) and is_list(scopes) do
+    if user_has_workos_organization?(user, organization_id) do
+      WorkOS.generate_widget_token(%{
+        organization_id: organization_id,
+        user_id: workos_user_id,
+        scopes: scopes
+      })
+    else
+      {:error, :forbidden}
+    end
+  end
+
+  defp generate_widget_token_for_scope(%Scope{}, _organization_id, _scopes),
+    do: {:error, :missing_workos_user_id}
+
+  defp generate_widget_token_for_scope(_scope, _organization_id, _scopes),
+    do: {:error, :unauthenticated}
 
   defp remote_organization_entry(membership) do
     case membership_organization_id(membership) do
