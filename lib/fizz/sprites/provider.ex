@@ -32,6 +32,7 @@ defmodule Fizz.Sprites.Provider do
               {:ok, non_neg_integer()} | {:error, term()}
 
   @callback list_sessions(String.t()) :: {:ok, [session()]} | {:error, term()}
+  @callback kill_session(String.t(), String.t()) :: :ok | {:error, term()}
 
   @callback list_checkpoints(String.t()) :: {:ok, [checkpoint()]} | {:error, term()}
   @callback get_checkpoint(String.t(), String.t()) :: {:ok, checkpoint()} | {:error, term()}

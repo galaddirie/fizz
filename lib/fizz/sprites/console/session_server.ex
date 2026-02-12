@@ -3,7 +3,7 @@ defmodule Fizz.Sprites.Console.SessionServer do
   Runtime process for a single interactive sprite console session.
   """
 
-  use GenServer
+  use GenServer, restart: :temporary
 
   alias Fizz.Sprites.Console.Registry, as: ConsoleRegistry
 

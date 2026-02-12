@@ -192,7 +192,8 @@ defmodule Fizz.Sprites do
          :ok <- ensure_provider_configured(),
          {:ok, sprite} <- fetch_sprite(scope, sprite_id),
          command <- normalize_console_command(read_value(attrs, [:command, "command"])),
-         args <- normalize_args(read_value(attrs, [:args, "args"])),
+         args <-
+           normalize_console_args(command, normalize_args(read_value(attrs, [:args, "args"]))),
          idle_timeout_seconds <-
            normalize_idle_timeout(read_value(attrs, [:idle_timeout, "idle_timeout"])),
          session_id <- runtime_session_id(),
@@ -279,6 +280,30 @@ defmodule Fizz.Sprites do
            normalize_provider_session_id(session_id),
          {:ok, _pid} <- ensure_attached_session(scope, sprite, normalized_session_id, []),
          :ok <- SessionServer.close(normalized_session_id, scope.user.id) do
+      :ok
+    else
+      nil -> {:error, :sprite_session_not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec kill_console(scope(), String.t(), String.t()) :: :ok | {:error, term()}
+  def kill_console(%Scope{} = scope, sprite_id, session_id)
+      when is_binary(sprite_id) and is_binary(session_id) do
+    with :ok <- require_execute(scope),
+         :ok <- ensure_provider_configured(),
+         {:ok, sprite} <- fetch_sprite(scope, sprite_id),
+         normalized_session_id when is_binary(normalized_session_id) <-
+           normalize_provider_session_id(session_id),
+         provider_session_id <-
+           provider_session_id_for_session(normalized_session_id, scope.user.id),
+         :ok <- provider_module().kill_session(sprite.sprite_name, provider_session_id) do
+      _ = maybe_close_runtime_session(normalized_session_id, scope.user.id, "killed_by_user")
+
+      if provider_session_id != normalized_session_id do
+        _ = maybe_close_runtime_session(provider_session_id, scope.user.id, "killed_by_user")
+      end
+
       :ok
     else
       nil -> {:error, :sprite_session_not_found}
@@ -637,6 +662,7 @@ defmodule Fizz.Sprites do
       end
     end)
     |> Enum.reverse()
+    |> Enum.uniq_by(& &1.id)
   end
 
   defp provider_session_to_map(session) do
@@ -678,6 +704,37 @@ defmodule Fizz.Sprites do
       :ok
     else
       {:error, :sprite_session_not_found}
+    end
+  end
+
+  defp provider_session_id_for_session(session_id, user_id) do
+    if is_pid(Registry.whereis(session_id)) do
+      case SessionServer.snapshot(session_id, user_id) do
+        {:ok, %{provider_session_id: provider_session_id}}
+        when is_binary(provider_session_id) and provider_session_id != "" ->
+          provider_session_id
+
+        {:ok, %{id: public_session_id}}
+        when is_binary(public_session_id) and public_session_id != "" ->
+          public_session_id
+
+        _ ->
+          session_id
+      end
+    else
+      session_id
+    end
+  end
+
+  defp maybe_close_runtime_session(session_id, user_id, reason) do
+    if is_binary(session_id) and is_pid(Registry.whereis(session_id)) do
+      try do
+        SessionServer.close(session_id, user_id, reason)
+      catch
+        :exit, _ -> :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -903,6 +960,12 @@ defmodule Fizz.Sprites do
   end
 
   defp normalize_console_command(_command), do: "bash"
+
+  defp normalize_console_args(command, args)
+       when command in ["bash", "/bin/bash"] and is_list(args) and args == [],
+       do: ["-i"]
+
+  defp normalize_console_args(_command, args) when is_list(args), do: args
 
   defp normalize_provider_session_id(session_id) when is_binary(session_id) do
     case String.trim(session_id) do

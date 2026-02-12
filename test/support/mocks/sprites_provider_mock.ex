@@ -134,6 +134,12 @@ defmodule Fizz.SpritesProviderMock do
   end
 
   @impl true
+  def kill_session(name, session_id) do
+    notify({:kill_session, name, session_id})
+    next_response(:kill_session, :ok)
+  end
+
+  @impl true
   def list_checkpoints(name) do
     notify({:list_checkpoints, name})
     next_response(:list_checkpoints, {:ok, []})

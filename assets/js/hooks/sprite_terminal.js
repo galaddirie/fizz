@@ -34,6 +34,10 @@ export const SpriteTerminal = {
     this.terminal.loadAddon(this.fitAddon)
     this.terminal.open(this.terminalContainer)
     this.fitAddon.fit()
+    this.terminal.focus()
+
+    this.focusListener = () => this.terminal.focus()
+    this.terminalContainer.addEventListener("click", this.focusListener)
 
     this.resizeObserver = new ResizeObserver(() => {
       this.fitAddon.fit()
@@ -67,6 +71,7 @@ export const SpriteTerminal = {
       }
 
       this.pushResize()
+      this.terminal.focus()
     })
 
     this.handleEvent("console_output", ({ session_id, chunk }) => {
@@ -92,10 +97,15 @@ export const SpriteTerminal = {
   updated() {
     if (this.terminal && this.currentSessionId()) {
       this.pushResize()
+      this.terminal.focus()
     }
   },
 
   destroyed() {
+    if (this.focusListener) {
+      this.terminalContainer.removeEventListener("click", this.focusListener)
+    }
+
     if (this.resizeObserver) {
       this.resizeObserver.disconnect()
     }

@@ -79,7 +79,14 @@ defmodule Fizz.Sprites.Providers.SpritesEx do
   def attach_console(name, session_id, opts) when is_binary(name) and is_binary(session_id) do
     with {:ok, client} <- client() do
       sprite = Sprites.sprite(client, name)
-      Sprites.attach_session(sprite, session_id, opts)
+
+      case Sprites.attach_session(sprite, session_id, opts) do
+        {:ok, command_handle} ->
+          {:ok, maybe_put_provider_session_id(command_handle, session_id)}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -91,11 +98,16 @@ defmodule Fizz.Sprites.Providers.SpritesEx do
 
   @impl true
   def close_console(command_handle) do
-    Sprites.close_stdin(command_handle)
-    :ok
-  rescue
-    error ->
-      {:error, error}
+    case {read_sprite_name(command_handle), read_provider_session_id(command_handle)} do
+      {sprite_name, provider_session_id}
+      when is_binary(sprite_name) and byte_size(sprite_name) > 0 and
+             is_binary(provider_session_id) and byte_size(provider_session_id) > 0 ->
+        kill_session(sprite_name, provider_session_id)
+
+      _ ->
+        Sprites.close_stdin(command_handle)
+        :ok
+    end
   end
 
   @impl true
@@ -113,6 +125,13 @@ defmodule Fizz.Sprites.Providers.SpritesEx do
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  @impl true
+  def kill_session(name, session_id) when is_binary(name) and is_binary(session_id) do
+    with {:ok, client} <- client() do
+      kill_session_with_fallback(client.req, name, session_id)
     end
   end
 
@@ -251,6 +270,68 @@ defmodule Fizz.Sprites.Providers.SpritesEx do
       history: checkpoint.history,
       comment: checkpoint.comment
     }
+  end
+
+  defp kill_session_with_fallback(req, sprite_name, session_id) do
+    encoded_name = URI.encode(sprite_name)
+    encoded_session_id = URI.encode(session_id)
+
+    request_attempts = [
+      fn ->
+        Req.delete(req, url: "/v1/sprites/#{encoded_name}/exec/#{encoded_session_id}")
+      end,
+      fn ->
+        Req.post(req, url: "/v1/sprites/#{encoded_name}/exec/#{encoded_session_id}/kill")
+      end
+    ]
+
+    request_attempts
+    |> Enum.reduce_while(nil, fn request, _last_error ->
+      case normalize_kill_response(request.()) do
+        :ok ->
+          {:halt, :ok}
+
+        {:retry, reason} ->
+          {:cont, reason}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+      nil -> {:error, :sprite_session_not_found}
+      reason -> {:error, reason}
+    end
+  end
+
+  defp normalize_kill_response({:ok, %{status: status}})
+       when is_integer(status) and status in 200..299,
+       do: :ok
+
+  defp normalize_kill_response({:ok, %{status: status, body: body}}) when status in [404, 405],
+    do: {:retry, {:api_error, status, body}}
+
+  defp normalize_kill_response({:ok, %{status: status, body: body}}),
+    do: {:error, {:api_error, status, body}}
+
+  defp normalize_kill_response({:ok, %{status: status}}) when status in [404, 405],
+    do: {:retry, {:api_error, status, nil}}
+
+  defp normalize_kill_response({:ok, %{status: status}}),
+    do: {:error, {:api_error, status, nil}}
+
+  defp normalize_kill_response({:error, reason}), do: {:error, reason}
+
+  defp read_provider_session_id(command_handle) do
+    read_value(command_handle, [:provider_session_id, "provider_session_id"])
+  end
+
+  defp read_sprite_name(command_handle) do
+    command_handle
+    |> read_value([:sprite, "sprite"])
+    |> read_value([:name, "name"])
   end
 
   defp list_session_ids(sprite) do

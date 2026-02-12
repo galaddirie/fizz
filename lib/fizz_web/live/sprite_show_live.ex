@@ -34,7 +34,7 @@ defmodule FizzWeb.SpriteShowLive do
         )
         |> assign(
           :console_form,
-          console_form(%{"command" => "bash", "args" => "", "idle_timeout" => "60"})
+          console_form(%{"command" => "bash", "args" => "-i", "idle_timeout" => "60"})
         )
         |> assign(:checkpoint_form, checkpoint_form(%{"comment" => ""}))
         |> assign(:policy_form, policy_form(%{"preset" => "minimal_agent", "custom_rules" => ""}))
@@ -160,16 +160,46 @@ defmodule FizzWeb.SpriteShowLive do
     {:noreply, socket}
   end
 
-  def handle_event("console_input", %{"session_id" => session_id, "data" => data}, socket) do
-    _ =
-      Sprites.send_console_input(
-        socket.assigns.sprite_scope,
-        socket.assigns.sprite.id,
-        session_id,
-        data
-      )
+  def handle_event("kill_console", %{"session-id" => session_id}, socket) do
+    socket =
+      case Sprites.kill_console(
+             socket.assigns.sprite_scope,
+             socket.assigns.sprite.id,
+             session_id
+           ) do
+        :ok ->
+          socket
+          |> clear_active_session(session_id)
+          |> assign(:console_error, nil)
+          |> load_sessions()
+
+        {:error, reason} ->
+          assign(socket, :console_error, reason)
+      end
 
     {:noreply, socket}
+  end
+
+  def handle_event("console_input", %{"session_id" => session_id, "data" => data}, socket) do
+    case Sprites.send_console_input(
+           socket.assigns.sprite_scope,
+           socket.assigns.sprite.id,
+           session_id,
+           data
+         ) do
+      :ok ->
+        {:noreply, socket}
+
+      {:error, :sprite_session_not_found} ->
+        {:noreply,
+         socket
+         |> clear_active_session(session_id)
+         |> assign(:console_error, :sprite_session_not_found)
+         |> load_sessions()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :console_error, reason)}
+    end
   end
 
   def handle_event(
@@ -454,6 +484,14 @@ defmodule FizzWeb.SpriteShowLive do
     can_manage?(scope) || scope.workspace_role == :member
   end
 
+  defp clear_active_session(socket, session_id) do
+    if socket.assigns.active_session_id == session_id do
+      assign(socket, :active_session_id, nil)
+    else
+      socket
+    end
+  end
+
   defp timeout_options do
     [
       {"60 seconds", "60"},
@@ -469,6 +507,9 @@ defmodule FizzWeb.SpriteShowLive do
 
   defp console_error_message(:provider_session_unavailable),
     do: "This session cannot be attached because no provider session ID is available."
+
+  defp console_error_message(:sprite_session_not_found),
+    do: "This console session is no longer available. Start or attach another session."
 
   defp console_error_message(:forbidden),
     do: "You are not allowed to control this console session."

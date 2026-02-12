@@ -104,13 +104,13 @@
             </button>
             <button
               :if={@active_session_id}
-              id="sprite-close-console"
+              id="sprite-kill-console"
               type="button"
               class="btn btn-error btn-soft"
-              phx-click="close_console"
+              phx-click="kill_console"
               phx-value-session-id={@active_session_id}
             >
-              Close
+              Kill
             </button>
           </div>
         </.form>
@@ -152,13 +152,13 @@
               </button>
               <button
                 :if={can_execute?(@sprite_scope)}
-                id={"sprite-close-session-#{session.id}"}
+                id={"sprite-kill-session-#{session.id}"}
                 type="button"
                 class="btn btn-xs btn-error btn-outline"
-                phx-click="close_console"
+                phx-click="kill_console"
                 phx-value-session-id={session.id}
               >
-                Close
+                Kill
               </button>
             </div>
           </div>

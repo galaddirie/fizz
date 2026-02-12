@@ -134,6 +134,47 @@ defmodule Fizz.SpritesTest do
     end
   end
 
+  test "kill_console/3 terminates runtime session and calls provider kill", %{
+    sprite_scope: sprite_scope
+  } do
+    assert {:ok, sprite} =
+             Sprites.create_sprite(sprite_scope, %{
+               "display_name" => "Kill Session Sprite"
+             })
+
+    assert {:ok, session} =
+             Sprites.start_console(sprite_scope, sprite.id, %{
+               "command" => "bash",
+               "idle_timeout" => "60"
+             })
+
+    session_id = session.id
+    assert {:ok, []} = Sprites.subscribe_console(sprite_scope, sprite.id, session_id, self())
+    assert :ok = Sprites.kill_console(sprite_scope, sprite.id, session_id)
+
+    assert_receive {:sprites_provider_call, {:kill_session, _sprite_name, ^session_id}}
+    assert_receive {:console_exit, ^session_id, nil, "killed_by_user"}
+  end
+
+  test "start_console/4 defaults bash sessions to interactive mode", %{sprite_scope: sprite_scope} do
+    assert {:ok, sprite} =
+             Sprites.create_sprite(sprite_scope, %{
+               "display_name" => "Interactive Console Sprite"
+             })
+
+    assert {:ok, _session} =
+             Sprites.start_console(sprite_scope, sprite.id, %{
+               "command" => "bash",
+               "args" => ""
+             })
+
+    assert_receive {:sprites_provider_call, {:start_console, _sprite_name, "bash", ["-i"]}}
+  end
+
+  test "session server child spec does not restart exited sessions" do
+    assert %{restart: :temporary} = Fizz.Sprites.Console.SessionServer.child_spec([])
+  end
+
   test "list_sessions/3 reads provider sessions as source of truth", %{sprite_scope: sprite_scope} do
     assert {:ok, sprite} =
              Sprites.create_sprite(sprite_scope, %{
