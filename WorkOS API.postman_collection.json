@@ -1,0 +1,1263 @@
+{
+  "info": {
+    "_postman_id": "79ce1172-4741-4f1d-a486-64380f9a599f",
+    "name": "WorkOS API",
+    "description": "# WorkOS API\n\nWorkOS is a developer platform that provides enterprise-ready authentication and user management APIs. This collection enables you to integrate Single Sign-On (SSO), Directory Sync (SCIM), Multi-Factor Authentication (MFA), and other enterprise features into your application with just a few API calls.\n\n## What You Can Build\n\nWith the WorkOS API, you can:\n\n- **Single Sign-On (SSO)**: Enable users to authenticate via SAML or OAuth providers like Okta, Azure AD, and Google Workspace\n- **Directory Sync**: Automatically sync user directories from identity providers using SCIM 2.0\n- **Multi-Factor Authentication**: Add an extra layer of security with SMS, TOTP, and other MFA methods\n- **Organizations**: Manage multi-tenant applications with organization-level controls\n- **Admin Portal**: Generate links for customers to self-serve SSO and Directory Sync configuration\n- **Audit Logs**: Stream security and compliance events to your application\n- **Magic Link**: Implement passwordless authentication flows\n\n## Getting Started\n\n### Authentication\n\nAll WorkOS API requests require authentication using your API key in the Authorization header:\n\n```\nAuthorization: Bearer sk_test_your_api_key_here\n```\n\nGet your API key from the [WorkOS Dashboard](https://dashboard.workos.com/api-keys).\n\n### Base URL\n\nAll API requests are made to:\n```\nhttps://api.workos.com\n```\n\n### Environment Setup\n\nThis collection uses environment variables for easy configuration:\n- `base_url`: Set to `https://api.workos.com`\n- `api_key`: Your WorkOS API key (keep this secret!)\n- Additional variables for resource IDs (organization_id, user_id, etc.)\n\n## Resources\n\n- **Full API Documentation**: [workos.com/docs/reference](https://workos.com/docs/reference)\n- **Developer Guides**: [workos.com/docs](https://workos.com/docs)\n- **Dashboard**: [dashboard.workos.com](https://dashboard.workos.com)\n- **Support**: [workos.com/support](https://workos.com/support)\n\n## Collection Structure\n\nThis collection is organized by WorkOS product features, with each folder containing the relevant API endpoints for that feature. Start with the **Organizations** folder to create and manage your multi-tenant structure, then explore SSO, Directory Sync, and other features as needed.\n\n---\n\nReady to get started? Fork this collection and configure your environment variables to begin making API calls.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "52322944",
+    "_collection_link": "https://go.postman.co/collection/25188762-79ce1172-4741-4f1d-a486-64380f9a599f?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Organizations",
+      "item": [
+        {
+          "name": "Get an Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/organizations/{{organization_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "organizations",
+                "{{organization_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Organizations",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/organizations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "organizations"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create an Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"name\": \"<Descriptive name for the organization>\",\n    \"domains\": [\"<Domains of the organization>\"],\n    \"allow_profiles_outside_organization\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/organizations",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "organizations"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update an Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "name",
+                  "value": "<string>",
+                  "description": "A descriptive name for the Organization. This field does not need to be unique.",
+                  "type": "text"
+                },
+                {
+                  "key": "domains[]",
+                  "value": "<string>",
+                  "description": "The domains of the Organization.  At least one domain is required unless allow_profiles_outside_organization is true.",
+                  "type": "text"
+                },
+                {
+                  "key": "domains[]",
+                  "value": "<string>",
+                  "description": "Enter each domain as an individual entry",
+                  "type": "text",
+                  "disabled": true
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/organizations/{{organization_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "organizations",
+                "{{organization_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete an Organization",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/organizations/{{organization_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "organizations",
+                "{{organization_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Single Sign-On",
+      "item": [
+        {
+          "name": "Connection",
+          "item": [
+            {
+              "name": "Get a Connection",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/connections/{{connection_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "connections",
+                    "{{connection_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Connections",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/connections",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "connections"
+                  ],
+                  "query": [
+                    {
+                      "key": "connection_type",
+                      "value": "<string>",
+                      "description": "Filter connections by their type.",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "domain",
+                      "value": "<string>",
+                      "description": "Filter Connections by their associated domain.",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "organization_id",
+                      "value": "<string>",
+                      "description": "Filter Connections by their associated organization.",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "after",
+                      "value": "<string>",
+                      "description": "A cursor to use for pagination. after is an object ID that defines your place in the list. For example, if you make a list request and receive 100 objects, ending with obj_123, your subsequent call can include after=obj_123 to fetch a new batch of objects after obj_123.",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "before",
+                      "value": "<string>",
+                      "description": "A cursor to use for pagination. before is an object ID that defines your place in the list. For example, if you make a list request and receive 100 objects, ending with obj_123, your subsequent call can include before=obj_123 to fetch a new batch of objects before obj_123.",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "<number>",
+                      "description": "Upper limit on the number of objects to return, between 1 and 100. The default value is 10.",
+                      "type": "text",
+                      "disabled": true
+                    },
+                    {
+                      "key": "order",
+                      "value": "<\"asc\" | \"desc\">",
+                      "description": "Order the results by the creation time. Supported values are \"asc\" and \"desc\" for ascending and descending order respectively.\n\n",
+                      "type": "text",
+                      "disabled": true
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete a Connection",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/connections/{{connection_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "connections",
+                    "{{connection_id}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Get Authorization URL",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "disableBodyPruning": true,
+            "disabledSystemHeaders": {
+              "content-type": true
+            },
+            "followRedirects": false
+          },
+          "request": {
+            "method": "GET",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/sso/authorize?response_type=code&client_id={{client_id}}&redirect_uri=<string>&organization=<string>",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sso",
+                "authorize"
+              ],
+              "query": [
+                {
+                  "key": "response_type",
+                  "value": "code",
+                  "description": "The only valid option for the response type parameter is code.\n\nThe code parameter value initiates an Authorization Code Grant Type. This grant type allows a Developer to exchange an authorization code for an access token during the redirect that takes place after a user has authenticated with an Identity Provider."
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "description": "This value can be obtained from the SSO Configuration page in the WorkOS dashboard."
+                },
+                {
+                  "key": "redirect_uri",
+                  "value": "<string>",
+                  "description": "A Redirect URI to return an authorized user to."
+                },
+                {
+                  "key": "organization",
+                  "value": "<string>",
+                  "description": "The organization connection selector is used to initiate SSO for an Organization.\n\nThe value of this parameter should be a WorkOS Organization ID.\n\nFor example, the Developer can persist the WorkOS Organization ID with application User or Team identifiers. WorkOS will use the organization connection selector to determine the appropriate Connection and IdP to direct the user to for authentication."
+                },
+                {
+                  "key": "connection",
+                  "value": "<string>",
+                  "description": "The connection connection selector is used to initiate SSO for a Connection.\n\nThe value of this parameter should be a WorkOS Connection ID.\n\nFor example, the Developer can persist the WorkOS Connection ID with application User or Team identifiers. WorkOS will use the Connection indicated by the connection parameter to direct the user to the corresponding IdP for authentication.",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "provider",
+                  "value": "<\"GoogleOAuth\" | \"MicrosoftOAuth\"> ",
+                  "description": "The provider connection selector is used to initiate SSO using an OAuth provider.\n\nCurrently, the only supported values for provider are GoogleOAuth and MicrosoftOAuth. Provide the provider parameter when authenticating Google OAuth users, because Google OAuth does not take a user’s domain into account when logging in with a “Sign in with Google” button.",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "state",
+                  "value": "<string>",
+                  "description": "An optional parameter that can be used to encode arbitrary information to help restore application state between redirects. If included, the redirect URI received from WorkOS will contain the exact state that was passed.",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "login_hint",
+                  "value": "<string>",
+                  "description": "Can be used to pre-fill the username/email address field of the IdP sign-in page for the user, if you know their username ahead of time.\n\nCurrently, this parameter is only supported for OAuth, and OpenID Connect connection types.",
+                  "type": "text",
+                  "disabled": true
+                },
+                {
+                  "key": "domain_hint",
+                  "value": "<string>",
+                  "description": "Can be used to pre-fill the domain field when initiating authentication with Microsoft OAuth.",
+                  "type": "text",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get a Profile and Token",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sso/token?client_id={{client_id}}&client_secret={{api_key}}&grant_type=authorization_code&code={{authorization_code}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sso",
+                "token"
+              ],
+              "query": [
+                {
+                  "key": "client_id",
+                  "value": "{{client_id}}",
+                  "description": "This value can be obtained from the SSO Configuration page in the WorkOS dashboard.\n"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{api_key}}",
+                  "description": "You can view and manage your API keys in the WorkOS Dashboard\n"
+                },
+                {
+                  "key": "grant_type",
+                  "value": "authorization_code",
+                  "description": "The grant type should always be authorization_code."
+                },
+                {
+                  "key": "code",
+                  "value": "{{authorization_code}}",
+                  "description": "An access token that can be exchanged for a user profile. Access tokens are one-time use and expire 10 minutes after they’re created."
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get a User Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{profile_token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/sso/profile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "sso",
+                "profile"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Directory Sync",
+      "item": [
+        {
+          "name": "Directory",
+          "item": [
+            {
+              "name": "Get a Directory",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directories/{{directory_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directories",
+                    "{{directory_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Directories",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directories?search={{searchable_text}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directories"
+                  ],
+                  "query": [
+                    {
+                      "key": "search",
+                      "value": "{{searchable_text}}",
+                      "description": "Searchable text to match against Directory names"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "Delete a Directory",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "DELETE",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directories/{{directory_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directories",
+                    "{{directory_id}}"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Directory User",
+          "item": [
+            {
+              "name": "Get a Directory User",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directory_users/{{directory_user_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directory_users",
+                    "{{directory_user_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Directory Users",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directory_users?directory={{directory_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directory_users"
+                  ],
+                  "query": [
+                    {
+                      "key": "directory",
+                      "value": "{{directory_id}}",
+                      "description": "Unique identifier of the WorkOS Directory"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Directory Group",
+          "item": [
+            {
+              "name": "Get a Directory Group",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directory_groups/{{directory_group_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directory_groups",
+                    "{{directory_group_id}}"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "List Directory Groups",
+              "request": {
+                "auth": {
+                  "type": "bearer",
+                  "bearer": [
+                    {
+                      "key": "token",
+                      "value": "{{api_key}}",
+                      "type": "string"
+                    }
+                  ]
+                },
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{base_url}}/directory_groups?directory={{directory_id}}",
+                  "host": [
+                    "{{base_url}}"
+                  ],
+                  "path": [
+                    "directory_groups"
+                  ],
+                  "query": [
+                    {
+                      "key": "directory",
+                      "value": "{{directory_id}}",
+                      "description": "Unique identifier of the WorkOS Directory"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Portal",
+      "item": [
+        {
+          "name": "Generate a Portal Link",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "organization",
+                  "value": "{{organization_id}}",
+                  "description": "Unique identifier of the Organization\n",
+                  "type": "text"
+                },
+                {
+                  "key": "intent",
+                  "value": "<enum: sso | dsync | audit_logs | log_streams> ",
+                  "description": "The intent of the Admin Portal.",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/portal/generate_link",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "portal",
+                "generate_link"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Magic Link",
+      "item": [
+        {
+          "name": "Create a Passwordless Session",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "email",
+                  "value": "<string>",
+                  "description": "The email of the user to authenticate.",
+                  "type": "text"
+                },
+                {
+                  "key": "type",
+                  "value": "MagicLink",
+                  "type": "text",
+                  "description": "The type of Passwordless Session to create. Currently, the only supported value is MagicLink."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/passwordless/sessions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "passwordless",
+                "sessions"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Email a Magic Link",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/passwordless/sessions/{{passwordless_session_id}}/send",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "passwordless",
+                "sessions",
+                "{{passwordless_session_id}}",
+                "send"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Audit Logs",
+      "item": [
+        {
+          "name": "Create Event",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "exec": [
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{Idempotency_Key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"organization_id\": \"<Organization ID>\",\n    \"event\": {\n      \"action\": \"<Identitifer of what happened>\",\n      \"occurred_at\": \"<ISO-8601 value of when the action occurred>\",\n      \"version\": 1,\n      \"actor\": {\n        \"type\": \"<Actor type>\",\n        \"id\": \"<Actor ID>\",\n        \"name\": \"<Optional actor name>\",\n        \"metadata\": {\n          \"role\": \"<Additional data associated with the event>\"\n        }\n      },\n      \"targets\": [\n        {\n          \"type\": \"<Target type>\",\n          \"id\": \"<Target ID>\",\n          \"name\": \"<Optional target name>\"\n        }        \n      ],\n      \"context\": {\n        \"location\": \"<IP Address or some other geolocation identifie>\",\n        \"user_agent\": \"<User agent string>\"\n      },\n      \"metadata\": {\n        \"extra\": \"<Additional data associated with the event>\"\n      }\n    }\n  }",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/audit_logs/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit_logs",
+                "events"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Export",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{Idempotency_Key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"organization_id\": \"{{organization_id}}\",\n    \"range_start\": \"2022-07-02T18:09:06.996Z\",\n    \"range_end\": \"2022-09-02T18:09:06.996Z\",\n    \"actions\": [\"<Optional list of actions to filter against>\"],\n    \"actors\": [\"<Optional list of actors to filter against>\"],\n    \"targets\": [\"<Optional list of targets to filter against>\"]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/audit_logs/exports",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit_logs",
+                "exports"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Export",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/audit_logs/exports/{{audit_log_export_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit_logs",
+                "exports",
+                "{{audit_log_export_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Multi-Factor Auth",
+      "item": [
+        {
+          "name": "Enroll Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "type",
+                  "value": "<enum: totp | sms> ",
+                  "description": "The type the Factor. Can be either totp or sms.\n",
+                  "type": "text"
+                },
+                {
+                  "key": "totp_issuer",
+                  "value": "<string>",
+                  "description": "An identifier for the organization issuing the challenge. Should be the name of your application or company. Required when type is totp.",
+                  "type": "text"
+                },
+                {
+                  "key": "totp_user",
+                  "value": "<string> ",
+                  "description": "An identifier for the user. Used by authenticator apps to label connections. Required when type is totp.",
+                  "type": "text"
+                },
+                {
+                  "key": "phone_number",
+                  "value": "<string>",
+                  "description": "A valid phone number for an SMS-enabled device. Required when type is sms.\n",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/factors/enroll",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "factors",
+                "enroll"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Challenge Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/auth/factors/{{authentication_factor_id}}/challenge",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "factors",
+                "{{authentication_factor_id}}",
+                "challenge"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Verify Challenge",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotency_key}}",
+                "type": "text",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"code\": \"your_6_digit_code\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/challenges/{{authentication_challenge_id}}/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "challenges",
+                "{{authentication_challenge_id}}",
+                "verify"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/factors/{{authentication_factor_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "factors",
+                "{{authentication_factor_id}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Factor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{api_key}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/factors/{{authentication_factor_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "factors",
+                "{{authentication_factor_id}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}
