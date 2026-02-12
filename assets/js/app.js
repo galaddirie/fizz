@@ -23,52 +23,14 @@ import "phoenix_html"
 import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/fizz"
-import React from "react"
-import {createRoot} from "react-dom/client"
-import {Pipes, WorkOsWidgets} from "@workos-inc/widgets"
 import topbar from "../vendor/topbar"
 
-const Hooks = {
-  ...colocatedHooks,
-  PipesWidget: {
-    mounted() {
-      this.root = createRoot(this.el)
-      this.renderWidget()
-    },
-
-    updated() {
-      this.renderWidget()
-    },
-
-    destroyed() {
-      if (this.root) {
-        this.root.unmount()
-        this.root = null
-      }
-    },
-
-    renderWidget() {
-      if (!this.root) return
-
-      const authToken = this.el.dataset.authToken
-      if (!authToken) return
-
-      this.root.render(
-        React.createElement(
-          WorkOsWidgets,
-          null,
-          React.createElement(Pipes, {authToken})
-        )
-      )
-    },
-  },
-}
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: Hooks,
+  hooks:  {...colocatedHooks},
 })
 
 // Show progress bar on live navigation and form submits
