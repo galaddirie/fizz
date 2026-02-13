@@ -8,7 +8,6 @@ defmodule Fizz.Accounts do
   alias Fizz.Accounts.{
     Scope,
     User,
-    WorkOS,
     Workspace,
     WorkspaceMembership
   }
@@ -42,7 +41,7 @@ defmodule Fizz.Accounts do
     workspace_id = Keyword.get(opts, :workspace_id)
 
     with {:ok, membership} <-
-           WorkOS.get_user_organization_membership(workos_user_id, organization_id),
+           workos_client().get_user_organization_membership(workos_user_id, organization_id),
          organization_role <- organization_role_from_membership(membership),
          {:ok, workspace_membership, workspace} <-
            fetch_workspace_membership(
@@ -148,7 +147,7 @@ defmodule Fizz.Accounts do
       role = Map.get(attrs, :role, :member)
 
       with {:ok, sync_payload} <-
-             WorkOS.ensure_organization_membership(organization_id, user, role),
+             workos_client().ensure_organization_membership(organization_id, user, role),
            {:ok, _user} <- maybe_store_workos_user_id(user, sync_payload.user_id),
            :ok <-
              maybe_emit_audit_event(
@@ -226,7 +225,7 @@ defmodule Fizz.Accounts do
   Ensures the current user exists in WorkOS and persists its external ID.
   """
   def sync_user_to_workos(%Scope{user: %User{} = user}) do
-    with {:ok, workos_user_id} <- WorkOS.ensure_user(user),
+    with {:ok, workos_user_id} <- workos_client().ensure_user(user),
          {:ok, user} <- maybe_store_workos_user_id(user, workos_user_id) do
       {:ok, user}
     end
@@ -323,7 +322,7 @@ defmodule Fizz.Accounts do
          context
        )
        when is_binary(organization_id) do
-    case WorkOS.create_audit_event(organization_id, actor, action, targets, context) do
+    case workos_client().create_audit_event(organization_id, actor, action, targets, context) do
       :ok -> :ok
       {:error, _reason} -> :ok
     end
@@ -430,7 +429,7 @@ defmodule Fizz.Accounts do
     end)
   end
 
-  defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
+  def workos_authorization_url(params), do: workos_client().authorization_url(params)
 
   @doc """
   Lists WorkOS organizations the current scope user belongs to.
@@ -438,7 +437,7 @@ defmodule Fizz.Accounts do
   @spec list_user_workos_organizations(Scope.t() | nil) :: [map()]
   def list_user_workos_organizations(%Scope{user: %User{workos_user_id: workos_user_id}})
       when is_binary(workos_user_id) do
-    case WorkOS.list_user_organization_memberships(workos_user_id) do
+    case workos_client().list_user_organization_memberships(workos_user_id) do
       {:ok, memberships} ->
         memberships
         |> Enum.map(&remote_organization_entry/1)
@@ -481,7 +480,7 @@ defmodule Fizz.Accounts do
       )
       when is_binary(workos_user_id) and is_binary(provider) do
     if is_nil(organization_id) or user_has_workos_organization?(user, organization_id) do
-      WorkOS.get_pipes_access_token(provider, workos_user_id, organization_id)
+      workos_client().get_pipes_access_token(provider, workos_user_id, organization_id)
     else
       {:error, :forbidden}
     end
@@ -494,7 +493,7 @@ defmodule Fizz.Accounts do
 
   defp user_has_workos_organization?(%User{workos_user_id: workos_user_id}, organization_id)
        when is_binary(workos_user_id) and is_binary(organization_id) do
-    case WorkOS.user_has_organization_membership?(workos_user_id, organization_id) do
+    case workos_client().user_has_organization_membership?(workos_user_id, organization_id) do
       {:ok, has_membership?} -> has_membership?
       {:error, _reason} -> false
     end
@@ -509,7 +508,7 @@ defmodule Fizz.Accounts do
        )
        when is_binary(workos_user_id) and is_binary(organization_id) and is_list(scopes) do
     if user_has_workos_organization?(user, organization_id) do
-      WorkOS.generate_widget_token(%{
+      workos_client().generate_widget_token(%{
         organization_id: organization_id,
         user_id: workos_user_id,
         scopes: scopes
@@ -635,10 +634,10 @@ defmodule Fizz.Accounts do
       user_agent: opts[:user_agent]
     }
 
-    with {:ok, authentication} <- WorkOS.authenticate_with_code(auth_params),
-         {:ok, profile} <- WorkOS.extract_user_profile(authentication),
+    with {:ok, authentication} <- workos_client().authenticate_with_code(auth_params),
+         {:ok, profile} <- workos_client().extract_user_profile(authentication),
          {:ok, user} <- get_or_upsert_user_from_workos_profile(profile),
-         {:ok, workos_session} <- WorkOS.extract_session(authentication) do
+         {:ok, workos_session} <- workos_client().extract_session(authentication) do
       {:ok,
        %{user: user, workos_session: workos_session, workos_session_id: workos_session.session_id}}
     end
@@ -655,10 +654,10 @@ defmodule Fizz.Accounts do
       user_agent: opts[:user_agent]
     }
 
-    with {:ok, authentication} <- WorkOS.authenticate_with_refresh_token(auth_params),
-         {:ok, profile} <- WorkOS.extract_user_profile(authentication),
+    with {:ok, authentication} <- workos_client().authenticate_with_refresh_token(auth_params),
+         {:ok, profile} <- workos_client().extract_user_profile(authentication),
          {:ok, user} <- get_or_upsert_user_from_workos_profile(profile),
-         {:ok, workos_session} <- WorkOS.extract_session(authentication) do
+         {:ok, workos_session} <- workos_client().extract_session(authentication) do
       {:ok,
        %{user: user, workos_session: workos_session, workos_session_id: workos_session.session_id}}
     end
@@ -729,5 +728,9 @@ defmodule Fizz.Accounts do
       confirmed_at: confirmed_at
     })
     |> Repo.update()
+  end
+
+  defp workos_client do
+    Application.get_env(:fizz, :workos_client_module, Fizz.Accounts.WorkOS)
   end
 end

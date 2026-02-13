@@ -7,6 +7,8 @@ defmodule Fizz.Accounts.WorkOS do
       config :fizz, :workos_sync_enabled, true
   """
 
+  @behaviour Fizz.Integrations.WorkOSClient
+
   require Logger
 
   alias Fizz.Accounts.User
@@ -653,6 +655,7 @@ defmodule Fizz.Accounts.WorkOS do
         ],
         params: normalize_query(opts[:query])
       ]
+      |> maybe_put_plug(workos_http_plug())
       |> maybe_put_json(opts[:json])
 
     case http_client_module().request(req_opts) do
@@ -684,6 +687,9 @@ defmodule Fizz.Accounts.WorkOS do
   end
 
   defp maybe_put_json(opts, _json), do: opts
+
+  defp maybe_put_plug(opts, nil), do: opts
+  defp maybe_put_plug(opts, plug), do: Keyword.put(opts, :plug, plug)
 
   defp normalize_query(nil), do: []
 
@@ -870,6 +876,10 @@ defmodule Fizz.Accounts.WorkOS do
 
   defp http_client_module do
     Application.get_env(:fizz, :workos_http_client_module, Req)
+  end
+
+  defp workos_http_plug do
+    Application.get_env(:fizz, :workos_http_plug)
   end
 
   defp read_value(data, keys) do

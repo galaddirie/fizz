@@ -7,89 +7,33 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
   alias Fizz.Accounts.User
   alias Fizz.Repo
 
-  defmodule ReqMock do
-    def request(opts) do
-      send(self(), {:workos_http_request, opts})
-      code = get_in(opts, [:json, :code])
-
-      case code do
-        "ok-code" ->
-          {:ok,
-           %Req.Response{
-             status: 200,
-             body: %{
-               "user" => %{
-                 "id" => "user_workos_123",
-                 "email" => "sso-user@example.com",
-                 "email_verified" => true
-               },
-               "access_token" => unsigned_jwt("user_workos_123", "session_workos_123"),
-               "refresh_token" => "refresh_workos_123",
-               "authentication_method" => "sso"
-             }
-           }}
-
-        "conflict-code" ->
-          {:ok,
-           %Req.Response{
-             status: 200,
-             body: %{
-               "user" => %{
-                 "id" => "user_workos_conflict",
-                 "email" => "conflict@example.com",
-                 "email_verified" => true
-               },
-               "access_token" => unsigned_jwt("user_workos_conflict", "session_workos_conflict"),
-               "refresh_token" => "refresh_workos_conflict",
-               "authentication_method" => "sso"
-             }
-           }}
-
-        _ ->
-          {:ok,
-           %Req.Response{
-             status: 400,
-             body: %{"code" => "invalid_grant", "message" => "Invalid authorization code"}
-           }}
-      end
-    end
-
-    defp unsigned_jwt(sub, sid) do
-      header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
-
-      payload =
-        Base.url_encode64(
-          Jason.encode!(%{
-            sub: sub,
-            sid: sid,
-            exp: System.os_time(:second) + 3600
-          }),
-          padding: false
-        )
-
-      "#{header}.#{payload}."
-    end
-  end
-
   setup do
-    previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
+    previous_workos_client_module = Application.get_env(:fizz, :workos_client_module)
     previous_provider = Application.get_env(:fizz, :workos_authkit_provider)
+    mock_store = start_supervised!({Agent, fn -> %{} end})
 
-    Application.put_env(:fizz, :workos_http_client_module, ReqMock)
+    Fizz.WorkOSClientMock.configure(self(), mock_store)
+    Application.put_env(:fizz, :workos_client_module, Fizz.WorkOSClientMock)
     Application.put_env(:fizz, :workos_authkit_provider, "authkit")
 
-    on_exit(fn ->
-      if previous_http_client do
-        Application.put_env(:fizz, :workos_http_client_module, previous_http_client)
-      else
-        Application.delete_env(:fizz, :workos_http_client_module)
-      end
+    Fizz.WorkOSClientMock.put_response(:authorization_url, fn params ->
+      query =
+        %{
+          "provider" => params[:provider],
+          "code_challenge_method" => params[:code_challenge_method],
+          "state" => params[:state],
+          "code_challenge" => params[:code_challenge]
+        }
+        |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+        |> Map.new()
 
-      if previous_provider do
-        Application.put_env(:fizz, :workos_authkit_provider, previous_provider)
-      else
-        Application.delete_env(:fizz, :workos_authkit_provider)
-      end
+      {:ok, "https://api.workos.com/user_management/authorize?#{URI.encode_query(query)}"}
+    end)
+
+    on_exit(fn ->
+      restore_env(:fizz, :workos_client_module, previous_workos_client_module)
+      restore_env(:fizz, :workos_authkit_provider, previous_provider)
+      Fizz.WorkOSClientMock.reset()
     end)
 
     :ok
@@ -128,6 +72,17 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
   end
 
   test "GET /auth/workos/callback logs in user for valid code and state", %{conn: conn} do
+    Fizz.WorkOSClientMock.put_response(:authenticate_with_code, fn _params ->
+      {:ok,
+       authentication_payload(
+         "user_workos_123",
+         "sso-user@example.com",
+         true,
+         "session_workos_123",
+         "refresh_workos_123"
+       )}
+    end)
+
     conn =
       conn
       |> init_test_session(%{
@@ -136,10 +91,10 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
       })
       |> get(~p"/auth/workos/callback", %{"code" => "ok-code", "state" => "known-state"})
 
-    assert_receive {:workos_http_request, params}
-    assert params[:json][:code] == "ok-code"
-    assert params[:json][:code_verifier] == "known-verifier"
-    assert params[:json][:ip_address]
+    assert_receive {:workos_client_call, :authenticate_with_code, [params]}
+    assert params[:code] == "ok-code"
+    assert params[:code_verifier] == "known-verifier"
+    assert is_binary(params[:ip_address])
 
     assert redirected_to(conn) == ~p"/"
     assert get_session(conn, :workos_session_id) == "session_workos_123"
@@ -176,6 +131,17 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
   end
 
   test "GET /auth/workos/callback handles WorkOS account conflict", %{conn: conn} do
+    Fizz.WorkOSClientMock.put_response(:authenticate_with_code, fn _params ->
+      {:ok,
+       authentication_payload(
+         "user_workos_conflict",
+         "conflict@example.com",
+         true,
+         "session_workos_conflict",
+         "refresh_workos_conflict"
+       )}
+    end)
+
     existing_user = user_fixture(%{email: "conflict@example.com"})
 
     {:ok, _existing_user} =
@@ -198,4 +164,36 @@ defmodule FizzWeb.WorkOSAuthControllerTest do
 
     refute get_session(conn, :workos_session_id)
   end
+
+  defp authentication_payload(id, email, email_verified, session_id, refresh_token) do
+    %WorkOS.UserManagement.Authentication{
+      user: %{
+        "id" => id,
+        "email" => email,
+        "email_verified" => email_verified
+      },
+      access_token: unsigned_jwt(id, session_id),
+      refresh_token: refresh_token,
+      authentication_method: "sso"
+    }
+  end
+
+  defp unsigned_jwt(sub, sid) do
+    header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
+
+    payload =
+      Base.url_encode64(
+        Jason.encode!(%{
+          sub: sub,
+          sid: sid,
+          exp: System.os_time(:second) + 3600
+        }),
+        padding: false
+      )
+
+    "#{header}.#{payload}."
+  end
+
+  defp restore_env(app, key, nil), do: Application.delete_env(app, key)
+  defp restore_env(app, key, value), do: Application.put_env(app, key, value)
 end

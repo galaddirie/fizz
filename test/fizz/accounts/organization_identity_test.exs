@@ -7,36 +7,16 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
 
   import Fizz.AccountsFixtures
 
-  defmodule ReqMock do
-    def request(opts) do
-      send(self(), {:workos_http_request, opts})
-
-      case Process.get(:workos_http_responses, []) do
-        [response | rest] ->
-          Process.put(:workos_http_responses, rest)
-          response
-
-        [] ->
-          raise "No mocked WorkOS HTTP responses were configured"
-      end
-    end
-  end
-
   setup do
-    previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
-    previous_workos_client = Application.get_env(:workos, WorkOS.Client)
+    previous_workos_client_module = Application.get_env(:fizz, :workos_client_module)
+    mock_store = start_supervised!({Agent, fn -> %{} end})
 
-    Application.put_env(:fizz, :workos_http_client_module, ReqMock)
-
-    Application.put_env(:workos, WorkOS.Client,
-      api_key: "sk_test_123",
-      client_id: "client_test_123",
-      client: Fizz.WorkOS.ReqClient
-    )
+    Fizz.WorkOSClientMock.configure(self(), mock_store)
+    Application.put_env(:fizz, :workos_client_module, Fizz.WorkOSClientMock)
 
     on_exit(fn ->
-      restore_env(:fizz, :workos_http_client_module, previous_http_client)
-      restore_env(:workos, WorkOS.Client, previous_workos_client)
+      restore_env(:fizz, :workos_client_module, previous_workos_client_module)
+      Fizz.WorkOSClientMock.reset()
     end)
 
     :ok
@@ -55,31 +35,24 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
     end
 
     test "build_scope/3 resolves organization role from WorkOS memberships", %{user: user} do
-      Process.put(:workos_http_responses, [
+      Fizz.WorkOSClientMock.put_response(:get_user_organization_membership, fn workos_user_id,
+                                                                               organization_id ->
+        assert workos_user_id == user.workos_user_id
+        assert organization_id == "org_123"
+
         {:ok,
-         %Req.Response{
-           status: 200,
-           body: %{
-             "data" => [
-               %{
-                 "id" => "om_123",
-                 "organization_id" => "org_123",
-                 "status" => "active",
-                 "role" => %{"slug" => "admin"}
-               }
-             ]
-           }
+         %{
+           "id" => "om_123",
+           "organization_id" => "org_123",
+           "status" => "active",
+           "role" => %{"slug" => "admin"}
          }}
-      ])
+      end)
 
       assert {:ok, organization_scope} = Accounts.build_scope(Scope.for_user(user), "org_123")
       assert organization_scope.organization_id == "org_123"
       assert organization_scope.organization_role == :admin
       assert Scope.organization_admin?(organization_scope)
-
-      assert_receive {:workos_http_request, request}
-      assert request[:method] == :get
-      assert request[:url] == "/user_management/organization_memberships"
     end
 
     test "create_workspace/2 creates admin workspace membership for creator", %{
@@ -96,9 +69,7 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
                )
     end
 
-    test "list_workspaces/1 limits members to assigned workspaces", %{
-      owner_scope: owner_scope
-    } do
+    test "list_workspaces/1 limits members to assigned workspaces", %{owner_scope: owner_scope} do
       {:ok, workspace_a} = Accounts.create_workspace(owner_scope, %{name: "Client A"})
       {:ok, _workspace_b} = Accounts.create_workspace(owner_scope, %{name: "Client B"})
 
@@ -107,22 +78,16 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
       {:ok, _workspace_membership} =
         Accounts.add_workspace_member(owner_scope, workspace_a.id, user, %{role: :member})
 
-      Process.put(:workos_http_responses, [
+      Fizz.WorkOSClientMock.put_response(
+        :get_user_organization_membership,
         {:ok,
-         %Req.Response{
-           status: 200,
-           body: %{
-             "data" => [
-               %{
-                 "id" => "om_456",
-                 "organization_id" => "org_123",
-                 "status" => "active",
-                 "role" => %{"slug" => "member"}
-               }
-             ]
-           }
+         %{
+           "id" => "om_456",
+           "organization_id" => "org_123",
+           "status" => "active",
+           "role" => %{"slug" => "member"}
          }}
-      ])
+      )
 
       {:ok, user_scope} = Accounts.build_scope(Scope.for_user(user), "org_123")
       {:ok, workspaces} = Accounts.list_workspaces(user_scope)

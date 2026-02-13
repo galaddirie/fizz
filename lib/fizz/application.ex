@@ -15,6 +15,7 @@ defmodule Fizz.Application do
       {Oban, Application.fetch_env!(:fizz, Oban)},
       {Phoenix.PubSub, name: Fizz.PubSub},
       FizzWeb.Presence,
+      Fizz.Sprites.Broker.Supervisor,
       # Start a worker by calling: Fizz.Worker.start_link(arg)
       # {Fizz.Worker, arg},
       # Start to serve requests, typically the last entry
