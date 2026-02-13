@@ -11,8 +11,6 @@ defmodule Fizz.Sprites.ManagedSprite do
     field :sprite_name, :string
     field :display_name, :string
     field :description, :string
-    # Provider-owned runtime fields.
-    field :status, :string, virtual: true
     field :url, :string, virtual: true
     field :url_auth_mode, :string, default: "bearer"
     field :metadata, :map, default: %{}

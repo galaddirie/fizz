@@ -96,7 +96,7 @@ defmodule FizzWeb.SpriteIndexLive do
   end
 
   defp load_sprites(socket) do
-    case Sprites.list_sprites(socket.assigns.sprite_scope) do
+    case Sprites.list_sprites(socket.assigns.sprite_scope, include_archived: true) do
       {:ok, sprites} ->
         assign(socket, :sprites, sprites)
 

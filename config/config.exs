@@ -10,7 +10,12 @@ import Config
 config :fizz, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  plugins: [],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"*/5 * * * *", Fizz.Sprites.ReconciliationWorker}
+     ]}
+  ],
   queues: [default: 10],
   repo: Fizz.Repo
 

@@ -5,6 +5,7 @@ defmodule Fizz.SpritesTest do
   alias Fizz.Accounts.WorkspaceMembership
   alias Fizz.Repo
   alias Fizz.Sprites
+  alias Fizz.Sprites.SpriteSession
 
   import Fizz.AccountsFixtures
 
@@ -45,17 +46,18 @@ defmodule Fizz.SpritesTest do
              })
 
     assert sprite.workspace_id == sprite_scope.workspace.id
-    assert sprite.status == "ready"
     assert sprite.url_auth_mode == "bearer"
     assert sprite.sprite_name =~ ~r/^fizz-research-sandbox-[a-z0-9]+$/
+    assert is_nil(sprite.archived_at)
 
     assert {:ok, [listed_sprite]} = Sprites.list_sprites(sprite_scope)
     assert listed_sprite.id == sprite.id
-    assert listed_sprite.status == "ready"
+    assert is_nil(listed_sprite.archived_at)
 
     assert_receive {:sprites_provider_call, {:create_sprite, _sprite_name, _config}}
     assert_receive {:sprites_provider_call, {:update_network_policy, _sprite_name, _policy}}
     assert_receive {:sprites_provider_call, {:update_url_settings, _sprite_name, _settings}}
+    refute_receive {:sprites_provider_call, {:get_sprite, _sprite_name}}
   end
 
   test "create_sprite/3 keeps successful creations when post-create setup fails", %{
@@ -73,7 +75,7 @@ defmodule Fizz.SpritesTest do
                "display_name" => "Provisioning Delay"
              })
 
-    assert sprite.status == "ready"
+    assert is_nil(sprite.archived_at)
     assert is_list(sprite.metadata["provisioning_warnings"])
 
     assert Enum.map(sprite.metadata["provisioning_warnings"], & &1["step"]) == [
@@ -118,6 +120,7 @@ defmodule Fizz.SpritesTest do
              )
 
     session_id = session.session_id
+    assert is_binary(session.provider_session_id)
     console_pid = Fizz.Sprites.Console.Registry.whereis(session_id)
 
     assert :ok =
@@ -136,6 +139,7 @@ defmodule Fizz.SpritesTest do
 
     assert_receive {:sprites_provider_call, {:kill_session, _sprite_name, provider_session_id}}
     assert is_binary(provider_session_id)
+    assert provider_session_id == session.provider_session_id
 
     assert_receive {:console_session_event, ^session_id,
                     %{type: "session_exit", reason: "terminated_by_user"}}
@@ -203,9 +207,76 @@ defmodule Fizz.SpritesTest do
 
     assert {:ok, [session]} = Sprites.list_sessions(sprite_scope, sprite.id)
     assert session.id == opened.session_id
+    assert session.provider_session_id == opened.provider_session_id
     assert session.state in ["starting", "attached", "grace_detaching", "detached"]
     assert session.interactive_command == "bash"
     assert :ok = Sprites.terminate_console_session(sprite_scope, sprite.id, opened.session_id)
+  end
+
+  test "reconcile_sessions/1 marks missing provider sessions as ended", %{
+    sprite_scope: sprite_scope
+  } do
+    assert {:ok, sprite} =
+             Sprites.create_sprite(sprite_scope, %{
+               "display_name" => "Reconcile Ended Session Sprite"
+             })
+
+    session =
+      %SpriteSession{}
+      |> SpriteSession.changeset(%{
+        managed_sprite_id: sprite.id,
+        owner_user_id: sprite_scope.user.id,
+        pane_id: "pane-reconcile-ended",
+        provider_session_id: "provider-session-missing",
+        interactive_command: "bash",
+        tty: true,
+        state: "attached",
+        generation: 1,
+        last_seq: 0
+      })
+      |> Repo.insert!()
+
+    Fizz.SpritesProviderMock.put_responses(:list_sessions, [{:ok, []}])
+
+    assert {:ok, summary} = Sprites.reconcile_sessions()
+    assert summary.sessions_ended == 1
+
+    reconciled = Repo.get!(SpriteSession, session.id)
+    assert reconciled.state == "ended"
+    assert reconciled.closed_reason == "reconciled_missing_provider_session"
+  end
+
+  test "reconcile_sessions/1 backfills provider session ids when mapping is unambiguous", %{
+    sprite_scope: sprite_scope
+  } do
+    assert {:ok, sprite} =
+             Sprites.create_sprite(sprite_scope, %{
+               "display_name" => "Reconcile Backfill Session Sprite"
+             })
+
+    session =
+      %SpriteSession{}
+      |> SpriteSession.changeset(%{
+        managed_sprite_id: sprite.id,
+        owner_user_id: sprite_scope.user.id,
+        pane_id: "pane-reconcile-backfill",
+        interactive_command: "bash",
+        tty: true,
+        state: "starting",
+        generation: 1,
+        last_seq: 0
+      })
+      |> Repo.insert!()
+
+    Fizz.SpritesProviderMock.put_responses(:list_sessions, [
+      {:ok, [%{id: "provider-session-reconciled"}]}
+    ])
+
+    assert {:ok, summary} = Sprites.reconcile_sessions()
+    assert summary.sessions_backfilled == 1
+
+    reconciled = Repo.get!(SpriteSession, session.id)
+    assert reconciled.provider_session_id == "provider-session-reconciled"
   end
 
   defp member_scope_for_workspace(workspace, organization_id) do

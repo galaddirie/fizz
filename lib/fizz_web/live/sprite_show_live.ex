@@ -159,6 +159,7 @@ defmodule FizzWeb.SpriteShowLive do
           existing
           |> Map.put(:client_id, client_id)
           |> Map.put(:session_id, opened.session_id)
+          |> Map.put(:provider_session_id, opened.provider_session_id)
           |> Map.put(:generation, opened.generation)
           |> Map.put(:state, opened.state)
           |> Map.put(:lease_state, opened.lease_state)
@@ -631,6 +632,7 @@ defmodule FizzWeb.SpriteShowLive do
       label: "Console #{index}",
       client_id: nil,
       session_id: nil,
+      provider_session_id: nil,
       generation: nil,
       state: "starting",
       lease_state: "viewer",

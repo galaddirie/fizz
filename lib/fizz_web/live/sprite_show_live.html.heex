@@ -141,7 +141,10 @@
           >
             <div class="mb-2 flex items-center justify-between gap-2 text-xs">
               <div class="flex items-center gap-2">
-                <span class="font-mono">{pane.session_id || "pending"}</span>
+                <span class="font-mono">local: {pane.session_id || "pending"}</span>
+                <span class="font-mono text-muted">
+                  provider: {pane.provider_session_id || "pending"}
+                </span>
                 <span class="rounded border border-base-300 px-1.5 py-0.5">{pane.state}</span>
                 <span class="rounded border border-base-300 px-1.5 py-0.5">
                   {if pane.lease_state == "writer", do: "writer", else: "view-only"}
@@ -201,6 +204,15 @@
             <p class="text-sm font-medium text-base-content">{session.interactive_command}</p>
             <p class="text-xs text-muted">
               State: {session.state} • Pane: {session.pane_id} • Gen: {session.generation}
+            </p>
+            <p id={"sprite-session-local-id-#{session.id}"} class="text-xs font-mono text-muted">
+              Local Session ID: {session.id}
+            </p>
+            <p
+              id={"sprite-session-provider-id-#{session.id}"}
+              class="text-xs font-mono text-muted"
+            >
+              Sprites API Session ID: {session.provider_session_id || "pending"}
             </p>
           </div>
           <p :if={@sessions == []} id="sprite-session-empty" class="text-sm text-muted">

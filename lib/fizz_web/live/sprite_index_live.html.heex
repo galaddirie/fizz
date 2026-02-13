@@ -55,7 +55,6 @@
           <thead>
             <tr>
               <th>Name</th>
-              <th>Status</th>
               <th>Sprite Name</th>
               <th>Auth</th>
               <th>Actions</th>
@@ -64,23 +63,30 @@
           <tbody id="sprite-index-list">
             <tr :for={sprite <- @sprites} id={"sprite-row-#{sprite.id}"}>
               <td>
-                <.link
-                  id={"sprite-show-link-#{sprite.id}"}
-                  navigate={
-                    ~p"/org/#{@organization_id}/workspaces/#{@workspace_id}/sprites/#{sprite.id}"
-                  }
-                  class="font-medium text-primary hover:underline"
-                >
-                  {sprite.display_name}
-                </.link>
+                <div class="flex items-center gap-2">
+                  <.link
+                    id={"sprite-show-link-#{sprite.id}"}
+                    navigate={
+                      ~p"/org/#{@organization_id}/workspaces/#{@workspace_id}/sprites/#{sprite.id}"
+                    }
+                    class="font-medium text-primary hover:underline"
+                  >
+                    {sprite.display_name}
+                  </.link>
+                  <span
+                    :if={not is_nil(sprite.archived_at)}
+                    class="inline-flex rounded-full border border-base-300 bg-base-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted"
+                  >
+                    Archived
+                  </span>
+                </div>
               </td>
-              <td>{sprite.status}</td>
               <td class="font-mono text-xs">{sprite.sprite_name}</td>
               <td>{sprite.url_auth_mode}</td>
               <td>
                 <div class="flex gap-2">
                   <button
-                    :if={can_manage_sprites?(@sprite_scope)}
+                    :if={can_manage_sprites?(@sprite_scope) and is_nil(sprite.archived_at)}
                     id={"sprite-archive-#{sprite.id}"}
                     phx-click="archive_sprite"
                     phx-value-id={sprite.id}
@@ -103,7 +109,7 @@
               </td>
             </tr>
             <tr :if={@sprites == []} id="sprite-index-empty-row">
-              <td colspan="5" class="py-8 text-center text-sm text-muted">No sprites yet.</td>
+              <td colspan="4" class="py-8 text-center text-sm text-muted">No sprites yet.</td>
             </tr>
           </tbody>
         </table>

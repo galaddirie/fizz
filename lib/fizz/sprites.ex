@@ -1,6 +1,6 @@
 defmodule Fizz.Sprites do
   @moduledoc """
-  Workspace-scoped sprite management with provider-owned runtime state.
+  Workspace-scoped sprite management with locally persisted metadata.
   """
 
   import Ecto.Query, warn: false
@@ -24,6 +24,7 @@ defmodule Fizz.Sprites do
   @default_egress_preset "minimal_agent"
   @default_console_grace_seconds 20
   @active_session_states ~w(starting attached grace_detaching detached)
+  @reconciled_missing_provider_reason "reconciled_missing_provider_session"
 
   @type scope :: Scope.t()
 
@@ -61,7 +62,6 @@ defmodule Fizz.Sprites do
       sprites =
         query
         |> Repo.all()
-        |> Enum.map(&hydrate_sprite/1)
 
       {:ok, sprites}
     end
@@ -100,7 +100,7 @@ defmodule Fizz.Sprites do
               provisioning_warnings: post_create.warnings
             })
 
-            {:ok, hydrate_sprite(updated_sprite)}
+            {:ok, updated_sprite}
           end
 
         {:error, reason} ->
@@ -119,7 +119,6 @@ defmodule Fizz.Sprites do
       :ok ->
         scope
         |> fetch_sprite!(sprite_id)
-        |> hydrate_sprite()
 
       {:error, reason} ->
         raise ArgumentError, "cannot load sprite: #{inspect(reason)}"
@@ -133,7 +132,7 @@ defmodule Fizz.Sprites do
          {:ok, sprite} <- fetch_sprite(scope, sprite_id),
          {:ok, sprite} <- update_managed_sprite(sprite, %{archived_at: DateTime.utc_now()}) do
       emit_event(sprite, scope.user, "sprite.archived", %{})
-      {:ok, hydrate_sprite(sprite)}
+      {:ok, sprite}
     end
   end
 
@@ -146,7 +145,7 @@ defmodule Fizz.Sprites do
          :ok <- provider_module().destroy_sprite(sprite.sprite_name),
          {:ok, sprite} <- update_managed_sprite(sprite, %{deleted_at: DateTime.utc_now()}) do
       emit_event(sprite, scope.user, "sprite.destroyed", %{})
-      {:ok, hydrate_sprite(sprite)}
+      {:ok, sprite}
     end
   end
 
@@ -222,6 +221,7 @@ defmodule Fizz.Sprites do
            ) do
       emit_event(sprite, scope.user, "sprite.console.client_opened", %{
         session_id: session.id,
+        provider_session_id: snapshot.provider_session_id,
         pane_id: pane_id
       })
 
@@ -342,6 +342,84 @@ defmodule Fizz.Sprites do
         |> Enum.map(&sprite_session_to_map/1)
 
       {:ok, sessions}
+    end
+  end
+
+  @spec reconcile_sessions(keyword()) :: {:ok, map()} | {:error, term()}
+  def reconcile_sessions(opts \\ []) when is_list(opts) do
+    if provider_module().configured?() do
+      now = DateTime.utc_now()
+
+      active_states =
+        Keyword.get(opts, :states, @active_session_states)
+        |> List.wrap()
+
+      sessions =
+        from(session in SpriteSession,
+          join: sprite in ManagedSprite,
+          on: session.managed_sprite_id == sprite.id,
+          where: session.state in ^active_states and is_nil(sprite.deleted_at),
+          select: %{
+            id: session.id,
+            sprite_name: sprite.sprite_name,
+            provider_session_id: session.provider_session_id
+          }
+        )
+        |> Repo.all()
+
+      summary =
+        sessions
+        |> Enum.group_by(& &1.sprite_name)
+        |> Enum.reduce(
+          %{
+            sprites_checked: 0,
+            sprites_failed: 0,
+            sessions_checked: 0,
+            sessions_backfilled: 0,
+            sessions_ended: 0
+          },
+          fn {sprite_name, sprite_sessions}, acc ->
+            case provider_module().list_sessions(sprite_name) do
+              {:ok, remote_sessions} ->
+                remote_session_ids =
+                  remote_sessions
+                  |> Enum.map(&read_value(&1, [:id, "id"]))
+                  |> Enum.filter(&present_provider_session_id?/1)
+                  |> MapSet.new()
+
+                {backfilled_count, ended_count} =
+                  reconcile_sprite_sessions(sprite_sessions, remote_session_ids, now)
+
+                %{
+                  acc
+                  | sprites_checked: acc.sprites_checked + 1,
+                    sessions_checked: acc.sessions_checked + length(sprite_sessions),
+                    sessions_backfilled: acc.sessions_backfilled + backfilled_count,
+                    sessions_ended: acc.sessions_ended + ended_count
+                }
+
+              {:error, _reason} ->
+                %{
+                  acc
+                  | sprites_checked: acc.sprites_checked + 1,
+                    sprites_failed: acc.sprites_failed + 1,
+                    sessions_checked: acc.sessions_checked + length(sprite_sessions)
+                }
+            end
+          end
+        )
+
+      {:ok, summary}
+    else
+      {:ok,
+       %{
+         sprites_checked: 0,
+         sprites_failed: 0,
+         sessions_checked: 0,
+         sessions_backfilled: 0,
+         sessions_ended: 0,
+         skipped: :sprites_not_configured
+       }}
     end
   end
 
@@ -478,40 +556,6 @@ defmodule Fizz.Sprites do
         ]
       }
     })
-  end
-
-  defp hydrate_sprite(%ManagedSprite{} = sprite) do
-    if provider_module().configured?() do
-      case provider_module().get_sprite(sprite.sprite_name) do
-        {:ok, remote_sprite} ->
-          apply_runtime_sprite(sprite, remote_sprite)
-
-        {:error, _reason} ->
-          apply_runtime_sprite(sprite, nil, "unavailable")
-      end
-    else
-      apply_runtime_sprite(sprite, nil, "unavailable")
-    end
-  end
-
-  defp apply_runtime_sprite(
-         %ManagedSprite{} = sprite,
-         remote_sprite,
-         fallback_status \\ "unknown"
-       ) do
-    remote_url_settings = read_value(remote_sprite, [:url_settings, "url_settings"]) || %{}
-
-    remote_auth_mode =
-      normalize_optional_url_auth_mode(read_value(remote_url_settings, [:auth, "auth"]))
-
-    %{
-      sprite
-      | status:
-          normalize_remote_status(read_value(remote_sprite, [:status, "status"])) ||
-            fallback_status,
-        url: read_value(remote_sprite, [:url, "url"]),
-        url_auth_mode: remote_auth_mode || sprite.url_auth_mode
-    }
   end
 
   defp insert_managed_sprite(scope, attrs, display_name) do
@@ -782,6 +826,75 @@ defmodule Fizz.Sprites do
       exit_code: session.exit_code
     }
   end
+
+  defp reconcile_sprite_sessions(sprite_sessions, remote_session_ids, now) do
+    known_provider_ids =
+      sprite_sessions
+      |> Enum.map(& &1.provider_session_id)
+      |> Enum.filter(&present_provider_session_id?/1)
+      |> MapSet.new()
+
+    nil_provider_sessions =
+      Enum.filter(sprite_sessions, fn session ->
+        not present_provider_session_id?(session.provider_session_id)
+      end)
+
+    unmatched_remote_ids =
+      remote_session_ids
+      |> MapSet.difference(known_provider_ids)
+      |> MapSet.to_list()
+
+    backfilled_count =
+      case {nil_provider_sessions, unmatched_remote_ids} do
+        {[session], [provider_session_id]} ->
+          Repo.update_all(
+            from(sprite_session in SpriteSession, where: sprite_session.id == ^session.id),
+            set: [provider_session_id: provider_session_id, updated_at: now]
+          )
+          |> elem(0)
+
+        _ ->
+          0
+      end
+
+    ended_session_ids =
+      sprite_sessions
+      |> Enum.filter(fn session ->
+        present_provider_session_id?(session.provider_session_id) and
+          not MapSet.member?(remote_session_ids, session.provider_session_id)
+      end)
+      |> Enum.map(& &1.id)
+
+    ended_count =
+      case ended_session_ids do
+        [] ->
+          0
+
+        ids ->
+          Repo.update_all(
+            from(sprite_session in SpriteSession,
+              where: sprite_session.id in ^ids and sprite_session.state in ^@active_session_states
+            ),
+            set: [
+              state: "ended",
+              closed_reason: @reconciled_missing_provider_reason,
+              last_activity_at: now,
+              grace_started_at: nil,
+              updated_at: now
+            ]
+          )
+          |> elem(0)
+      end
+
+    {backfilled_count, ended_count}
+  end
+
+  defp present_provider_session_id?(provider_session_id)
+       when is_binary(provider_session_id) do
+    provider_session_id != ""
+  end
+
+  defp present_provider_session_id?(_provider_session_id), do: false
 
   defp mark_session_failed(session_id, reason) do
     now = DateTime.utc_now()
@@ -1079,25 +1192,6 @@ defmodule Fizz.Sprites do
   defp normalize_url_auth_mode(mode) when mode in ["public", "bearer"], do: mode
   defp normalize_url_auth_mode(mode) when mode in [:public, :bearer], do: Atom.to_string(mode)
   defp normalize_url_auth_mode(_mode), do: "bearer"
-
-  defp normalize_optional_url_auth_mode(mode) when mode in ["public", "bearer"], do: mode
-
-  defp normalize_optional_url_auth_mode(mode) when mode in [:public, :bearer],
-    do: Atom.to_string(mode)
-
-  defp normalize_optional_url_auth_mode(_mode), do: nil
-
-  defp normalize_remote_status(status) when is_binary(status) do
-    status
-    |> String.trim()
-    |> String.downcase()
-    |> case do
-      "" -> nil
-      value -> value
-    end
-  end
-
-  defp normalize_remote_status(_status), do: nil
 
   defp maybe_exclude_archived(query, true), do: query
 
