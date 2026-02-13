@@ -80,9 +80,6 @@ if sprites_api_key = System.get_env("SPRITES_API_KEY") do
   config :fizz, :sprites_api_key, sprites_api_key
 end
 
-if sprites_base_url = System.get_env("SPRITES_BASE_URL") do
-  config :fizz, :sprites_base_url, sprites_base_url
-end
 
 if config_env() == :prod do
   database_url =

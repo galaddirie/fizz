@@ -13,8 +13,6 @@ defmodule Fizz.Application do
       Fizz.Repo,
       {DNSCluster, query: Application.get_env(:fizz, :dns_cluster_query) || :ignore},
       {Oban, Application.fetch_env!(:fizz, Oban)},
-      {Registry, keys: :unique, name: Fizz.Sprites.Console.Registry},
-      Fizz.Sprites.Console.Supervisor,
       {Phoenix.PubSub, name: Fizz.PubSub},
       FizzWeb.Presence,
       # Start a worker by calling: Fizz.Worker.start_link(arg)
