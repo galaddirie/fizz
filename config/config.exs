@@ -11,7 +11,7 @@ config :fizz, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
   plugins: [
-    {Oban.Plugins.Cron}
+    {Oban.Plugins.Cron, crontab: []}
   ],
   queues: [default: 10],
   repo: Fizz.Repo
