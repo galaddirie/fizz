@@ -7,16 +7,99 @@ defmodule Fizz.AccountsTest do
 
   import Fizz.AccountsFixtures
 
-  setup do
-    previous_module = Application.get_env(:fizz, :workos_client_module)
-    mock_store = start_supervised!({Agent, fn -> %{} end})
+  defmodule UserManagementMock do
+    def get_authorization_url(_params), do: {:ok, "https://auth.workos.test/authorize"}
+    def create_user(_params), do: {:error, :not_implemented}
+    def create_organization_membership(_params), do: {:error, :not_implemented}
 
-    Fizz.WorkOSClientMock.configure(self(), mock_store)
-    Application.put_env(:fizz, :workos_client_module, Fizz.WorkOSClientMock)
+    def authenticate_with_code(params) do
+      send(self(), {:workos_authenticate_with_code, params})
+
+      case params[:code] do
+        "new-user" ->
+          {:ok,
+           %WorkOS.UserManagement.Authentication{
+             user: %{
+               "id" => "user_workos_new",
+               "email" => "new-user@example.com",
+               "email_verified" => true
+             },
+             access_token: unsigned_jwt("user_workos_new", "session_workos_new"),
+             refresh_token: "refresh_workos_new",
+             authentication_method: "sso"
+           }}
+
+        "existing-id" ->
+          {:ok,
+           %WorkOS.UserManagement.Authentication{
+             user: %{
+               "id" => "user_workos_existing",
+               "email" => "updated@example.com",
+               "email_verified" => true
+             },
+             access_token: unsigned_jwt("user_workos_existing", "session_workos_existing"),
+             refresh_token: "refresh_workos_existing",
+             authentication_method: "sso"
+           }}
+
+        "link-existing-email" ->
+          {:ok,
+           %WorkOS.UserManagement.Authentication{
+             user: %{
+               "id" => "user_workos_linked",
+               "email" => "link-existing@example.com",
+               "email_verified" => false
+             },
+             access_token: unsigned_jwt("user_workos_linked", "session_workos_linked"),
+             refresh_token: "refresh_workos_linked",
+             authentication_method: "sso"
+           }}
+
+        "conflict-email" ->
+          {:ok,
+           %WorkOS.UserManagement.Authentication{
+             user: %{
+               "id" => "user_workos_conflict",
+               "email" => "conflict@example.com",
+               "email_verified" => true
+             },
+             access_token: unsigned_jwt("user_workos_conflict", "session_workos_conflict"),
+             refresh_token: "refresh_workos_conflict",
+             authentication_method: "sso"
+           }}
+
+        _ ->
+          {:error, {:workos_error, "invalid_grant", "Invalid authorization code"}}
+      end
+    end
+
+    defp unsigned_jwt(sub, sid) do
+      header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
+
+      payload =
+        Base.url_encode64(
+          Jason.encode!(%{
+            sub: sub,
+            sid: sid,
+            exp: System.os_time(:second) + 3600
+          }),
+          padding: false
+        )
+
+      "#{header}.#{payload}."
+    end
+  end
+
+  setup do
+    previous_module = Application.get_env(:fizz, :workos_user_management_module)
+    Application.put_env(:fizz, :workos_user_management_module, UserManagementMock)
 
     on_exit(fn ->
-      restore_env(:fizz, :workos_client_module, previous_module)
-      Fizz.WorkOSClientMock.reset()
+      if previous_module do
+        Application.put_env(:fizz, :workos_user_management_module, previous_module)
+      else
+        Application.delete_env(:fizz, :workos_user_management_module)
+      end
     end)
 
     :ok
@@ -57,19 +140,6 @@ defmodule Fizz.AccountsTest do
 
   describe "authenticate_user_with_workos_code/2" do
     test "creates a new local user when workos identity is unknown" do
-      put_authenticate_with_code_response(fn params ->
-        send(self(), {:workos_authenticate_with_code, params})
-
-        {:ok,
-         authentication_payload(
-           "user_workos_new",
-           "new-user@example.com",
-           true,
-           "session_workos_new",
-           "refresh_workos_new"
-         )}
-      end)
-
       assert {:ok, user} =
                Accounts.authenticate_user_with_workos_code("new-user",
                  ip_address: "127.0.0.1",
@@ -87,17 +157,6 @@ defmodule Fizz.AccountsTest do
     end
 
     test "updates a local user matched by workos_user_id" do
-      put_authenticate_with_code_response(fn _params ->
-        {:ok,
-         authentication_payload(
-           "user_workos_existing",
-           "updated@example.com",
-           true,
-           "session_workos_existing",
-           "refresh_workos_existing"
-         )}
-      end)
-
       user_fixture(%{email: "before@example.com", workos_user_id: "user_workos_existing"})
 
       assert {:ok, user} = Accounts.authenticate_user_with_workos_code("existing-id")
@@ -107,17 +166,6 @@ defmodule Fizz.AccountsTest do
     end
 
     test "links an existing local email to a new workos_user_id" do
-      put_authenticate_with_code_response(fn _params ->
-        {:ok,
-         authentication_payload(
-           "user_workos_linked",
-           "link-existing@example.com",
-           false,
-           "session_workos_linked",
-           "refresh_workos_linked"
-         )}
-      end)
-
       existing_user = Repo.insert!(%User{email: "link-existing@example.com"})
 
       assert {:ok, user} = Accounts.authenticate_user_with_workos_code("link-existing-email")
@@ -128,17 +176,6 @@ defmodule Fizz.AccountsTest do
     end
 
     test "returns conflict when email belongs to another workos identity" do
-      put_authenticate_with_code_response(fn _params ->
-        {:ok,
-         authentication_payload(
-           "user_workos_conflict",
-           "conflict@example.com",
-           true,
-           "session_workos_conflict",
-           "refresh_workos_conflict"
-         )}
-      end)
-
       user_fixture(%{email: "conflict@example.com", workos_user_id: "user_workos_local"})
 
       assert {:error, :workos_account_conflict} =
@@ -146,10 +183,6 @@ defmodule Fizz.AccountsTest do
     end
 
     test "returns the underlying workos error when code exchange fails" do
-      put_authenticate_with_code_response(fn _params ->
-        {:error, {:workos_error, "invalid_grant", "Invalid authorization code"}}
-      end)
-
       assert {:error, {:workos_error, "invalid_grant", "Invalid authorization code"}} =
                Accounts.authenticate_user_with_workos_code("invalid-code")
     end
@@ -157,17 +190,6 @@ defmodule Fizz.AccountsTest do
 
   describe "authenticate_user_with_workos_code_and_session/2" do
     test "returns the resolved user and WorkOS session id" do
-      put_authenticate_with_code_response(fn _params ->
-        {:ok,
-         authentication_payload(
-           "user_workos_new",
-           "new-user@example.com",
-           true,
-           "session_workos_new",
-           "refresh_workos_new"
-         )}
-      end)
-
       assert {:ok, %{user: user, workos_session_id: "session_workos_new"}} =
                Accounts.authenticate_user_with_workos_code_and_session("new-user")
 
@@ -175,17 +197,6 @@ defmodule Fizz.AccountsTest do
     end
 
     test "returns the WorkOS session payload when tokens are available" do
-      put_authenticate_with_code_response(fn _params ->
-        {:ok,
-         authentication_payload(
-           "user_workos_existing",
-           "updated@example.com",
-           true,
-           "session_workos_existing",
-           "refresh_workos_existing"
-         )}
-      end)
-
       assert {:ok,
               %{workos_session: workos_session, workos_session_id: "session_workos_existing"}} =
                Accounts.authenticate_user_with_workos_code_and_session("existing-id")
@@ -263,40 +274,4 @@ defmodule Fizz.AccountsTest do
                Accounts.revoke_user_sessions_by_workos_user_id(nil)
     end
   end
-
-  defp put_authenticate_with_code_response(response) do
-    Fizz.WorkOSClientMock.put_response(:authenticate_with_code, response)
-  end
-
-  defp authentication_payload(id, email, email_verified, session_id, refresh_token) do
-    %WorkOS.UserManagement.Authentication{
-      user: %{
-        "id" => id,
-        "email" => email,
-        "email_verified" => email_verified
-      },
-      access_token: unsigned_jwt(id, session_id),
-      refresh_token: refresh_token,
-      authentication_method: "sso"
-    }
-  end
-
-  defp unsigned_jwt(sub, sid) do
-    header = Base.url_encode64(~s({"alg":"none","typ":"JWT"}), padding: false)
-
-    payload =
-      Base.url_encode64(
-        Jason.encode!(%{
-          sub: sub,
-          sid: sid,
-          exp: System.os_time(:second) + 3600
-        }),
-        padding: false
-      )
-
-    "#{header}.#{payload}."
-  end
-
-  defp restore_env(app, key, nil), do: Application.delete_env(app, key)
-  defp restore_env(app, key, value), do: Application.put_env(app, key, value)
 end

@@ -9,6 +9,7 @@ defmodule Fizz.Accounts.Workspace do
     field :description, :string
     field :metadata, :map, default: %{}
     field :workos_organization_id, :string
+
     has_many :memberships, WorkspaceMembership
 
     timestamps()
