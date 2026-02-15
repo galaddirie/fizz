@@ -1,5 +1,8 @@
 defmodule Fizz.Accounts.WorkOS.Helpers do
-  @moduledoc false
+  @moduledoc """
+  Shared utilities for parsing WorkOS API responses (flexible key reading,
+  role slug extraction).
+  """
 
   @doc """
   Reads the first non-nil value from a map for a list of candidate keys.

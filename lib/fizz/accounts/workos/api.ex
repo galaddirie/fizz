@@ -1,5 +1,8 @@
 defmodule Fizz.Accounts.WorkOS.Api do
-  @moduledoc false
+  @moduledoc """
+  Direct WorkOS API operations: audit events, widget tokens, Pipes access
+  tokens, and Vault objects.
+  """
 
   require Logger
 

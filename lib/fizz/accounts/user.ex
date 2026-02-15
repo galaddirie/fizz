@@ -1,4 +1,13 @@
 defmodule Fizz.Accounts.User do
+  @moduledoc """
+  A user authenticated via WorkOS AuthKit — no local passwords are stored.
+
+  The local record holds `email` and `workos_user_id` for linking to the
+  external WorkOS identity. `confirmed_at` tracks email verification status
+  (set when WorkOS reports the email as verified). `authenticated_at` is a
+  virtual field populated at login time and is not persisted.
+  """
+
   use Fizz.Schema
 
   schema "users" do

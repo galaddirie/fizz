@@ -1,5 +1,10 @@
 defmodule Fizz.Accounts.WorkOS.Memberships do
-  @moduledoc false
+  @moduledoc """
+  WorkOS organization membership management.
+
+  Ensures users exist in WorkOS, creates or finds organization memberships,
+  and syncs role changes between the local application and WorkOS.
+  """
 
   require Logger
 

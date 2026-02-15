@@ -3,7 +3,7 @@ defmodule FizzWeb.UserManagementLive do
 
   alias Fizz.Accounts
 
-  @tabs [
+  @user_tabs [
     %{
       id: "profile",
       title: "Profile",
@@ -17,22 +17,25 @@ defmodule FizzWeb.UserManagementLive do
       widget_name: "user-security"
     },
     %{
-      id: "connections",
-      title: "Connections",
-      icon: "hero-link",
-      widget_name: "pipes"
-    },
-    %{
       id: "sessions",
       title: "Sessions",
       icon: "hero-computer-desktop",
       widget_name: "user-sessions"
-    },
+    }
+  ]
+
+  @org_tabs [
     %{
       id: "members",
       title: "Members",
       icon: "hero-user-group",
       widget_name: "users-management"
+    },
+    %{
+      id: "connections",
+      title: "Connections",
+      icon: "hero-link",
+      widget_name: "pipes"
     },
     %{
       id: "api-keys",
@@ -42,9 +45,11 @@ defmodule FizzWeb.UserManagementLive do
     }
   ]
 
+  @all_tabs @user_tabs ++ @org_tabs
+
   @impl true
   def mount(_params, _session, socket) do
-    organizations = Accounts.list_user_workos_organizations(socket.assigns.current_scope)
+    organizations = Accounts.ensure_personal_organization(socket.assigns.current_scope)
     selected_organization_id = default_organization_id(organizations)
 
     socket =
@@ -56,8 +61,11 @@ defmodule FizzWeb.UserManagementLive do
       |> assign(:workos_user_id, socket.assigns.current_scope.user.workos_user_id)
       |> assign(:widget_token, nil)
       |> assign(:widget_error, nil)
-      |> assign(:tabs, @tabs)
+      |> assign(:user_tabs, @user_tabs)
+      |> assign(:org_tabs, @org_tabs)
       |> assign(:active_tab, "profile")
+      |> assign(:show_create_org_modal, false)
+      |> assign(:create_org_form, to_form(%{"name" => ""}, as: :create_org))
       |> assign_organization_form(selected_organization_id)
       |> assign_widget_token()
 
@@ -87,10 +95,55 @@ defmodule FizzWeb.UserManagementLive do
   end
 
   def handle_event("switch_tab", %{"tab" => tab_id}, socket) do
-    if Enum.any?(@tabs, &(&1.id == tab_id)) do
+    if Enum.any?(@all_tabs, &(&1.id == tab_id)) do
       {:noreply, assign(socket, :active_tab, tab_id)}
     else
       {:noreply, socket}
+    end
+  end
+
+  def handle_event("open_create_org_modal", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_create_org_modal, true)
+      |> assign(:create_org_form, to_form(%{"name" => ""}, as: :create_org))
+
+    {:noreply, socket}
+  end
+
+  def handle_event("close_create_org_modal", _params, socket) do
+    {:noreply, assign(socket, :show_create_org_modal, false)}
+  end
+
+  def handle_event("validate_create_org", %{"create_org" => params}, socket) do
+    {:noreply, assign(socket, :create_org_form, to_form(params, as: :create_org))}
+  end
+
+  def handle_event("create_organization", %{"create_org" => %{"name" => name}}, socket) do
+    name = String.trim(name)
+
+    if name == "" do
+      {:noreply, socket}
+    else
+      case Accounts.create_organization(socket.assigns.current_scope, %{name: name}) do
+        {:ok, org} ->
+          organizations =
+            Accounts.ensure_personal_organization(socket.assigns.current_scope)
+
+          socket =
+            socket
+            |> assign(:organizations, organizations)
+            |> assign(:organization_options, organization_options(organizations))
+            |> assign(:selected_organization_id, org.organization_id)
+            |> assign(:show_create_org_modal, false)
+            |> assign_organization_form(org.organization_id)
+            |> assign_widget_token()
+
+          {:noreply, socket}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Could not create organization.")}
+      end
     end
   end
 

@@ -17,8 +17,35 @@
     <%!-- Sidebar --%>
     <aside class="w-full shrink-0 lg:w-56">
       <nav class="flex flex-row gap-1 overflow-x-auto lg:flex-col">
+        <%!-- Account section --%>
+        <span class="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted lg:block">
+          Account
+        </span>
         <button
-          :for={tab <- @tabs}
+          :for={tab <- @user_tabs}
+          id={"settings-tab-#{tab.id}"}
+          phx-click="switch_tab"
+          phx-value-tab={tab.id}
+          class={[
+            "flex items-center gap-3 rounded-box px-3 py-2.5 text-left text-sm font-medium transition-colors whitespace-nowrap",
+            tab.id == @active_tab && "bg-primary/10 text-primary",
+            tab.id != @active_tab &&
+              "text-base-content/70 hover:bg-base-200 hover:text-base-content"
+          ]}
+        >
+          <.icon name={tab.icon} class="size-5 shrink-0" />
+          <span>{tab.title}</span>
+        </button>
+
+        <%!-- Divider --%>
+        <div class="hidden my-3 border-t border-base-200 lg:block"></div>
+
+        <%!-- Organization section --%>
+        <span class="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted lg:block">
+          Organization
+        </span>
+        <button
+          :for={tab <- @org_tabs}
           id={"settings-tab-#{tab.id}"}
           phx-click="switch_tab"
           phx-value-tab={tab.id}
@@ -34,6 +61,7 @@
         </button>
       </nav>
 
+      <%!-- Org selector --%>
       <div class="mt-4 border-t border-base-200 pt-4 hidden lg:block">
         <.form
           for={@org_form}
@@ -48,13 +76,20 @@
             options={@organization_options}
           />
         </.form>
+        <button
+          phx-click="open_create_org_modal"
+          class="btn btn-ghost btn-sm mt-2 w-full gap-2 text-base-content/70"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          <span>New organization</span>
+        </button>
       </div>
     </aside>
 
     <%!-- Main content --%>
     <div class="min-w-0 flex-1">
       <%!-- Mobile org selector --%>
-      <div :if={length(@organization_options) > 1} class="mb-4 lg:hidden">
+      <div :if={length(@organization_options) > 0} class="mb-4 lg:hidden">
         <.form
           for={@org_form}
           id="user-management-organization-form-mobile"
@@ -68,6 +103,13 @@
             options={@organization_options}
           />
         </.form>
+        <button
+          phx-click="open_create_org_modal"
+          class="btn btn-ghost btn-sm mt-2 gap-2 text-base-content/70"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          <span>New organization</span>
+        </button>
       </div>
 
       <p
@@ -75,11 +117,11 @@
         id="user-management-no-organization"
         class="rounded-box border border-warning/40 bg-warning/10 p-4 text-sm"
       >
-        No active organization memberships were found for this account.
+        Unable to provision organization settings. Please try again later.
       </p>
 
       <p
-        :if={@widget_error}
+        :if={@widget_error && @organization_options != []}
         id="user-management-widget-error"
         class="rounded-box border border-error/40 bg-error/10 p-4 text-sm"
       >
@@ -88,7 +130,7 @@
 
       <div id="user-management-context">
         <%= if @widget_token do %>
-          <% tab = active_tab_config(@tabs, @active_tab) %>
+          <% tab = active_tab_config(@user_tabs ++ @org_tabs, @active_tab) %>
           <div
             id={"settings-widget-#{tab.id}-#{@selected_organization_id}"}
             phx-hook="WorkOSReactWidget"
@@ -137,6 +179,46 @@
           </div>
         <% end %>
       </div>
+    </div>
+  </div>
+
+  <%!-- Create Organization Modal --%>
+  <div
+    :if={@show_create_org_modal}
+    id="create-org-modal"
+    class="modal modal-open"
+    phx-window-keydown="close_create_org_modal"
+    phx-key="Escape"
+  >
+    <div class="modal-backdrop" phx-click="close_create_org_modal"></div>
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">Create Organization</h3>
+      <p class="mt-2 text-sm text-base-content/70">
+        Create a new organization to collaborate with your team.
+      </p>
+      <.form
+        for={@create_org_form}
+        id="create-org-form"
+        phx-change="validate_create_org"
+        phx-submit="create_organization"
+        class="mt-4"
+      >
+        <.input
+          field={@create_org_form[:name]}
+          type="text"
+          label="Organization name"
+          placeholder="My Organization"
+          phx-debounce="300"
+        />
+        <div class="modal-action">
+          <button type="button" class="btn" phx-click="close_create_org_modal">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-primary">
+            Create
+          </button>
+        </div>
+      </.form>
     </div>
   </div>
 </Layouts.app>

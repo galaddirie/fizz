@@ -172,22 +172,69 @@ defmodule FizzWeb.UserManagementLiveTest do
              end)
     end
 
-    test "shows a single no-organization state when no WorkOS organization is linked", %{
-      conn: conn
-    } do
-      put_http_responses([
+    test "auto-provisions a personal organization when user has none", %{conn: conn, user: user} do
+      org_name = "#{String.split(user.email, "@") |> List.first()}'s Organization"
+
+      auto_provision_responses = fn ->
+        [
+          # list_user_workos_organizations → empty
+          memberships_response([]),
+          # create_workos_organization → new org
+          {:ok,
+           %Req.Response{
+             status: 201,
+             body: %{"id" => "org_personal", "name" => org_name}
+           }},
+          # create_organization_membership → owner
+          {:ok,
+           %Req.Response{
+             status: 201,
+             body: %{
+               "id" => "om_personal",
+               "user_id" => user.workos_user_id,
+               "organization_id" => "org_personal",
+               "status" => "active",
+               "role" => %{"slug" => "owner"}
+             }
+           }},
+          # user_has_organization_membership? check for widget token
+          memberships_response([
+            %{
+              "id" => "om_personal",
+              "organization_id" => "org_personal",
+              "status" => "active",
+              "role" => %{"slug" => "owner"}
+            }
+          ]),
+          # generate_widget_token
+          widget_response("widget_token_personal")
+        ]
+      end
+
+      # Static render + connected mount
+      put_http_responses(auto_provision_responses.() ++ auto_provision_responses.())
+
+      {:ok, view, _html} = live(conn, ~p"/settings/")
+
+      refute has_element?(view, "#user-management-no-organization")
+      assert has_element?(view, "#user-management-page")
+    end
+
+    test "shows fallback state when auto-provisioning fails", %{conn: conn} do
+      provisioning_failure_responses = [
+        # list_user_workos_organizations → empty
         memberships_response([]),
-        memberships_response([])
-      ])
+        # create_workos_organization → error
+        {:ok, %Req.Response{status: 500, body: %{"message" => "Internal server error"}}}
+      ]
+
+      # Static render + connected mount
+      put_http_responses(provisioning_failure_responses ++ provisioning_failure_responses)
 
       {:ok, view, _html} = live(conn, ~p"/settings/")
 
       assert has_element?(view, "#user-management-no-organization")
       refute has_element?(view, "#user-management-widget-error")
-      refute has_element?(view, "[id^='user-management-users-management-widget-org_']")
-
-      requests = receive_workos_requests(2)
-      assert Enum.all?(requests, &(&1[:url] == "/user_management/organization_memberships"))
     end
   end
 

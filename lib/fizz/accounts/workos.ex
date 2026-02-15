@@ -1,11 +1,30 @@
 defmodule Fizz.Accounts.WorkOS do
   @moduledoc """
-  Accounts-facing wrapper over WorkOS primitives.
+  Accounts-facing facade over WorkOS API primitives.
+
+  Delegates to specialized submodules:
+
+  * `WorkOS.Auth` — AuthKit PKCE authorization flow
+  * `WorkOS.Memberships` — organization membership sync
+  * `WorkOS.Organizations` — organization CRUD
+  * `WorkOS.Api` — audit events, widget tokens, Pipes access tokens, Vault objects
+  * `WorkOS.Http` — low-level authenticated HTTP client
 
   Sync is disabled by default and can be enabled via:
 
       config :fizz, :workos_sync_enabled, true
+
+  The HTTP client and WorkOS SDK modules are configurable for testing:
+
+      config :fizz, :workos_http_client_module, MyMockReq
+      config :fizz, :workos_user_management_module, MyMockUserManagement
+      config :fizz, :workos_audit_logs_module, MyMockAuditLogs
   """
+
+  # Organizations
+  defdelegate create_workos_organization(name, opts \\ []), to: __MODULE__.Organizations, as: :create_organization
+  defdelegate get_workos_organization(org_id), to: __MODULE__.Organizations, as: :get_organization
+  defdelegate update_workos_organization(org_id, attrs), to: __MODULE__.Organizations, as: :update_organization
 
   # Memberships
   defdelegate enabled?, to: __MODULE__.Memberships

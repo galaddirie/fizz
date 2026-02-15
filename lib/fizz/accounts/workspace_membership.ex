@@ -1,4 +1,15 @@
 defmodule Fizz.Accounts.WorkspaceMembership do
+  @moduledoc """
+  Links a user to a workspace with a specific role.
+
+  Three roles are available: `:admin` (full control), `:member` (standard
+  access), and `:viewer` (read-only). The default role is `:viewer`.
+
+  A user may hold at most one membership per workspace (enforced by a unique
+  constraint). The optional `access_purpose` field documents why the user
+  was granted access.
+  """
+
   use Fizz.Schema
 
   alias Fizz.Accounts.{User, Workspace}

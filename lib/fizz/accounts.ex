@@ -1,6 +1,42 @@
 defmodule Fizz.Accounts do
   @moduledoc """
-  The Accounts context.
+  Identity and multi-tenancy context, built on WorkOS as the external identity provider.
+
+  ## Entity hierarchy
+
+      Organizations (WorkOS) → Workspaces (local) → Memberships (local)
+
+  **Organizations** are managed entirely in WorkOS — they are never stored locally.
+  An organization represents a company, team, or billing entity. Users belong to
+  one or more organizations via WorkOS organization memberships.
+
+  **Workspaces** are a local sub-organizational unit scoped to a single WorkOS
+  organization. They provide a generic grouping concept for related resources and
+  work — more focused than an organization, more generic than a "project". In a
+  B2B SaaS context a client typically maps to one workspace, or to multiple
+  workspaces for larger clients.
+
+  **Workspace memberships** link a user to a workspace with a specific role
+  (`:admin`, `:member`, or `:viewer`).
+
+  ## Authorization
+
+  All operations require a `Fizz.Accounts.Scope` struct carrying the resolved
+  user, organization, and workspace context. The scope is built via `build_scope/3`
+  after the user selects an organization and (optionally) a workspace.
+
+  ## Roles
+
+  * **Organization roles** (sourced from WorkOS): `:owner` > `:admin` > `:member`
+  * **Workspace roles** (local): `:admin` > `:member` > `:viewer`
+
+  Organization owners and admins implicitly have access to all workspaces in
+  their organization.
+
+  ## WorkOS integration
+
+  Authentication (AuthKit), organization membership, and audit logging are
+  delegated to WorkOS through `Fizz.Accounts.WorkOS`.
   """
 
   import Ecto.Query, warn: false
@@ -25,10 +61,62 @@ defmodule Fizz.Accounts do
   def list_organizations(_scope), do: []
 
   @doc """
-  Organization creation is owned by WorkOS.
+  Creates a WorkOS organization and adds the current user as owner.
   """
-  def create_organization(_scope, _attrs, _opts \\ []),
-    do: {:error, :organization_managed_by_workos}
+  def create_organization(scope, attrs, opts \\ [])
+
+  def create_organization(
+        %Scope{user: %User{workos_user_id: workos_user_id}} = _scope,
+        %{name: name},
+        _opts
+      )
+      when is_binary(workos_user_id) and is_binary(name) do
+    with {:ok, organization} <- WorkOS.create_workos_organization(name),
+         {:ok, _membership} <-
+           WorkOS.create_organization_membership(workos_user_id, organization.id, "owner") do
+      {:ok, %{organization_id: organization.id, name: organization.name}}
+    end
+  end
+
+  def create_organization(%Scope{user: %User{}}, _attrs, _opts),
+    do: {:error, :missing_workos_user_id}
+
+  def create_organization(_scope, _attrs, _opts), do: {:error, :unauthenticated}
+
+  @doc """
+  Ensures the user has at least one organization.
+
+  If the user has no organizations, a personal org is auto-provisioned
+  named "<email_prefix>'s Organization".
+  """
+  @spec ensure_personal_organization(Scope.t() | nil) :: [map()]
+  def ensure_personal_organization(%Scope{user: %User{email: email}} = scope) do
+    case list_user_workos_organizations(scope) do
+      [] ->
+        prefix = email |> String.split("@") |> List.first()
+        org_name = "#{prefix}'s Organization"
+
+        case create_organization(scope, %{name: org_name}) do
+          {:ok, org} ->
+            [
+              %{
+                organization_id: org.organization_id,
+                local_organization_id: nil,
+                organization_name: org.name,
+                role: :owner
+              }
+            ]
+
+          {:error, _reason} ->
+            []
+        end
+
+      organizations ->
+        organizations
+    end
+  end
+
+  def ensure_personal_organization(_scope), do: []
 
   @doc """
   Builds a WorkOS organization/workspace-aware scope for the current user.

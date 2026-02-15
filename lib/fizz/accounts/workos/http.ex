@@ -1,5 +1,7 @@
 defmodule Fizz.Accounts.WorkOS.Http do
-  @moduledoc false
+  @moduledoc """
+  Low-level authenticated HTTP client for the WorkOS API.
+  """
 
   require Logger
 

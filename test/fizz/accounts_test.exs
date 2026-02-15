@@ -15,8 +15,89 @@ defmodule Fizz.AccountsTest do
         {:post, "/user_management/authenticate"} ->
           authenticate_response(opts[:json][:code])
 
+        {:post, "/organizations"} ->
+          create_organization_response(opts[:json])
+
+        {:post, "/user_management/organization_memberships"} ->
+          create_membership_response(opts[:json])
+
+        {:get, "/user_management/organization_memberships"} ->
+          list_memberships_response(opts[:params])
+
         _ ->
           {:ok, %Req.Response{status: 404, body: %{"message" => "Not found"}}}
+      end
+    end
+
+    defp create_organization_response(%{name: name}) do
+      org_id = "org_#{System.unique_integer([:positive])}"
+
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => org_id,
+           "name" => name
+         }
+       }}
+    end
+
+    defp create_organization_response(_) do
+      {:ok,
+       %Req.Response{
+         status: 422,
+         body: %{"code" => "invalid_request", "message" => "Name is required"}
+       }}
+    end
+
+    defp create_membership_response(%{user_id: user_id, organization_id: org_id}) do
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "om_#{System.unique_integer([:positive])}",
+           "user_id" => user_id,
+           "organization_id" => org_id,
+           "status" => "active",
+           "role" => %{"slug" => "owner"}
+         }
+       }}
+    end
+
+    defp create_membership_response(_) do
+      {:ok,
+       %Req.Response{
+         status: 422,
+         body: %{"code" => "invalid_request", "message" => "Invalid membership params"}
+       }}
+    end
+
+    defp list_memberships_response(params) do
+      user_id = Keyword.get(params, :user_id) || params[:user_id]
+
+      if user_id == "user_workos_with_orgs" do
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: %{
+             "data" => [
+               %{
+                 "id" => "om_existing",
+                 "user_id" => "user_workos_with_orgs",
+                 "organization_id" => "org_existing_1",
+                 "status" => "active",
+                 "role" => %{"slug" => "owner"},
+                 "organization" => %{"name" => "Existing Org"}
+               }
+             ]
+           }
+         }}
+      else
+        {:ok,
+         %Req.Response{
+           status: 200,
+           body: %{"data" => []}
+         }}
       end
     end
 
@@ -326,6 +407,70 @@ defmodule Fizz.AccountsTest do
     test "returns error for invalid workos_user_id" do
       assert {:error, :invalid_workos_user_id} =
                Accounts.revoke_user_sessions_by_workos_user_id(nil)
+    end
+  end
+
+  describe "create_organization/3" do
+    test "creates a WorkOS organization and owner membership" do
+      scope = user_scope_fixture(user_fixture(%{workos_user_id: "user_workos_org_creator"}))
+
+      assert {:ok, %{organization_id: org_id, name: "Test Org"}} =
+               Accounts.create_organization(scope, %{name: "Test Org"})
+
+      assert is_binary(org_id)
+
+      # Verify the organization creation request was made
+      assert_receive {:workos_http_request, create_org_req}
+      assert create_org_req[:method] == :post
+      assert create_org_req[:url] == "/organizations"
+      assert create_org_req[:json][:name] == "Test Org"
+
+      # Verify the membership creation request was made
+      assert_receive {:workos_http_request, create_membership_req}
+      assert create_membership_req[:method] == :post
+      assert create_membership_req[:url] == "/user_management/organization_memberships"
+      assert create_membership_req[:json][:user_id] == "user_workos_org_creator"
+      assert create_membership_req[:json][:role_slug] == "owner"
+    end
+
+    test "returns error when user has no workos_user_id" do
+      user = Repo.insert!(%User{email: "no-workos@example.com"})
+      scope = user_scope_fixture(user)
+
+      assert {:error, :missing_workos_user_id} =
+               Accounts.create_organization(scope, %{name: "Test Org"})
+    end
+
+    test "returns error when unauthenticated" do
+      assert {:error, :unauthenticated} =
+               Accounts.create_organization(nil, %{name: "Test Org"})
+    end
+  end
+
+  describe "ensure_personal_organization/1" do
+    test "returns existing organizations when user has them" do
+      scope = user_scope_fixture(user_fixture(%{workos_user_id: "user_workos_with_orgs"}))
+
+      orgs = Accounts.ensure_personal_organization(scope)
+
+      assert length(orgs) == 1
+      assert hd(orgs).organization_id == "org_existing_1"
+      assert hd(orgs).organization_name == "Existing Org"
+    end
+
+    test "creates a personal organization when user has none" do
+      user = user_fixture(%{email: "alice@example.com", workos_user_id: "user_workos_no_orgs"})
+      scope = user_scope_fixture(user)
+
+      orgs = Accounts.ensure_personal_organization(scope)
+
+      assert length(orgs) == 1
+      assert hd(orgs).organization_name == "alice's Organization"
+      assert hd(orgs).role == :owner
+    end
+
+    test "returns empty list for nil scope" do
+      assert Accounts.ensure_personal_organization(nil) == []
     end
   end
 end

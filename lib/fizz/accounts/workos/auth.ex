@@ -1,5 +1,10 @@
 defmodule Fizz.Accounts.WorkOS.Auth do
-  @moduledoc false
+  @moduledoc """
+  WorkOS AuthKit PKCE authorization flow.
+
+  Handles authorization URL generation, code exchange, token refresh, and
+  extraction of user profiles and session payloads from authentication responses.
+  """
 
   import Fizz.Accounts.WorkOS.Helpers
   import Fizz.Accounts.WorkOS.Http
