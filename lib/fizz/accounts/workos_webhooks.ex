@@ -5,6 +5,8 @@ defmodule Fizz.Accounts.WorkOSWebhooks do
 
   require Logger
 
+  import Fizz.Accounts.WorkOS.Helpers, only: [read_value: 2]
+
   alias Fizz.Accounts
   alias WorkOS.Webhooks.Event
 
@@ -24,8 +26,8 @@ defmodule Fizz.Accounts.WorkOSWebhooks do
   defp handle_event("session.revoked", data) do
     with workos_user_id when is_binary(workos_user_id) <- extract_workos_user_id(data) do
       data
-      |> extract_value([:id, "id"])
-      |> FizzWeb.UserAuth.disconnect_workos_session()
+      |> read_value([:id, "id"])
+      |> Accounts.disconnect_workos_session()
 
       Accounts.revoke_user_sessions_by_workos_user_id(workos_user_id)
     else
@@ -37,7 +39,7 @@ defmodule Fizz.Accounts.WorkOSWebhooks do
   defp handle_event("user.updated", data), do: upsert_user(data)
 
   defp handle_event("user.deleted", data) do
-    with workos_user_id when is_binary(workos_user_id) <- extract_value(data, [:id, "id"]) do
+    with workos_user_id when is_binary(workos_user_id) <- read_value(data, [:id, "id"]) do
       Accounts.delete_user_by_workos_user_id(workos_user_id)
     else
       _ -> {:error, :invalid_workos_user_payload}
@@ -52,12 +54,12 @@ defmodule Fizz.Accounts.WorkOSWebhooks do
   defp handle_event(_event, _data), do: {:error, :invalid_workos_event}
 
   defp upsert_user(data) do
-    with workos_user_id when is_binary(workos_user_id) <- extract_value(data, [:id, "id"]),
-         email when is_binary(email) <- extract_value(data, [:email, "email"]) do
+    with workos_user_id when is_binary(workos_user_id) <- read_value(data, [:id, "id"]),
+         email when is_binary(email) <- read_value(data, [:email, "email"]) do
       Accounts.upsert_user_from_workos_profile(%{
         id: workos_user_id,
         email: email,
-        email_verified: extract_value(data, [:email_verified, "email_verified"]) in [true, "true"]
+        email_verified: read_value(data, [:email_verified, "email_verified"]) in [true, "true"]
       })
       |> normalize_result()
     else
@@ -69,16 +71,7 @@ defmodule Fizz.Accounts.WorkOSWebhooks do
   defp normalize_result({:error, reason}), do: {:error, reason}
 
   defp extract_workos_user_id(data) do
-    extract_value(data, [:user_id, "user_id"]) ||
-      extract_value(data, [:userId, "userId"])
-  end
-
-  defp extract_value(data, keys) do
-    Enum.find_value(keys, fn key ->
-      case data do
-        %{} -> Map.get(data, key)
-        _ -> nil
-      end
-    end)
+    read_value(data, [:user_id, "user_id"]) ||
+      read_value(data, [:userId, "userId"])
   end
 end

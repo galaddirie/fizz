@@ -109,7 +109,7 @@ defmodule FizzWeb.UserManagementLive do
   end
 
   defp assign_widget_token(socket) do
-    case Accounts.generate_user_management_widget_token(
+    case Accounts.generate_widget_token(
            socket.assigns.current_scope,
            socket.assigns.selected_organization_id
          ) do

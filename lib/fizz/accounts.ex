@@ -5,6 +5,8 @@ defmodule Fizz.Accounts do
 
   import Ecto.Query, warn: false
 
+  import Fizz.Accounts.WorkOS.Helpers, only: [read_value: 2, membership_role_slugs: 1]
+
   alias Fizz.Accounts.{
     Scope,
     User,
@@ -401,34 +403,6 @@ defmodule Fizz.Accounts do
 
   defp normalize_role_slug(_role_slug), do: nil
 
-  defp membership_role_slugs(membership) do
-    role_slugs =
-      membership
-      |> read_value([:roles, "roles"])
-      |> List.wrap()
-      |> Enum.map(fn role -> read_value(role, [:slug, "slug"]) end)
-      |> Enum.filter(&is_binary/1)
-
-    primary_role_slug =
-      case read_value(membership, [:role, "role", :role_slug, "role_slug"]) do
-        %{} = role -> read_value(role, [:slug, "slug"])
-        slug when is_binary(slug) -> slug
-        _ -> nil
-      end
-
-    [primary_role_slug | role_slugs]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.uniq()
-  end
-
-  defp read_value(data, keys) do
-    Enum.find_value(keys, fn key ->
-      case data do
-        %{} -> Map.get(data, key)
-        _ -> nil
-      end
-    end)
-  end
 
   defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
 
@@ -454,19 +428,11 @@ defmodule Fizz.Accounts do
   def list_user_workos_organizations(_scope), do: []
 
   @doc """
-  Generates a WorkOS Pipes widget token for the given organization.
+  Generates a WorkOS widget token for the given organization.
   """
-  @spec generate_pipes_widget_token(Scope.t() | nil, String.t()) ::
+  @spec generate_widget_token(Scope.t() | nil, String.t()) ::
           {:ok, String.t()} | {:error, term()}
-  def generate_pipes_widget_token(scope, organization_id),
-    do: generate_widget_token_for_scope(scope, organization_id, [])
-
-  @doc """
-  Generates a WorkOS Users Management widget token for the given organization.
-  """
-  @spec generate_user_management_widget_token(Scope.t() | nil, String.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  def generate_user_management_widget_token(scope, organization_id),
+  def generate_widget_token(scope, organization_id),
     do: generate_widget_token_for_scope(scope, organization_id, [])
 
   @doc """
@@ -674,6 +640,17 @@ defmodule Fizz.Accounts do
 
   def revoke_user_sessions_by_workos_user_id(_workos_user_id),
     do: {:error, :invalid_workos_user_id}
+
+  @doc """
+  Broadcasts a disconnect for the given WorkOS session id via PubSub.
+  """
+  def disconnect_workos_session(session_id)
+      when is_binary(session_id) and byte_size(session_id) > 0 do
+    topic = "workos_sessions:#{Base.url_encode64(session_id, padding: false)}"
+    FizzWeb.Endpoint.broadcast(topic, "disconnect", %{})
+  end
+
+  def disconnect_workos_session(_session_id), do: :ok
 
   ## WorkOS profile sync
 

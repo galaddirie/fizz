@@ -62,11 +62,7 @@ defmodule FizzWeb.Layouts do
                       <.icon name="hero-home" class="size-4" /> Overview
                     </.link>
                   </li>
-                  <li :if={@current_scope && @current_scope.user}>
-                    <.link href={~p"/sprites"} class="gap-2">
-                      <.icon name="hero-command-line" class="size-4" /> Sprites
-                    </.link>
-                  </li>
+
                   <li><hr class="my-1 border-base-300" /></li>
                   <%= if @current_scope && @current_scope.user do %>
                     <li class="menu-title">
@@ -108,15 +104,6 @@ defmodule FizzWeb.Layouts do
                     <.icon name="hero-home" class="size-5" /> Overview
                   </.link>
                 </li>
-
-                <li :if={@current_scope && @current_scope.user}>
-                  <.link
-                    href={~p"/sprites"}
-                    class={["btn btn-ghost gap-2", @current_path == "/sprites" && "btn-active"]}
-                  >
-                    <.icon name="hero-command-line" class="size-5" /> Sprites
-                  </.link>
-                </li>
               </ul>
 
               <%= if @current_scope && @current_scope.user do %>
@@ -143,11 +130,6 @@ defmodule FizzWeb.Layouts do
                     <li>
                       <.link href={~p"/settings/"} class="gap-2">
                         <.icon name="hero-cog-6-tooth" class="size-4" /> Settings
-                      </.link>
-                    </li>
-                    <li>
-                      <.link href={~p"/sprites"} class="gap-2">
-                        <.icon name="hero-command-line" class="size-4" /> Sprites
                       </.link>
                     </li>
                     <li>
