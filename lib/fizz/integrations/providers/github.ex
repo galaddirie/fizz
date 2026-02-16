@@ -72,11 +72,6 @@ defmodule Fizz.Integrations.Providers.GitHub do
   end
 
   @impl true
-  def git_credential_hosts do
-    ["github.com"]
-  end
-
-  @impl true
   def list_repos(scope, opts) do
     organization_id = Keyword.get(opts, :organization_id)
 

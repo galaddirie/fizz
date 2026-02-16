@@ -1,7 +1,6 @@
 defmodule FizzWeb.SpritesLive.Show do
   use FizzWeb, :live_view
 
-  alias Fizz.Integrations
   alias Fizz.Sprites
 
   @impl true
@@ -18,9 +17,6 @@ defmodule FizzWeb.SpritesLive.Show do
       |> assign(:selected_job, nil)
       |> assign(:job_output, [])
       |> assign(:subscribed_job_ids, MapSet.new())
-      |> assign(:github_status, nil)
-      |> assign(:github_repos, [])
-      |> assign(:show_repo_browser, false)
       |> stream(:jobs, [])
       |> stream(:services, [])
       |> stream(:checkpoints, [])
@@ -176,52 +172,6 @@ defmodule FizzWeb.SpritesLive.Show do
     end
   end
 
-  def handle_event("check_github", _params, socket) do
-    case Integrations.check_and_sync_connection(
-           socket.assigns.current_scope,
-           socket.assigns.workspace_id,
-           "github"
-         ) do
-      {:ok, connection} ->
-        {:noreply, assign(socket, :github_status, connection.status)}
-
-      {:error, _reason} ->
-        {:noreply, assign(socket, :github_status, nil)}
-    end
-  end
-
-  def handle_event("browse_repos", _params, socket) do
-    case Integrations.list_repos(
-           socket.assigns.current_scope,
-           socket.assigns.workspace_id,
-           "github"
-         ) do
-      {:ok, repos} ->
-        {:noreply,
-         socket
-         |> assign(:github_repos, repos)
-         |> assign(:show_repo_browser, true)}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Could not list repos: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("clone_repo", %{"url" => clone_url}, socket) do
-    socket =
-      if socket.assigns.active_console do
-        push_event(socket, "console_send_stdin", %{data: "git clone #{clone_url}\n"})
-      else
-        socket
-      end
-
-    {:noreply, assign(socket, :show_repo_browser, false)}
-  end
-
-  def handle_event("close_repo_browser", _params, socket) do
-    {:noreply, assign(socket, :show_repo_browser, false)}
-  end
-
   @impl true
   def handle_info(
         %Phoenix.Socket.Broadcast{
@@ -336,7 +286,6 @@ defmodule FizzWeb.SpritesLive.Show do
     |> load_jobs()
     |> load_services()
     |> load_checkpoints()
-    |> load_github_status()
   end
 
   defp load_sprite(socket) do
@@ -400,17 +349,6 @@ defmodule FizzWeb.SpritesLive.Show do
          ) do
       {:ok, checkpoints} -> stream(socket, :checkpoints, checkpoints, reset: true)
       {:error, _reason} -> socket
-    end
-  end
-
-  defp load_github_status(socket) do
-    case Integrations.check_and_sync_connection(
-           socket.assigns.current_scope,
-           socket.assigns.workspace_id,
-           "github"
-         ) do
-      {:ok, connection} -> assign(socket, :github_status, connection.status)
-      {:error, _} -> assign(socket, :github_status, nil)
     end
   end
 

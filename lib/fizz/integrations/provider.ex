@@ -31,9 +31,8 @@ defmodule Fizz.Integrations.Provider do
               {:ok, token_result()} | {:error, term()}
   @callback network_domains() :: [String.t()]
 
-  @optional_callbacks git_credential_hosts: 0, list_repos: 2, create_pull_request: 2
+  @optional_callbacks list_repos: 2, create_pull_request: 2
 
-  @callback git_credential_hosts() :: [String.t()]
   @callback list_repos(Scope.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
   @callback create_pull_request(Scope.t(), map()) :: {:ok, map()} | {:error, term()}
 end

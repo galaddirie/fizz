@@ -122,20 +122,6 @@ defmodule Fizz.Integrations do
     end
   end
 
-  @doc """
-  Returns the git credential hosts for a provider, if it supports git.
-  """
-  @spec git_credential_hosts(String.t()) :: {:ok, [String.t()]} | {:error, term()}
-  def git_credential_hosts(provider) do
-    with {:ok, provider_mod} <- provider_module(provider) do
-      if function_exported?(provider_mod, :git_credential_hosts, 0) do
-        {:ok, provider_mod.git_credential_hosts()}
-      else
-        {:ok, []}
-      end
-    end
-  end
-
   # ---------------------------------------------------------------------------
   # Private helpers
   # ---------------------------------------------------------------------------
