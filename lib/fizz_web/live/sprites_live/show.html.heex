@@ -40,20 +40,74 @@
         </.form>
 
         <div id="sprite-jobs" phx-update="stream" class="mt-4 space-y-2">
-          <div class="hidden only:block text-sm text-muted">No jobs yet.</div>
+          <div id="sprite-jobs-empty" class="hidden only:block text-sm text-muted">No jobs yet.</div>
 
           <article
             :for={{dom_id, job} <- @streams.jobs}
             id={dom_id}
-            class="rounded-box border border-base-300 p-3"
+            class={[
+              "rounded-box border p-3 cursor-pointer transition-colors hover:bg-base-200",
+              if(@selected_job_id == job.id,
+                do: "border-primary bg-primary/5",
+                else: "border-base-300"
+              )
+            ]}
+            phx-click="select_job"
+            phx-value-id={job.id}
           >
             <div class="flex items-center justify-between gap-2">
-              <p class="font-medium">{job.command}</p>
-              <span class="badge badge-outline">{job.state}</span>
+              <p class="font-medium truncate">{job_display_command(job)}</p>
+              <span class={["badge", job_state_badge_class(job.state)]}>{job.state}</span>
             </div>
             <p class="mt-1 text-xs text-muted">{job.inserted_at}</p>
           </article>
         </div>
+
+        <%= if @selected_job do %>
+          <div class="mt-4 rounded-box border border-base-300 bg-base-200 p-4">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <h3 class="font-semibold truncate text-sm">
+                {job_display_command(@selected_job)}
+              </h3>
+              <button
+                class="btn btn-ghost btn-xs"
+                phx-click="close_output"
+              >
+                <.icon name="hero-x-mark" class="size-4" />
+              </button>
+            </div>
+
+            <%= if @selected_job.state in [:failed, :system_error] do %>
+              <div class="alert alert-error mb-3 text-sm">
+                <%= if @selected_job.error_message do %>
+                  {@selected_job.error_message}
+                <% else %>
+                  Job {to_string(@selected_job.state) |> String.replace("_", " ")}
+                <% end %>
+              </div>
+            <% end %>
+
+            <div
+              id="job-output"
+              phx-hook="ScrollBottom"
+              class="max-h-96 overflow-y-auto rounded-box border border-base-300 bg-base-100 p-3 font-mono text-sm whitespace-pre-wrap break-all"
+            >
+              <%= if @job_output == [] and not terminal_state?(@selected_job.state) do %>
+                <p class="text-muted italic">Waiting for output...</p>
+              <% else %>
+                <%= for chunk <- @job_output do %>
+                  <span class={if chunk.stream == "stderr", do: "text-warning", else: ""}>{chunk.text}</span>
+                <% end %>
+              <% end %>
+            </div>
+
+            <%= if terminal_state?(@selected_job.state) and @selected_job.exit_code do %>
+              <p class="mt-2 text-xs text-muted">
+                Exit code: {@selected_job.exit_code}
+              </p>
+            <% end %>
+          </div>
+        <% end %>
       </section>
 
       <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
@@ -105,7 +159,7 @@
         <h2 class="text-lg font-semibold">Services</h2>
 
         <div id="sprite-services" phx-update="stream" class="mt-4 space-y-2">
-          <div class="hidden only:block text-sm text-muted">No services configured.</div>
+          <div id="sprite-services-empty" class="hidden only:block text-sm text-muted">No services configured.</div>
 
           <article
             :for={{dom_id, service} <- @streams.services}
@@ -159,7 +213,7 @@
         </.form>
 
         <div id="sprite-checkpoints" phx-update="stream" class="mt-4 space-y-2">
-          <div class="hidden only:block text-sm text-muted">No checkpoints available.</div>
+          <div id="sprite-checkpoints-empty" class="hidden only:block text-sm text-muted">No checkpoints available.</div>
 
           <article
             :for={{dom_id, checkpoint} <- @streams.checkpoints}

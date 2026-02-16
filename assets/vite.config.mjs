@@ -12,7 +12,7 @@ export default defineConfig({
   },
   optimizeDeps: {
     // https://vitejs.dev/guide/dep-pre-bundling#monorepos-and-linked-dependencies
-    include: ["live_vue", "phoenix", "phoenix_html", "phoenix_live_view"],
+    include: ["live_vue", "phoenix", "phoenix_html", "phoenix_live_view", "@xterm/xterm", "@xterm/addon-fit"],
   },
   ssr: { noExternal: process.env.NODE_ENV === "production" ? true : undefined },
     build: {

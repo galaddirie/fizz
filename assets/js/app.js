@@ -42,6 +42,9 @@ const liveSocket = new LiveSocket("/live", Socket, {
     PipesWidget,
     WorkOSReactWidget,
     SpriteConsole,
+    ScrollBottom: {
+      updated() { this.el.scrollTop = this.el.scrollHeight }
+    },
   },
 })
 
