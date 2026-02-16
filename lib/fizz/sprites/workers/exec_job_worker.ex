@@ -12,7 +12,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
 
   alias Fizz.Repo
   alias Fizz.Sprites, as: Broker
-  alias Fizz.Sprites.{Client, ExecJob, Usage}
+  alias Fizz.Sprites.{Client, ExecJob}
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"exec_job_id" => exec_job_id}}) do
@@ -194,20 +194,6 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
         bytes_total: result.total,
         heartbeat_at: DateTime.utc_now()
       })
-
-    if state == :succeeded do
-      Usage.increment(exec_job.workspace_id, %{
-        jobs_succeeded: 1,
-        exec_seconds: result.duration_s,
-        log_bytes: result.total
-      })
-    else
-      Usage.increment(exec_job.workspace_id, %{
-        jobs_failed: 1,
-        exec_seconds: result.duration_s,
-        log_bytes: result.total
-      })
-    end
   end
 
   defp finish_timed_out(exec_job, result) do
@@ -220,12 +206,6 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
         error_code: "timeout",
         error_message: "Execution timed out"
       })
-
-    Usage.increment(exec_job.workspace_id, %{
-      jobs_failed: 1,
-      exec_seconds: result.duration_s,
-      log_bytes: result.total
-    })
   end
 
   defp finish_system_error(exec_job, reason, result) do
@@ -238,12 +218,6 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
         error_code: "system_error",
         error_message: inspect(reason)
       })
-
-    Usage.increment(exec_job.workspace_id, %{
-      jobs_failed: 1,
-      exec_seconds: result.duration_s,
-      log_bytes: result.total
-    })
   end
 
   defp touch_heartbeat(exec_job_id) do

@@ -1,6 +1,6 @@
 defmodule Fizz.Sprites.Workers.GCWorker do
   @moduledoc """
-  Garbage-collects old usage/log/checkpoint/rate-limit artifacts.
+  Garbage-collects old logs and checkpoints.
   """
 
   use Oban.Worker, queue: :sprites_maintenance, max_attempts: 1

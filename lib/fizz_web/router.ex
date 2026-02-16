@@ -17,13 +17,6 @@ defmodule FizzWeb.Router do
     plug :accepts, ["json"]
   end
 
-  pipeline :api_session do
-    plug :accepts, ["json"]
-    plug :fetch_session
-    plug :fetch_current_scope_for_user
-    plug :require_authenticated_user_api
-  end
-
   scope "/", FizzWeb do
     pipe_through :browser
 
@@ -34,81 +27,6 @@ defmodule FizzWeb.Router do
     pipe_through :api
 
     post "/workos", WorkOSWebhookController, :create
-  end
-
-  scope "/api/v1", FizzWeb.Api do
-    pipe_through :api_session
-
-    get "/workspaces/:workspace_id/sprites", SpriteController, :index
-    post "/workspaces/:workspace_id/sprites", SpriteController, :create
-    get "/workspaces/:workspace_id/sprites/:sprite_id", SpriteController, :show
-    patch "/workspaces/:workspace_id/sprites/:sprite_id", SpriteController, :update
-    delete "/workspaces/:workspace_id/sprites/:sprite_id", SpriteController, :delete
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/jobs", SpriteJobController, :create
-    get "/workspaces/:workspace_id/sprites/:sprite_id/jobs/:job_id", SpriteJobController, :show
-
-    get "/workspaces/:workspace_id/sprites/:sprite_id/jobs/:job_id/logs",
-        SpriteJobController,
-        :logs
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/jobs/:job_id/cancel",
-         SpriteJobController,
-         :cancel
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/console", SpriteConsoleController, :create
-
-    delete "/workspaces/:workspace_id/sprites/:sprite_id/console/:console_id",
-           SpriteConsoleController,
-           :delete
-
-    get "/workspaces/:workspace_id/sprites/:sprite_id/services/:service_name",
-        SpriteServiceController,
-        :show
-
-    put "/workspaces/:workspace_id/sprites/:sprite_id/services/:service_name",
-        SpriteServiceController,
-        :upsert
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/services/:service_name/start",
-         SpriteServiceController,
-         :start
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/services/:service_name/stop",
-         SpriteServiceController,
-         :stop
-
-    get "/workspaces/:workspace_id/sprites/:sprite_id/services/:service_name/logs",
-        SpriteServiceController,
-        :logs
-
-    get "/workspaces/:workspace_id/sprites/:sprite_id/checkpoints",
-        SpriteCheckpointController,
-        :index
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/checkpoints",
-         SpriteCheckpointController,
-         :create
-
-    post "/workspaces/:workspace_id/sprites/:sprite_id/checkpoints/:checkpoint_id/restore",
-         SpriteCheckpointController,
-         :restore
-
-    get "/workspaces/:workspace_id/sprites/limits", SpriteLimitController, :show
-    patch "/workspaces/:workspace_id/sprites/limits", SpriteLimitController, :update
-    get "/workspaces/:workspace_id/sprites/usage", SpriteLimitController, :usage
-
-    get "/workspaces/:workspace_id/integrations/:provider/status",
-        IntegrationController,
-        :status
-
-    get "/workspaces/:workspace_id/integrations/:provider/repos",
-        IntegrationController,
-        :repos
-
-    post "/workspaces/:workspace_id/integrations/:provider/pull-requests",
-         IntegrationController,
-         :create_pr
   end
 
   # Other scopes may use custom stacks.

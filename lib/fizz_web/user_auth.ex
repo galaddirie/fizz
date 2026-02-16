@@ -378,20 +378,6 @@ defmodule FizzWeb.UserAuth do
     end
   end
 
-  @doc """
-  API variant of `require_authenticated_user/2` that returns JSON 401.
-  """
-  def require_authenticated_user_api(conn, _opts) do
-    if conn.assigns.current_scope && conn.assigns.current_scope.user do
-      conn
-    else
-      conn
-      |> put_status(:unauthorized)
-      |> json(%{error: "unauthenticated"})
-      |> halt()
-    end
-  end
-
   defp maybe_store_return_to(%{method: "GET"} = conn) do
     put_session(conn, :user_return_to, current_path(conn))
   end

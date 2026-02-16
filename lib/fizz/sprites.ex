@@ -1,7 +1,7 @@
 defmodule Fizz.Sprites do
   @moduledoc """
   Workspace-scoped broker context for Sprites lifecycle, jobs, consoles,
-  services, checkpoints, quotas, and usage.
+  services, and checkpoints.
   """
 
   import Ecto.Query
@@ -20,12 +20,8 @@ defmodule Fizz.Sprites do
     ExecJob,
     ExecLogChunk,
     Http,
-    Quota,
-    RateLimiter,
     Service,
-    Sprite,
-    Usage,
-    WorkspaceSpriteLimit
+    Sprite
   }
 
   alias Fizz.Sprites.Workers.ExecJobWorker
@@ -38,8 +34,6 @@ defmodule Fizz.Sprites do
           | :console_not_found
           | :unauthenticated
           | :sprites_not_configured
-          | {:quota_exceeded, atom()}
-          | :rate_limited
           | term()
 
   @doc """
@@ -113,17 +107,13 @@ defmodule Fizz.Sprites do
     attrs = normalize_attrs(attrs)
 
     with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
-         :ok <- Quota.check(workspace_id, :sprites),
-         {:ok, _workspace_limit} <- fetch_workspace_limits(workspace_id),
          {:ok, client} <- Client.client(),
-         :ok <- RateLimiter.check_and_increment(workspace_id, "sprite_creates", 30),
          name when is_binary(name) <- attr(attrs, :name),
          remote_name <- remote_name_for(workspace_id, name),
          {:ok, sprite} <-
            insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name),
          {:ok, sprite} <-
            provision_remote(client, sprite, remote_name, attrs) do
-      Usage.increment(workspace_id, %{sprites_created: 1})
       emit_event([:fizz, :sprites, :sprite, :created], %{count: 1}, %{workspace_id: workspace_id})
       {:ok, sprite}
     else
@@ -146,7 +136,6 @@ defmodule Fizz.Sprites do
            sprite
            |> Sprite.changeset(%{status: :deleted, deleted_at: DateTime.utc_now()})
            |> Repo.update() do
-      Usage.increment(workspace_id, %{sprites_deleted: 1})
       emit_event([:fizz, :sprites, :sprite, :deleted], %{count: 1}, %{workspace_id: workspace_id})
       {:ok, updated_sprite}
     end
@@ -162,14 +151,6 @@ defmodule Fizz.Sprites do
 
     with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
          {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         :ok <- Quota.check(workspace_id, :concurrent_jobs),
-         {:ok, workspace_limit} <- fetch_workspace_limits(workspace_id),
-         :ok <-
-           RateLimiter.check_and_increment(
-             workspace_id,
-             "jobs_per_minute",
-             workspace_limit.max_jobs_per_minute
-           ),
          command when is_binary(command) <- attr(exec_spec, :command),
          args <- normalize_string_list(attr(exec_spec, :args)),
          timeout_ms <- attr(exec_spec, :timeout_ms) || Client.exec_timeout_ms_default(),
@@ -185,20 +166,11 @@ defmodule Fizz.Sprites do
              timeout_ms
            )
            |> Repo.transaction() do
-      Usage.increment(workspace_id, %{jobs_total: 1})
       emit_event([:fizz, :sprites, :job, :queued], %{count: 1}, %{workspace_id: workspace_id})
       {:ok, exec_job}
     else
       nil ->
         {:error, :invalid_command}
-
-      {:error, {:quota_exceeded, _} = quota_error} ->
-        Usage.increment(workspace_id, %{quota_rejections: 1})
-        {:error, quota_error}
-
-      {:error, :rate_limited} ->
-        Usage.increment(workspace_id, %{rate_limited: 1})
-        {:error, :rate_limited}
 
       {:error, _step, reason, _changes} ->
         {:error, reason}
@@ -319,7 +291,6 @@ defmodule Fizz.Sprites do
 
     with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
          {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         :ok <- Quota.check(workspace_id, :console_sessions),
          {:ok, console_session} <-
            %ConsoleSession{}
            |> ConsoleSession.changeset(%{
@@ -353,7 +324,6 @@ defmodule Fizz.Sprites do
              close_reason: "closed"
            })
            |> Repo.update() do
-      Usage.increment(workspace_id, %{console_seconds: console_duration_seconds(console_session)})
       emit_event([:fizz, :sprites, :console, :closed], %{count: 1}, %{workspace_id: workspace_id})
       FizzWeb.Endpoint.broadcast("sprite_console:#{console_id}", "closed", %{reason: "closed"})
       {:ok, closed_session}
@@ -461,7 +431,6 @@ defmodule Fizz.Sprites do
 
     with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
          {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         :ok <- Quota.check(workspace_id, :services_per_sprite, sprite_id: sprite.id),
          {:ok, _response} <-
            Http.put_service(sprite.remote_name, service_name, %{
              cmd: attr(attrs, :cmd),
@@ -545,13 +514,6 @@ defmodule Fizz.Sprites do
     with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
          {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
          {:ok, remote_sprite} <- Client.sprite(sprite.remote_name),
-         {:ok, checkpoints_before} <- Sprites.list_checkpoints(remote_sprite),
-         :ok <-
-           Quota.check(
-             workspace_id,
-             :checkpoints_per_sprite,
-             current_count: length(checkpoints_before)
-           ),
          {:ok, _messages} <-
            Sprites.create_checkpoint(remote_sprite, comment: attr(attrs, :comment) || ""),
          {:ok, checkpoints_after} <- Sprites.list_checkpoints(remote_sprite),
@@ -581,40 +543,6 @@ defmodule Fizz.Sprites do
          {:ok, remote_sprite} <- Client.sprite(sprite.remote_name),
          {:ok, messages} <- Sprites.restore_checkpoint(remote_sprite, checkpoint_id) do
       {:ok, Enum.map(messages, &stream_message_to_map/1)}
-    end
-  end
-
-  @doc """
-  Returns workspace limits.
-  """
-  @spec inspect_workspace_limits(Scope.t() | nil, String.t()) ::
-          {:ok, WorkspaceSpriteLimit.t() | nil} | {:error, error_reason()}
-  def inspect_workspace_limits(scope, workspace_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read) do
-      {:ok, Quota.ensure_limits(workspace_id)}
-    end
-  end
-
-  @doc """
-  Updates workspace limits.
-  """
-  @spec change_workspace_limits(Scope.t() | nil, String.t(), map()) ::
-          {:ok, WorkspaceSpriteLimit.t()} | {:error, error_reason() | Ecto.Changeset.t()}
-  def change_workspace_limits(scope, workspace_id, attrs) when is_map(attrs) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
-         {:ok, limits} <- Quota.update_limits(workspace_id, normalize_attrs(attrs)) do
-      {:ok, limits}
-    end
-  end
-
-  @doc """
-  Returns daily usage series.
-  """
-  @spec list_workspace_usage(Scope.t() | nil, String.t(), keyword()) ::
-          {:ok, list()} | {:error, error_reason()}
-  def list_workspace_usage(scope, workspace_id, opts \\ []) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read) do
-      {:ok, Usage.get(workspace_id, opts)}
     end
   end
 
@@ -698,7 +626,7 @@ defmodule Fizz.Sprites do
   end
 
   @doc """
-  Cleanup routine for old log chunks/checkpoints/rate windows/usage rows.
+  Cleanup routine for old log chunks and checkpoints.
   """
   @spec run_gc() :: :ok
   def run_gc do
@@ -713,9 +641,6 @@ defmodule Fizz.Sprites do
 
     from(checkpoint in Checkpoint, where: checkpoint.inserted_at < ^checkpoint_cutoff)
     |> Repo.delete_all()
-
-    _ = Usage.prune_older_than(Client.log_retention_days() * 4)
-    _ = RateLimiter.prune_older_than(Client.log_retention_days())
 
     :ok
   end
@@ -763,13 +688,6 @@ defmodule Fizz.Sprites do
       )
 
     count
-  end
-
-  defp fetch_workspace_limits(workspace_id) do
-    case Quota.ensure_limits(workspace_id) do
-      %WorkspaceSpriteLimit{} = workspace_limit -> {:ok, workspace_limit}
-      _ -> {:error, :workspace_not_found}
-    end
   end
 
   defp enqueue_job_multi(
@@ -1043,12 +961,6 @@ defmodule Fizz.Sprites do
   end
 
   defp maybe_cancel_oban_job(_oban_job_id), do: :ok
-
-  defp console_duration_seconds(%ConsoleSession{opened_at: nil}), do: 0
-
-  defp console_duration_seconds(%ConsoleSession{opened_at: opened_at}) do
-    DateTime.diff(DateTime.utc_now(), opened_at, :second)
-  end
 
   defp normalize_url_auth_mode(mode) when mode in [:default, :public, :bearer], do: mode
   defp normalize_url_auth_mode("default"), do: :default

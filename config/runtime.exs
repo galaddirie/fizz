@@ -39,20 +39,6 @@ config :fizz,
   sprites_api_key: System.get_env("SPRITES_API_KEY"),
   sprites_api_base_url: System.get_env("SPRITES_API_BASE_URL", "https://api.sprites.dev"),
   sprites_default_region: System.get_env("SPRITES_DEFAULT_REGION"),
-  sprites_limits_defaults: %{
-    max_sprites: String.to_integer(System.get_env("SPRITES_MAX_SPRITES", "20")),
-    max_concurrent_jobs: String.to_integer(System.get_env("SPRITES_MAX_CONCURRENT_JOBS", "5")),
-    max_jobs_per_minute: String.to_integer(System.get_env("SPRITES_MAX_JOBS_PER_MINUTE", "30")),
-    max_console_sessions: String.to_integer(System.get_env("SPRITES_MAX_CONSOLE_SESSIONS", "2")),
-    max_services_per_sprite:
-      String.to_integer(System.get_env("SPRITES_MAX_SERVICES_PER_SPRITE", "10")),
-    max_checkpoints_per_sprite:
-      String.to_integer(System.get_env("SPRITES_MAX_CHECKPOINTS_PER_SPRITE", "50")),
-    daily_exec_seconds_limit:
-      String.to_integer(System.get_env("SPRITES_DAILY_EXEC_SECONDS_LIMIT", "36000")),
-    daily_log_bytes_limit:
-      String.to_integer(System.get_env("SPRITES_DAILY_LOG_BYTES_LIMIT", "2147483648"))
-  },
   sprites_log_retention_days:
     String.to_integer(System.get_env("SPRITES_LOG_RETENTION_DAYS", "14")),
   sprites_checkpoint_retention_days:
