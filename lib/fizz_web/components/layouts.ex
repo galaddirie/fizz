@@ -62,6 +62,14 @@ defmodule FizzWeb.Layouts do
                       <.icon name="hero-home" class="size-4" /> Overview
                     </.link>
                   </li>
+                  <li>
+                    <.link
+                      href={~p"/workspaces"}
+                      class={["gap-2", workspace_nav_active?(@current_path) && "active"]}
+                    >
+                      <.icon name="hero-rectangle-group" class="size-4" /> Workspaces
+                    </.link>
+                  </li>
 
                   <li><hr class="my-1 border-base-300" /></li>
                   <%= if @current_scope && @current_scope.user do %>
@@ -102,6 +110,17 @@ defmodule FizzWeb.Layouts do
                     class={["btn btn-ghost gap-2", @current_path == "/" && "btn-active"]}
                   >
                     <.icon name="hero-home" class="size-5" /> Overview
+                  </.link>
+                </li>
+                <li>
+                  <.link
+                    href={~p"/workspaces"}
+                    class={[
+                      "btn btn-ghost gap-2",
+                      workspace_nav_active?(@current_path) && "btn-active"
+                    ]}
+                  >
+                    <.icon name="hero-rectangle-group" class="size-5" /> Workspaces
                   </.link>
                 </li>
               </ul>
@@ -258,4 +277,9 @@ defmodule FizzWeb.Layouts do
     </div>
     """
   end
+
+  defp workspace_nav_active?(path) when is_binary(path),
+    do: String.starts_with?(path, "/workspaces")
+
+  defp workspace_nav_active?(_path), do: false
 end

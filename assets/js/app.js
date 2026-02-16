@@ -28,6 +28,8 @@ import topbar from "topbar"
 import {getHooks} from "live_vue"
 import liveVueApp from "../vue"
 import {PipesWidget, WorkOSReactWidget} from "./hooks/workos_react_widgets"
+import {SpriteConsole} from "./hooks/sprite_console"
+import {getUserSocket} from "./user_socket"
 
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
@@ -39,6 +41,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     ...getHooks(liveVueApp),
     PipesWidget,
     WorkOSReactWidget,
+    SpriteConsole,
   },
 })
 
@@ -55,6 +58,7 @@ liveSocket.connect()
 // >> liveSocket.enableLatencySim(1000)  // enabled for duration of browser session
 // >> liveSocket.disableLatencySim()
 window.liveSocket = liveSocket
+getUserSocket()
 
 // The lines below enable quality of life phoenix_live_reload
 // development features:

@@ -265,7 +265,6 @@ defmodule FizzWeb.UserAuth do
 
   defp maybe_put_live_socket_id(conn, _session_id), do: delete_session(conn, @live_socket_id)
 
-
   defp post_logout_return_to do
     Application.get_env(:fizz, :workos_authkit_logout_return_uri) ||
       FizzWeb.Endpoint.url() <> ~p"/"
@@ -375,6 +374,20 @@ defmodule FizzWeb.UserAuth do
       |> put_flash(:error, "You must log in to access this page.")
       |> maybe_store_return_to()
       |> redirect(to: ~p"/auth/workos")
+      |> halt()
+    end
+  end
+
+  @doc """
+  API variant of `require_authenticated_user/2` that returns JSON 401.
+  """
+  def require_authenticated_user_api(conn, _opts) do
+    if conn.assigns.current_scope && conn.assigns.current_scope.user do
+      conn
+    else
+      conn
+      |> put_status(:unauthorized)
+      |> json(%{error: "unauthenticated"})
       |> halt()
     end
   end

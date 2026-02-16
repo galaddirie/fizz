@@ -22,18 +22,31 @@ defmodule Fizz.Accounts.WorkOS do
   """
 
   # Organizations
-  defdelegate create_workos_organization(name, opts \\ []), to: __MODULE__.Organizations, as: :create_organization
+  defdelegate create_workos_organization(name, opts \\ []),
+    to: __MODULE__.Organizations,
+    as: :create_organization
+
   defdelegate get_workos_organization(org_id), to: __MODULE__.Organizations, as: :get_organization
-  defdelegate update_workos_organization(org_id, attrs), to: __MODULE__.Organizations, as: :update_organization
+
+  defdelegate update_workos_organization(org_id, attrs),
+    to: __MODULE__.Organizations,
+    as: :update_organization
 
   # Memberships
   defdelegate enabled?, to: __MODULE__.Memberships
   defdelegate ensure_user(user), to: __MODULE__.Memberships
-  defdelegate ensure_organization_membership(org_id, user, role \\ :member), to: __MODULE__.Memberships
-  defdelegate create_organization_membership(user_id, org_id, role \\ nil), to: __MODULE__.Memberships
+
+  defdelegate ensure_organization_membership(org_id, user, role \\ :member),
+    to: __MODULE__.Memberships
+
+  defdelegate create_organization_membership(user_id, org_id, role \\ nil),
+    to: __MODULE__.Memberships
+
   defdelegate list_user_organization_memberships(workos_user_id), to: __MODULE__.Memberships
   defdelegate get_user_organization_membership(workos_user_id, org_id), to: __MODULE__.Memberships
-  defdelegate user_has_organization_membership?(workos_user_id, org_id), to: __MODULE__.Memberships
+
+  defdelegate user_has_organization_membership?(workos_user_id, org_id),
+    to: __MODULE__.Memberships
 
   # Auth
   defdelegate authorization_url(params), to: __MODULE__.Auth

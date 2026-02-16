@@ -25,8 +25,6 @@ end
 
 config :fizz, FizzWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
-
-
 config :fizz,
   workos_sync_enabled: System.get_env("WORKOS_SYNC_ENABLED") in ~w(1 true TRUE),
   workos_authkit_provider: System.get_env("WORKOS_AUTHKIT_PROVIDER", "authkit"),
@@ -37,7 +35,32 @@ config :fizz,
     owner: System.get_env("WORKOS_ROLE_SLUG_OWNER", "owner"),
     admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN", "admin"),
     member: System.get_env("WORKOS_ROLE_SLUG_MEMBER", "member")
-  }
+  },
+  sprites_api_key: System.get_env("SPRITES_API_KEY"),
+  sprites_api_base_url: System.get_env("SPRITES_API_BASE_URL", "https://api.sprites.dev"),
+  sprites_default_region: System.get_env("SPRITES_DEFAULT_REGION"),
+  sprites_limits_defaults: %{
+    max_sprites: String.to_integer(System.get_env("SPRITES_MAX_SPRITES", "20")),
+    max_concurrent_jobs: String.to_integer(System.get_env("SPRITES_MAX_CONCURRENT_JOBS", "5")),
+    max_jobs_per_minute: String.to_integer(System.get_env("SPRITES_MAX_JOBS_PER_MINUTE", "30")),
+    max_console_sessions: String.to_integer(System.get_env("SPRITES_MAX_CONSOLE_SESSIONS", "2")),
+    max_services_per_sprite:
+      String.to_integer(System.get_env("SPRITES_MAX_SERVICES_PER_SPRITE", "10")),
+    max_checkpoints_per_sprite:
+      String.to_integer(System.get_env("SPRITES_MAX_CHECKPOINTS_PER_SPRITE", "50")),
+    daily_exec_seconds_limit:
+      String.to_integer(System.get_env("SPRITES_DAILY_EXEC_SECONDS_LIMIT", "36000")),
+    daily_log_bytes_limit:
+      String.to_integer(System.get_env("SPRITES_DAILY_LOG_BYTES_LIMIT", "2147483648"))
+  },
+  sprites_log_retention_days:
+    String.to_integer(System.get_env("SPRITES_LOG_RETENTION_DAYS", "14")),
+  sprites_checkpoint_retention_days:
+    String.to_integer(System.get_env("SPRITES_CHECKPOINT_RETENTION_DAYS", "14")),
+  sprites_service_log_tail_lines:
+    String.to_integer(System.get_env("SPRITES_SERVICE_LOG_TAIL_LINES", "200")),
+  sprites_exec_timeout_ms_default:
+    String.to_integer(System.get_env("SPRITES_EXEC_TIMEOUT_MS_DEFAULT", "30000"))
 
 if api_key = System.get_env("WORKOS_API_KEY") do
   config :workos, WorkOS.Client,
@@ -45,7 +68,6 @@ if api_key = System.get_env("WORKOS_API_KEY") do
     client_id: System.get_env("WORKOS_CLIENT_ID"),
     client: Fizz.WorkOS.ReqClient
 end
-
 
 if config_env() == :prod do
   database_url =

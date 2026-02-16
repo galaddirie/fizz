@@ -11,9 +11,14 @@ config :fizz, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
   plugins: [
-    {Oban.Plugins.Cron, crontab: []}
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"*/3 * * * *", Fizz.Sprites.Workers.ReconcileStaleJobsWorker},
+       {"*/5 * * * *", Fizz.Sprites.Workers.ConsoleReaperWorker},
+       {"0 * * * *", Fizz.Sprites.Workers.GCWorker}
+     ]}
   ],
-  queues: [default: 10],
+  queues: [default: 10, sprites: 20, sprites_maintenance: 5],
   repo: Fizz.Repo
 
 config :live_vue, ssr: true

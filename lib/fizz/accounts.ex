@@ -225,6 +225,34 @@ defmodule Fizz.Accounts do
   def list_workspaces(_scope), do: {:error, :organization_scope_required}
 
   @doc """
+  Fetches a workspace by local id.
+  """
+  @spec get_workspace(String.t()) :: Workspace.t() | nil
+  def get_workspace(workspace_id) when is_binary(workspace_id) do
+    Repo.get(Workspace, workspace_id)
+  end
+
+  def get_workspace(_workspace_id), do: nil
+
+  @doc """
+  Builds and returns a workspace-aware scope for the given workspace id.
+  """
+  @spec build_scope_for_workspace(Scope.t() | nil, String.t()) ::
+          {:ok, Scope.t()}
+          | {:error, :workspace_not_found | :forbidden | :unauthenticated | term()}
+  def build_scope_for_workspace(%Scope{} = scope, workspace_id) when is_binary(workspace_id) do
+    case Repo.get(Workspace, workspace_id) do
+      %Workspace{} = workspace ->
+        build_scope(scope, workspace.workos_organization_id, workspace_id: workspace.id)
+
+      nil ->
+        {:error, :workspace_not_found}
+    end
+  end
+
+  def build_scope_for_workspace(_scope, _workspace_id), do: {:error, :unauthenticated}
+
+  @doc """
   Adds or updates organization membership for a user in WorkOS.
   """
   def add_organization_member(
@@ -490,7 +518,6 @@ defmodule Fizz.Accounts do
   end
 
   defp normalize_role_slug(_role_slug), do: nil
-
 
   defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
 

@@ -1,0 +1,86 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_path={~p"/workspaces/#{@workspace_id}"}
+>
+  <:page_header>
+    <div class="space-y-2">
+      <.link
+        navigate={~p"/workspaces"}
+        class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content"
+      >
+        <.icon name="hero-arrow-left" class="size-4" /> Back to Workspaces
+      </.link>
+      <h1 class="text-3xl font-semibold">{(@workspace && @workspace.name) || "Workspace"}</h1>
+      <p class="text-sm text-muted">Workspace details and quick links.</p>
+    </div>
+  </:page_header>
+
+  <%= if @workspace do %>
+    <div id="workspace-show-page" class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <h2 class="text-lg font-semibold">Details</h2>
+
+        <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div id="workspace-show-id">
+            <dt class="text-xs uppercase tracking-wide text-muted">Workspace ID</dt>
+            <dd class="mt-1 text-sm font-mono">{@workspace.id}</dd>
+          </div>
+          <div id="workspace-show-slug">
+            <dt class="text-xs uppercase tracking-wide text-muted">Slug</dt>
+            <dd class="mt-1 text-sm">{@workspace.slug}</dd>
+          </div>
+          <div id="workspace-show-org-id">
+            <dt class="text-xs uppercase tracking-wide text-muted">Organization ID</dt>
+            <dd class="mt-1 text-sm font-mono">{@workspace.workos_organization_id}</dd>
+          </div>
+          <div id="workspace-show-inserted-at">
+            <dt class="text-xs uppercase tracking-wide text-muted">Created</dt>
+            <dd class="mt-1 text-sm">{to_string(@workspace.inserted_at)}</dd>
+          </div>
+        </dl>
+
+        <p
+          :if={@workspace.description && @workspace.description != ""}
+          id="workspace-show-description"
+          class="mt-4 rounded-box border border-base-300 bg-base-200/40 p-3 text-sm"
+        >
+          {@workspace.description}
+        </p>
+      </section>
+
+      <aside class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <h2 class="text-lg font-semibold">Quick Actions</h2>
+
+        <div class="mt-4 space-y-2">
+          <.link
+            id="workspace-show-open-sprites"
+            navigate={~p"/workspaces/#{@workspace.id}/sprites"}
+            class="btn btn-primary btn-sm w-full"
+          >
+            Open Sprites
+          </.link>
+          <.link
+            id="workspace-show-back"
+            navigate={~p"/workspaces"}
+            class="btn btn-ghost btn-sm w-full"
+          >
+            All Workspaces
+          </.link>
+        </div>
+
+        <div class="mt-6 space-y-3">
+          <p class="text-xs uppercase tracking-wide text-muted">Access scope</p>
+          <div class="flex items-center justify-between gap-3 text-sm">
+            <span>Organization role</span>
+            <span class="badge badge-outline">{@workspace_scope.organization_role || :none}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3 text-sm">
+            <span>Workspace role</span>
+            <span class="badge badge-outline">{@workspace_scope.workspace_role || :none}</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  <% end %>
+</Layouts.app>

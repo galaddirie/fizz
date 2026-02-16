@@ -16,7 +16,8 @@ defmodule Fizz.Accounts.WorkOS.Organizations do
     body =
       compact_map(%{
         name: name,
-        allow_profiles_outside_organization: Keyword.get(opts, :allow_profiles_outside_organization, true)
+        allow_profiles_outside_organization:
+          Keyword.get(opts, :allow_profiles_outside_organization, true)
       })
 
     case api_request(:post, "/organizations", json: body) do
