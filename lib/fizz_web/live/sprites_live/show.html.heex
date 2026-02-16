@@ -112,26 +112,96 @@
 
       <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
         <div class="mb-4 flex items-center justify-between gap-3">
-          <h2 class="text-lg font-semibold">Console</h2>
+          <div class="flex items-center gap-3">
+            <h2 class="text-lg font-semibold">Console</h2>
+            <%= if @github_status == :active do %>
+              <span class="badge badge-success badge-sm">GitHub Connected</span>
+            <% else %>
+              <span class="badge badge-ghost badge-sm">GitHub Not Connected</span>
+            <% end %>
+          </div>
 
-          <%= if @active_console do %>
-            <button
-              id="sprite-console-close"
-              class="btn btn-error btn-sm"
-              phx-click="close_console"
-            >
-              Close Console
-            </button>
-          <% else %>
-            <button
-              id="sprite-console-open"
-              class="btn btn-primary btn-sm"
-              phx-click="open_console"
-            >
-              Open Console
-            </button>
-          <% end %>
+          <div class="flex items-center gap-2">
+            <%= if @github_status == :active do %>
+              <button
+                id="sprite-browse-repos"
+                class="btn btn-outline btn-sm"
+                phx-click="browse_repos"
+              >
+                Browse Repos
+              </button>
+            <% else %>
+              <button
+                id="sprite-check-github"
+                class="btn btn-ghost btn-sm"
+                phx-click="check_github"
+              >
+                Check GitHub
+              </button>
+            <% end %>
+
+            <%= if @active_console do %>
+              <button
+                id="sprite-console-close"
+                class="btn btn-error btn-sm"
+                phx-click="close_console"
+              >
+                Close Console
+              </button>
+            <% else %>
+              <button
+                id="sprite-console-open"
+                class="btn btn-primary btn-sm"
+                phx-click="open_console"
+              >
+                Open Console
+              </button>
+            <% end %>
+          </div>
         </div>
+
+        <%= if @show_repo_browser do %>
+          <div class="mb-4 rounded-box border border-base-300 bg-base-200 p-3">
+            <div class="mb-2 flex items-center justify-between">
+              <h3 class="text-sm font-semibold">GitHub Repositories</h3>
+              <button
+                class="btn btn-ghost btn-xs"
+                phx-click="close_repo_browser"
+              >
+                <.icon name="hero-x-mark" class="size-4" />
+              </button>
+            </div>
+            <div class="max-h-60 space-y-2 overflow-y-auto">
+              <%= if @github_repos == [] do %>
+                <p class="text-sm text-muted">No repositories found.</p>
+              <% else %>
+                <%= for repo <- @github_repos do %>
+                  <div class="flex items-center justify-between gap-2 rounded-box border border-base-300 bg-base-100 p-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <p class="truncate text-sm font-medium">{repo.full_name}</p>
+                        <%= if repo.private do %>
+                          <span class="badge badge-warning badge-xs">Private</span>
+                        <% end %>
+                      </div>
+                      <%= if repo.description do %>
+                        <p class="truncate text-xs text-muted">{repo.description}</p>
+                      <% end %>
+                    </div>
+                    <button
+                      class="btn btn-primary btn-xs"
+                      phx-click="clone_repo"
+                      phx-value-url={repo.clone_url}
+                      disabled={is_nil(@active_console)}
+                    >
+                      Clone
+                    </button>
+                  </div>
+                <% end %>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
 
         <%= if @active_console do %>
           <div

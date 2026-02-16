@@ -123,11 +123,10 @@ defmodule Fizz.Sprites do
          :ok <- RateLimiter.check_and_increment(workspace_id, "sprite_creates", 30),
          name when is_binary(name) <- attr(attrs, :name),
          remote_name <- remote_name_for(workspace_id, name),
-         {:ok, remote_sprite} <-
-           Sprites.create(client, remote_name, config: attr(attrs, :config) || %{}),
-         :ok <- apply_default_network_policy(remote_sprite, attrs),
          {:ok, sprite} <-
-           insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name, remote_sprite) do
+           insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name),
+         {:ok, sprite} <-
+           provision_remote(client, sprite, remote_name, attrs) do
       Usage.increment(workspace_id, %{sprites_created: 1})
       emit_event([:fizz, :sprites, :sprite, :created], %{count: 1}, %{workspace_id: workspace_id})
       {:ok, sprite}
@@ -806,16 +805,14 @@ defmodule Fizz.Sprites do
     end
   end
 
-  defp insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name, remote_sprite) do
+  defp insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name) do
     %Sprite{}
     |> Sprite.changeset(%{
       workspace_id: workspace_id,
       created_by_user_id: workspace_scope.user.id,
       name: attr(attrs, :name),
       remote_name: remote_name,
-      remote_id: Map.get(remote_sprite, :id),
-      status: :ready,
-      url: Map.get(remote_sprite, :url),
+      status: :provisioning,
       url_auth_mode: normalize_url_auth_mode(attr(attrs, :url_auth_mode)),
       config: attr(attrs, :config) || %{},
       metadata: attr(attrs, :metadata) || %{},
@@ -952,6 +949,27 @@ defmodule Fizz.Sprites do
     end
   end
 
+  defp provision_remote(client, sprite, remote_name, attrs) do
+    with {:ok, remote_sprite} <-
+           Sprites.create(client, remote_name, config: attr(attrs, :config) || %{}),
+         :ok <- apply_default_network_policy(remote_sprite, attrs),
+         {:ok, sprite} <-
+           sprite
+           |> Sprite.changeset(%{
+             remote_id: Map.get(remote_sprite, :id),
+             status: :ready,
+             url: Map.get(remote_sprite, :url)
+           })
+           |> Repo.update() do
+      {:ok, sprite}
+    else
+      {:error, reason} ->
+        Logger.warning("Remote provisioning failed for #{remote_name}, rolling back local record")
+        Repo.delete(sprite)
+        {:error, reason}
+    end
+  end
+
   defp remote_name_for(workspace_id, name) do
     slug =
       name
@@ -966,8 +984,15 @@ defmodule Fizz.Sprites do
     "fizz-#{workspace_suffix}-#{slug}-#{suffix}"
   end
 
+  @default_network_allowlist [
+    "github.com",
+    "api.github.com",
+    "*.githubusercontent.com"
+  ]
+
   defp apply_default_network_policy(remote_sprite, attrs) do
-    allowlist = normalize_string_list(attr(attrs, :network_allowlist))
+    user_allowlist = normalize_string_list(attr(attrs, :network_allowlist))
+    allowlist = Enum.uniq(@default_network_allowlist ++ user_allowlist)
 
     rules =
       allowlist

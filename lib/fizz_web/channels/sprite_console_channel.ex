@@ -1,8 +1,12 @@
 defmodule FizzWeb.SpriteConsoleChannel do
   use FizzWeb, :channel
 
+  alias Fizz.Integrations
+  alias Fizz.Integrations.GitCredentialSetup
   alias Fizz.Sprites
   alias Fizz.Sprites.ConsoleRunner
+
+  require Logger
 
   @impl true
   def join("sprite_console:" <> console_id, _payload, socket) do
@@ -10,13 +14,15 @@ defmodule FizzWeb.SpriteConsoleChannel do
 
     with {:ok, console_session} <- Sprites.get_console_session(scope, console_id),
          :active <- console_session.state,
+         env_tuples = setup_git_credentials(scope, console_session),
          {:ok, runner_pid} <-
            ConsoleRunner.start_link(
              console_id: console_session.id,
              remote_name: console_session.sprite.remote_name,
              channel_pid: self(),
              rows: console_session.rows,
-             cols: console_session.cols
+             cols: console_session.cols,
+             env: env_tuples
            ) do
       Process.monitor(runner_pid)
 
@@ -142,4 +148,45 @@ defmodule FizzWeb.SpriteConsoleChannel do
   end
 
   defp normalize_integer(_value, fallback), do: fallback
+
+  defp setup_git_credentials(scope, console_session) do
+    workspace_id = console_session.workspace_id
+    remote_name = console_session.sprite.remote_name
+
+    with {:ok, token_result} <- Integrations.fetch_token_for_sprite(scope, workspace_id, "github"),
+         {:ok, hosts} <- Integrations.git_credential_hosts("github") do
+      user_opts = git_user_opts(scope, workspace_id)
+
+      case GitCredentialSetup.setup(remote_name, token_result.access_token, hosts, user_opts) do
+        {:ok, env_tuples} -> env_tuples
+        {:error, reason} ->
+          Logger.warning("Git credential setup failed: #{inspect(reason)}")
+          []
+      end
+    else
+      {:error, reason} ->
+        Logger.debug("Git credential setup skipped: #{inspect(reason)}")
+        []
+    end
+  end
+
+  # Pull the user's real GitHub identity from the stored connection metadata.
+  # Falls back to the Fizz account email if no GitHub metadata is available.
+  defp git_user_opts(scope, workspace_id) do
+    case Integrations.get_connection(scope, workspace_id, "github") do
+      {:ok, connection} ->
+        meta = connection.provider_metadata || %{}
+        name = meta["name"] || meta["username"]
+        email = meta["email"] || github_noreply_email(meta["username"]) || scope.user.email
+
+        [user_name: name, user_email: email]
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+      {:error, _} ->
+        if scope.user.email, do: [user_email: scope.user.email], else: []
+    end
+  end
+
+  defp github_noreply_email(nil), do: nil
+  defp github_noreply_email(username), do: "#{username}@users.noreply.github.com"
 end

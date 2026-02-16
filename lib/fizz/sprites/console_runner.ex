@@ -15,6 +15,7 @@ defmodule Fizz.Sprites.ConsoleRunner do
           | {:channel_pid, pid()}
           | {:rows, integer()}
           | {:cols, integer()}
+          | {:env, [{String.t(), String.t()}]}
 
   @spec start_link([option()]) :: GenServer.on_start()
   def start_link(opts) do
@@ -28,6 +29,7 @@ defmodule Fizz.Sprites.ConsoleRunner do
     channel_pid = Keyword.fetch!(opts, :channel_pid)
     rows = Keyword.get(opts, :rows, 24)
     cols = Keyword.get(opts, :cols, 80)
+    env = Keyword.get(opts, :env, [])
 
     Process.monitor(channel_pid)
 
@@ -38,6 +40,7 @@ defmodule Fizz.Sprites.ConsoleRunner do
              stdin: true,
              tty_rows: rows,
              tty_cols: cols,
+             env: env,
              owner: self()
            ) do
       {:ok,

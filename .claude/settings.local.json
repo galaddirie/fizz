@@ -5,7 +5,8 @@
       "Bash(mix test:*)",
       "Bash(mix compile:*)",
       "mcp__ide__getDiagnostics",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(mix ecto.gen.migration:*)"
     ]
   }
 }

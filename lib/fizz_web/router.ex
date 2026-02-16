@@ -97,6 +97,18 @@ defmodule FizzWeb.Router do
     get "/workspaces/:workspace_id/sprites/limits", SpriteLimitController, :show
     patch "/workspaces/:workspace_id/sprites/limits", SpriteLimitController, :update
     get "/workspaces/:workspace_id/sprites/usage", SpriteLimitController, :usage
+
+    get "/workspaces/:workspace_id/integrations/:provider/status",
+        IntegrationController,
+        :status
+
+    get "/workspaces/:workspace_id/integrations/:provider/repos",
+        IntegrationController,
+        :repos
+
+    post "/workspaces/:workspace_id/integrations/:provider/pull-requests",
+         IntegrationController,
+         :create_pr
   end
 
   # Other scopes may use custom stacks.
