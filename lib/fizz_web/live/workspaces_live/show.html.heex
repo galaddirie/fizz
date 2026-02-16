@@ -73,11 +73,15 @@
           <p class="text-xs uppercase tracking-wide text-muted">Access scope</p>
           <div class="flex items-center justify-between gap-3 text-sm">
             <span>Organization role</span>
-            <span class="badge badge-outline">{@workspace_scope.organization_role || :none}</span>
+            <span class="badge badge-outline">
+              {@resolve_workspace_scope.organization_role || :none}
+            </span>
           </div>
           <div class="flex items-center justify-between gap-3 text-sm">
             <span>Workspace role</span>
-            <span class="badge badge-outline">{@workspace_scope.workspace_role || :none}</span>
+            <span class="badge badge-outline">
+              {@resolve_workspace_scope.workspace_role || :none}
+            </span>
           </div>
         </div>
       </aside>

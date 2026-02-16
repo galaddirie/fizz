@@ -7,7 +7,7 @@ defmodule Fizz.Sprites.Workers.GCWorker do
 
   @impl Oban.Worker
   def perform(_job) do
-    :ok = Fizz.Sprites.gc()
+    :ok = Fizz.Sprites.run_gc()
     :ok
   end
 end

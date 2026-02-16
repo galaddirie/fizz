@@ -15,9 +15,9 @@ defmodule FizzWeb.Plugs.RequireWorkspaceScope do
     current_scope = conn.assigns[:current_scope]
 
     case Accounts.build_scope_for_workspace(current_scope, workspace_id) do
-      {:ok, workspace_scope} ->
+      {:ok, resolve_workspace_scope} ->
         conn
-        |> assign(:workspace_scope, workspace_scope)
+        |> assign(:resolve_workspace_scope, resolve_workspace_scope)
         |> assign(:workspace_id, workspace_id)
 
       {:error, :workspace_not_found} ->

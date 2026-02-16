@@ -40,12 +40,12 @@ defmodule Fizz.Integrations do
   @spec get_connection(Scope.t(), String.t(), String.t()) ::
           {:ok, IntegrationConnection.t()} | {:error, term()}
   def get_connection(%Scope{} = scope, workspace_id, provider) do
-    with {:ok, workspace_scope} <- resolve_workspace_scope(scope, workspace_id) do
+    with {:ok, resolve_workspace_scope} <- resolve_workspace_scope(scope, workspace_id) do
       query =
         from ic in IntegrationConnection,
           where:
             ic.workspace_id == ^workspace_id and
-              ic.user_id == ^workspace_scope.user.id and
+              ic.user_id == ^resolve_workspace_scope.user.id and
               ic.provider == ^provider
 
       case Repo.one(query) do
@@ -62,10 +62,10 @@ defmodule Fizz.Integrations do
           {:ok, IntegrationConnection.t()} | {:error, term()}
   def check_and_sync_connection(%Scope{} = scope, workspace_id, provider) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
-         org_id = workspace_scope.organization_id,
-         {:ok, status} <- provider_mod.check_connection(workspace_scope, org_id) do
-      upsert_connection(workspace_scope, workspace_id, provider, status)
+         {:ok, resolve_workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
+         org_id = resolve_workspace_scope.organization_id,
+         {:ok, status} <- provider_mod.check_connection(resolve_workspace_scope, org_id) do
+      upsert_connection(resolve_workspace_scope, workspace_id, provider, status)
     end
   end
 
@@ -76,10 +76,10 @@ defmodule Fizz.Integrations do
           {:ok, map()} | {:error, term()}
   def fetch_token_for_sprite(%Scope{} = scope, workspace_id, provider) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
-         org_id = workspace_scope.organization_id,
-         {:ok, token_result} <- provider_mod.fetch_token(workspace_scope, org_id) do
-      _ = touch_token_fetch(workspace_scope, workspace_id, provider)
+         {:ok, resolve_workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
+         org_id = resolve_workspace_scope.organization_id,
+         {:ok, token_result} <- provider_mod.fetch_token(resolve_workspace_scope, org_id) do
+      _ = touch_token_fetch(resolve_workspace_scope, workspace_id, provider)
       {:ok, token_result}
     end
   end
@@ -91,10 +91,10 @@ defmodule Fizz.Integrations do
           {:ok, [map()]} | {:error, term()}
   def list_repos(%Scope{} = scope, workspace_id, provider, opts \\ []) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
-         org_id = workspace_scope.organization_id do
+         {:ok, resolve_workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
+         org_id = resolve_workspace_scope.organization_id do
       opts = Keyword.put(opts, :organization_id, org_id)
-      provider_mod.list_repos(workspace_scope, opts)
+      provider_mod.list_repos(resolve_workspace_scope, opts)
     end
   end
 
@@ -105,10 +105,10 @@ defmodule Fizz.Integrations do
           {:ok, map()} | {:error, term()}
   def create_pull_request(%Scope{} = scope, workspace_id, provider, params) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
-         org_id = workspace_scope.organization_id do
+         {:ok, resolve_workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
+         org_id = resolve_workspace_scope.organization_id do
       params = Map.put(params, "organization_id", org_id)
-      provider_mod.create_pull_request(workspace_scope, params)
+      provider_mod.create_pull_request(resolve_workspace_scope, params)
     end
   end
 
@@ -144,9 +144,9 @@ defmodule Fizz.Integrations do
     Accounts.build_scope_for_workspace(scope, workspace_id)
   end
 
-  defp upsert_connection(workspace_scope, workspace_id, provider, status) do
+  defp upsert_connection(resolve_workspace_scope, workspace_id, provider, status) do
     now = DateTime.utc_now()
-    user_id = workspace_scope.user.id
+    user_id = resolve_workspace_scope.user.id
 
     {db_status, error, disconnected_at} =
       cond do
@@ -194,9 +194,9 @@ defmodule Fizz.Integrations do
     )
   end
 
-  defp touch_token_fetch(workspace_scope, workspace_id, provider) do
+  defp touch_token_fetch(resolve_workspace_scope, workspace_id, provider) do
     now = DateTime.utc_now()
-    user_id = workspace_scope.user.id
+    user_id = resolve_workspace_scope.user.id
 
     from(ic in IntegrationConnection,
       where:

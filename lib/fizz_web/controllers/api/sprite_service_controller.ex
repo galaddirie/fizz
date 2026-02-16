@@ -11,7 +11,12 @@ defmodule FizzWeb.Api.SpriteServiceController do
         "sprite_id" => sprite_id,
         "service_name" => service_name
       }) do
-    case Sprites.get_service(conn.assigns.current_scope, workspace_id, sprite_id, service_name) do
+    case Sprites.inspect_service(
+           conn.assigns.current_scope,
+           workspace_id,
+           sprite_id,
+           service_name
+         ) do
       {:ok, service} -> json(conn, %{data: Helpers.service_json(service)})
       {:error, reason} -> Helpers.error(conn, reason)
     end
@@ -25,7 +30,7 @@ defmodule FizzWeb.Api.SpriteServiceController do
           "service_name" => service_name
         } = params
       ) do
-    case Sprites.upsert_service(
+    case Sprites.define_service(
            conn.assigns.current_scope,
            workspace_id,
            sprite_id,
@@ -73,7 +78,7 @@ defmodule FizzWeb.Api.SpriteServiceController do
         Application.get_env(:fizz, :sprites_service_log_tail_lines, 200)
       )
 
-    case Sprites.service_logs(
+    case Sprites.tail_service_logs(
            conn.assigns.current_scope,
            workspace_id,
            sprite_id,

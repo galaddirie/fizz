@@ -50,7 +50,7 @@
               id={"sprite-delete-#{sprite.id}"}
               type="button"
               class="btn btn-outline btn-error btn-sm"
-              phx-click="delete_sprite"
+              phx-click="terminate_sprite"
               phx-value-id={sprite.id}
             >
               Delete
@@ -68,7 +68,7 @@
         for={@create_form}
         id="sprites-create-form"
         phx-change="validate_create_sprite"
-        phx-submit="create_sprite"
+        phx-submit="provision_sprite"
         class="mt-4 space-y-4"
       >
         <.input

@@ -9,7 +9,7 @@ defmodule Fizz.Sprites.Workers.ReconcileStaleJobsWorker do
 
   @impl Oban.Worker
   def perform(_job) do
-    count = Fizz.Sprites.reconcile_stale_jobs(180)
+    count = Fizz.Sprites.recover_stale_jobs(180)
     Logger.info("sprites stale reconcile completed", stale_jobs: count)
     :ok
   end

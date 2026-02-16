@@ -16,7 +16,7 @@ defmodule FizzWeb.WorkspacesLive.Index do
       |> assign(:selected_organization_id, selected_organization_id)
       |> assign(:organization_form, organization_form(selected_organization_id))
       |> assign(:create_form, to_form(%{"name" => "", "description" => ""}, as: :workspace))
-      |> assign(:workspace_scope, nil)
+      |> assign(:resolve_workspace_scope, nil)
       |> assign(:workspace_error, nil)
       |> stream(:workspaces, [])
 
@@ -36,7 +36,7 @@ defmodule FizzWeb.WorkspacesLive.Index do
      socket
      |> assign(:selected_organization_id, selected_organization_id)
      |> assign(:organization_form, organization_form(selected_organization_id))
-     |> assign(:workspace_scope, nil)
+     |> assign(:resolve_workspace_scope, nil)
      |> load_workspaces()}
   end
 
@@ -45,7 +45,7 @@ defmodule FizzWeb.WorkspacesLive.Index do
   end
 
   def handle_event("create_workspace", %{"workspace" => params}, socket) do
-    case socket.assigns.workspace_scope do
+    case socket.assigns.resolve_workspace_scope do
       nil ->
         {:noreply,
          put_flash(socket, :error, "Select an organization before creating a workspace.")}
@@ -74,7 +74,7 @@ defmodule FizzWeb.WorkspacesLive.Index do
 
   defp load_workspaces(%{assigns: %{selected_organization_id: nil}} = socket) do
     socket
-    |> assign(:workspace_scope, nil)
+    |> assign(:resolve_workspace_scope, nil)
     |> assign(:workspace_error, :no_organization)
     |> stream(:workspaces, [], reset: true)
   end
@@ -84,24 +84,24 @@ defmodule FizzWeb.WorkspacesLive.Index do
            socket.assigns.current_scope,
            socket.assigns.selected_organization_id
          ) do
-      {:ok, workspace_scope} ->
-        case Accounts.list_workspaces(workspace_scope) do
+      {:ok, resolve_workspace_scope} ->
+        case Accounts.list_workspaces(resolve_workspace_scope) do
           {:ok, workspaces} ->
             socket
-            |> assign(:workspace_scope, workspace_scope)
+            |> assign(:resolve_workspace_scope, resolve_workspace_scope)
             |> assign(:workspace_error, nil)
             |> stream(:workspaces, workspaces, reset: true)
 
           {:error, reason} ->
             socket
-            |> assign(:workspace_scope, nil)
+            |> assign(:resolve_workspace_scope, nil)
             |> assign(:workspace_error, reason)
             |> stream(:workspaces, [], reset: true)
         end
 
       {:error, reason} ->
         socket
-        |> assign(:workspace_scope, nil)
+        |> assign(:resolve_workspace_scope, nil)
         |> assign(:workspace_error, reason)
         |> stream(:workspaces, [], reset: true)
     end

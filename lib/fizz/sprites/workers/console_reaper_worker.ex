@@ -9,7 +9,7 @@ defmodule Fizz.Sprites.Workers.ConsoleReaperWorker do
 
   @impl Oban.Worker
   def perform(_job) do
-    count = Fizz.Sprites.reap_old_consoles(300)
+    count = Fizz.Sprites.reap_idle_consoles(300)
     Logger.info("sprites console reaper completed", reaped: count)
     :ok
   end

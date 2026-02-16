@@ -41,13 +41,13 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   @impl true
-  def handle_event("enqueue_job", %{"job" => params}, socket) do
+  def handle_event("queue_job", %{"job" => params}, socket) do
     exec_spec = %{
       "command" => params["command"],
       "dir" => "/home/sprite"
     }
 
-    case Sprites.enqueue_job(
+    case Sprites.queue_job(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id,
@@ -70,7 +70,7 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   def handle_event("select_job", %{"id" => job_id}, socket) do
-    case Sprites.get_job(
+    case Sprites.inspect_job(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id,
@@ -157,8 +157,8 @@ defmodule FizzWeb.SpritesLive.Show do
     end
   end
 
-  def handle_event("create_checkpoint", %{"checkpoint" => params}, socket) do
-    case Sprites.create_checkpoint(
+  def handle_event("capture_checkpoint", %{"checkpoint" => params}, socket) do
+    case Sprites.capture_checkpoint(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id,
@@ -232,7 +232,7 @@ defmodule FizzWeb.SpritesLive.Show do
         socket
       ) do
     socket =
-      case Sprites.get_job(
+      case Sprites.inspect_job(
              socket.assigns.current_scope,
              socket.assigns.workspace_id,
              socket.assigns.sprite_id,
@@ -292,7 +292,7 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   defp load_job_output(socket, job_id) do
-    case Sprites.list_job_logs(
+    case Sprites.tail_job_logs(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id,
@@ -340,7 +340,7 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   defp load_sprite(socket) do
-    case Sprites.get_sprite(
+    case Sprites.inspect_sprite(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id
@@ -366,7 +366,7 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   defp load_jobs(socket) do
-    case Sprites.list_jobs(
+    case Sprites.list_sprite_jobs(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id
@@ -382,7 +382,7 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   defp load_services(socket) do
-    case Sprites.list_services(
+    case Sprites.list_sprite_services(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id
@@ -393,7 +393,7 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   defp load_checkpoints(socket) do
-    case Sprites.list_checkpoints(
+    case Sprites.list_sprite_checkpoints(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            socket.assigns.sprite_id

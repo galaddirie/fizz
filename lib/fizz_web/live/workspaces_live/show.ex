@@ -9,7 +9,7 @@ defmodule FizzWeb.WorkspacesLive.Show do
       socket
       |> assign(:workspace_id, workspace_id)
       |> assign(:workspace, nil)
-      |> assign(:workspace_scope, nil)
+      |> assign(:resolve_workspace_scope, nil)
       |> assign(:page_title, "Workspace")
 
     {:ok, load_workspace(socket)}
@@ -25,13 +25,13 @@ defmodule FizzWeb.WorkspacesLive.Show do
            socket.assigns.current_scope,
            socket.assigns.workspace_id
          ) do
-      {:ok, workspace_scope} ->
+      {:ok, resolve_workspace_scope} ->
         workspace =
-          workspace_scope.workspace || Accounts.get_workspace(socket.assigns.workspace_id)
+          resolve_workspace_scope.workspace || Accounts.get_workspace(socket.assigns.workspace_id)
 
         if workspace do
           socket
-          |> assign(:workspace_scope, workspace_scope)
+          |> assign(:resolve_workspace_scope, resolve_workspace_scope)
           |> assign(:workspace, workspace)
           |> assign(:page_title, workspace.name)
         else

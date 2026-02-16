@@ -25,8 +25,14 @@ defmodule Fizz.Sprites.Quota do
 
   @spec ensure_limits(String.t()) :: WorkspaceSpriteLimit.t() | nil
   def ensure_limits(workspace_id) when is_binary(workspace_id) do
-    get_limits(workspace_id) ||
-      create_default_limits(workspace_id)
+    defaults = Map.put(Client.default_limits(), :workspace_id, workspace_id)
+
+    _ =
+      %WorkspaceSpriteLimit{}
+      |> WorkspaceSpriteLimit.changeset(defaults)
+      |> Repo.insert(on_conflict: :nothing, conflict_target: [:workspace_id])
+
+    get_limits(workspace_id)
   end
 
   def ensure_limits(_workspace_id), do: nil
@@ -98,13 +104,5 @@ defmodule Fizz.Sprites.Quota do
       _ ->
         :ok
     end
-  end
-
-  defp create_default_limits(workspace_id) do
-    defaults = Client.default_limits()
-
-    %WorkspaceSpriteLimit{}
-    |> WorkspaceSpriteLimit.changeset(Map.put(defaults, :workspace_id, workspace_id))
-    |> Repo.insert!()
   end
 end

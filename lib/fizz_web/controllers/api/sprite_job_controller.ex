@@ -7,7 +7,7 @@ defmodule FizzWeb.Api.SpriteJobController do
   plug FizzWeb.Plugs.RequireWorkspaceScope
 
   def create(conn, %{"workspace_id" => workspace_id, "sprite_id" => sprite_id} = params) do
-    case Sprites.enqueue_job(conn.assigns.current_scope, workspace_id, sprite_id, params) do
+    case Sprites.queue_job(conn.assigns.current_scope, workspace_id, sprite_id, params) do
       {:ok, job} ->
         conn
         |> put_status(:created)
@@ -19,7 +19,7 @@ defmodule FizzWeb.Api.SpriteJobController do
   end
 
   def show(conn, %{"workspace_id" => workspace_id, "sprite_id" => sprite_id, "job_id" => job_id}) do
-    case Sprites.get_job(conn.assigns.current_scope, workspace_id, sprite_id, job_id) do
+    case Sprites.inspect_job(conn.assigns.current_scope, workspace_id, sprite_id, job_id) do
       {:ok, job} -> json(conn, %{data: Helpers.job_json(job)})
       {:error, reason} -> Helpers.error(conn, reason)
     end
@@ -32,7 +32,7 @@ defmodule FizzWeb.Api.SpriteJobController do
     after_seq = parse_integer(params["after_seq"], 0)
     limit = parse_integer(params["limit"], 200)
 
-    case Sprites.list_job_logs(
+    case Sprites.tail_job_logs(
            conn.assigns.current_scope,
            workspace_id,
            sprite_id,

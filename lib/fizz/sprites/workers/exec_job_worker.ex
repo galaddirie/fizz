@@ -33,7 +33,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
     now = DateTime.utc_now()
 
     {:ok, _running_job} =
-      Broker.transition_job(exec_job.id, :running, %{started_at: now, heartbeat_at: now})
+      Broker.set_job_state(exec_job.id, :running, %{started_at: now, heartbeat_at: now})
 
     with {:ok, remote_sprite} <- Client.sprite(exec_job.sprite.remote_name),
          {:ok, command} <-
@@ -111,7 +111,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
       receive do
         {:stdout, %{ref: ref}, data} when ref == command.ref ->
           next_seq = seq + 1
-          _ = Broker.append_job_chunk(exec_job_id, :stdout, next_seq, data)
+          _ = Broker.append_job_output(exec_job_id, :stdout, next_seq, data)
 
           collect_output(
             command,
@@ -126,7 +126,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
 
         {:stderr, %{ref: ref}, data} when ref == command.ref ->
           next_seq = seq + 1
-          _ = Broker.append_job_chunk(exec_job_id, :stderr, next_seq, data)
+          _ = Broker.append_job_output(exec_job_id, :stderr, next_seq, data)
 
           collect_output(
             command,
@@ -186,7 +186,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
     state = if result.exit_code == 0, do: :succeeded, else: :failed
 
     _ =
-      Broker.transition_job(exec_job.id, state, %{
+      Broker.set_job_state(exec_job.id, state, %{
         exit_code: result.exit_code,
         finished_at: DateTime.utc_now(),
         bytes_stdout: result.stdout,
@@ -212,7 +212,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
 
   defp finish_timed_out(exec_job, result) do
     _ =
-      Broker.transition_job(exec_job.id, :timed_out, %{
+      Broker.set_job_state(exec_job.id, :timed_out, %{
         finished_at: DateTime.utc_now(),
         bytes_stdout: result.stdout,
         bytes_stderr: result.stderr,
@@ -230,7 +230,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
 
   defp finish_system_error(exec_job, reason, result) do
     _ =
-      Broker.transition_job(exec_job.id, :system_error, %{
+      Broker.set_job_state(exec_job.id, :system_error, %{
         finished_at: DateTime.utc_now(),
         bytes_stdout: result.stdout,
         bytes_stderr: result.stderr,

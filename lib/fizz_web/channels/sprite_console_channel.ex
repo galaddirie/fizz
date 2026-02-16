@@ -12,7 +12,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
   def join("sprite_console:" <> console_id, _payload, socket) do
     scope = socket.assigns.current_scope
 
-    with {:ok, console_session} <- Sprites.get_console_session(scope, console_id),
+    with {:ok, console_session} <- Sprites.authorize_console_session(scope, console_id),
          :active <- console_session.state,
          env_tuples = setup_git_credentials(scope, console_session),
          {:ok, runner_pid} <-
@@ -91,7 +91,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
         %{assigns: %{console_id: console_id}} = socket
       ) do
     push(socket, "error", %{reason: reason})
-    Sprites.mark_console_errored(console_id, reason)
+    Sprites.flag_console_error(console_id, reason)
     {:stop, :normal, socket}
   end
 
@@ -153,12 +153,15 @@ defmodule FizzWeb.SpriteConsoleChannel do
     workspace_id = console_session.workspace_id
     remote_name = console_session.sprite.remote_name
 
-    with {:ok, token_result} <- Integrations.fetch_token_for_sprite(scope, workspace_id, "github"),
+    with {:ok, token_result} <-
+           Integrations.fetch_token_for_sprite(scope, workspace_id, "github"),
          {:ok, hosts} <- Integrations.git_credential_hosts("github") do
       user_opts = git_user_opts(scope, workspace_id)
 
       case GitCredentialSetup.setup(remote_name, token_result.access_token, hosts, user_opts) do
-        {:ok, env_tuples} -> env_tuples
+        {:ok, env_tuples} ->
+          env_tuples
+
         {:error, reason} ->
           Logger.warning("Git credential setup failed: #{inspect(reason)}")
           []

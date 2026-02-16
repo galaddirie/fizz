@@ -7,14 +7,14 @@ defmodule FizzWeb.Api.SpriteCheckpointController do
   plug FizzWeb.Plugs.RequireWorkspaceScope
 
   def index(conn, %{"workspace_id" => workspace_id, "sprite_id" => sprite_id}) do
-    case Sprites.list_checkpoints(conn.assigns.current_scope, workspace_id, sprite_id) do
+    case Sprites.list_sprite_checkpoints(conn.assigns.current_scope, workspace_id, sprite_id) do
       {:ok, checkpoints} -> json(conn, %{data: checkpoints})
       {:error, reason} -> Helpers.error(conn, reason)
     end
   end
 
   def create(conn, %{"workspace_id" => workspace_id, "sprite_id" => sprite_id} = params) do
-    case Sprites.create_checkpoint(conn.assigns.current_scope, workspace_id, sprite_id, params) do
+    case Sprites.capture_checkpoint(conn.assigns.current_scope, workspace_id, sprite_id, params) do
       {:ok, checkpoint} ->
         conn
         |> put_status(:created)

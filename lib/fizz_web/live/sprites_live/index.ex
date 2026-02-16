@@ -25,8 +25,12 @@ defmodule FizzWeb.SpritesLive.Index do
     {:noreply, assign(socket, :create_form, to_form(params, as: :sprite))}
   end
 
-  def handle_event("create_sprite", %{"sprite" => params}, socket) do
-    case Sprites.create_sprite(socket.assigns.current_scope, socket.assigns.workspace_id, params) do
+  def handle_event("provision_sprite", %{"sprite" => params}, socket) do
+    case Sprites.provision_sprite(
+           socket.assigns.current_scope,
+           socket.assigns.workspace_id,
+           params
+         ) do
       {:ok, _sprite} ->
         {:noreply,
          socket
@@ -39,8 +43,8 @@ defmodule FizzWeb.SpritesLive.Index do
     end
   end
 
-  def handle_event("delete_sprite", %{"id" => sprite_id}, socket) do
-    case Sprites.delete_sprite(
+  def handle_event("terminate_sprite", %{"id" => sprite_id}, socket) do
+    case Sprites.terminate_sprite(
            socket.assigns.current_scope,
            socket.assigns.workspace_id,
            sprite_id
@@ -54,10 +58,10 @@ defmodule FizzWeb.SpritesLive.Index do
   end
 
   defp load_workspace_sprites(socket) do
-    case Sprites.list_sprites(socket.assigns.current_scope, socket.assigns.workspace_id) do
+    case Sprites.list_workspace_sprites(socket.assigns.current_scope, socket.assigns.workspace_id) do
       {:ok, sprites} ->
         socket
-        |> assign(:workspace_scope, workspace_scope(socket))
+        |> assign(:resolve_workspace_scope, resolve_workspace_scope(socket))
         |> stream(:sprites, sprites, reset: true)
 
       {:error, :forbidden} ->
@@ -76,8 +80,11 @@ defmodule FizzWeb.SpritesLive.Index do
     end
   end
 
-  defp workspace_scope(socket) do
-    case Sprites.workspace_scope(socket.assigns.current_scope, socket.assigns.workspace_id) do
+  defp resolve_workspace_scope(socket) do
+    case Sprites.resolve_workspace_scope(
+           socket.assigns.current_scope,
+           socket.assigns.workspace_id
+         ) do
       {:ok, resolved_scope} -> resolved_scope
       _ -> socket.assigns.current_scope
     end

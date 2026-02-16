@@ -44,6 +44,10 @@ defmodule Fizz.Integrations.GitCredentialSetup do
         Logger.warning("Git credential setup failed: #{inspect(reason)}")
         {:error, reason}
     end
+  rescue
+    exception ->
+      Logger.warning("Git credential setup raised: #{Exception.message(exception)}")
+      {:error, {:git_credential_setup_failed, exception}}
   end
 
   @doc """
@@ -79,7 +83,10 @@ defmodule Fizz.Integrations.GitCredentialSetup do
       Sprites.cmd(
         remote_sprite,
         "sh",
-        ["-c", "echo #{encoded} | base64 -d > #{@git_credentials_path} && chmod 600 #{@git_credentials_path}"],
+        [
+          "-c",
+          "echo #{encoded} | base64 -d > #{@git_credentials_path} && chmod 600 #{@git_credentials_path}"
+        ],
         timeout: 5_000
       )
 

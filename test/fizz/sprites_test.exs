@@ -3,18 +3,18 @@ defmodule Fizz.SpritesTest do
 
   alias Fizz.Sprites
 
-  test "list_sprites/2 returns unauthenticated when scope is nil" do
-    assert {:error, :unauthenticated} = Sprites.list_sprites(nil, Ecto.UUID.generate())
+  test "list_workspace_sprites/2 returns unauthenticated when scope is nil" do
+    assert {:error, :unauthenticated} = Sprites.list_workspace_sprites(nil, Ecto.UUID.generate())
   end
 
-  test "create_sprite/3 returns unauthenticated when scope is nil" do
+  test "provision_sprite/3 returns unauthenticated when scope is nil" do
     assert {:error, :unauthenticated} =
-             Sprites.create_sprite(nil, Ecto.UUID.generate(), %{"name" => "demo"})
+             Sprites.provision_sprite(nil, Ecto.UUID.generate(), %{"name" => "demo"})
   end
 
-  test "enqueue_job/4 returns unauthenticated when scope is nil" do
+  test "queue_job/4 returns unauthenticated when scope is nil" do
     assert {:error, :unauthenticated} =
-             Sprites.enqueue_job(nil, Ecto.UUID.generate(), Ecto.UUID.generate(), %{
+             Sprites.queue_job(nil, Ecto.UUID.generate(), Ecto.UUID.generate(), %{
                "command" => "echo hi"
              })
   end
