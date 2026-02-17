@@ -69,6 +69,10 @@ defmodule FizzWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{FizzWeb.UserAuth, :require_authenticated}] do
       live "/settings/", UserManagementLive, :index
+      live "/workspaces", WorkspacesLive.Index, :index
+      live "/workspaces/:workspace_id", WorkspacesLive.Show, :show
+      live "/workspaces/:workspace_id/sprites", SpritesLive.Index, :index
+      live "/workspaces/:workspace_id/sprites/:sprite_id", SpritesLive.Show, :show
     end
   end
 end

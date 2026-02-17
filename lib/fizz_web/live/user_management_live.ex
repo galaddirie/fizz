@@ -3,54 +3,69 @@ defmodule FizzWeb.UserManagementLive do
 
   alias Fizz.Accounts
 
-  @widget_configs [
+  @user_tabs [
     %{
-      dom_id: "users-management",
-      title: "Directory",
-      description: "Manage members, roles, and invitations for this organization.",
-      widget_name: "users-management"
-    },
-    %{
-      dom_id: "organization-switcher",
-      title: "Organization Switcher",
-      description: "Preview and validate org switching behavior for this authenticated user.",
-      widget_name: "organization-switcher"
-    },
-    %{
-      dom_id: "user-profile",
-      title: "User Profile",
-      description: "Let users update core identity profile details.",
+      id: "profile",
+      title: "Profile",
+      icon: "hero-user",
       widget_name: "user-profile"
     },
     %{
-      dom_id: "user-security",
-      title: "Security Settings",
-      description: "Manage password and MFA controls in a hosted widget.",
+      id: "security",
+      title: "Security",
+      icon: "hero-shield-check",
       widget_name: "user-security"
     },
     %{
-      dom_id: "api-keys",
+      id: "sessions",
+      title: "Sessions",
+      icon: "hero-computer-desktop",
+      widget_name: "user-sessions"
+    }
+  ]
+
+  @org_tabs [
+    %{
+      id: "members",
+      title: "Members",
+      icon: "hero-user-group",
+      widget_name: "users-management"
+    },
+    %{
+      id: "connections",
+      title: "Connections",
+      icon: "hero-link",
+      widget_name: "pipes"
+    },
+    %{
+      id: "api-keys",
       title: "API Keys",
-      description: "Create and revoke organization API keys from the same page.",
+      icon: "hero-key",
       widget_name: "api-keys"
     }
   ]
 
+  @all_tabs @user_tabs ++ @org_tabs
+
   @impl true
   def mount(_params, _session, socket) do
-    organizations = Accounts.list_user_workos_organizations(socket.assigns.current_scope)
+    organizations = Accounts.ensure_personal_organization(socket.assigns.current_scope)
     selected_organization_id = default_organization_id(organizations)
 
     socket =
       socket
-      |> assign(:page_title, "User Management")
+      |> assign(:page_title, "Settings")
       |> assign(:organizations, organizations)
       |> assign(:organization_options, organization_options(organizations))
       |> assign(:selected_organization_id, selected_organization_id)
       |> assign(:workos_user_id, socket.assigns.current_scope.user.workos_user_id)
       |> assign(:widget_token, nil)
       |> assign(:widget_error, nil)
-      |> assign(:widget_configs, @widget_configs)
+      |> assign(:user_tabs, @user_tabs)
+      |> assign(:org_tabs, @org_tabs)
+      |> assign(:active_tab, "profile")
+      |> assign(:show_create_org_modal, false)
+      |> assign(:create_org_form, to_form(%{"name" => ""}, as: :create_org))
       |> assign_organization_form(selected_organization_id)
       |> assign_widget_token()
 
@@ -79,6 +94,59 @@ defmodule FizzWeb.UserManagementLive do
     {:noreply, assign_widget_token(socket)}
   end
 
+  def handle_event("switch_tab", %{"tab" => tab_id}, socket) do
+    if Enum.any?(@all_tabs, &(&1.id == tab_id)) do
+      {:noreply, assign(socket, :active_tab, tab_id)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("open_create_org_modal", _params, socket) do
+    socket =
+      socket
+      |> assign(:show_create_org_modal, true)
+      |> assign(:create_org_form, to_form(%{"name" => ""}, as: :create_org))
+
+    {:noreply, socket}
+  end
+
+  def handle_event("close_create_org_modal", _params, socket) do
+    {:noreply, assign(socket, :show_create_org_modal, false)}
+  end
+
+  def handle_event("validate_create_org", %{"create_org" => params}, socket) do
+    {:noreply, assign(socket, :create_org_form, to_form(params, as: :create_org))}
+  end
+
+  def handle_event("create_organization", %{"create_org" => %{"name" => name}}, socket) do
+    name = String.trim(name)
+
+    if name == "" do
+      {:noreply, socket}
+    else
+      case Accounts.create_organization(socket.assigns.current_scope, %{name: name}) do
+        {:ok, org} ->
+          organizations =
+            Accounts.ensure_personal_organization(socket.assigns.current_scope)
+
+          socket =
+            socket
+            |> assign(:organizations, organizations)
+            |> assign(:organization_options, organization_options(organizations))
+            |> assign(:selected_organization_id, org.organization_id)
+            |> assign(:show_create_org_modal, false)
+            |> assign_organization_form(org.organization_id)
+            |> assign_widget_token()
+
+          {:noreply, socket}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Could not create organization.")}
+      end
+    end
+  end
+
   defp assign_widget_token(
          %{assigns: %{selected_organization_id: nil, organization_options: []}} = socket
        ) do
@@ -94,7 +162,7 @@ defmodule FizzWeb.UserManagementLive do
   end
 
   defp assign_widget_token(socket) do
-    case Accounts.generate_user_management_widget_token(
+    case Accounts.generate_widget_token(
            socket.assigns.current_scope,
            socket.assigns.selected_organization_id
          ) do
@@ -138,6 +206,10 @@ defmodule FizzWeb.UserManagementLive do
     else
       default_organization_id(organizations)
     end
+  end
+
+  defp active_tab_config(tabs, active_tab) do
+    Enum.find(tabs, List.first(tabs), &(&1.id == active_tab))
   end
 
   defp widget_error_message(:missing_workos_organization_id) do

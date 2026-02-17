@@ -1,9 +1,47 @@
 defmodule Fizz.Accounts do
   @moduledoc """
-  The Accounts context.
+  Identity and multi-tenancy context, built on WorkOS as the external identity provider.
+
+  ## Entity hierarchy
+
+      Organizations (WorkOS) → Workspaces (local) → Memberships (local)
+
+  **Organizations** are managed entirely in WorkOS — they are never stored locally.
+  An organization represents a company, team, or billing entity. Users belong to
+  one or more organizations via WorkOS organization memberships.
+
+  **Workspaces** are a local sub-organizational unit scoped to a single WorkOS
+  organization. They provide a generic grouping concept for related resources and
+  work — more focused than an organization, more generic than a "project". In a
+  B2B SaaS context a client typically maps to one workspace, or to multiple
+  workspaces for larger clients.
+
+  **Workspace memberships** link a user to a workspace with a specific role
+  (`:admin`, `:member`, or `:viewer`).
+
+  ## Authorization
+
+  All operations require a `Fizz.Accounts.Scope` struct carrying the resolved
+  user, organization, and workspace context. The scope is built via `build_scope/3`
+  after the user selects an organization and (optionally) a workspace.
+
+  ## Roles
+
+  * **Organization roles** (sourced from WorkOS): `:owner` > `:admin` > `:member`
+  * **Workspace roles** (local): `:admin` > `:member` > `:viewer`
+
+  Organization owners and admins implicitly have access to all workspaces in
+  their organization.
+
+  ## WorkOS integration
+
+  Authentication (AuthKit), organization membership, and audit logging are
+  delegated to WorkOS through `Fizz.Accounts.WorkOS`.
   """
 
   import Ecto.Query, warn: false
+
+  import Fizz.Accounts.WorkOS.Helpers, only: [read_value: 2, membership_role_slugs: 1]
 
   alias Fizz.Accounts.{
     Scope,
@@ -23,10 +61,62 @@ defmodule Fizz.Accounts do
   def list_organizations(_scope), do: []
 
   @doc """
-  Organization creation is owned by WorkOS.
+  Creates a WorkOS organization and adds the current user as owner.
   """
-  def create_organization(_scope, _attrs, _opts \\ []),
-    do: {:error, :organization_managed_by_workos}
+  def create_organization(scope, attrs, opts \\ [])
+
+  def create_organization(
+        %Scope{user: %User{workos_user_id: workos_user_id}} = _scope,
+        %{name: name},
+        _opts
+      )
+      when is_binary(workos_user_id) and is_binary(name) do
+    with {:ok, organization} <- WorkOS.create_workos_organization(name),
+         {:ok, _membership} <-
+           WorkOS.create_organization_membership(workos_user_id, organization.id, "owner") do
+      {:ok, %{organization_id: organization.id, name: organization.name}}
+    end
+  end
+
+  def create_organization(%Scope{user: %User{}}, _attrs, _opts),
+    do: {:error, :missing_workos_user_id}
+
+  def create_organization(_scope, _attrs, _opts), do: {:error, :unauthenticated}
+
+  @doc """
+  Ensures the user has at least one organization.
+
+  If the user has no organizations, a personal org is auto-provisioned
+  named "<email_prefix>'s Organization".
+  """
+  @spec ensure_personal_organization(Scope.t() | nil) :: [map()]
+  def ensure_personal_organization(%Scope{user: %User{email: email}} = scope) do
+    case list_user_workos_organizations(scope) do
+      [] ->
+        prefix = email |> String.split("@") |> List.first()
+        org_name = "#{prefix}'s Organization"
+
+        case create_organization(scope, %{name: org_name}) do
+          {:ok, org} ->
+            [
+              %{
+                organization_id: org.organization_id,
+                local_organization_id: nil,
+                organization_name: org.name,
+                role: :owner
+              }
+            ]
+
+          {:error, _reason} ->
+            []
+        end
+
+      organizations ->
+        organizations
+    end
+  end
+
+  def ensure_personal_organization(_scope), do: []
 
   @doc """
   Builds a WorkOS organization/workspace-aware scope for the current user.
@@ -133,6 +223,34 @@ defmodule Fizz.Accounts do
   end
 
   def list_workspaces(_scope), do: {:error, :organization_scope_required}
+
+  @doc """
+  Fetches a workspace by local id.
+  """
+  @spec get_workspace(String.t()) :: Workspace.t() | nil
+  def get_workspace(workspace_id) when is_binary(workspace_id) do
+    Repo.get(Workspace, workspace_id)
+  end
+
+  def get_workspace(_workspace_id), do: nil
+
+  @doc """
+  Builds and returns a workspace-aware scope for the given workspace id.
+  """
+  @spec build_scope_for_workspace(Scope.t() | nil, String.t()) ::
+          {:ok, Scope.t()}
+          | {:error, :workspace_not_found | :forbidden | :unauthenticated | term()}
+  def build_scope_for_workspace(%Scope{} = scope, workspace_id) when is_binary(workspace_id) do
+    case Repo.get(Workspace, workspace_id) do
+      %Workspace{} = workspace ->
+        build_scope(scope, workspace.workos_organization_id, workspace_id: workspace.id)
+
+      nil ->
+        {:error, :workspace_not_found}
+    end
+  end
+
+  def build_scope_for_workspace(_scope, _workspace_id), do: {:error, :unauthenticated}
 
   @doc """
   Adds or updates organization membership for a user in WorkOS.
@@ -401,35 +519,6 @@ defmodule Fizz.Accounts do
 
   defp normalize_role_slug(_role_slug), do: nil
 
-  defp membership_role_slugs(membership) do
-    role_slugs =
-      membership
-      |> read_value([:roles, "roles"])
-      |> List.wrap()
-      |> Enum.map(fn role -> read_value(role, [:slug, "slug"]) end)
-      |> Enum.filter(&is_binary/1)
-
-    primary_role_slug =
-      case read_value(membership, [:role, "role", :role_slug, "role_slug"]) do
-        %{} = role -> read_value(role, [:slug, "slug"])
-        slug when is_binary(slug) -> slug
-        _ -> nil
-      end
-
-    [primary_role_slug | role_slugs]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.uniq()
-  end
-
-  defp read_value(data, keys) do
-    Enum.find_value(keys, fn key ->
-      case data do
-        %{} -> Map.get(data, key)
-        _ -> nil
-      end
-    end)
-  end
-
   defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
 
   @doc """
@@ -454,19 +543,11 @@ defmodule Fizz.Accounts do
   def list_user_workos_organizations(_scope), do: []
 
   @doc """
-  Generates a WorkOS Pipes widget token for the given organization.
+  Generates a WorkOS widget token for the given organization.
   """
-  @spec generate_pipes_widget_token(Scope.t() | nil, String.t()) ::
+  @spec generate_widget_token(Scope.t() | nil, String.t()) ::
           {:ok, String.t()} | {:error, term()}
-  def generate_pipes_widget_token(scope, organization_id),
-    do: generate_widget_token_for_scope(scope, organization_id, [])
-
-  @doc """
-  Generates a WorkOS Users Management widget token for the given organization.
-  """
-  @spec generate_user_management_widget_token(Scope.t() | nil, String.t()) ::
-          {:ok, String.t()} | {:error, term()}
-  def generate_user_management_widget_token(scope, organization_id),
+  def generate_widget_token(scope, organization_id),
     do: generate_widget_token_for_scope(scope, organization_id, [])
 
   @doc """
@@ -674,6 +755,17 @@ defmodule Fizz.Accounts do
 
   def revoke_user_sessions_by_workos_user_id(_workos_user_id),
     do: {:error, :invalid_workos_user_id}
+
+  @doc """
+  Broadcasts a disconnect for the given WorkOS session id via PubSub.
+  """
+  def disconnect_workos_session(session_id)
+      when is_binary(session_id) and byte_size(session_id) > 0 do
+    topic = "workos_sessions:#{Base.url_encode64(session_id, padding: false)}"
+    FizzWeb.Endpoint.broadcast(topic, "disconnect", %{})
+  end
+
+  def disconnect_workos_session(_session_id), do: :ok
 
   ## WorkOS profile sync
 

@@ -25,55 +25,34 @@ end
 
 config :fizz, FizzWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
-workos_sync_enabled = System.get_env("WORKOS_SYNC_ENABLED") in ~w(1 true TRUE)
-config :fizz, :workos_sync_enabled, workos_sync_enabled
+config :fizz,
+  workos_sync_enabled: System.get_env("WORKOS_SYNC_ENABLED") in ~w(1 true TRUE),
+  workos_authkit_provider: System.get_env("WORKOS_AUTHKIT_PROVIDER", "authkit"),
+  workos_authkit_redirect_uri: System.get_env("WORKOS_AUTHKIT_REDIRECT_URI"),
+  workos_authkit_logout_return_uri: System.get_env("WORKOS_AUTHKIT_LOGOUT_RETURN_URI"),
+  workos_webhook_secret: System.get_env("WORKOS_WEBHOOK_SECRET"),
+  workos_role_slug_map: %{
+    owner: System.get_env("WORKOS_ROLE_SLUG_OWNER", "owner"),
+    admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN", "admin"),
+    member: System.get_env("WORKOS_ROLE_SLUG_MEMBER", "member")
+  },
+  sprites_api_key: System.get_env("SPRITES_API_KEY"),
+  sprites_api_base_url: System.get_env("SPRITES_API_BASE_URL", "https://api.sprites.dev"),
+  sprites_default_region: System.get_env("SPRITES_DEFAULT_REGION"),
+  sprites_log_retention_days:
+    String.to_integer(System.get_env("SPRITES_LOG_RETENTION_DAYS", "14")),
+  sprites_checkpoint_retention_days:
+    String.to_integer(System.get_env("SPRITES_CHECKPOINT_RETENTION_DAYS", "14")),
+  sprites_service_log_tail_lines:
+    String.to_integer(System.get_env("SPRITES_SERVICE_LOG_TAIL_LINES", "200")),
+  sprites_exec_timeout_ms_default:
+    String.to_integer(System.get_env("SPRITES_EXEC_TIMEOUT_MS_DEFAULT", "30000"))
 
-workos_api_key = System.get_env("WORKOS_API_KEY")
-workos_client_id = System.get_env("WORKOS_CLIENT_ID")
-
-if workos_api_key && workos_client_id do
+if api_key = System.get_env("WORKOS_API_KEY") do
   config :workos, WorkOS.Client,
-    api_key: workos_api_key,
-    client_id: workos_client_id,
+    api_key: api_key,
+    client_id: System.get_env("WORKOS_CLIENT_ID"),
     client: Fizz.WorkOS.ReqClient
-end
-
-if workos_sync_enabled and !(workos_api_key && workos_client_id) do
-  raise "WORKOS_SYNC_ENABLED is true but WORKOS_API_KEY/WORKOS_CLIENT_ID are missing"
-end
-
-if workos_authkit_provider = System.get_env("WORKOS_AUTHKIT_PROVIDER") do
-  config :fizz, :workos_authkit_provider, workos_authkit_provider
-end
-
-if workos_authkit_redirect_uri = System.get_env("WORKOS_AUTHKIT_REDIRECT_URI") do
-  config :fizz, :workos_authkit_redirect_uri, workos_authkit_redirect_uri
-end
-
-if workos_authkit_logout_return_uri = System.get_env("WORKOS_AUTHKIT_LOGOUT_RETURN_URI") do
-  config :fizz, :workos_authkit_logout_return_uri, workos_authkit_logout_return_uri
-end
-
-if workos_webhook_secret = System.get_env("WORKOS_WEBHOOK_SECRET") do
-  config :fizz, :workos_webhook_secret, workos_webhook_secret
-end
-
-workos_role_slug_overrides =
-  %{
-    owner: System.get_env("WORKOS_ROLE_SLUG_OWNER"),
-    admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN"),
-    member: System.get_env("WORKOS_ROLE_SLUG_MEMBER")
-  }
-  |> Enum.reject(fn {_role, slug} -> is_nil(slug) or slug == "" end)
-  |> Map.new()
-
-if map_size(workos_role_slug_overrides) > 0 do
-  config :fizz,
-         :workos_role_slug_map,
-         Map.merge(
-           %{owner: "owner", admin: "admin", member: "member"},
-           workos_role_slug_overrides
-         )
 end
 
 if config_env() == :prod do

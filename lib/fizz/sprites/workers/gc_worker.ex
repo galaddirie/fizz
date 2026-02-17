@@ -1,0 +1,13 @@
+defmodule Fizz.Sprites.Workers.GCWorker do
+  @moduledoc """
+  Garbage-collects old logs and checkpoints.
+  """
+
+  use Oban.Worker, queue: :sprites_maintenance, max_attempts: 1
+
+  @impl Oban.Worker
+  def perform(_job) do
+    :ok = Fizz.Sprites.run_gc()
+    :ok
+  end
+end

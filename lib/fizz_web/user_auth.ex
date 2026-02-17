@@ -3,6 +3,7 @@ defmodule FizzWeb.UserAuth do
 
   import Plug.Conn
   import Phoenix.Controller
+  import Fizz.Accounts.WorkOS.Helpers, only: [read_value: 2, normalize_integer: 1]
 
   alias Fizz.Accounts
   alias Fizz.Accounts.Scope
@@ -264,26 +265,6 @@ defmodule FizzWeb.UserAuth do
 
   defp maybe_put_live_socket_id(conn, _session_id), do: delete_session(conn, @live_socket_id)
 
-  defp read_value(data, keys) do
-    Enum.find_value(keys, fn key ->
-      case data do
-        %{} -> Map.get(data, key)
-        _ -> nil
-      end
-    end)
-  end
-
-  defp normalize_integer(value) when is_integer(value), do: value
-
-  defp normalize_integer(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {parsed, ""} -> parsed
-      _ -> nil
-    end
-  end
-
-  defp normalize_integer(_value), do: nil
-
   defp post_logout_return_to do
     Application.get_env(:fizz, :workos_authkit_logout_return_uri) ||
       FizzWeb.Endpoint.url() <> ~p"/"
@@ -308,12 +289,7 @@ defmodule FizzWeb.UserAuth do
   @doc """
   Disconnects existing sockets for a WorkOS session id.
   """
-  def disconnect_workos_session(session_id)
-      when is_binary(session_id) and byte_size(session_id) > 0 do
-    FizzWeb.Endpoint.broadcast(workos_session_topic(session_id), "disconnect", %{})
-  end
-
-  def disconnect_workos_session(_session_id), do: :ok
+  defdelegate disconnect_workos_session(session_id), to: Accounts
 
   defp workos_session_topic(session_id),
     do: "workos_sessions:#{Base.url_encode64(session_id, padding: false)}"

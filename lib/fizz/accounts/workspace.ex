@@ -1,4 +1,17 @@
 defmodule Fizz.Accounts.Workspace do
+  @moduledoc """
+  A generic organizational unit for grouping related resources and work within
+  a WorkOS organization.
+
+  More focused than an organization, more generic than a "project". In a B2B
+  SaaS context a client typically maps to one workspace, or to multiple
+  workspaces for larger clients.
+
+  Each workspace is scoped to a WorkOS organization via `workos_organization_id`.
+  Slugs are unique per organization and auto-generated from the name if not
+  provided. Access is controlled through `Fizz.Accounts.WorkspaceMembership`.
+  """
+
   use Fizz.Schema
 
   alias Fizz.Accounts.WorkspaceMembership

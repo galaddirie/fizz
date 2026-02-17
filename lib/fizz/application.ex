@@ -14,6 +14,7 @@ defmodule Fizz.Application do
       {DNSCluster, query: Application.get_env(:fizz, :dns_cluster_query) || :ignore},
       {Oban, Application.fetch_env!(:fizz, Oban)},
       {Phoenix.PubSub, name: Fizz.PubSub},
+      FizzWeb.Presence,
       # Start a worker by calling: Fizz.Worker.start_link(arg)
       # {Fizz.Worker, arg},
       # Start to serve requests, typically the last entry

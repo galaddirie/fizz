@@ -70,7 +70,11 @@ defmodule Fizz.MixProject do
       {:bandit, "~> 1.5"},
       {:nvir, "~> 0.16"},
       {:runic, git: "https://github.com/galaddirie/runic.git", branch: "main"},
-      {:oban, "~> 2.20"}
+      {:jsv, "~> 0.13.1"},
+      {:oban, "~> 2.20"},
+      {:sprites, git: "https://github.com/superfly/sprites-ex.git"},
+      {:flame, "~> 0.5.3"},
+      {:solid, "~> 1.2"}
     ]
   end
 

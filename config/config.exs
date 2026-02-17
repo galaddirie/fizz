@@ -10,7 +10,15 @@ import Config
 config :fizz, Oban,
   engine: Oban.Engines.Basic,
   notifier: Oban.Notifiers.Postgres,
-  queues: [default: 10],
+  plugins: [
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"*/3 * * * *", Fizz.Sprites.Workers.ReconcileStaleJobsWorker},
+       {"*/5 * * * *", Fizz.Sprites.Workers.ConsoleReaperWorker},
+       {"0 * * * *", Fizz.Sprites.Workers.GCWorker}
+     ]}
+  ],
+  queues: [default: 10, sprites: 20, sprites_maintenance: 5],
   repo: Fizz.Repo
 
 config :live_vue, ssr: true
@@ -39,16 +47,6 @@ config :fizz, :scopes,
 config :fizz,
   ecto_repos: [Fizz.Repo],
   generators: [timestamp_type: :utc_datetime]
-
-config :fizz, :workos_sync_enabled, false
-config :fizz, :workos_authkit_provider, "authkit"
-config :fizz, :workos_webhook_secret, nil
-config :fizz, :workos_role_slug_map, %{owner: "owner", admin: "admin", member: "member"}
-
-config :workos, WorkOS.Client,
-  api_key: System.get_env("WORKOS_API_KEY"),
-  client_id: System.get_env("WORKOS_CLIENT_ID"),
-  client: Fizz.WorkOS.ReqClient
 
 config :tesla, disable_deprecated_builder_warning: true
 

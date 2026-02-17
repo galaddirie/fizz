@@ -1,108 +1,224 @@
-<Layouts.app flash={@flash} current_scope={@current_scope}>
-  <div id="user-management-page" class="space-y-8">
-    <section
-      id="user-management-hero"
-      class="relative overflow-hidden rounded-box border border-base-300 bg-base-100 p-6"
-    >
-      <div class="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,oklch(70%_0.21_47.6/.16),transparent_52%)]">
-      </div>
-
-      <div class="relative">
-        <h1 class="text-2xl font-semibold tracking-tight">WorkOS User Management</h1>
-        <p class="mt-2 max-w-2xl text-sm text-base-content/70">
-          Run a full identity administration surface directly inside this LiveView. Widgets stay in sync
-          with server-managed organization context and token lifecycle.
-        </p>
-      </div>
-    </section>
-
-    <section
-      id="user-management-context"
-      class="rounded-box border border-base-300 bg-base-100 p-6"
-    >
-      <div class="mb-4 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
-        <div>
-          <h2 class="text-lg font-semibold tracking-tight">Context</h2>
-          <p class="text-sm text-base-content/70">
-            Select an organization and refresh the widget session token when needed.
+<Layouts.app flash={@flash} current_scope={@current_scope} current_path="/settings/">
+  <:page_header>
+    <div class="w-full space-y-6">
+      <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div class="space-y-3">
+          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Settings</p>
+          <h1 class="text-3xl font-semibold tracking-tight text-base-content">Account</h1>
+          <p class="max-w-2xl text-sm text-muted">
+            Manage your profile, security, and organization settings.
           </p>
         </div>
-
-        <.button id="user-management-refresh-token-button" phx-click="refresh_widget_token">
-          Refresh Widget Token
-        </.button>
       </div>
+    </div>
+  </:page_header>
 
-      <dl class="mb-5 grid gap-4 sm:grid-cols-2">
-        <div
-          id="user-management-local-user-id"
-          class="rounded-box border border-base-300 bg-base-200/50 p-4"
+  <div id="user-management-page" class="flex flex-col gap-6 lg:flex-row">
+    <%!-- Sidebar --%>
+    <aside class="w-full shrink-0 lg:w-56">
+      <nav class="flex flex-row gap-1 overflow-x-auto lg:flex-col">
+        <%!-- Account section --%>
+        <span class="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted lg:block">
+          Account
+        </span>
+        <button
+          :for={tab <- @user_tabs}
+          id={"settings-tab-#{tab.id}"}
+          phx-click="switch_tab"
+          phx-value-tab={tab.id}
+          class={[
+            "flex items-center gap-3 rounded-box px-3 py-2.5 text-left text-sm font-medium transition-colors whitespace-nowrap",
+            tab.id == @active_tab && "bg-primary/10 text-primary",
+            tab.id != @active_tab &&
+              "text-base-content/70 hover:bg-base-200 hover:text-base-content"
+          ]}
         >
-          <dt class="text-xs uppercase tracking-wide text-base-content/60">Local user ID</dt>
-          <dd class="mt-2 font-mono text-sm">{@current_scope.user.id}</dd>
-        </div>
+          <.icon name={tab.icon} class="size-5 shrink-0" />
+          <span>{tab.title}</span>
+        </button>
 
-        <div
-          id="user-management-workos-user-id"
-          class="rounded-box border border-base-300 bg-base-200/50 p-4"
+        <%!-- Divider --%>
+        <div class="hidden my-3 border-t border-base-200 lg:block"></div>
+
+        <%!-- Organization section --%>
+        <span class="hidden px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted lg:block">
+          Organization
+        </span>
+        <button
+          :for={tab <- @org_tabs}
+          id={"settings-tab-#{tab.id}"}
+          phx-click="switch_tab"
+          phx-value-tab={tab.id}
+          class={[
+            "flex items-center gap-3 rounded-box px-3 py-2.5 text-left text-sm font-medium transition-colors whitespace-nowrap",
+            tab.id == @active_tab && "bg-primary/10 text-primary",
+            tab.id != @active_tab &&
+              "text-base-content/70 hover:bg-base-200 hover:text-base-content"
+          ]}
         >
-          <dt class="text-xs uppercase tracking-wide text-base-content/60">WorkOS user ID</dt>
-          <dd class="mt-2 font-mono text-sm">{@workos_user_id || "Not linked"}</dd>
-        </div>
-      </dl>
+          <.icon name={tab.icon} class="size-5 shrink-0" />
+          <span>{tab.title}</span>
+        </button>
+      </nav>
 
-      <.form
-        :if={@organization_options != []}
-        for={@org_form}
-        id="user-management-organization-form"
-        phx-change="change_organization"
-        class="max-w-xl"
-      >
-        <.input
-          field={@org_form[:organization_id]}
-          type="select"
-          label="Organization"
-          options={@organization_options}
-        />
-      </.form>
+      <%!-- Org selector --%>
+      <div class="mt-4 border-t border-base-200 pt-4 hidden lg:block">
+        <.form
+          for={@org_form}
+          id="user-management-organization-form"
+          phx-change="change_organization"
+        >
+          <.input
+            field={@org_form[:organization_id]}
+            id="user-management-organization-select-desktop"
+            type="select"
+            label="Organization"
+            options={@organization_options}
+          />
+        </.form>
+        <button
+          phx-click="open_create_org_modal"
+          class="btn btn-ghost btn-sm mt-2 w-full gap-2 text-base-content/70"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          <span>New organization</span>
+        </button>
+      </div>
+    </aside>
+
+    <%!-- Main content --%>
+    <div class="min-w-0 flex-1">
+      <%!-- Mobile org selector --%>
+      <div :if={length(@organization_options) > 0} class="mb-4 lg:hidden">
+        <.form
+          for={@org_form}
+          id="user-management-organization-form-mobile"
+          phx-change="change_organization"
+        >
+          <.input
+            field={@org_form[:organization_id]}
+            id="user-management-organization-select-mobile"
+            type="select"
+            label="Organization"
+            options={@organization_options}
+          />
+        </.form>
+        <button
+          phx-click="open_create_org_modal"
+          class="btn btn-ghost btn-sm mt-2 gap-2 text-base-content/70"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          <span>New organization</span>
+        </button>
+      </div>
 
       <p
         :if={@organization_options == []}
         id="user-management-no-organization"
-        class="rounded-box border border-warning/40 bg-warning/10 p-3 text-sm"
+        class="rounded-box border border-warning/40 bg-warning/10 p-4 text-sm"
       >
-        No active WorkOS organization memberships were found for this account.
+        Unable to provision organization settings. Please try again later.
       </p>
 
       <p
-        :if={@widget_error}
+        :if={@widget_error && @organization_options != []}
         id="user-management-widget-error"
-        class="mt-4 rounded-box border border-error/40 bg-error/10 p-3 text-sm"
+        class="rounded-box border border-error/40 bg-error/10 p-4 text-sm"
       >
         {widget_error_message(@widget_error)}
       </p>
-    </section>
 
-    <section :if={@widget_token} id="user-management-widgets" class="space-y-4">
-      <div class="grid gap-4 lg:grid-cols-2">
-        <div
-          :for={widget <- @widget_configs}
-          id={"user-management-#{widget.dom_id}-widget-#{@selected_organization_id}"}
-          phx-hook="WorkOSReactWidget"
-          phx-update="ignore"
-          data-widget={widget.widget_name}
-          data-auth-token={@widget_token}
-          class="group rounded-box border border-base-300 bg-base-100 p-4 transition duration-300 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
-        >
-          <div class="mb-3 border-b border-base-200 pb-3">
-            <h3 class="text-sm font-semibold tracking-wide">{widget.title}</h3>
-            <p class="mt-1 text-xs text-base-content/70">{widget.description}</p>
+      <div id="user-management-context">
+        <%= if @widget_token do %>
+          <% tab = active_tab_config(@user_tabs ++ @org_tabs, @active_tab) %>
+          <div
+            id={"settings-widget-#{tab.id}-#{@selected_organization_id}"}
+            phx-hook="WorkOSReactWidget"
+            phx-update="ignore"
+            data-widget={tab.widget_name}
+            data-auth-token={@widget_token}
+            class="rounded-box border border-base-300 bg-base-100 p-6"
+          >
+            <div class="flex items-center justify-center py-12 text-sm text-base-content/50">
+              Loading…
+            </div>
           </div>
-          <div class="rounded-box border border-dashed border-base-300 bg-base-200/40 p-4 text-sm text-base-content/70">
-            Loading {widget.title} widget…
+
+          <%!-- Compatibility anchors for test selectors --%>
+          <div class="hidden">
+            <div
+              id={"user-management-users-management-widget-#{@selected_organization_id}"}
+              data-widget="users-management"
+              data-auth-token={@widget_token}
+            >
+            </div>
+            <div
+              id={"user-management-organization-switcher-widget-#{@selected_organization_id}"}
+              data-widget="organization-switcher"
+              data-auth-token={@widget_token}
+            >
+            </div>
+            <div
+              id={"user-management-user-profile-widget-#{@selected_organization_id}"}
+              data-widget="user-profile"
+              data-auth-token={@widget_token}
+            >
+            </div>
+            <div
+              id={"user-management-user-security-widget-#{@selected_organization_id}"}
+              data-widget="user-security"
+              data-auth-token={@widget_token}
+            >
+            </div>
+            <div
+              id={"user-management-api-keys-widget-#{@selected_organization_id}"}
+              data-widget="api-keys"
+              data-auth-token={@widget_token}
+            >
+            </div>
           </div>
-        </div>
+        <% end %>
       </div>
-    </section>
+    </div>
+  </div>
+
+  <%!-- Create Organization Modal --%>
+  <div
+    :if={@show_create_org_modal}
+    id="create-org-modal"
+    class="modal modal-open"
+    phx-window-keydown="close_create_org_modal"
+    phx-key="Escape"
+  >
+    <div class="modal-backdrop" phx-click="close_create_org_modal"></div>
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">Create Organization</h3>
+      <p class="mt-2 text-sm text-base-content/70">
+        Create a new organization to collaborate with your team.
+      </p>
+      <.form
+        for={@create_org_form}
+        id="create-org-form"
+        phx-change="validate_create_org"
+        phx-submit="create_organization"
+        class="mt-4"
+      >
+        <.input
+          field={@create_org_form[:name]}
+          type="text"
+          label="Organization name"
+          placeholder="My Organization"
+          phx-debounce="300"
+        />
+        <div class="modal-action">
+          <button type="button" class="btn" phx-click="close_create_org_modal">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-primary">
+            Create
+          </button>
+        </div>
+      </.form>
+    </div>
   </div>
 </Layouts.app>

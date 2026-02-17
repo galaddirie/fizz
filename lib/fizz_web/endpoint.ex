@@ -16,6 +16,10 @@ defmodule FizzWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  socket "/socket", FizzWeb.UserSocket,
+    websocket: [connect_info: [session: @session_options]],
+    longpoll: false
+
   plug :favicon, dev_server: {PhoenixVite.Components, :has_vite_watcher?, [__MODULE__]}
 
   # Serve at "/" the static files from "priv/static" directory.
