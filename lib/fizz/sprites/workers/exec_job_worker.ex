@@ -10,13 +10,18 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
 
   import Ecto.Query
 
+  alias Fizz.Accounts
+  alias Fizz.Accounts.Scope
+  alias Fizz.Integrations
   alias Fizz.Repo
   alias Fizz.Sprites, as: Broker
-  alias Fizz.Sprites.{Client, ExecJob}
+  alias Fizz.Sprites.{Client, ExecJob, GitCredentialSetup}
+
+  require Logger
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"exec_job_id" => exec_job_id}}) do
-    case Repo.get(ExecJob, exec_job_id) |> Repo.preload(:sprite) do
+    case Repo.get(ExecJob, exec_job_id) |> Repo.preload([:sprite, :requested_by_user]) do
       nil ->
         :discard
 
@@ -35,6 +40,8 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
     {:ok, _running_job} =
       Broker.set_job_state(exec_job.id, :running, %{started_at: now, heartbeat_at: now})
 
+    git_env = setup_git_credentials(exec_job)
+
     with {:ok, remote_sprite} <- Client.sprite(exec_job.sprite.remote_name),
          {:ok, command} <-
            Sprites.spawn(
@@ -42,7 +49,7 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
              exec_job.command,
              exec_job.args,
              owner: self(),
-             env: env_tuples(exec_job.env),
+             env: env_tuples(exec_job.env) ++ git_env,
              dir: exec_job.dir
            ) do
       start_ms = System.monotonic_time(:millisecond)
@@ -241,4 +248,52 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
   end
 
   defp stop_command(_command), do: :ok
+
+  defp setup_git_credentials(%ExecJob{requested_by_user: %Accounts.User{} = user} = exec_job) do
+    scope = Scope.for_user(user)
+
+    with {:ok, workspace_scope} <-
+           Accounts.build_scope_for_workspace(scope, exec_job.workspace_id),
+         {:ok, token_result} <-
+           Integrations.fetch_token_for_sprite(workspace_scope, exec_job.workspace_id, "github") do
+      user_opts = git_user_opts(workspace_scope, exec_job.workspace_id)
+
+      case GitCredentialSetup.setup(
+             exec_job.sprite.remote_name,
+             token_result.access_token,
+             user_opts
+           ) do
+        {:ok, env_tuples} ->
+          env_tuples
+
+        {:error, reason} ->
+          Logger.warning("Git credential setup failed for exec job: #{inspect(reason)}")
+          []
+      end
+    else
+      {:error, reason} ->
+        Logger.debug("Git credential setup skipped for exec job: #{inspect(reason)}")
+        []
+    end
+  end
+
+  defp setup_git_credentials(_exec_job), do: []
+
+  defp git_user_opts(scope, workspace_id) do
+    case Integrations.get_connection(scope, workspace_id, "github") do
+      {:ok, connection} ->
+        meta = connection.provider_metadata || %{}
+        name = meta["name"] || meta["username"]
+        email = meta["email"] || github_noreply_email(meta["username"]) || scope.user.email
+
+        [user_name: name, user_email: email]
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+      {:error, _} ->
+        if scope.user.email, do: [user_email: scope.user.email], else: []
+    end
+  end
+
+  defp github_noreply_email(nil), do: nil
+  defp github_noreply_email(username), do: "#{username}@users.noreply.github.com"
 end
