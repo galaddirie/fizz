@@ -188,7 +188,7 @@ defmodule Fizz.IntegrationsTest do
     assert resolved.api_key == "sk-anthropic"
   end
 
-  test "supports multiple credentials for the same provider and unique vault names" do
+  test "supports multiple credentials for the same provider with unique display labels and vault names" do
     user = user_fixture()
     org_id = "org_multi"
     scope = Scope.for_user(user)
@@ -218,17 +218,96 @@ defmodule Fizz.IntegrationsTest do
     assert {:ok, second_credential} =
              AccountExternalAuth.create_credential(scope, org_id, %{
                provider: "openai_api_key",
-               provider_label: "OpenAI Production",
+               provider_label: "OpenAI Staging",
                secret: "sk-second"
              })
 
     assert first_credential.provider == "openai_api_key"
     assert second_credential.provider == "openai_api_key"
     assert first_credential.id != second_credential.id
+    assert first_credential.provider_label != second_credential.provider_label
     assert first_credential.vault_object_id != second_credential.vault_object_id
     assert first_credential.vault_object_name != second_credential.vault_object_name
     assert String.starts_with?(first_credential.vault_object_name, "openai_production_")
-    assert String.starts_with?(second_credential.vault_object_name, "openai_production_")
+    assert String.starts_with?(second_credential.vault_object_name, "openai_staging_")
+  end
+
+  test "rejects duplicate credential display labels for the same user in an organization" do
+    user = user_fixture()
+    org_id = "org_duplicate_label"
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{"id" => "vault_obj_dup_1", "metadata" => %{"version_id" => "version_1"}}
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{"id" => "vault_obj_dup_2", "metadata" => %{"version_id" => "version_1"}}
+       }},
+      {:ok, %Req.Response{status: 204, body: %{}}}
+    ])
+
+    assert {:ok, _credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Shared Label",
+               secret: "sk-first"
+             })
+
+    assert {:error, %Ecto.Changeset{} = changeset} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Shared Label",
+               secret: "sk-second"
+             })
+
+    assert %{provider_label: ["has already been taken"]} = errors_on(changeset)
+  end
+
+  test "allows duplicate credential display labels for different users" do
+    first_user = user_fixture()
+    second_user = user_fixture()
+    org_id = "org_user_scoped_label"
+    first_scope = Scope.for_user(first_user)
+    second_scope = Scope.for_user(second_user)
+
+    put_workos_responses([
+      membership_response(first_user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{"id" => "vault_obj_user_1", "metadata" => %{"version_id" => "version_1"}}
+       }},
+      membership_response(second_user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{"id" => "vault_obj_user_2", "metadata" => %{"version_id" => "version_1"}}
+       }}
+    ])
+
+    assert {:ok, first_credential} =
+             AccountExternalAuth.create_credential(first_scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Team Key",
+               secret: "sk-first-user"
+             })
+
+    assert {:ok, second_credential} =
+             AccountExternalAuth.create_credential(second_scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Team Key",
+               secret: "sk-second-user"
+             })
+
+    assert first_credential.user_id != second_credential.user_id
+    assert first_credential.provider_label == second_credential.provider_label
   end
 
   test "credential usage is owner-scoped within workspace" do

@@ -58,6 +58,10 @@ defmodule Fizz.Accounts.ApiCredential do
     |> validate_length(:vault_object_name, min: 3, max: 255)
     |> validate_provider_custom_name()
     |> foreign_key_constraint(:user_id)
+    |> unique_constraint(:provider_label,
+      name: :api_credentials_org_user_provider_label_index,
+      message: "has already been taken"
+    )
     |> unique_constraint(:vault_object_id)
     |> unique_constraint(:vault_object_name)
   end
