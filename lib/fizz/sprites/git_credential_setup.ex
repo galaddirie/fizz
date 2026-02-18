@@ -52,7 +52,9 @@ defmodule Fizz.Sprites.GitCredentialSetup do
   @spec teardown(String.t()) :: :ok
   def teardown(remote_name) do
     with {:ok, remote_sprite} <- Client.sprite(remote_name) do
-      delete_url = fs_url(remote_sprite, "/fs/delete", path: @git_credentials_path, recursive: "false")
+      delete_url =
+        fs_url(remote_sprite, "/fs/delete", path: @git_credentials_path, recursive: "false")
+
       Req.delete(remote_sprite.client.req, url: delete_url)
       :ok
     else

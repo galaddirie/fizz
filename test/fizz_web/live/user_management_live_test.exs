@@ -3,6 +3,9 @@ defmodule FizzWeb.UserManagementLiveTest do
 
   import Phoenix.LiveViewTest
 
+  alias Fizz.Integrations.IntegrationCredential
+  alias Fizz.Repo
+
   defmodule ReqMock do
     def request(opts) do
       owner = :persistent_term.get({FizzWeb.UserManagementLiveTest, :owner}, nil)
@@ -14,11 +17,14 @@ defmodule FizzWeb.UserManagementLiveTest do
 
       if is_pid(mock_store) do
         Agent.get_and_update(mock_store, fn
+          [{:repeat, _} = response | rest] -> {response, [response | rest]}
           [response | rest] -> {response, rest}
           [] -> {:no_mocked_response, []}
         end)
         |> case do
           :no_mocked_response -> raise "No mocked WorkOS HTTP responses were configured"
+          {:repeat, response_fun} when is_function(response_fun, 1) -> response_fun.(opts)
+          response_fun when is_function(response_fun, 1) -> response_fun.(opts)
           response -> response
         end
       else
@@ -29,6 +35,7 @@ defmodule FizzWeb.UserManagementLiveTest do
 
   setup do
     previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
+    previous_workos_http_backoff_ms = Application.get_env(:fizz, :workos_http_backoff_ms)
     previous_workos_client = Application.get_env(:workos, WorkOS.Client)
     mock_store = start_supervised!({Agent, fn -> [] end})
 
@@ -36,15 +43,17 @@ defmodule FizzWeb.UserManagementLiveTest do
     :persistent_term.put({__MODULE__, :mock_store}, mock_store)
 
     Application.put_env(:fizz, :workos_http_client_module, ReqMock)
+    Application.put_env(:fizz, :workos_http_backoff_ms, 0)
 
     Application.put_env(:workos, WorkOS.Client,
       api_key: "sk_test_123",
       client_id: "client_test_123",
-      client: Fizz.WorkOS.ReqClient
+      client: Fizz.Accounts.WorkOS.ReqClient
     )
 
     on_exit(fn ->
       restore_env(:fizz, :workos_http_client_module, previous_http_client)
+      restore_env(:fizz, :workos_http_backoff_ms, previous_workos_http_backoff_ms)
       restore_env(:workos, WorkOS.Client, previous_workos_client)
       :persistent_term.erase({__MODULE__, :owner})
       :persistent_term.erase({__MODULE__, :mock_store})
@@ -56,7 +65,7 @@ defmodule FizzWeb.UserManagementLiveTest do
   describe "authenticated users management page" do
     setup :register_and_log_in_user
 
-    test "renders all management widget mounts", %{conn: conn, user: user} do
+    test "renders management widgets and native credentials tab", %{conn: conn} do
       put_http_responses([
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
@@ -64,7 +73,13 @@ defmodule FizzWeb.UserManagementLiveTest do
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
         ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
         widget_response("widget_token_123"),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
         ]),
@@ -102,22 +117,73 @@ defmodule FizzWeb.UserManagementLiveTest do
 
       assert has_element?(
                view,
-               "#user-management-api-keys-widget-org_123[data-widget=\"api-keys\"][data-auth-token=\"widget_token_123\"]"
+               "#settings-tab-api-keys"
              )
 
-      requests = receive_workos_requests(6)
+      view
+      |> element("#settings-tab-api-keys")
+      |> render_click()
 
-      assert Enum.count(requests, &(&1[:url] == "/user_management/organization_memberships")) == 4
-      assert Enum.count(requests, &(&1[:url] == "/widgets/token")) == 2
+      assert has_element?(view, "#user-management-credentials-section")
+      assert has_element?(view, "#user-management-credentials-empty")
+    end
 
-      assert Enum.any?(requests, fn request ->
-               request[:url] == "/widgets/token" and
-                 request[:json] == %{
-                   organization_id: "org_123",
-                   scopes: [],
-                   user_id: user.workos_user_id
-                 }
-             end)
+    test "creates, rotates, and deletes credentials in credentials tab", %{conn: conn} do
+      put_http_responses([
+        {:repeat, &org_scoped_credential_flow_response/1}
+      ])
+
+      {:ok, view, _html} = live(conn, ~p"/settings/")
+
+      view
+      |> element("#settings-tab-api-keys")
+      |> render_click()
+
+      view
+      |> element("#open-create-credential-modal")
+      |> render_click()
+
+      assert has_element?(view, "#create-credential-form")
+
+      view
+      |> element("#create-credential-form")
+      |> render_submit(%{
+        "credential" => %{
+          "provider" => "openai",
+          "provider_label" => "OpenAI Key",
+          "provider_custom_name" => "",
+          "secret" => "sk-openai-1"
+        }
+      })
+
+      credential = Repo.one!(IntegrationCredential)
+      assert has_element?(view, "#credential-#{credential.id}")
+
+      view
+      |> element("#rotate-credential-#{credential.id}")
+      |> render_click()
+
+      view
+      |> element("#rotate-credential-form")
+      |> render_submit(%{
+        "rotate_credential" => %{
+          "provider_label" => "OpenAI Key Rotated",
+          "provider_custom_name" => "",
+          "secret" => "sk-openai-2"
+        }
+      })
+
+      assert has_element?(view, "#credential-#{credential.id}")
+
+      view
+      |> element("#delete-credential-#{credential.id}")
+      |> render_click()
+
+      view
+      |> element("#delete-credential-modal .btn-error")
+      |> render_click()
+
+      refute Repo.get(IntegrationCredential, credential.id)
     end
 
     test "switches organizations and refreshes token", %{conn: conn, user: user} do
@@ -129,6 +195,9 @@ defmodule FizzWeb.UserManagementLiveTest do
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
         ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
         widget_response("widget_token_123"),
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"},
@@ -137,7 +206,13 @@ defmodule FizzWeb.UserManagementLiveTest do
         memberships_response([
           %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
         ]),
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ]),
         widget_response("widget_token_123"),
+        memberships_response([
+          %{"id" => "om_2", "organization_id" => "org_456", "status" => "active"}
+        ]),
         memberships_response([
           %{"id" => "om_2", "organization_id" => "org_456", "status" => "active"}
         ]),
@@ -160,7 +235,7 @@ defmodule FizzWeb.UserManagementLiveTest do
                "#user-management-users-management-widget-org_456[data-auth-token=\"widget_token_456\"]"
              )
 
-      requests = receive_workos_requests(8)
+      requests = receive_workos_requests(11)
 
       assert Enum.any?(requests, fn request ->
                request[:url] == "/widgets/token" and
@@ -197,6 +272,15 @@ defmodule FizzWeb.UserManagementLiveTest do
                "role" => %{"slug" => "owner"}
              }
            }},
+          # build_scope_for_workspace context check
+          memberships_response([
+            %{
+              "id" => "om_personal",
+              "organization_id" => "org_personal",
+              "status" => "active",
+              "role" => %{"slug" => "owner"}
+            }
+          ]),
           # user_has_organization_membership? check for widget token
           memberships_response([
             %{
@@ -274,5 +358,36 @@ defmodule FizzWeb.UserManagementLiveTest do
   defp put_http_responses(responses) do
     mock_store = :persistent_term.get({__MODULE__, :mock_store})
     Agent.update(mock_store, fn _ -> responses end)
+  end
+
+  defp org_scoped_credential_flow_response(opts) do
+    case {opts[:method], opts[:url]} do
+      {:get, "/user_management/organization_memberships"} ->
+        memberships_response([
+          %{"id" => "om_1", "organization_id" => "org_123", "status" => "active"}
+        ])
+
+      {:post, "/widgets/token"} ->
+        widget_response("widget_token_123")
+
+      {:post, "/vault/objects"} ->
+        {:ok,
+         %Req.Response{
+           status: 201,
+           body: %{
+             "id" => "vault_obj_123",
+             "metadata" => %{"version_id" => "version_1"}
+           }
+         }}
+
+      {:patch, "/vault/objects/vault_obj_123"} ->
+        {:ok, %Req.Response{status: 200, body: %{"metadata" => %{"version_id" => "version_2"}}}}
+
+      {:delete, "/vault/objects/vault_obj_123"} ->
+        {:ok, %Req.Response{status: 204, body: %{}}}
+
+      _ ->
+        {:ok, %Req.Response{status: 200, body: %{}}}
+    end
   end
 end

@@ -1,4 +1,4 @@
-defmodule Fizz.WorkOS.ReqClient do
+defmodule Fizz.Accounts.WorkOS.ReqClient do
   @moduledoc """
   WorkOS SDK HTTP adapter implemented with Req.
   """

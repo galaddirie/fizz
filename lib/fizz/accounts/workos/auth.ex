@@ -4,10 +4,30 @@ defmodule Fizz.Accounts.WorkOS.Auth do
 
   Handles authorization URL generation, code exchange, token refresh, and
   extraction of user profiles and session payloads from authentication responses.
+  Also provides PKCE code verifier/challenge helpers for the controller flow.
   """
 
   import Fizz.Accounts.WorkOS.Helpers
   import Fizz.Accounts.WorkOS.Http
+
+  @doc """
+  Generates a random PKCE code verifier.
+  """
+  @spec generate_code_verifier(pos_integer()) :: String.t()
+  def generate_code_verifier(bytes \\ 32) when is_integer(bytes) and bytes > 0 do
+    bytes
+    |> :crypto.strong_rand_bytes()
+    |> Base.url_encode64(padding: false)
+  end
+
+  @doc """
+  Computes a PKCE code challenge using the S256 method.
+  """
+  @spec code_challenge_s256(String.t()) :: String.t()
+  def code_challenge_s256(code_verifier) when is_binary(code_verifier) do
+    :crypto.hash(:sha256, code_verifier)
+    |> Base.url_encode64(padding: false)
+  end
 
   @doc """
   Generates a WorkOS User Management authorization URL (PKCE-only).

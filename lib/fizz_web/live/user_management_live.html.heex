@@ -120,63 +120,164 @@
         Unable to provision organization settings. Please try again later.
       </p>
 
-      <p
-        :if={@widget_error && @organization_options != []}
-        id="user-management-widget-error"
-        class="rounded-box border border-error/40 bg-error/10 p-4 text-sm"
-      >
-        {widget_error_message(@widget_error)}
-      </p>
-
       <div id="user-management-context">
-        <%= if @widget_token do %>
-          <% tab = active_tab_config(@user_tabs ++ @org_tabs, @active_tab) %>
-          <div
-            id={"settings-widget-#{tab.id}-#{@selected_organization_id}"}
-            phx-hook="WorkOSReactWidget"
-            phx-update="ignore"
-            data-widget={tab.widget_name}
-            data-auth-token={@widget_token}
-            class="rounded-box border border-base-300 bg-base-100 p-6"
-          >
-            <div class="flex items-center justify-center py-12 text-sm text-base-content/50">
-              Loading…
-            </div>
-          </div>
+        <%= if @active_tab == "api-keys" do %>
+          <div id="user-management-credentials-section" class="space-y-4">
+            <div class="rounded-box border border-base-300 bg-base-100 p-6">
+              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 class="text-lg font-semibold">Credentials</h2>
+                  <p class="mt-1 text-sm text-base-content/70">
+                    Store provider API keys securely in WorkOS Vault. Secrets are masked and never persisted locally.
+                  </p>
+                </div>
+                <button
+                  id="open-create-credential-modal"
+                  phx-click="open_create_credential_modal"
+                  class="btn btn-primary btn-sm gap-2"
+                  disabled={is_nil(@selected_organization_id)}
+                >
+                  <.icon name="hero-plus" class="size-4" />
+                  <span>Add credential</span>
+                </button>
+              </div>
 
-          <%!-- Compatibility anchors for test selectors --%>
-          <div class="hidden">
-            <div
-              id={"user-management-users-management-widget-#{@selected_organization_id}"}
-              data-widget="users-management"
-              data-auth-token={@widget_token}
-            >
+              <div class="mt-4 rounded-box border border-base-300 bg-base-200/40 p-3 text-xs text-base-content/70">
+                Credentials are scoped to the selected organization and can be reused across workspaces in that organization.
+              </div>
             </div>
-            <div
-              id={"user-management-organization-switcher-widget-#{@selected_organization_id}"}
-              data-widget="organization-switcher"
-              data-auth-token={@widget_token}
+
+            <p
+              :if={@credentials_error}
+              id="user-management-credentials-error"
+              class="rounded-box border border-error/40 bg-error/10 p-4 text-sm"
             >
-            </div>
-            <div
-              id={"user-management-user-profile-widget-#{@selected_organization_id}"}
-              data-widget="user-profile"
-              data-auth-token={@widget_token}
-            >
-            </div>
-            <div
-              id={"user-management-user-security-widget-#{@selected_organization_id}"}
-              data-widget="user-security"
-              data-auth-token={@widget_token}
-            >
-            </div>
-            <div
-              id={"user-management-api-keys-widget-#{@selected_organization_id}"}
-              data-widget="api-keys"
-              data-auth-token={@widget_token}
-            >
+              {credential_error_message(@credentials_error)}
+            </p>
+
+            <div id="user-management-credentials-list" class="space-y-3">
+              <div
+                :if={@credentials == [] && !@credentials_error}
+                id="user-management-credentials-empty"
+                class="rounded-box border border-base-300 bg-base-100 p-5 text-sm text-base-content/70"
+              >
+                No credentials yet for this organization.
+              </div>
+
+              <article
+                :for={credential <- @credentials}
+                id={"credential-#{credential.id}"}
+                class="rounded-box border border-base-300 bg-base-100 p-4 shadow-sm transition hover:border-base-400"
+              >
+                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex items-center gap-3">
+                    <div class="flex size-10 items-center justify-center rounded-full border border-base-300 bg-base-200/70">
+                      <%= if logo_path = provider_logo_path(@provider_catalog, credential.provider) do %>
+                        <img
+                          src={logo_path}
+                          alt={"#{credential.provider_label} logo"}
+                          class="size-6 rounded-sm object-contain"
+                        />
+                      <% else %>
+                        <.icon name="hero-key" class="size-5 text-base-content/60" />
+                      <% end %>
+                    </div>
+                    <div>
+                      <p class="text-sm font-semibold text-base-content">
+                        {credential.provider_label}
+                      </p>
+                      <p class="text-xs text-base-content/60">
+                        {credential.provider_custom_name || credential.provider}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <button
+                      id={"rotate-credential-#{credential.id}"}
+                      phx-click="open_rotate_credential_modal"
+                      phx-value-credential_id={credential.id}
+                      class="btn btn-ghost btn-xs"
+                    >
+                      Rotate / Edit
+                    </button>
+                    <button
+                      id={"delete-credential-#{credential.id}"}
+                      phx-click="open_delete_credential_modal"
+                      phx-value-credential_id={credential.id}
+                      class="btn btn-ghost btn-xs text-error hover:bg-error/10"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
+                  <span class="rounded-full border border-base-300 px-2 py-0.5">
+                    Organization scoped
+                  </span>
+                  <span class="rounded-full border border-base-300 px-2 py-0.5">
+                    Secret: ••••••••
+                  </span>
+                  <span class="rounded-full border border-base-300 px-2 py-0.5">
+                    Last used: {credential.last_used_at || "never"}
+                  </span>
+                </div>
+              </article>
             </div>
           </div>
+        <% else %>
+          <p
+            :if={@widget_error && @organization_options != []}
+            id="user-management-widget-error"
+            class="rounded-box border border-error/40 bg-error/10 p-4 text-sm"
+          >
+            {widget_error_message(@widget_error)}
+          </p>
+
+          <%= if @widget_token do %>
+            <% tab = active_tab_config(@user_tabs ++ @org_tabs, @active_tab) %>
+            <div
+              id={"settings-widget-#{tab.id}-#{@selected_organization_id}"}
+              phx-hook="WorkOSReactWidget"
+              phx-update="ignore"
+              data-widget={tab.widget_name}
+              data-auth-token={@widget_token}
+              class="rounded-box border border-base-300 bg-base-100 p-6"
+            >
+              <div class="flex items-center justify-center py-12 text-sm text-base-content/50">
+                Loading…
+              </div>
+            </div>
+
+            <%!-- Compatibility anchors for test selectors --%>
+            <div class="hidden">
+              <div
+                id={"user-management-users-management-widget-#{@selected_organization_id}"}
+                data-widget="users-management"
+                data-auth-token={@widget_token}
+              >
+              </div>
+              <div
+                id={"user-management-organization-switcher-widget-#{@selected_organization_id}"}
+                data-widget="organization-switcher"
+                data-auth-token={@widget_token}
+              >
+              </div>
+              <div
+                id={"user-management-user-profile-widget-#{@selected_organization_id}"}
+                data-widget="user-profile"
+                data-auth-token={@widget_token}
+              >
+              </div>
+              <div
+                id={"user-management-user-security-widget-#{@selected_organization_id}"}
+                data-widget="user-security"
+                data-auth-token={@widget_token}
+              >
+              </div>
+            </div>
+          <% end %>
         <% end %>
       </div>
     </div>
@@ -219,6 +320,135 @@
           </button>
         </div>
       </.form>
+    </div>
+  </div>
+
+  <%!-- Create Credential Modal --%>
+  <div
+    :if={@show_create_credential_modal}
+    id="create-credential-modal"
+    class="modal modal-open"
+    phx-window-keydown="close_create_credential_modal"
+    phx-key="Escape"
+  >
+    <div class="modal-backdrop" phx-click="close_create_credential_modal"></div>
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">Add Credential</h3>
+      <p class="mt-2 text-sm text-base-content/70">
+        Create an organization-scoped API credential backed by WorkOS Vault.
+      </p>
+      <.form
+        for={@credential_form}
+        id="create-credential-form"
+        phx-change="validate_credential"
+        phx-submit="create_credential"
+        class="mt-4 space-y-3"
+      >
+        <.input
+          field={@credential_form[:provider]}
+          type="select"
+          label="Provider"
+          options={@provider_options}
+        />
+        <.input field={@credential_form[:provider_label]} type="text" label="Display label" />
+        <.input
+          :if={@credential_form[:provider].value == "custom"}
+          field={@credential_form[:provider_custom_name]}
+          type="text"
+          label="Custom provider name"
+          placeholder="Acme AI"
+        />
+        <.input
+          field={@credential_form[:secret]}
+          type="password"
+          label="API key"
+          placeholder="sk-..."
+          autocomplete="new-password"
+        />
+        <div class="modal-action">
+          <button type="button" class="btn" phx-click="close_create_credential_modal">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-primary">
+            Save credential
+          </button>
+        </div>
+      </.form>
+    </div>
+  </div>
+
+  <%!-- Rotate Credential Modal --%>
+  <div
+    :if={@show_rotate_credential_modal}
+    id="rotate-credential-modal"
+    class="modal modal-open"
+    phx-window-keydown="close_rotate_credential_modal"
+    phx-key="Escape"
+  >
+    <div class="modal-backdrop" phx-click="close_rotate_credential_modal"></div>
+    <div class="modal-box">
+      <h3 class="text-lg font-bold">Rotate Credential</h3>
+      <p class="mt-2 text-sm text-base-content/70">
+        Rotating replaces the existing secret in Vault.
+      </p>
+      <.form
+        for={@rotate_credential_form}
+        id="rotate-credential-form"
+        phx-change="validate_rotate_credential"
+        phx-submit="rotate_credential"
+        class="mt-4 space-y-3"
+      >
+        <.input
+          field={@rotate_credential_form[:provider_label]}
+          type="text"
+          label="Display label"
+        />
+        <.input
+          field={@rotate_credential_form[:provider_custom_name]}
+          type="text"
+          label="Custom provider name (optional)"
+        />
+        <.input
+          field={@rotate_credential_form[:secret]}
+          type="password"
+          label="New API key"
+          placeholder="sk-..."
+          autocomplete="new-password"
+        />
+        <div class="modal-action">
+          <button type="button" class="btn" phx-click="close_rotate_credential_modal">
+            Cancel
+          </button>
+          <button type="submit" class="btn btn-primary">
+            Rotate
+          </button>
+        </div>
+      </.form>
+    </div>
+  </div>
+
+  <%!-- Delete Credential Modal --%>
+  <div
+    :if={@show_delete_credential_modal}
+    id="delete-credential-modal"
+    class="modal modal-open"
+    phx-window-keydown="close_delete_credential_modal"
+    phx-key="Escape"
+  >
+    <div class="modal-backdrop" phx-click="close_delete_credential_modal"></div>
+    <div class="modal-box">
+      <h3 class="text-lg font-bold text-error">Delete Credential</h3>
+      <p class="mt-2 text-sm text-base-content/70">
+        This permanently deletes the Vault object and cannot be undone.
+      </p>
+      <div class="modal-action">
+        <button type="button" class="btn" phx-click="close_delete_credential_modal">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-error" phx-click="delete_credential">
+          Delete
+        </button>
+      </div>
     </div>
   </div>
 </Layouts.app>

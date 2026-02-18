@@ -49,6 +49,8 @@ defmodule Fizz.Accounts.WorkOS do
     to: __MODULE__.Memberships
 
   # Auth
+  defdelegate generate_code_verifier(bytes \\ 32), to: __MODULE__.Auth
+  defdelegate code_challenge_s256(code_verifier), to: __MODULE__.Auth
   defdelegate authorization_url(params), to: __MODULE__.Auth
   defdelegate authenticate_with_code(params), to: __MODULE__.Auth
   defdelegate authenticate_with_refresh_token(params), to: __MODULE__.Auth
@@ -60,5 +62,9 @@ defmodule Fizz.Accounts.WorkOS do
   defdelegate generate_widget_token(params), to: __MODULE__.Api
   defdelegate get_pipes_access_token(provider, user_id, org_id \\ nil), to: __MODULE__.Api
   defdelegate create_vault_object(params), to: __MODULE__.Api
-  defdelegate delete_vault_object(object_id), to: __MODULE__.Api
+  defdelegate read_vault_object(object_id), to: __MODULE__.Api
+  defdelegate read_vault_object_by_name(name, opts \\ %{}), to: __MODULE__.Api
+  defdelegate list_vault_objects(query \\ %{}), to: __MODULE__.Api
+  defdelegate update_vault_object(object_id, params), to: __MODULE__.Api
+  defdelegate delete_vault_object(object_id, params \\ %{}), to: __MODULE__.Api
 end

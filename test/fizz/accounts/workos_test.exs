@@ -23,10 +23,12 @@ defmodule Fizz.Accounts.WorkOSTest do
     previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
     previous_sync_enabled = Application.get_env(:fizz, :workos_sync_enabled)
     previous_role_slug_map = Application.get_env(:fizz, :workos_role_slug_map)
+    previous_workos_http_backoff_ms = Application.get_env(:fizz, :workos_http_backoff_ms)
     previous_workos_client = Application.get_env(:workos, WorkOS.Client)
 
     Application.put_env(:fizz, :workos_http_client_module, ReqMock)
     Application.put_env(:fizz, :workos_sync_enabled, true)
+    Application.put_env(:fizz, :workos_http_backoff_ms, 0)
 
     Application.put_env(:fizz, :workos_role_slug_map, %{
       owner: "owner",
@@ -37,13 +39,14 @@ defmodule Fizz.Accounts.WorkOSTest do
     Application.put_env(:workos, WorkOS.Client,
       api_key: "sk_test_123",
       client_id: "client_test_123",
-      client: Fizz.WorkOS.ReqClient
+      client: Fizz.Accounts.WorkOS.ReqClient
     )
 
     on_exit(fn ->
       restore_env(:fizz, :workos_http_client_module, previous_http_client)
       restore_env(:fizz, :workos_sync_enabled, previous_sync_enabled)
       restore_env(:fizz, :workos_role_slug_map, previous_role_slug_map)
+      restore_env(:fizz, :workos_http_backoff_ms, previous_workos_http_backoff_ms)
       restore_env(:workos, WorkOS.Client, previous_workos_client)
     end)
 
@@ -174,6 +177,123 @@ defmodule Fizz.Accounts.WorkOSTest do
     assert_receive {:workos_http_request, request}
     assert request[:method] == :delete
     assert request[:url] == "/vault/objects/vault_obj_123"
+  end
+
+  test "read_vault_object/1 fetches object by id" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_123", "name" => "openai_key", "value" => "sk-123"}
+       }}
+    ])
+
+    assert {:ok, %{"id" => "vault_obj_123", "name" => "openai_key", "value" => "sk-123"}} =
+             AccountsWorkOS.read_vault_object("vault_obj_123")
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :get
+    assert request[:url] == "/vault/objects/vault_obj_123"
+  end
+
+  test "list_vault_objects/1 sends list query" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"data" => [%{"id" => "vault_obj_123"}]}}}
+    ])
+
+    assert {:ok, %{"data" => [%{"id" => "vault_obj_123"}]}} =
+             AccountsWorkOS.list_vault_objects(%{
+               limit: 5,
+               context: %{"organization_id" => "org_123"}
+             })
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :get
+    assert request[:url] == "/vault/objects"
+    assert Enum.member?(request[:params], {:limit, 5})
+    assert Enum.member?(request[:params], {:context, %{"organization_id" => "org_123"}})
+  end
+
+  test "read_vault_object_by_name/2 lists then reads object id" do
+    Process.put(:workos_http_responses, [
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"data" => [%{"id" => "vault_obj_123", "name" => "openai_key"}]}
+       }},
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_123", "name" => "openai_key", "value" => "sk-abc"}
+       }}
+    ])
+
+    assert {:ok, %{"id" => "vault_obj_123", "name" => "openai_key", "value" => "sk-abc"}} =
+             AccountsWorkOS.read_vault_object_by_name("openai_key", %{
+               context: %{"organization_id" => "org_123"}
+             })
+
+    assert_receive {:workos_http_request, list_request}
+    assert list_request[:method] == :get
+    assert list_request[:url] == "/vault/objects"
+    assert Enum.member?(list_request[:params], {:limit, 100})
+    assert Enum.member?(list_request[:params], {:context, %{"organization_id" => "org_123"}})
+
+    assert_receive {:workos_http_request, read_request}
+    assert read_request[:method] == :get
+    assert read_request[:url] == "/vault/objects/vault_obj_123"
+  end
+
+  test "update_vault_object/2 patches object value with version check" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 200, body: %{"id" => "vault_obj_123"}}}
+    ])
+
+    assert {:ok, %{"id" => "vault_obj_123"}} =
+             AccountsWorkOS.update_vault_object("vault_obj_123", %{
+               value: "sk-new",
+               version_check: "etag-1"
+             })
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :patch
+    assert request[:url] == "/vault/objects/vault_obj_123"
+    assert request[:json] == %{value: "sk-new", version_check: "etag-1"}
+  end
+
+  test "delete_vault_object/2 sends version check body" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 204, body: %{}}}
+    ])
+
+    assert :ok = AccountsWorkOS.delete_vault_object("vault_obj_123", %{version_check: "etag-1"})
+
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :delete
+    assert request[:url] == "/vault/objects/vault_obj_123"
+    assert request[:json] == %{version_check: "etag-1"}
+  end
+
+  test "vault requests retry on rate limit" do
+    Process.put(:workos_http_responses, [
+      {:ok, %Req.Response{status: 429, body: %{"message" => "rate limited"}}},
+      {:ok, %Req.Response{status: 201, body: %{"id" => "vault_obj_123"}}}
+    ])
+
+    assert {:ok, %{"id" => "vault_obj_123"}} =
+             AccountsWorkOS.create_vault_object(%{
+               name: "openai-key",
+               value: "sk-retry",
+               context: %{"organization_id" => "org_123"}
+             })
+
+    assert_receive {:workos_http_request, first_request}
+    assert first_request[:method] == :post
+    assert first_request[:url] == "/vault/objects"
+
+    assert_receive {:workos_http_request, second_request}
+    assert second_request[:method] == :post
+    assert second_request[:url] == "/vault/objects"
   end
 
   test "generate_widget_token/1 posts to widgets token endpoint" do

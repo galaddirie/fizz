@@ -2,7 +2,6 @@ defmodule FizzWeb.WorkOSAuthController do
   use FizzWeb, :controller
 
   alias Fizz.Accounts
-  alias Fizz.WorkOS.PKCE
   alias FizzWeb.UserAuth
 
   @state_session_key :workos_auth_state
@@ -10,8 +9,8 @@ defmodule FizzWeb.WorkOSAuthController do
 
   def authorize(conn, _params) do
     state = generate_state()
-    code_verifier = PKCE.random_b64url(32)
-    code_challenge = PKCE.code_challenge_s256(code_verifier)
+    code_verifier = Accounts.generate_workos_pkce_code_verifier(32)
+    code_challenge = Accounts.workos_pkce_code_challenge_s256(code_verifier)
 
     auth_params = %{
       redirect_uri: redirect_uri(conn),

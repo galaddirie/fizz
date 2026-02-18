@@ -31,7 +31,7 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
     Application.put_env(:workos, WorkOS.Client,
       api_key: "sk_test_123",
       client_id: "client_test_123",
-      client: Fizz.WorkOS.ReqClient
+      client: Fizz.Accounts.WorkOS.ReqClient
     )
 
     on_exit(fn ->

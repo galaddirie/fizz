@@ -519,6 +519,14 @@ defmodule Fizz.Accounts do
 
   defp normalize_role_slug(_role_slug), do: nil
 
+  defdelegate generate_workos_pkce_code_verifier(bytes \\ 32),
+    to: WorkOS,
+    as: :generate_code_verifier
+
+  defdelegate workos_pkce_code_challenge_s256(code_verifier),
+    to: WorkOS,
+    as: :code_challenge_s256
+
   defdelegate workos_authorization_url(params), to: WorkOS, as: :authorization_url
 
   @doc """

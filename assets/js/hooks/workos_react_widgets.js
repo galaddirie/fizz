@@ -3,7 +3,6 @@ import {createRoot} from "react-dom/client"
 import {
   AdminPortalDomainVerification,
   AdminPortalSsoConnection,
-  ApiKeys,
   OrganizationSwitcher,
   Pipes,
   UserProfile,
@@ -26,7 +25,6 @@ const WIDGET_COMPONENTS = {
   "user-security": UserSecurity,
   "user-sessions": UserSessions,
   "users-management": UsersManagement,
-  "api-keys": ApiKeys,
 }
 
 function parseJson(rawValue, fallbackValue) {

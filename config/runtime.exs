@@ -52,7 +52,7 @@ if api_key = System.get_env("WORKOS_API_KEY") do
   config :workos, WorkOS.Client,
     api_key: api_key,
     client_id: System.get_env("WORKOS_CLIENT_ID"),
-    client: Fizz.WorkOS.ReqClient
+    client: Fizz.Accounts.WorkOS.ReqClient
 end
 
 if config_env() == :prod do

@@ -2,6 +2,8 @@ defmodule FizzWeb.UserManagementLive do
   use FizzWeb, :live_view
 
   alias Fizz.Accounts
+  alias Fizz.Integrations
+  alias Fizz.Integrations.CredentialProviderCatalog
 
   @user_tabs [
     %{
@@ -39,7 +41,7 @@ defmodule FizzWeb.UserManagementLive do
     },
     %{
       id: "api-keys",
-      title: "API Keys",
+      title: "Credentials",
       icon: "hero-key",
       widget_name: "api-keys"
     }
@@ -51,6 +53,7 @@ defmodule FizzWeb.UserManagementLive do
   def mount(_params, _session, socket) do
     organizations = Accounts.ensure_personal_organization(socket.assigns.current_scope)
     selected_organization_id = default_organization_id(organizations)
+    provider_catalog = CredentialProviderCatalog.providers()
 
     socket =
       socket
@@ -66,7 +69,18 @@ defmodule FizzWeb.UserManagementLive do
       |> assign(:active_tab, "profile")
       |> assign(:show_create_org_modal, false)
       |> assign(:create_org_form, to_form(%{"name" => ""}, as: :create_org))
+      |> assign(:provider_catalog, provider_catalog)
+      |> assign(:provider_options, provider_options(provider_catalog))
+      |> assign(:show_create_credential_modal, false)
+      |> assign(:show_rotate_credential_modal, false)
+      |> assign(:show_delete_credential_modal, false)
+      |> assign(:selected_credential_id, nil)
+      |> assign(:credentials_error, nil)
+      |> assign(:credentials, [])
+      |> assign(:credential_form, credential_form(provider_catalog))
+      |> assign(:rotate_credential_form, rotate_credential_form())
       |> assign_organization_form(selected_organization_id)
+      |> load_credentials()
       |> assign_widget_token()
 
     {:ok, socket}
@@ -85,6 +99,7 @@ defmodule FizzWeb.UserManagementLive do
       socket
       |> assign(:selected_organization_id, selected_organization_id)
       |> assign_organization_form(selected_organization_id)
+      |> load_credentials()
       |> assign_widget_token()
 
     {:noreply, socket}
@@ -99,6 +114,155 @@ defmodule FizzWeb.UserManagementLive do
       {:noreply, assign(socket, :active_tab, tab_id)}
     else
       {:noreply, socket}
+    end
+  end
+
+  def handle_event("open_create_credential_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_create_credential_modal, true)
+     |> assign(:credential_form, credential_form(socket.assigns.provider_catalog))}
+  end
+
+  def handle_event("close_create_credential_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_create_credential_modal, false)
+     |> assign(:credential_form, credential_form(socket.assigns.provider_catalog))}
+  end
+
+  def handle_event("validate_credential", %{"credential" => params}, socket) do
+    {:noreply,
+     assign(socket, :credential_form, credential_form(socket.assigns.provider_catalog, params))}
+  end
+
+  def handle_event("create_credential", %{"credential" => params}, socket) do
+    organization_id = socket.assigns.selected_organization_id
+
+    if is_binary(organization_id) and byte_size(organization_id) > 0 do
+      attrs = normalize_credential_params(params, socket.assigns.provider_catalog)
+
+      case Integrations.create_credential(socket.assigns.current_scope, organization_id, attrs) do
+        {:ok, _credential} ->
+          {:noreply,
+           socket
+           |> assign(:show_create_credential_modal, false)
+           |> assign(:credential_form, credential_form(socket.assigns.provider_catalog))
+           |> load_credentials()
+           |> put_flash(:info, "Credential created.")}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply, assign(socket, :credential_form, to_form(changeset, as: :credential))}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, credential_error_message(reason))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Select an organization before creating credentials.")}
+    end
+  end
+
+  def handle_event("open_rotate_credential_modal", %{"credential_id" => credential_id}, socket) do
+    case Enum.find(socket.assigns.credentials, &(&1.id == credential_id)) do
+      nil ->
+        {:noreply, socket}
+
+      credential ->
+        {:noreply,
+         socket
+         |> assign(:selected_credential_id, credential.id)
+         |> assign(:show_rotate_credential_modal, true)
+         |> assign(:rotate_credential_form, rotate_credential_form(credential))}
+    end
+  end
+
+  def handle_event("close_rotate_credential_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_rotate_credential_modal, false)
+     |> assign(:selected_credential_id, nil)
+     |> assign(:rotate_credential_form, rotate_credential_form())}
+  end
+
+  def handle_event("validate_rotate_credential", %{"rotate_credential" => params}, socket) do
+    {:noreply, assign(socket, :rotate_credential_form, to_form(params, as: :rotate_credential))}
+  end
+
+  def handle_event("rotate_credential", %{"rotate_credential" => params}, socket) do
+    organization_id = socket.assigns.selected_organization_id
+    credential_id = socket.assigns.selected_credential_id
+
+    if is_binary(organization_id) and is_binary(credential_id) do
+      attrs = normalize_rotate_credential_params(params)
+
+      case Integrations.rotate_credential(
+             socket.assigns.current_scope,
+             organization_id,
+             credential_id,
+             attrs
+           ) do
+        {:ok, _credential} ->
+          {:noreply,
+           socket
+           |> assign(:show_rotate_credential_modal, false)
+           |> assign(:selected_credential_id, nil)
+           |> assign(:rotate_credential_form, rotate_credential_form())
+           |> load_credentials()
+           |> put_flash(:info, "Credential rotated.")}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply,
+           assign(socket, :rotate_credential_form, to_form(changeset, as: :rotate_credential))}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, credential_error_message(reason))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Select a credential before rotating.")}
+    end
+  end
+
+  def handle_event("open_delete_credential_modal", %{"credential_id" => credential_id}, socket) do
+    if Enum.any?(socket.assigns.credentials, &(&1.id == credential_id)) do
+      {:noreply,
+       socket
+       |> assign(:selected_credential_id, credential_id)
+       |> assign(:show_delete_credential_modal, true)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_delete_credential_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_delete_credential_modal, false)
+     |> assign(:selected_credential_id, nil)}
+  end
+
+  def handle_event("delete_credential", _params, socket) do
+    organization_id = socket.assigns.selected_organization_id
+    credential_id = socket.assigns.selected_credential_id
+
+    if is_binary(organization_id) and is_binary(credential_id) do
+      case Integrations.delete_credential(
+             socket.assigns.current_scope,
+             organization_id,
+             credential_id
+           ) do
+        {:ok, _credential} ->
+          {:noreply,
+           socket
+           |> assign(:show_delete_credential_modal, false)
+           |> assign(:selected_credential_id, nil)
+           |> load_credentials()
+           |> put_flash(:info, "Credential deleted.")}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, credential_error_message(reason))}
+      end
+    else
+      {:noreply, put_flash(socket, :error, "Select a credential before deleting.")}
     end
   end
 
@@ -188,6 +352,29 @@ defmodule FizzWeb.UserManagementLive do
     assign(socket, :org_form, form)
   end
 
+  defp load_credentials(%{assigns: %{selected_organization_id: nil}} = socket) do
+    socket
+    |> assign(:credentials, [])
+    |> assign(:credentials_error, nil)
+  end
+
+  defp load_credentials(socket) do
+    case Integrations.list_credentials(
+           socket.assigns.current_scope,
+           socket.assigns.selected_organization_id
+         ) do
+      {:ok, credentials} ->
+        socket
+        |> assign(:credentials, credentials)
+        |> assign(:credentials_error, nil)
+
+      {:error, reason} ->
+        socket
+        |> assign(:credentials, [])
+        |> assign(:credentials_error, reason)
+    end
+  end
+
   defp default_organization_id([%{organization_id: organization_id} | _]), do: organization_id
   defp default_organization_id(_), do: nil
 
@@ -231,4 +418,122 @@ defmodule FizzWeb.UserManagementLive do
   defp widget_error_message(_reason) do
     "Could not initialize WorkOS user management widgets right now."
   end
+
+  defp credential_form(provider_catalog, params \\ %{}) do
+    provider = Map.get(params, "provider") || default_provider(provider_catalog)
+
+    provider_label =
+      Map.get(params, "provider_label") || provider_label_for(provider_catalog, provider)
+
+    defaults = %{
+      "provider" => provider,
+      "provider_label" => provider_label,
+      "provider_custom_name" => Map.get(params, "provider_custom_name", ""),
+      "secret" => Map.get(params, "secret", "")
+    }
+
+    to_form(Map.merge(defaults, params), as: :credential)
+  end
+
+  defp rotate_credential_form(credential \\ nil)
+
+  defp rotate_credential_form(nil) do
+    to_form(
+      %{
+        "provider_label" => "",
+        "provider_custom_name" => "",
+        "secret" => ""
+      },
+      as: :rotate_credential
+    )
+  end
+
+  defp rotate_credential_form(credential) do
+    to_form(
+      %{
+        "provider_label" => credential.provider_label || "",
+        "provider_custom_name" => credential.provider_custom_name || "",
+        "secret" => ""
+      },
+      as: :rotate_credential
+    )
+  end
+
+  defp normalize_credential_params(params, provider_catalog) do
+    provider = Map.get(params, "provider") || default_provider(provider_catalog)
+
+    provider_label =
+      Map.get(params, "provider_label") || provider_label_for(provider_catalog, provider)
+
+    %{
+      provider: provider,
+      provider_label: provider_label,
+      provider_custom_name: Map.get(params, "provider_custom_name"),
+      secret: Map.get(params, "secret")
+    }
+  end
+
+  defp normalize_rotate_credential_params(params) do
+    %{
+      provider_label: Map.get(params, "provider_label"),
+      provider_custom_name: Map.get(params, "provider_custom_name"),
+      secret: Map.get(params, "secret")
+    }
+  end
+
+  defp default_provider(provider_catalog) do
+    provider_catalog
+    |> Enum.find(&(!&1.custom))
+    |> case do
+      nil -> "custom"
+      provider -> provider.id
+    end
+  end
+
+  defp provider_label_for(provider_catalog, provider_id) do
+    provider_catalog
+    |> Enum.find(&(&1.id == provider_id))
+    |> case do
+      nil -> provider_id
+      provider -> provider.label
+    end
+  end
+
+  defp provider_options(provider_catalog) do
+    Enum.map(provider_catalog, fn provider ->
+      {provider.label, provider.id}
+    end)
+  end
+
+  defp provider_logo_path(provider_catalog, provider_id) do
+    provider_catalog
+    |> Enum.find(&(&1.id == provider_id))
+    |> case do
+      nil -> nil
+      provider -> provider.logo_path
+    end
+  end
+
+  defp credential_error_message(:organization_load_failed),
+    do: "Could not load organization credentials right now."
+
+  defp credential_error_message(:credential_not_found), do: "Credential not found."
+  defp credential_error_message(:missing_secret_value), do: "Secret value is required."
+  defp credential_error_message(:invalid_provider), do: "Select a valid provider."
+  defp credential_error_message(:invalid_provider_label), do: "Provider label is required."
+
+  defp credential_error_message(:missing_custom_provider_name),
+    do: "Custom provider name is required."
+
+  defp credential_error_message(:vault_secret_not_found),
+    do: "Could not read secret value from vault."
+
+  defp credential_error_message(:invalid_vault_object_response),
+    do: "Vault returned an invalid response."
+
+  defp credential_error_message({:workos_http_error, 429, _message}),
+    do: "Vault is currently rate-limited. Please retry in a moment."
+
+  defp credential_error_message(_reason),
+    do: "Could not complete the credential action right now."
 end
