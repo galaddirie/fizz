@@ -312,23 +312,43 @@ defmodule Fizz.Sprites do
   """
   @spec close_console(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, ConsoleSession.t()} | {:error, error_reason()}
-  def close_console(scope, workspace_id, sprite_id, console_id) do
+  @spec close_console(Scope.t() | nil, String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, ConsoleSession.t()} | {:error, error_reason()}
+  def close_console(scope, workspace_id, sprite_id, console_id, reason \\ "closed") do
+    close_reason = normalize_close_reason(reason)
+
     with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
          {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         {:ok, console_session} <- fetch_console_session(workspace_id, sprite.id, console_id),
-         {:ok, closed_session} <-
+         {:ok, console_session} <- fetch_console_session(workspace_id, sprite.id, console_id) do
+      close_console_session(console_session, workspace_id, close_reason)
+    end
+  end
+
+  defp close_console_session(
+         %ConsoleSession{state: :active} = console_session,
+         workspace_id,
+         reason
+       ) do
+    with {:ok, closed_session} <-
            console_session
            |> ConsoleSession.changeset(%{
              state: :closed,
              closed_at: DateTime.utc_now(),
-             close_reason: "closed"
+             close_reason: reason
            })
            |> Repo.update() do
       emit_event([:fizz, :sprites, :console, :closed], %{count: 1}, %{workspace_id: workspace_id})
-      FizzWeb.Endpoint.broadcast("sprite_console:#{console_id}", "closed", %{reason: "closed"})
+
+      FizzWeb.Endpoint.broadcast("sprite_console:#{console_session.id}", "closed", %{
+        reason: reason
+      })
+
       {:ok, closed_session}
     end
   end
+
+  defp close_console_session(%ConsoleSession{} = console_session, _workspace_id, _reason),
+    do: {:ok, console_session}
 
   @doc """
   Gets a console session by topic id for channel auth.
@@ -1050,6 +1070,12 @@ defmodule Fizz.Sprites do
   end
 
   defp normalize_integer(_value, fallback), do: fallback
+
+  defp normalize_close_reason(reason) when is_binary(reason),
+    do: reason |> String.trim() |> String.slice(0, 280)
+
+  defp normalize_close_reason(reason),
+    do: reason |> to_string() |> String.slice(0, 280)
 
   defp safe_to_existing_atom(key) do
     try do

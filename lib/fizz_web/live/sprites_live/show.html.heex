@@ -94,15 +94,19 @@
               phx-hook="ScrollBottom"
               class="max-h-96 overflow-y-auto rounded-box border border-base-300 bg-base-100 p-3 font-mono text-sm whitespace-pre-wrap break-all"
             >
-              <%= if @job_output == [] and not terminal_state?(@selected_job.state) do %>
+              <%= if @job_output_empty? and not terminal_state?(@selected_job.state) do %>
                 <p class="text-muted italic">Waiting for output...</p>
-              <% else %>
-                <%= for chunk <- @job_output do %>
-                  <span class={if chunk.stream == "stderr", do: "text-warning", else: ""}>
-                    {chunk.text}
-                  </span>
-                <% end %>
               <% end %>
+
+              <div id="job-output-stream" phx-update="stream">
+                <span
+                  :for={{dom_id, chunk} <- @streams.job_output}
+                  id={dom_id}
+                  class={if chunk.stream == "stderr", do: "text-warning", else: ""}
+                >
+                  {chunk.text}
+                </span>
+              </div>
             </div>
 
             <%= if terminal_state?(@selected_job.state) and @selected_job.exit_code do %>

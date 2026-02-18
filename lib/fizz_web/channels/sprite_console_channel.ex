@@ -31,6 +31,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
         |> assign(:sprite_id, console_session.sprite_id)
         |> assign(:workspace_id, console_session.workspace_id)
         |> assign(:runner_pid, runner_pid)
+        |> assign(:console_closed?, false)
 
       {:ok, %{console_id: console_session.id}, socket}
     else
@@ -55,7 +56,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
   end
 
   def handle_in("close", _payload, socket) do
-    close_console(socket, "closed")
+    socket = maybe_close_console(socket, "closed")
     {:stop, :normal, socket}
   end
 
@@ -81,7 +82,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
         %{assigns: %{console_id: console_id}} = socket
       ) do
     push(socket, "exit", %{exit_code: exit_code})
-    close_console(socket, "exit")
+    socket = maybe_close_console(socket, "exit")
     {:stop, :normal, socket}
   end
 
@@ -91,7 +92,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
       ) do
     push(socket, "error", %{reason: reason})
     Sprites.flag_console_error(console_id, reason)
-    {:stop, :normal, socket}
+    {:stop, :normal, assign(socket, :console_closed?, true)}
   end
 
   def handle_info(
@@ -99,7 +100,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
         %{assigns: %{runner_pid: runner_pid}} = socket
       ) do
     push(socket, "closed", %{reason: "runner_down"})
-    close_console(socket, "runner_down")
+    socket = maybe_close_console(socket, "runner_down")
     {:stop, :normal, socket}
   end
 
@@ -119,22 +120,25 @@ defmodule FizzWeb.SpriteConsoleChannel do
         _ -> "disconnect"
       end
 
-    close_console(socket, close_reason)
+    _socket = maybe_close_console(socket, close_reason)
     :ok
   end
 
-  defp close_console(%{assigns: assigns} = socket, _reason) do
+  defp maybe_close_console(%{assigns: %{console_closed?: true}} = socket, _reason), do: socket
+
+  defp maybe_close_console(%{assigns: assigns} = socket, reason) do
     if assigns[:console_id] && assigns[:workspace_id] && assigns[:sprite_id] do
       _ =
         Sprites.close_console(
           socket.assigns.current_scope,
           assigns.workspace_id,
           assigns.sprite_id,
-          assigns.console_id
+          assigns.console_id,
+          reason
         )
     end
 
-    :ok
+    assign(socket, :console_closed?, true)
   end
 
   defp normalize_integer(value, _fallback) when is_integer(value), do: value

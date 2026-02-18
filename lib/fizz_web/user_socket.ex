@@ -9,28 +9,26 @@ defmodule FizzWeb.UserSocket do
 
   @impl true
   def connect(_params, socket, %{session: session}) do
-    case session["workos_user_id"] do
-      workos_user_id when is_binary(workos_user_id) and byte_size(workos_user_id) > 0 ->
-        case Accounts.get_user_by_workos_user_id(workos_user_id) do
-          %{} = user ->
-            {:ok, assign(socket, :current_scope, Scope.for_user(user))}
-
-          nil ->
-            :error
-        end
-
-      _ ->
-        :error
+    with workos_user_id when is_binary(workos_user_id) and byte_size(workos_user_id) > 0 <-
+           session["workos_user_id"],
+         workos_session_id
+         when is_binary(workos_session_id) and byte_size(workos_session_id) > 0 <-
+           session["workos_session_id"],
+         %{} = user <- Accounts.get_user_by_workos_user_id(workos_user_id) do
+      {:ok,
+       socket
+       |> assign(:current_scope, Scope.for_user(user))
+       |> assign(:workos_session_topic, workos_session_topic(workos_session_id))}
+    else
+      _ -> :error
     end
   end
 
   def connect(_params, _socket, _connect_info), do: :error
 
   @impl true
-  def id(socket) do
-    case socket.assigns[:current_scope] do
-      %Scope{user: %{id: user_id}} when is_binary(user_id) -> "users_socket:#{user_id}"
-      _ -> nil
-    end
-  end
+  def id(socket), do: socket.assigns[:workos_session_topic]
+
+  defp workos_session_topic(session_id),
+    do: "workos_sessions:#{Base.url_encode64(session_id, padding: false)}"
 end

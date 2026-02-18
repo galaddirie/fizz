@@ -15,11 +15,13 @@ defmodule FizzWeb.SpritesLive.Show do
       |> assign(:checkpoint_form, to_form(%{"comment" => ""}, as: :checkpoint))
       |> assign(:selected_job_id, nil)
       |> assign(:selected_job, nil)
-      |> assign(:job_output, [])
+      |> assign(:job_output_seqs, MapSet.new())
+      |> assign(:job_output_empty?, true)
       |> assign(:subscribed_job_ids, MapSet.new())
       |> stream(:jobs, [])
       |> stream(:services, [])
       |> stream(:checkpoints, [])
+      |> stream(:job_output, [])
 
     {:ok, load_page(socket)}
   end
@@ -32,7 +34,7 @@ defmodule FizzWeb.SpritesLive.Show do
      |> assign(:sprite_id, sprite_id)
      |> assign(:selected_job_id, nil)
      |> assign(:selected_job, nil)
-     |> assign(:job_output, [])
+     |> clear_job_output()
      |> load_page()}
   end
 
@@ -85,7 +87,7 @@ defmodule FizzWeb.SpritesLive.Show do
      socket
      |> assign(:selected_job_id, nil)
      |> assign(:selected_job, nil)
-     |> assign(:job_output, [])}
+     |> clear_job_output()}
   end
 
   def handle_event("refresh", _params, socket) do
@@ -212,16 +214,16 @@ defmodule FizzWeb.SpritesLive.Show do
         },
         socket
       ) do
-    if job_id == socket.assigns.selected_job_id do
-      existing_seqs = MapSet.new(socket.assigns.job_output, & &1.seq)
+    if job_id == socket.assigns.selected_job_id and
+         not MapSet.member?(socket.assigns.job_output_seqs, seq) do
+      text = Base.decode64!(encoded_chunk)
+      chunk = output_chunk(seq, stream_name, text)
 
-      if MapSet.member?(existing_seqs, seq) do
-        {:noreply, socket}
-      else
-        text = Base.decode64!(encoded_chunk)
-        chunk = %{seq: seq, stream: stream_name, text: text}
-        {:noreply, assign(socket, :job_output, socket.assigns.job_output ++ [chunk])}
-      end
+      {:noreply,
+       socket
+       |> assign(:job_output_seqs, MapSet.put(socket.assigns.job_output_seqs, seq))
+       |> assign(:job_output_empty?, false)
+       |> stream_insert(:job_output, chunk)}
     else
       {:noreply, socket}
     end
@@ -237,7 +239,7 @@ defmodule FizzWeb.SpritesLive.Show do
     socket
     |> assign(:selected_job_id, job.id)
     |> assign(:selected_job, job)
-    |> assign(:job_output, output)
+    |> assign_job_output(output)
     |> subscribe_to_job_topic(job.id)
   end
 
@@ -252,13 +254,26 @@ defmodule FizzWeb.SpritesLive.Show do
          ) do
       {:ok, chunks} ->
         Enum.map(chunks, fn chunk ->
-          %{seq: chunk.seq, stream: to_string(chunk.stream), text: chunk.chunk}
+          output_chunk(chunk.seq, to_string(chunk.stream), chunk.chunk)
         end)
 
       {:error, _} ->
         []
     end
   end
+
+  defp output_chunk(seq, stream_name, text) do
+    %{id: "job-output-#{seq}", seq: seq, stream: stream_name, text: text}
+  end
+
+  defp assign_job_output(socket, output) do
+    socket
+    |> assign(:job_output_seqs, MapSet.new(output, & &1.seq))
+    |> assign(:job_output_empty?, output == [])
+    |> stream(:job_output, output, reset: true)
+  end
+
+  defp clear_job_output(socket), do: assign_job_output(socket, [])
 
   defp subscribe_to_job_topic(socket, job_id) do
     if connected?(socket) and not MapSet.member?(socket.assigns.subscribed_job_ids, job_id) do
