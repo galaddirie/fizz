@@ -15,10 +15,10 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
       compact_map(%{
         name: read_value(params, [:name, "name"]),
         value: read_value(params, [:value, "value"]),
-        context: normalize_vault_context(read_value(params, [:context, "context"]))
+        key_context: normalize_vault_context(read_value(params, [:key_context, "key_context"]))
       })
 
-    case api_request(:post, "/vault/objects", json: body) do
+    case api_request(:post, "/vault/v1/kv", json: body) do
       {:ok, response} ->
         {:ok, response}
 
@@ -33,7 +33,7 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
   """
   @spec read_vault_object(String.t()) :: {:ok, map()} | {:error, term()}
   def read_vault_object(object_id) when is_binary(object_id) do
-    path = "/vault/objects/#{URI.encode_www_form(object_id)}"
+    path = "/vault/v1/kv/#{URI.encode_www_form(object_id)}"
 
     case api_request(:get, path, []) do
       {:ok, response} ->
@@ -46,24 +46,19 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
   end
 
   @doc """
-  Reads a Vault object by name using list filtering.
+  Reads a Vault object by name.
   """
   @spec read_vault_object_by_name(String.t(), map()) :: {:ok, map()} | {:error, term()}
-  def read_vault_object_by_name(name, opts \\ %{}) when is_binary(name) and is_map(opts) do
-    query =
-      opts
-      |> Map.take([:context, "context", :limit, "limit", :order, "order", :after, "after"])
-      |> Map.put_new(:limit, 100)
+  def read_vault_object_by_name(name, _opts \\ %{}) when is_binary(name) do
+    path = "/vault/v1/kv/name/#{URI.encode_www_form(name)}"
 
-    with {:ok, %{"data" => objects}} <- list_vault_objects(query),
-         %{} = object <- Enum.find(objects, &(Map.get(&1, "name") == name)),
-         object_id when is_binary(object_id) <- Map.get(object, "id") do
-      read_vault_object(object_id)
-    else
-      nil -> {:error, :vault_object_not_found}
-      {:ok, _response} -> {:error, :vault_object_not_found}
-      {:error, reason} -> {:error, reason}
-      _ -> {:error, :vault_object_not_found}
+    case api_request(:get, path, []) do
+      {:ok, response} ->
+        {:ok, response}
+
+      {:error, error} ->
+        log_error("read vault object by name", error)
+        {:error, normalize_error(error)}
     end
   end
 
@@ -77,11 +72,11 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
         limit: read_value(query, [:limit, "limit"]),
         before: read_value(query, [:before, "before"]),
         after: read_value(query, [:after, "after"]),
-        order: read_value(query, [:order, "order"]),
-        context: normalize_vault_context(read_value(query, [:context, "context"]))
+        updatedAfter:
+          read_value(query, [:updatedAfter, "updatedAfter", :updated_after, "updated_after"])
       })
 
-    case api_request(:get, "/vault/objects", query: list_query) do
+    case api_request(:get, "/vault/v1/kv", query: list_query) do
       {:ok, response} ->
         {:ok, response}
 
@@ -96,7 +91,7 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
   """
   @spec update_vault_object(String.t(), map()) :: {:ok, map()} | {:error, term()}
   def update_vault_object(object_id, params) when is_binary(object_id) and is_map(params) do
-    path = "/vault/objects/#{URI.encode_www_form(object_id)}"
+    path = "/vault/v1/kv/#{URI.encode_www_form(object_id)}"
 
     body =
       compact_map(%{
@@ -105,7 +100,7 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
           normalize_vault_version_check(read_value(params, [:version_check, "version_check"]))
       })
 
-    case api_request(:patch, path, json: body) do
+    case api_request(:put, path, json: body) do
       {:ok, response} ->
         {:ok, response}
 
@@ -122,7 +117,7 @@ defmodule Fizz.Accounts.WorkOS.VaultObjects do
   def delete_vault_object(object_id, params \\ %{})
 
   def delete_vault_object(object_id, params) when is_binary(object_id) and is_map(params) do
-    path = "/vault/objects/#{URI.encode_www_form(object_id)}"
+    path = "/vault/v1/kv/#{URI.encode_www_form(object_id)}"
 
     body =
       compact_map(%{

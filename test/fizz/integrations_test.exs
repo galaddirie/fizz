@@ -188,6 +188,49 @@ defmodule Fizz.IntegrationsTest do
     assert resolved.api_key == "sk-anthropic"
   end
 
+  test "supports multiple credentials for the same provider and unique vault names" do
+    user = user_fixture()
+    org_id = "org_multi"
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{"id" => "vault_obj_multi_1", "metadata" => %{"version_id" => "version_1"}}
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{"id" => "vault_obj_multi_2", "metadata" => %{"version_id" => "version_1"}}
+       }}
+    ])
+
+    assert {:ok, first_credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Production",
+               secret: "sk-first"
+             })
+
+    assert {:ok, second_credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Production",
+               secret: "sk-second"
+             })
+
+    assert first_credential.provider == "openai_api_key"
+    assert second_credential.provider == "openai_api_key"
+    assert first_credential.id != second_credential.id
+    assert first_credential.vault_object_id != second_credential.vault_object_id
+    assert first_credential.vault_object_name != second_credential.vault_object_name
+    assert String.starts_with?(first_credential.vault_object_name, "openai_production_")
+    assert String.starts_with?(second_credential.vault_object_name, "openai_production_")
+  end
+
   test "credential usage is owner-scoped within workspace" do
     owner_user = user_fixture()
     member_user = user_fixture()

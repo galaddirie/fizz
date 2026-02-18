@@ -11,6 +11,7 @@ defmodule Fizz.Accounts.WorkOS.Vault do
   alias Fizz.Accounts.WorkOS
 
   @type vault_context :: %{required(String.t()) => String.t()}
+  @vault_name_max_length 255
 
   @spec create_object(Scope.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def create_object(%Scope{} = scope, organization_id, attrs)
@@ -21,7 +22,7 @@ defmodule Fizz.Accounts.WorkOS.Vault do
         attrs
         |> Map.take([:name, "name", :value, "value"])
         |> normalize_params()
-        |> Map.put(:context, context)
+        |> Map.put(:key_context, context)
 
       WorkOS.create_vault_object(params)
     end
@@ -38,9 +39,8 @@ defmodule Fizz.Accounts.WorkOS.Vault do
   @spec read_object_by_name(Scope.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def read_object_by_name(%Scope{} = scope, organization_id, name)
       when is_binary(organization_id) and is_binary(name) do
-    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
-         {:ok, context} <- context_for_scope(resolved_scope) do
-      WorkOS.read_vault_object_by_name(name, %{context: context})
+    with {:ok, _resolved_scope} <- resolve_organization_scope(scope, organization_id) do
+      WorkOS.read_vault_object_by_name(name)
     end
   end
 
@@ -77,41 +77,39 @@ defmodule Fizz.Accounts.WorkOS.Vault do
          {:ok, context} <- context_for_scope(resolved_scope) do
       query =
         opts
-        |> Map.take([:limit, "limit", :before, "before", :after, "after", :order, "order"])
+        |> Map.take([
+          :limit,
+          "limit",
+          :before,
+          "before",
+          :after,
+          "after",
+          :updatedAfter,
+          "updatedAfter",
+          :updated_after,
+          "updated_after"
+        ])
         |> normalize_params()
-        |> Map.put(:context, context)
 
-      WorkOS.list_vault_objects(query)
+      case WorkOS.list_vault_objects(query) do
+        {:ok, response} -> {:ok, filter_objects_by_context(response, context)}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
-  @spec object_name(String.t(), String.t(), String.t(), String.t() | nil) :: String.t()
-  def object_name(organization_id, user_id, provider, suffix \\ nil)
-      when is_binary(organization_id) and is_binary(user_id) and is_binary(provider) do
+  @spec object_name(String.t(), String.t() | nil) :: String.t()
+  def object_name(display_name, unique_suffix \\ nil) when is_binary(display_name) do
     base =
-      [
-        "org",
-        sanitize_component(organization_id),
-        "user",
-        sanitize_component(user_id),
-        "provider",
-        sanitize_component(provider)
-      ]
-      |> Enum.join("_")
+      display_name
+      |> sanitize_component()
+      |> default_name_if_blank()
 
-    case suffix do
-      value when is_binary(value) ->
-        trimmed_value = String.trim(value)
+    suffix = normalize_suffix(unique_suffix) || random_suffix()
+    max_base_length = max(@vault_name_max_length - byte_size(suffix) - 1, 1)
+    truncated_base = String.slice(base, 0, max_base_length)
 
-        if byte_size(trimmed_value) > 0 do
-          "#{base}_#{sanitize_component(trimmed_value)}"
-        else
-          base
-        end
-
-      _ ->
-        base
-    end
+    "#{truncated_base}_#{suffix}"
   end
 
   @spec context_for_scope(Scope.t()) ::
@@ -137,9 +135,6 @@ defmodule Fizz.Accounts.WorkOS.Vault do
        when is_binary(organization_id),
        do: Accounts.build_scope(scope, organization_id)
 
-  defp resolve_organization_scope(_scope, _organization_id),
-    do: {:error, :organization_scope_required}
-
   defp normalize_params(attrs) do
     Enum.reduce(attrs, %{}, fn
       {key, value}, acc when is_atom(key) ->
@@ -149,12 +144,13 @@ defmodule Fizz.Accounts.WorkOS.Vault do
         case key do
           "name" -> Map.put(acc, :name, value)
           "value" -> Map.put(acc, :value, value)
-          "context" -> Map.put(acc, :context, value)
+          "key_context" -> Map.put(acc, :key_context, value)
           "version_check" -> Map.put(acc, :version_check, value)
           "limit" -> Map.put(acc, :limit, value)
           "before" -> Map.put(acc, :before, value)
           "after" -> Map.put(acc, :after, value)
-          "order" -> Map.put(acc, :order, value)
+          "updatedAfter" -> Map.put(acc, :updatedAfter, value)
+          "updated_after" -> Map.put(acc, :updatedAfter, value)
           _ -> acc
         end
 
@@ -163,13 +159,64 @@ defmodule Fizz.Accounts.WorkOS.Vault do
     end)
   end
 
-  defp put_supported_key(acc, key, value) when key in [:name, :value, :context, :version_check],
-    do: Map.put(acc, key, value)
+  defp put_supported_key(acc, key, value)
+       when key in [:name, :value, :key_context, :version_check],
+       do: Map.put(acc, key, value)
 
-  defp put_supported_key(acc, key, value) when key in [:limit, :before, :after, :order],
+  defp put_supported_key(acc, key, value) when key in [:limit, :before, :after, :updatedAfter],
     do: Map.put(acc, key, value)
 
   defp put_supported_key(acc, _key, _value), do: acc
+
+  defp filter_objects_by_context(%{"data" => objects} = response, context)
+       when is_list(objects) do
+    filtered =
+      Enum.filter(objects, fn object ->
+        object_context_matches?(object, context)
+      end)
+
+    Map.put(response, "data", filtered)
+  end
+
+  defp filter_objects_by_context(response, _context), do: response
+
+  defp object_context_matches?(object, context) when is_map(object) and is_map(context) do
+    metadata = object["metadata"] || object[:metadata]
+    object_context = metadata && (metadata["context"] || metadata[:context])
+
+    if is_map(object_context) do
+      normalized_object_context =
+        Map.new(object_context, fn {key, value} -> {to_string(key), value} end)
+
+      Enum.all?(context, fn {key, value} ->
+        Map.get(normalized_object_context, to_string(key)) == value
+      end)
+    else
+      false
+    end
+  end
+
+  defp object_context_matches?(_object, _context), do: false
+
+  defp default_name_if_blank(""), do: "credential"
+  defp default_name_if_blank(value), do: value
+
+  defp normalize_suffix(value) when is_binary(value) do
+    sanitized =
+      value
+      |> sanitize_component()
+      |> String.slice(0, 24)
+
+    if sanitized == "", do: nil, else: sanitized
+  end
+
+  defp normalize_suffix(_value), do: nil
+
+  defp random_suffix do
+    Ecto.UUID.generate()
+    |> String.replace("-", "")
+    |> String.slice(0, 12)
+  end
 
   defp sanitize_component(value) do
     value

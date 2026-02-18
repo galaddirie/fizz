@@ -144,7 +144,7 @@ defmodule Fizz.Accounts.WorkOSTest do
     refute_receive {:workos_http_request, _request}
   end
 
-  test "create_vault_object/1 posts to vault objects endpoint" do
+  test "create_vault_object/1 posts to vault kv endpoint" do
     Process.put(:workos_http_responses, [
       {:ok, %Req.Response{status: 201, body: %{"id" => "vault_obj_123"}}}
     ])
@@ -153,17 +153,17 @@ defmodule Fizz.Accounts.WorkOSTest do
              AccountsWorkOS.create_vault_object(%{
                name: "slack-token",
                value: "xoxb-example",
-               context: %{"organization_id" => "org_123"}
+               key_context: %{"organization_id" => "org_123"}
              })
 
     assert_receive {:workos_http_request, request}
     assert request[:method] == :post
-    assert request[:url] == "/vault/objects"
+    assert request[:url] == "/vault/v1/kv"
 
     assert request[:json] == %{
              name: "slack-token",
              value: "xoxb-example",
-             context: %{"organization_id" => "org_123"}
+             key_context: %{"organization_id" => "org_123"}
            }
   end
 
@@ -176,7 +176,7 @@ defmodule Fizz.Accounts.WorkOSTest do
 
     assert_receive {:workos_http_request, request}
     assert request[:method] == :delete
-    assert request[:url] == "/vault/objects/vault_obj_123"
+    assert request[:url] == "/vault/v1/kv/vault_obj_123"
   end
 
   test "read_vault_object/1 fetches object by id" do
@@ -193,7 +193,7 @@ defmodule Fizz.Accounts.WorkOSTest do
 
     assert_receive {:workos_http_request, request}
     assert request[:method] == :get
-    assert request[:url] == "/vault/objects/vault_obj_123"
+    assert request[:url] == "/vault/v1/kv/vault_obj_123"
   end
 
   test "list_vault_objects/1 sends list query" do
@@ -204,23 +204,18 @@ defmodule Fizz.Accounts.WorkOSTest do
     assert {:ok, %{"data" => [%{"id" => "vault_obj_123"}]}} =
              AccountsWorkOS.list_vault_objects(%{
                limit: 5,
-               context: %{"organization_id" => "org_123"}
+               updated_after: "2025-02-21T12:00:00Z"
              })
 
     assert_receive {:workos_http_request, request}
     assert request[:method] == :get
-    assert request[:url] == "/vault/objects"
+    assert request[:url] == "/vault/v1/kv"
     assert Enum.member?(request[:params], {:limit, 5})
-    assert Enum.member?(request[:params], {:context, %{"organization_id" => "org_123"}})
+    assert Enum.member?(request[:params], {:updatedAfter, "2025-02-21T12:00:00Z"})
   end
 
-  test "read_vault_object_by_name/2 lists then reads object id" do
+  test "read_vault_object_by_name/2 reads object by name endpoint" do
     Process.put(:workos_http_responses, [
-      {:ok,
-       %Req.Response{
-         status: 200,
-         body: %{"data" => [%{"id" => "vault_obj_123", "name" => "openai_key"}]}
-       }},
       {:ok,
        %Req.Response{
          status: 200,
@@ -233,18 +228,12 @@ defmodule Fizz.Accounts.WorkOSTest do
                context: %{"organization_id" => "org_123"}
              })
 
-    assert_receive {:workos_http_request, list_request}
-    assert list_request[:method] == :get
-    assert list_request[:url] == "/vault/objects"
-    assert Enum.member?(list_request[:params], {:limit, 100})
-    assert Enum.member?(list_request[:params], {:context, %{"organization_id" => "org_123"}})
-
-    assert_receive {:workos_http_request, read_request}
-    assert read_request[:method] == :get
-    assert read_request[:url] == "/vault/objects/vault_obj_123"
+    assert_receive {:workos_http_request, request}
+    assert request[:method] == :get
+    assert request[:url] == "/vault/v1/kv/name/openai_key"
   end
 
-  test "update_vault_object/2 patches object value with version check" do
+  test "update_vault_object/2 puts object value with version check" do
     Process.put(:workos_http_responses, [
       {:ok, %Req.Response{status: 200, body: %{"id" => "vault_obj_123"}}}
     ])
@@ -256,8 +245,8 @@ defmodule Fizz.Accounts.WorkOSTest do
              })
 
     assert_receive {:workos_http_request, request}
-    assert request[:method] == :patch
-    assert request[:url] == "/vault/objects/vault_obj_123"
+    assert request[:method] == :put
+    assert request[:url] == "/vault/v1/kv/vault_obj_123"
     assert request[:json] == %{value: "sk-new", version_check: "etag-1"}
   end
 
@@ -270,7 +259,7 @@ defmodule Fizz.Accounts.WorkOSTest do
 
     assert_receive {:workos_http_request, request}
     assert request[:method] == :delete
-    assert request[:url] == "/vault/objects/vault_obj_123"
+    assert request[:url] == "/vault/v1/kv/vault_obj_123"
     assert request[:json] == %{version_check: "etag-1"}
   end
 
@@ -284,16 +273,16 @@ defmodule Fizz.Accounts.WorkOSTest do
              AccountsWorkOS.create_vault_object(%{
                name: "openai-key",
                value: "sk-retry",
-               context: %{"organization_id" => "org_123"}
+               key_context: %{"organization_id" => "org_123"}
              })
 
     assert_receive {:workos_http_request, first_request}
     assert first_request[:method] == :post
-    assert first_request[:url] == "/vault/objects"
+    assert first_request[:url] == "/vault/v1/kv"
 
     assert_receive {:workos_http_request, second_request}
     assert second_request[:method] == :post
-    assert second_request[:url] == "/vault/objects"
+    assert second_request[:url] == "/vault/v1/kv"
   end
 
   test "generate_widget_token/1 posts to widgets token endpoint" do

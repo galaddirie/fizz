@@ -146,8 +146,7 @@ defmodule Fizz.Accounts.ExternalAuth do
       when is_binary(organization_id) and is_map(attrs) do
     with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
          {:ok, normalized_attrs} <- normalize_credential_attrs(attrs),
-         {:ok, vault_name} <-
-           build_vault_object_name(organization_id, resolved_scope.user.id, normalized_attrs),
+         {:ok, vault_name} <- build_vault_object_name(normalized_attrs),
          {:ok, vault_response} <-
            Vault.create_object(resolved_scope, organization_id, %{
              name: vault_name,
@@ -305,8 +304,6 @@ defmodule Fizz.Accounts.ExternalAuth do
   defp resolve_oauth_provider(provider) when is_binary(provider),
     do: ProviderCatalog.resolve_provider_id_for_type(provider, :oauth)
 
-  defp resolve_oauth_provider(_provider), do: {:error, :invalid_provider}
-
   defp get_credential(%Scope{} = resolved_scope, organization_id, api_credential_id)
        when is_binary(organization_id) and is_binary(api_credential_id) do
     query =
@@ -356,6 +353,7 @@ defmodule Fizz.Accounts.ExternalAuth do
           api_credential.workos_organization_id == ^organization_id and
             api_credential.user_id == ^resolved_scope.user.id and
             api_credential.provider == ^provider,
+        order_by: [desc: api_credential.inserted_at],
         limit: 1
 
     case Repo.one(query) do
@@ -429,8 +427,6 @@ defmodule Fizz.Accounts.ExternalAuth do
     end
   end
 
-  defp validate_provider_custom_name(_provider, _provider_custom_name), do: :ok
-
   defp normalize_optional_string(value) when is_binary(value) do
     trimmed = String.trim(value)
     if trimmed == "", do: nil, else: trimmed
@@ -461,11 +457,9 @@ defmodule Fizz.Accounts.ExternalAuth do
     end
   end
 
-  defp build_vault_object_name(organization_id, user_id, credential_attrs) do
-    suffix = credential_attrs.provider_custom_name || credential_attrs.provider_label
-
-    {:ok,
-     Vault.object_name(organization_id, to_string(user_id), credential_attrs.provider, suffix)}
+  defp build_vault_object_name(credential_attrs) do
+    display_name = credential_attrs.provider_custom_name || credential_attrs.provider_label
+    {:ok, Vault.object_name(display_name)}
   end
 
   defp maybe_emit_credential_audit_event(

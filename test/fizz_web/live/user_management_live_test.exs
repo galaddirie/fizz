@@ -370,7 +370,7 @@ defmodule FizzWeb.UserManagementLiveTest do
       {:post, "/widgets/token"} ->
         widget_response("widget_token_123")
 
-      {:post, "/vault/objects"} ->
+      {:post, "/vault/v1/kv"} ->
         {:ok,
          %Req.Response{
            status: 201,
@@ -380,10 +380,10 @@ defmodule FizzWeb.UserManagementLiveTest do
            }
          }}
 
-      {:patch, "/vault/objects/vault_obj_123"} ->
+      {:put, "/vault/v1/kv/vault_obj_123"} ->
         {:ok, %Req.Response{status: 200, body: %{"metadata" => %{"version_id" => "version_2"}}}}
 
-      {:delete, "/vault/objects/vault_obj_123"} ->
+      {:delete, "/vault/v1/kv/vault_obj_123"} ->
         {:ok, %Req.Response{status: 204, body: %{}}}
 
       _ ->
