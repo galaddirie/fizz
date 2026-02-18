@@ -10,7 +10,7 @@ defmodule Fizz.Integrations.Providers.GitHub do
   require Logger
 
   @impl true
-  def provider_id, do: "github"
+  def provider_id, do: "github_oauth"
 
   @impl true
   def display_name, do: "GitHub"

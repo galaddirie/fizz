@@ -153,7 +153,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
     remote_name = console_session.sprite.remote_name
 
     with {:ok, token_result} <-
-           Integrations.fetch_token_for_sprite(scope, workspace_id, "github") do
+           Integrations.fetch_token_for_sprite(scope, workspace_id, "github_oauth") do
       user_opts = git_user_opts(scope, workspace_id)
 
       case GitCredentialSetup.setup(remote_name, token_result.access_token, user_opts) do
@@ -172,7 +172,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
   end
 
   defp git_user_opts(scope, workspace_id) do
-    case Integrations.get_connection(scope, workspace_id, "github") do
+    case Integrations.get_connection(scope, workspace_id, "github_oauth") do
       {:ok, connection} ->
         meta = connection.provider_metadata || %{}
         name = meta["name"] || meta["username"]

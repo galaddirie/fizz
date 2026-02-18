@@ -1,4 +1,4 @@
-defmodule Fizz.Integrations.IntegrationCredential do
+defmodule Fizz.Accounts.ApiCredential do
   @moduledoc """
   Organization-scoped metadata for provider credentials stored in WorkOS Vault.
 
@@ -9,11 +9,11 @@ defmodule Fizz.Integrations.IntegrationCredential do
   use Fizz.Schema
 
   alias Fizz.Accounts.User
-  alias Fizz.Integrations.IntegrationConnection
+  alias Fizz.Integrations.ProviderCatalog
 
   @type t :: %__MODULE__{}
 
-  schema "integration_credentials" do
+  schema "api_credentials" do
     field :workos_organization_id, :string
     field :provider, :string
     field :provider_label, :string
@@ -24,7 +24,6 @@ defmodule Fizz.Integrations.IntegrationCredential do
     field :last_used_at, :utc_datetime_usec
 
     belongs_to :user, User
-    has_many :integration_connections, IntegrationConnection, foreign_key: :credential_id
 
     timestamps()
   end
@@ -60,7 +59,7 @@ defmodule Fizz.Integrations.IntegrationCredential do
     |> validate_provider_custom_name()
     |> foreign_key_constraint(:user_id)
     |> unique_constraint([:workos_organization_id, :user_id, :provider],
-      name: :integration_credentials_org_user_provider_index
+      name: :api_credentials_org_user_provider_index
     )
     |> unique_constraint(:vault_object_id)
     |> unique_constraint(:vault_object_name)
@@ -70,7 +69,7 @@ defmodule Fizz.Integrations.IntegrationCredential do
     provider = get_field(changeset, :provider)
     custom_name = get_field(changeset, :provider_custom_name)
 
-    if provider == "custom" do
+    if custom_provider?(provider) do
       if is_binary(custom_name) and byte_size(String.trim(custom_name)) > 0 do
         changeset
       else
@@ -80,4 +79,13 @@ defmodule Fizz.Integrations.IntegrationCredential do
       changeset
     end
   end
+
+  defp custom_provider?(provider_id) when is_binary(provider_id) do
+    case ProviderCatalog.provider(provider_id) do
+      {:ok, %{custom: true}} -> true
+      _ -> false
+    end
+  end
+
+  defp custom_provider?(_provider_id), do: false
 end

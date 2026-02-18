@@ -2,8 +2,9 @@ defmodule Fizz.IntegrationsTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.Scope
+  alias Fizz.Accounts.Integrations, as: AccountIntegrations
+  alias Fizz.Accounts.ApiCredential
   alias Fizz.Integrations
-  alias Fizz.Integrations.IntegrationCredential
   alias Fizz.WorkOSHTTPMock
 
   import Fizz.AccountsFixtures
@@ -41,11 +42,10 @@ defmodule Fizz.IntegrationsTest do
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    workspace = workspace_fixture(owner_scope, %{name: "Workspace A"})
+    _workspace = workspace_fixture(owner_scope, %{name: "Workspace A"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
-      membership_response(user.workos_user_id, org_id),
       membership_response(user.workos_user_id, org_id),
       {:ok,
        %Req.Response{
@@ -56,9 +56,7 @@ defmodule Fizz.IntegrationsTest do
          }
        }},
       membership_response(user.workos_user_id, org_id),
-      membership_response(user.workos_user_id, org_id),
       {:ok, %Req.Response{status: 200, body: %{"metadata" => %{"version_id" => "version_2"}}}},
-      membership_response(user.workos_user_id, org_id),
       membership_response(user.workos_user_id, org_id),
       {:ok,
        %Req.Response{
@@ -69,41 +67,40 @@ defmodule Fizz.IntegrationsTest do
          }
        }},
       membership_response(user.workos_user_id, org_id),
-      membership_response(user.workos_user_id, org_id),
       {:ok, %Req.Response{status: 204, body: %{}}}
     ])
 
     assert {:ok, credential} =
-             Integrations.create_credential(scope, org_id, %{
-               provider: "openai",
+             AccountIntegrations.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
                provider_label: "OpenAI Production",
                secret: "sk-original"
              })
 
-    assert credential.provider == "openai"
+    assert credential.provider == "openai_api_key"
     assert credential.vault_object_id == "vault_obj_123"
     assert credential.vault_version == "version_1"
 
     assert {:ok, rotated} =
-             Integrations.rotate_credential(scope, org_id, credential.id, %{
+             AccountIntegrations.rotate_credential(scope, org_id, credential.id, %{
                secret: "sk-new"
              })
 
     assert rotated.vault_version == "version_2"
 
     assert {:ok, resolved} =
-             Integrations.resolve_credential_for_use(scope, workspace.id, "openai",
-               credential_id: credential.id
+             AccountIntegrations.resolve_credential_for_use(scope, org_id, "openai_api_key",
+               api_credential_id: credential.id
              )
 
     assert resolved.api_key == "sk-new"
-    assert resolved.credential_id == credential.id
+    assert resolved.api_credential_id == credential.id
 
-    assert {:ok, _deleted} = Integrations.delete_credential(scope, org_id, credential.id)
-    refute Repo.get(IntegrationCredential, credential.id)
+    assert {:ok, _deleted} = AccountIntegrations.delete_credential(scope, org_id, credential.id)
+    refute Repo.get(ApiCredential, credential.id)
   end
 
-  test "fetch_token_for_sprite/3 resolves api_key auth when bound" do
+  test "fetch_token_for_sprite/3 resolves api_key auth directly from credentials" do
     user = user_fixture()
     org_id = "org_234"
 
@@ -115,7 +112,6 @@ defmodule Fizz.IntegrationsTest do
 
     put_workos_responses([
       membership_response(user.workos_user_id, org_id),
-      membership_response(user.workos_user_id, org_id),
       {:ok,
        %Req.Response{
          status: 201,
@@ -125,26 +121,21 @@ defmodule Fizz.IntegrationsTest do
          }
        }},
       membership_response(user.workos_user_id, org_id),
-      membership_response(user.workos_user_id, org_id),
-      membership_response(user.workos_user_id, org_id),
-      membership_response(user.workos_user_id, org_id),
       {:ok, %Req.Response{status: 200, body: %{"id" => "vault_obj_234", "value" => "sk-api-key"}}}
     ])
 
     assert {:ok, credential} =
-             Integrations.create_credential(scope, org_id, %{
-               provider: "openai",
+             AccountIntegrations.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
                provider_label: "OpenAI",
                secret: "sk-api-key"
              })
 
-    assert {:ok, _connection} =
-             Integrations.bind_api_key_credential(scope, workspace.id, "openai", credential.id)
-
     assert {:ok, token_result} =
-             Integrations.fetch_token_for_sprite(scope, workspace.id, "openai")
+             Integrations.fetch_token_for_sprite(scope, workspace.id, "openai_api_key")
 
     assert token_result.access_token == "sk-api-key"
+    assert credential.provider == "openai_api_key"
   end
 
   test "credential usage is organization-scoped across workspaces" do
@@ -155,11 +146,10 @@ defmodule Fizz.IntegrationsTest do
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
     _workspace_a = workspace_fixture(owner_scope, %{name: "Workspace C"})
-    workspace_b = workspace_fixture(owner_scope, %{name: "Workspace D"})
+    _workspace_b = workspace_fixture(owner_scope, %{name: "Workspace D"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
-      membership_response(user.workos_user_id, org_id),
       membership_response(user.workos_user_id, org_id),
       {:ok,
        %Req.Response{
@@ -168,19 +158,17 @@ defmodule Fizz.IntegrationsTest do
            "id" => "vault_obj_345",
            "metadata" => %{"version_id" => "version_1"}
          }
-       }},
-      membership_response(user.workos_user_id, org_id)
+       }}
     ])
 
     assert {:ok, credential} =
-             Integrations.create_credential(scope, org_id, %{
-               provider: "anthropic",
+             AccountIntegrations.create_credential(scope, org_id, %{
+               provider: "anthropic_api_key",
                provider_label: "Anthropic",
                secret: "sk-anthropic"
              })
 
     put_workos_responses([
-      membership_response(user.workos_user_id, org_id),
       membership_response(user.workos_user_id, org_id),
       {:ok,
        %Req.Response{
@@ -193,8 +181,8 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, resolved} =
-             Integrations.resolve_credential_for_use(scope, workspace_b.id, "anthropic",
-               credential_id: credential.id
+             AccountIntegrations.resolve_credential_for_use(scope, org_id, "anthropic_api_key",
+               api_credential_id: credential.id
              )
 
     assert resolved.api_key == "sk-anthropic"
@@ -222,7 +210,6 @@ defmodule Fizz.IntegrationsTest do
 
     put_workos_responses([
       membership_response(owner_user.workos_user_id, org_id),
-      membership_response(owner_user.workos_user_id, org_id),
       {:ok,
        %Req.Response{
          status: 201,
@@ -235,15 +222,18 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, credential} =
-             Integrations.create_credential(owner_runtime_scope, org_id, %{
-               provider: "openai",
+             AccountIntegrations.create_credential(owner_runtime_scope, org_id, %{
+               provider: "openai_api_key",
                provider_label: "OpenAI Owner",
                secret: "sk-owner"
              })
 
     assert {:error, :credential_not_found} =
-             Integrations.resolve_credential_for_use(member_runtime_scope, workspace.id, "openai",
-               credential_id: credential.id
+             AccountIntegrations.resolve_credential_for_use(
+               member_runtime_scope,
+               org_id,
+               "openai_api_key",
+               api_credential_id: credential.id
              )
   end
 

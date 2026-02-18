@@ -2,7 +2,7 @@ defmodule FizzWeb.UserManagementLive do
   use FizzWeb, :live_view
 
   alias Fizz.Accounts
-  alias Fizz.Integrations
+  alias Fizz.Accounts.Integrations, as: AccountIntegrations
   alias Fizz.Integrations.CredentialProviderCatalog
 
   @user_tabs [
@@ -142,7 +142,11 @@ defmodule FizzWeb.UserManagementLive do
     if is_binary(organization_id) and byte_size(organization_id) > 0 do
       attrs = normalize_credential_params(params, socket.assigns.provider_catalog)
 
-      case Integrations.create_credential(socket.assigns.current_scope, organization_id, attrs) do
+      case AccountIntegrations.create_credential(
+             socket.assigns.current_scope,
+             organization_id,
+             attrs
+           ) do
         {:ok, _credential} ->
           {:noreply,
            socket
@@ -195,7 +199,7 @@ defmodule FizzWeb.UserManagementLive do
     if is_binary(organization_id) and is_binary(credential_id) do
       attrs = normalize_rotate_credential_params(params)
 
-      case Integrations.rotate_credential(
+      case AccountIntegrations.rotate_credential(
              socket.assigns.current_scope,
              organization_id,
              credential_id,
@@ -245,7 +249,7 @@ defmodule FizzWeb.UserManagementLive do
     credential_id = socket.assigns.selected_credential_id
 
     if is_binary(organization_id) and is_binary(credential_id) do
-      case Integrations.delete_credential(
+      case AccountIntegrations.delete_credential(
              socket.assigns.current_scope,
              organization_id,
              credential_id
@@ -359,7 +363,7 @@ defmodule FizzWeb.UserManagementLive do
   end
 
   defp load_credentials(socket) do
-    case Integrations.list_credentials(
+    case AccountIntegrations.list_credentials(
            socket.assigns.current_scope,
            socket.assigns.selected_organization_id
          ) do
@@ -485,7 +489,7 @@ defmodule FizzWeb.UserManagementLive do
     provider_catalog
     |> Enum.find(&(!&1.custom))
     |> case do
-      nil -> "custom"
+      nil -> "custom_api_key"
       provider -> provider.id
     end
   end

@@ -3,7 +3,7 @@ defmodule FizzWeb.UserManagementLiveTest do
 
   import Phoenix.LiveViewTest
 
-  alias Fizz.Integrations.IntegrationCredential
+  alias Fizz.Accounts.ApiCredential
   alias Fizz.Repo
 
   defmodule ReqMock do
@@ -149,14 +149,14 @@ defmodule FizzWeb.UserManagementLiveTest do
       |> element("#create-credential-form")
       |> render_submit(%{
         "credential" => %{
-          "provider" => "openai",
+          "provider" => "openai_api_key",
           "provider_label" => "OpenAI Key",
           "provider_custom_name" => "",
           "secret" => "sk-openai-1"
         }
       })
 
-      credential = Repo.one!(IntegrationCredential)
+      credential = Repo.one!(ApiCredential)
       assert has_element?(view, "#credential-#{credential.id}")
 
       view
@@ -183,7 +183,7 @@ defmodule FizzWeb.UserManagementLiveTest do
       |> element("#delete-credential-modal .btn-error")
       |> render_click()
 
-      refute Repo.get(IntegrationCredential, credential.id)
+      refute Repo.get(ApiCredential, credential.id)
     end
 
     test "switches organizations and refreshes token", %{conn: conn, user: user} do

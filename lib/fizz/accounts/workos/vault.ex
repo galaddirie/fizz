@@ -1,9 +1,9 @@
-defmodule Fizz.Integrations.Vault do
+defmodule Fizz.Accounts.WorkOS.Vault do
   @moduledoc """
   Organization-scoped wrapper around WorkOS Vault APIs.
 
   This module keeps tenant boundaries explicit and centralizes
-  WorkOS Vault error normalization for higher-level integrations workflows.
+  WorkOS Vault error normalization for higher-level workflows.
   """
 
   alias Fizz.Accounts
@@ -15,7 +15,7 @@ defmodule Fizz.Integrations.Vault do
   @spec create_object(Scope.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def create_object(%Scope{} = scope, organization_id, attrs)
       when is_binary(organization_id) and is_map(attrs) do
-    with {:ok, resolved_scope} <- Accounts.build_scope(scope, organization_id),
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
          {:ok, context} <- context_for_scope(resolved_scope) do
       params =
         attrs
@@ -30,7 +30,7 @@ defmodule Fizz.Integrations.Vault do
   @spec read_object(Scope.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def read_object(%Scope{} = scope, organization_id, object_id)
       when is_binary(organization_id) and is_binary(object_id) do
-    with {:ok, _resolved_scope} <- Accounts.build_scope(scope, organization_id) do
+    with {:ok, _resolved_scope} <- resolve_organization_scope(scope, organization_id) do
       WorkOS.read_vault_object(object_id)
     end
   end
@@ -38,7 +38,7 @@ defmodule Fizz.Integrations.Vault do
   @spec read_object_by_name(Scope.t(), String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def read_object_by_name(%Scope{} = scope, organization_id, name)
       when is_binary(organization_id) and is_binary(name) do
-    with {:ok, resolved_scope} <- Accounts.build_scope(scope, organization_id),
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
          {:ok, context} <- context_for_scope(resolved_scope) do
       WorkOS.read_vault_object_by_name(name, %{context: context})
     end
@@ -47,7 +47,7 @@ defmodule Fizz.Integrations.Vault do
   @spec update_object(Scope.t(), String.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def update_object(%Scope{} = scope, organization_id, object_id, attrs)
       when is_binary(organization_id) and is_binary(object_id) and is_map(attrs) do
-    with {:ok, _resolved_scope} <- Accounts.build_scope(scope, organization_id) do
+    with {:ok, _resolved_scope} <- resolve_organization_scope(scope, organization_id) do
       params =
         attrs
         |> Map.take([:value, "value", :version_check, "version_check"])
@@ -60,7 +60,7 @@ defmodule Fizz.Integrations.Vault do
   @spec delete_object(Scope.t(), String.t(), String.t(), map()) :: :ok | {:error, term()}
   def delete_object(%Scope{} = scope, organization_id, object_id, attrs \\ %{})
       when is_binary(organization_id) and is_binary(object_id) and is_map(attrs) do
-    with {:ok, _resolved_scope} <- Accounts.build_scope(scope, organization_id) do
+    with {:ok, _resolved_scope} <- resolve_organization_scope(scope, organization_id) do
       params =
         attrs
         |> Map.take([:version_check, "version_check"])
@@ -73,7 +73,7 @@ defmodule Fizz.Integrations.Vault do
   @spec list_objects(Scope.t(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   def list_objects(%Scope{} = scope, organization_id, opts \\ %{})
       when is_binary(organization_id) and is_map(opts) do
-    with {:ok, resolved_scope} <- Accounts.build_scope(scope, organization_id),
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
          {:ok, context} <- context_for_scope(resolved_scope) do
       query =
         opts
@@ -114,7 +114,9 @@ defmodule Fizz.Integrations.Vault do
     end
   end
 
-  defp context_for_scope(%Scope{organization_id: org_id, user: user}) when is_binary(org_id) do
+  @spec context_for_scope(Scope.t()) ::
+          {:ok, vault_context()} | {:error, :organization_scope_required}
+  def context_for_scope(%Scope{organization_id: org_id, user: user}) when is_binary(org_id) do
     {:ok,
      %{
        "organization_id" => org_id,
@@ -122,7 +124,21 @@ defmodule Fizz.Integrations.Vault do
      }}
   end
 
-  defp context_for_scope(_scope), do: {:error, :organization_scope_required}
+  def context_for_scope(_scope), do: {:error, :organization_scope_required}
+
+  defp resolve_organization_scope(
+         %Scope{organization_id: organization_id} = scope,
+         organization_id
+       )
+       when is_binary(organization_id),
+       do: {:ok, scope}
+
+  defp resolve_organization_scope(%Scope{} = scope, organization_id)
+       when is_binary(organization_id),
+       do: Accounts.build_scope(scope, organization_id)
+
+  defp resolve_organization_scope(_scope, _organization_id),
+    do: {:error, :organization_scope_required}
 
   defp normalize_params(attrs) do
     Enum.reduce(attrs, %{}, fn

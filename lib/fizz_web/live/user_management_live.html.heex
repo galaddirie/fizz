@@ -352,7 +352,7 @@
         />
         <.input field={@credential_form[:provider_label]} type="text" label="Display label" />
         <.input
-          :if={@credential_form[:provider].value == "custom"}
+          :if={@credential_form[:provider].value == "custom_api_key"}
           field={@credential_form[:provider_custom_name]}
           type="text"
           label="Custom provider name"

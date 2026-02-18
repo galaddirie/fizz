@@ -48,11 +48,37 @@ config :fizz,
   ecto_repos: [Fizz.Repo],
   generators: [timestamp_type: :utc_datetime]
 
-config :fizz, :integration_credential_providers, [
-  %{id: "openai", label: "OpenAI", logo_path: "/images/openai.svg", custom: false},
-  %{id: "anthropic", label: "Anthropic", logo_path: "/images/anthropic.svg", custom: false},
-  %{id: "github", label: "GitHub", logo_path: "/images/github.svg", custom: false},
-  %{id: "custom", label: "Custom", logo_path: nil, custom: true}
+config :fizz, :integration_providers, [
+  %{
+    id: "github_oauth",
+    label: "GitHub",
+    logo_path: "/images/github.svg",
+    custom: false,
+    type: :oauth,
+    oauth_module: Fizz.Integrations.Providers.GitHub
+  },
+  %{
+    id: "github_api_key",
+    label: "GitHub",
+    logo_path: "/images/github.svg",
+    custom: false,
+    type: :api_key
+  },
+  %{
+    id: "openai_api_key",
+    label: "OpenAI",
+    logo_path: "/images/openai.svg",
+    custom: false,
+    type: :api_key
+  },
+  %{
+    id: "anthropic_api_key",
+    label: "Anthropic",
+    logo_path: "/images/anthropic.svg",
+    custom: false,
+    type: :api_key
+  },
+  %{id: "custom_api_key", label: "Custom", logo_path: nil, custom: true, type: :api_key}
 ]
 
 config :tesla, disable_deprecated_builder_warning: true
