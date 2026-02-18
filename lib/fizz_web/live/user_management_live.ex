@@ -72,6 +72,10 @@ defmodule FizzWeb.UserManagementLive do
       |> assign(:provider_catalog, provider_catalog)
       |> assign(:provider_options, provider_options(provider_catalog))
       |> assign(:show_create_credential_modal, false)
+      |> assign(:credential_modal_step, :select_provider)
+      |> assign(:provider_search_query, "")
+      |> assign(:filtered_providers, provider_catalog)
+      |> assign(:selected_provider, nil)
       |> assign(:show_rotate_credential_modal, false)
       |> assign(:show_delete_credential_modal, false)
       |> assign(:selected_credential_id, nil)
@@ -121,6 +125,10 @@ defmodule FizzWeb.UserManagementLive do
     {:noreply,
      socket
      |> assign(:show_create_credential_modal, true)
+     |> assign(:credential_modal_step, :select_provider)
+     |> assign(:provider_search_query, "")
+     |> assign(:filtered_providers, socket.assigns.provider_catalog)
+     |> assign(:selected_provider, nil)
      |> assign(:credential_form, credential_form(socket.assigns.provider_catalog))}
   end
 
@@ -128,7 +136,52 @@ defmodule FizzWeb.UserManagementLive do
     {:noreply,
      socket
      |> assign(:show_create_credential_modal, false)
+     |> assign(:credential_modal_step, :select_provider)
+     |> assign(:provider_search_query, "")
+     |> assign(:filtered_providers, socket.assigns.provider_catalog)
+     |> assign(:selected_provider, nil)
      |> assign(:credential_form, credential_form(socket.assigns.provider_catalog))}
+  end
+
+  def handle_event("search_providers", %{"query" => query}, socket) do
+    filtered =
+      filter_providers(socket.assigns.provider_catalog, query)
+
+    {:noreply,
+     socket
+     |> assign(:provider_search_query, query)
+     |> assign(:filtered_providers, filtered)}
+  end
+
+  def handle_event("select_provider", %{"provider_id" => provider_id}, socket) do
+    catalog = socket.assigns.provider_catalog
+    provider = Enum.find(catalog, &(&1.id == provider_id))
+
+    if provider do
+      form_params = %{
+        "provider" => provider.id,
+        "provider_label" => provider.label,
+        "provider_custom_name" => "",
+        "secret" => ""
+      }
+
+      {:noreply,
+       socket
+       |> assign(:credential_modal_step, :configure)
+       |> assign(:selected_provider, provider)
+       |> assign(:credential_form, to_form(form_params, as: :credential))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("credential_modal_back", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:credential_modal_step, :select_provider)
+     |> assign(:selected_provider, nil)
+     |> assign(:provider_search_query, "")
+     |> assign(:filtered_providers, socket.assigns.provider_catalog)}
   end
 
   def handle_event("validate_credential", %{"credential" => params}, socket) do
@@ -151,6 +204,8 @@ defmodule FizzWeb.UserManagementLive do
           {:noreply,
            socket
            |> assign(:show_create_credential_modal, false)
+           |> assign(:credential_modal_step, :select_provider)
+           |> assign(:selected_provider, nil)
            |> assign(:credential_form, credential_form(socket.assigns.provider_catalog))
            |> load_credentials()
            |> put_flash(:info, "Credential created.")}
@@ -507,6 +562,19 @@ defmodule FizzWeb.UserManagementLive do
     Enum.map(provider_catalog, fn provider ->
       {provider.label, provider.id}
     end)
+  end
+
+  defp filter_providers(catalog, query) do
+    query = String.trim(query) |> String.downcase()
+
+    if query == "" do
+      catalog
+    else
+      Enum.filter(catalog, fn provider ->
+        String.contains?(String.downcase(provider.label), query) ||
+          String.contains?(String.downcase(provider.id), query)
+      end)
+    end
   end
 
   defp provider_logo_path(provider_catalog, provider_id) do

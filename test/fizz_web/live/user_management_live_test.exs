@@ -143,6 +143,12 @@ defmodule FizzWeb.UserManagementLiveTest do
       |> element("#open-create-credential-modal")
       |> render_click()
 
+      assert has_element?(view, "#credential-step-select")
+
+      view
+      |> element("#select-provider-openai_api_key")
+      |> render_click()
+
       assert has_element?(view, "#create-credential-form")
 
       view

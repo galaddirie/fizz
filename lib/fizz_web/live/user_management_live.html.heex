@@ -122,29 +122,27 @@
 
       <div id="user-management-context">
         <%= if @active_tab == "api-keys" do %>
-          <div id="user-management-credentials-section" class="space-y-4">
-            <div class="rounded-box border border-base-300 bg-base-100 p-6">
-              <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 class="text-lg font-semibold">Credentials</h2>
-                  <p class="mt-1 text-sm text-base-content/70">
-                    Store provider API keys securely in WorkOS Vault. Secrets are masked and never persisted locally.
-                  </p>
-                </div>
-                <button
-                  id="open-create-credential-modal"
-                  phx-click="open_create_credential_modal"
-                  class="btn btn-primary btn-sm gap-2"
-                  disabled={is_nil(@selected_organization_id)}
-                >
-                  <.icon name="hero-plus" class="size-4" />
-                  <span>Add credential</span>
-                </button>
+          <div id="user-management-credentials-section" class="space-y-5">
+            <%!-- Header --%>
+            <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 class="text-lg font-semibold tracking-tight">Credentials</h2>
+                <p class="mt-1 text-sm text-muted">
+                  Securely stored in WorkOS Vault. Scoped to your selected organization.
+                </p>
               </div>
-
-              <div class="mt-4 rounded-box border border-base-300 bg-base-200/40 p-3 text-xs text-base-content/70">
-                Credentials are scoped to the selected organization and can be reused across workspaces in that organization.
-              </div>
+              <button
+                id="open-create-credential-modal"
+                phx-click="open_create_credential_modal"
+                class={[
+                  "btn btn-primary btn-sm gap-2 shrink-0",
+                  is_nil(@selected_organization_id) && "btn-disabled"
+                ]}
+                disabled={is_nil(@selected_organization_id)}
+              >
+                <.icon name="hero-plus" class="size-4" />
+                <span>Add credential</span>
+              </button>
             </div>
 
             <p
@@ -155,72 +153,103 @@
               {credential_error_message(@credentials_error)}
             </p>
 
-            <div id="user-management-credentials-list" class="space-y-3">
+            <%!-- Credential table --%>
+            <div
+              id="user-management-credentials-list"
+              class="overflow-hidden rounded-box border border-base-300 bg-base-100"
+            >
+              <%!-- Empty state --%>
               <div
                 :if={@credentials == [] && !@credentials_error}
                 id="user-management-credentials-empty"
-                class="rounded-box border border-base-300 bg-base-100 p-5 text-sm text-base-content/70"
+                class="flex flex-col items-center justify-center px-6 py-16 text-center"
               >
-                No credentials yet for this organization.
+                <div class="flex size-12 items-center justify-center rounded-full bg-base-200">
+                  <.icon name="hero-key" class="size-6 text-muted" />
+                </div>
+                <p class="mt-4 text-sm font-medium text-base-content">No credentials yet</p>
+                <p class="mt-1 max-w-xs text-xs text-muted">
+                  Add your first API credential to connect a provider to this organization.
+                </p>
+                <button
+                  :if={!is_nil(@selected_organization_id)}
+                  phx-click="open_create_credential_modal"
+                  class="btn btn-primary btn-sm mt-5 gap-2"
+                >
+                  <.icon name="hero-plus" class="size-4" />
+                  <span>Add credential</span>
+                </button>
               </div>
 
-              <article
-                :for={credential <- @credentials}
-                id={"credential-#{credential.id}"}
-                class="rounded-box border border-base-300 bg-base-100 p-4 shadow-sm transition hover:border-base-400"
-              >
-                <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <%!-- Table rows --%>
+              <div :if={@credentials != []}>
+                <%!-- Table header --%>
+                <div class="hidden border-b border-base-300 bg-base-200/50 px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted sm:grid sm:grid-cols-[minmax(0,1fr)_120px_100px_140px] sm:gap-4">
+                  <span>Provider</span>
+                  <span>Secret</span>
+                  <span>Last used</span>
+                  <span class="text-right">Actions</span>
+                </div>
+
+                <div
+                  :for={credential <- @credentials}
+                  id={"credential-#{credential.id}"}
+                  class="group flex flex-col gap-3 border-b border-base-300 px-4 py-3 transition-colors last:border-b-0 hover:bg-base-200/30 sm:grid sm:grid-cols-[minmax(0,1fr)_120px_100px_140px] sm:items-center sm:gap-4"
+                >
+                  <%!-- Provider info --%>
                   <div class="flex items-center gap-3">
-                    <div class="flex size-10 items-center justify-center rounded-full border border-base-300 bg-base-200/70">
+                    <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-200/60">
                       <%= if logo_path = provider_logo_path(@provider_catalog, credential.provider) do %>
                         <img
                           src={logo_path}
                           alt={"#{credential.provider_label} logo"}
-                          class="size-6 rounded-sm object-contain"
+                          class="size-5 rounded-sm object-contain"
                         />
                       <% else %>
-                        <.icon name="hero-key" class="size-5 text-base-content/60" />
+                        <.icon name="hero-key" class="size-4 text-muted" />
                       <% end %>
                     </div>
-                    <div>
-                      <p class="text-sm font-semibold text-base-content">
+                    <div class="min-w-0">
+                      <p class="truncate text-sm font-medium text-base-content">
                         {credential.provider_label}
                       </p>
-                      <p class="text-xs text-base-content/60">
+                      <p class="truncate text-xs text-muted">
                         {credential.provider_custom_name || credential.provider}
                       </p>
                     </div>
                   </div>
 
-                  <div class="flex items-center gap-2">
+                  <%!-- Secret --%>
+                  <div class="text-xs text-muted">
+                    <span class="font-mono tracking-wide">••••••••</span>
+                  </div>
+
+                  <%!-- Last used --%>
+                  <div class="text-xs text-muted">
+                    {credential.last_used_at || "Never"}
+                  </div>
+
+                  <%!-- Actions --%>
+                  <div class="flex items-center justify-end gap-1">
                     <button
                       id={"rotate-credential-#{credential.id}"}
                       phx-click="open_rotate_credential_modal"
                       phx-value-credential_id={credential.id}
-                      class="btn btn-ghost btn-xs"
+                      class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-base-content/70 transition-colors hover:bg-base-200 hover:text-base-content"
                     >
-                      Rotate / Edit
+                      Edit
                     </button>
                     <button
                       id={"delete-credential-#{credential.id}"}
                       phx-click="open_delete_credential_modal"
                       phx-value-credential_id={credential.id}
-                      class="btn btn-ghost btn-xs text-error hover:bg-error/10"
+                      class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-error/70 transition-colors hover:bg-error/10 hover:text-error"
                     >
                       Delete
                     </button>
                   </div>
                 </div>
-
-                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-base-content/70">
-                  <span class="rounded-full border border-base-300 px-2 py-0.5">
-                    Secret: ••••••••
-                  </span>
-                  <span class="rounded-full border border-base-300 px-2 py-0.5">
-                    Last used: {credential.last_used_at || "never"}
-                  </span>
-                </div>
-              </article>
+              </div>
             </div>
           </div>
         <% else %>
@@ -320,7 +349,7 @@
     </div>
   </div>
 
-  <%!-- Create Credential Modal --%>
+  <%!-- Create Credential Modal (2-step) --%>
   <div
     :if={@show_create_credential_modal}
     id="create-credential-modal"
@@ -329,48 +358,178 @@
     phx-key="Escape"
   >
     <div class="modal-backdrop" phx-click="close_create_credential_modal"></div>
-    <div class="modal-box">
-      <h3 class="text-lg font-bold">Add Credential</h3>
-      <p class="mt-2 text-sm text-base-content/70">
-        Create an organization-scoped API credential backed by WorkOS Vault.
-      </p>
-      <.form
-        for={@credential_form}
-        id="create-credential-form"
-        phx-change="validate_credential"
-        phx-submit="create_credential"
-        class="mt-4 space-y-3"
-      >
-        <.input
-          field={@credential_form[:provider]}
-          type="select"
-          label="Provider"
-          options={@provider_options}
-        />
-        <.input field={@credential_form[:provider_label]} type="text" label="Display label" />
-        <.input
-          :if={@credential_form[:provider].value == "custom_api_key"}
-          field={@credential_form[:provider_custom_name]}
-          type="text"
-          label="Custom provider name"
-          placeholder="Acme AI"
-        />
-        <.input
-          field={@credential_form[:secret]}
-          type="password"
-          label="API key"
-          placeholder="sk-..."
-          autocomplete="new-password"
-        />
-        <div class="modal-action">
-          <button type="button" class="btn" phx-click="close_create_credential_modal">
-            Cancel
-          </button>
-          <button type="submit" class="btn btn-primary">
-            Save credential
-          </button>
+    <div class="modal-box max-w-md p-0">
+      <%= if @credential_modal_step == :select_provider do %>
+        <%!-- Step 1: Provider selector (command palette style) --%>
+        <div id="credential-step-select" class="flex flex-col">
+          <%!-- Header with search --%>
+          <div class="border-b border-base-300 px-4 pt-4 pb-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-base font-semibold tracking-tight">Add Credential</h3>
+              <button
+                type="button"
+                phx-click="close_create_credential_modal"
+                class="rounded-lg p-1 text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+              >
+                <.icon name="hero-x-mark" class="size-5" />
+              </button>
+            </div>
+            <div class="relative mt-3">
+              <.icon
+                name="hero-magnifying-glass"
+                class="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+              />
+              <form id="provider-search-form" phx-change="search_providers">
+                <input
+                  id="provider-search-input"
+                  name="query"
+                  type="text"
+                  placeholder="Search providers..."
+                  value={@provider_search_query}
+                  phx-debounce="100"
+                  class="w-full rounded-lg border border-base-300 bg-base-200/50 py-2 pl-9 pr-3 text-sm text-base-content placeholder:text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                  autofocus
+                  autocomplete="off"
+                />
+              </form>
+            </div>
+          </div>
+
+          <%!-- Provider list --%>
+          <div class="max-h-72 overflow-y-auto px-2 py-2">
+            <%= if @filtered_providers == [] do %>
+              <div class="flex flex-col items-center justify-center py-8 text-center">
+                <.icon name="hero-magnifying-glass" class="size-6 text-muted" />
+                <p class="mt-2 text-sm text-muted">No providers match your search</p>
+              </div>
+            <% else %>
+              <div class="space-y-0.5">
+                <button
+                  :for={provider <- @filtered_providers}
+                  id={"select-provider-#{provider.id}"}
+                  type="button"
+                  phx-click="select_provider"
+                  phx-value-provider_id={provider.id}
+                  class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-base-200"
+                >
+                  <div class="flex size-8 shrink-0 items-center justify-center rounded-lg border border-base-300 bg-base-200/60">
+                    <%= if provider.logo_path do %>
+                      <img
+                        src={provider.logo_path}
+                        alt={"#{provider.label} logo"}
+                        class="size-5 rounded-sm object-contain"
+                      />
+                    <% else %>
+                      <.icon name="hero-cog-6-tooth" class="size-4 text-muted" />
+                    <% end %>
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm font-medium text-base-content">{provider.label}</p>
+                    <p class="text-xs text-muted">API Key</p>
+                  </div>
+                  <.icon
+                    name="hero-chevron-right"
+                    class="size-4 shrink-0 text-base-content/30"
+                  />
+                </button>
+              </div>
+            <% end %>
+          </div>
         </div>
-      </.form>
+      <% else %>
+        <%!-- Step 2: Configure credential --%>
+        <div id="credential-step-configure" class="flex flex-col">
+          <%!-- Header with back button --%>
+          <div class="border-b border-base-300 px-4 pt-4 pb-3">
+            <div class="flex items-center justify-between">
+              <button
+                type="button"
+                phx-click="credential_modal_back"
+                class="flex items-center gap-1 rounded-lg py-1 pr-2 text-sm font-medium text-muted transition-colors hover:text-base-content"
+              >
+                <.icon name="hero-arrow-left" class="size-4" />
+                <span>Back</span>
+              </button>
+              <button
+                type="button"
+                phx-click="close_create_credential_modal"
+                class="rounded-lg p-1 text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+              >
+                <.icon name="hero-x-mark" class="size-5" />
+              </button>
+            </div>
+
+            <%!-- Selected provider identity --%>
+            <div :if={@selected_provider} class="mt-3 flex items-center gap-3">
+              <div class="flex size-10 items-center justify-center rounded-lg border border-base-300 bg-base-200/60">
+                <%= if @selected_provider.logo_path do %>
+                  <img
+                    src={@selected_provider.logo_path}
+                    alt={"#{@selected_provider.label} logo"}
+                    class="size-6 rounded-sm object-contain"
+                  />
+                <% else %>
+                  <.icon name="hero-cog-6-tooth" class="size-5 text-muted" />
+                <% end %>
+              </div>
+              <div>
+                <p class="text-sm font-semibold text-base-content">
+                  {@selected_provider.label}
+                </p>
+                <p class="text-xs text-muted">API Key credential</p>
+              </div>
+            </div>
+          </div>
+
+          <%!-- Configure form --%>
+          <div class="px-4 pt-4 pb-5">
+            <.form
+              for={@credential_form}
+              id="create-credential-form"
+              phx-change="validate_credential"
+              phx-submit="create_credential"
+              class="space-y-4"
+            >
+              <input
+                type="hidden"
+                name={@credential_form[:provider].name}
+                value={@credential_form[:provider].value}
+              />
+              <.input
+                field={@credential_form[:provider_label]}
+                type="text"
+                label="Display label"
+              />
+              <.input
+                :if={@selected_provider && @selected_provider.custom}
+                field={@credential_form[:provider_custom_name]}
+                type="text"
+                label="Custom provider name"
+                placeholder="e.g. Acme AI"
+              />
+              <.input
+                field={@credential_form[:secret]}
+                type="password"
+                label="API key"
+                placeholder="sk-..."
+                autocomplete="new-password"
+              />
+              <div class="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  class="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+                  phx-click="close_create_credential_modal"
+                >
+                  Cancel
+                </button>
+                <button type="submit" class="btn btn-primary btn-sm">
+                  Save credential
+                </button>
+              </div>
+            </.form>
+          </div>
+        </div>
+      <% end %>
     </div>
   </div>
 
@@ -383,44 +542,61 @@
     phx-key="Escape"
   >
     <div class="modal-backdrop" phx-click="close_rotate_credential_modal"></div>
-    <div class="modal-box">
-      <h3 class="text-lg font-bold">Rotate Credential</h3>
-      <p class="mt-2 text-sm text-base-content/70">
-        Rotating replaces the existing secret in Vault.
-      </p>
-      <.form
-        for={@rotate_credential_form}
-        id="rotate-credential-form"
-        phx-change="validate_rotate_credential"
-        phx-submit="rotate_credential"
-        class="mt-4 space-y-3"
-      >
-        <.input
-          field={@rotate_credential_form[:provider_label]}
-          type="text"
-          label="Display label"
-        />
-        <.input
-          field={@rotate_credential_form[:provider_custom_name]}
-          type="text"
-          label="Custom provider name (optional)"
-        />
-        <.input
-          field={@rotate_credential_form[:secret]}
-          type="password"
-          label="New API key"
-          placeholder="sk-..."
-          autocomplete="new-password"
-        />
-        <div class="modal-action">
-          <button type="button" class="btn" phx-click="close_rotate_credential_modal">
-            Cancel
-          </button>
-          <button type="submit" class="btn btn-primary">
-            Rotate
+    <div class="modal-box max-w-md p-0">
+      <div class="border-b border-base-300 px-4 pt-4 pb-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold tracking-tight">Edit Credential</h3>
+          <button
+            type="button"
+            phx-click="close_rotate_credential_modal"
+            class="rounded-lg p-1 text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+          >
+            <.icon name="hero-x-mark" class="size-5" />
           </button>
         </div>
-      </.form>
+        <p class="mt-1 text-xs text-muted">
+          Update the display label or rotate the API key.
+        </p>
+      </div>
+      <div class="px-4 pt-4 pb-5">
+        <.form
+          for={@rotate_credential_form}
+          id="rotate-credential-form"
+          phx-change="validate_rotate_credential"
+          phx-submit="rotate_credential"
+          class="space-y-4"
+        >
+          <.input
+            field={@rotate_credential_form[:provider_label]}
+            type="text"
+            label="Display label"
+          />
+          <.input
+            field={@rotate_credential_form[:provider_custom_name]}
+            type="text"
+            label="Custom provider name (optional)"
+          />
+          <.input
+            field={@rotate_credential_form[:secret]}
+            type="password"
+            label="New API key"
+            placeholder="sk-..."
+            autocomplete="new-password"
+          />
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              class="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+              phx-click="close_rotate_credential_modal"
+            >
+              Cancel
+            </button>
+            <button type="submit" class="btn btn-primary btn-sm">
+              Save changes
+            </button>
+          </div>
+        </.form>
+      </div>
     </div>
   </div>
 
@@ -433,16 +609,33 @@
     phx-key="Escape"
   >
     <div class="modal-backdrop" phx-click="close_delete_credential_modal"></div>
-    <div class="modal-box">
-      <h3 class="text-lg font-bold text-error">Delete Credential</h3>
-      <p class="mt-2 text-sm text-base-content/70">
-        This permanently deletes the Vault object and cannot be undone.
-      </p>
-      <div class="modal-action">
-        <button type="button" class="btn" phx-click="close_delete_credential_modal">
+    <div class="modal-box max-w-sm p-0">
+      <div class="px-5 pt-5 pb-4">
+        <div class="flex items-start gap-3">
+          <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-error/10">
+            <.icon name="hero-exclamation-triangle" class="size-5 text-error" />
+          </div>
+          <div>
+            <h3 class="text-base font-semibold text-base-content">Delete credential</h3>
+            <p class="mt-1 text-sm text-muted">
+              This permanently deletes the Vault object and cannot be undone.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center justify-end gap-2 border-t border-base-300 px-5 py-3">
+        <button
+          type="button"
+          class="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+          phx-click="close_delete_credential_modal"
+        >
           Cancel
         </button>
-        <button type="button" class="btn btn-error" phx-click="delete_credential">
+        <button
+          type="button"
+          class="btn btn-error btn-sm"
+          phx-click="delete_credential"
+        >
           Delete
         </button>
       </div>
