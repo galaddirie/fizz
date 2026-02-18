@@ -2,7 +2,7 @@ defmodule FizzWeb.UserManagementLive do
   use FizzWeb, :live_view
 
   alias Fizz.Accounts
-  alias Fizz.Accounts.Integrations, as: AccountIntegrations
+  alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Integrations.CredentialProviderCatalog
 
   @user_tabs [
@@ -142,7 +142,7 @@ defmodule FizzWeb.UserManagementLive do
     if is_binary(organization_id) and byte_size(organization_id) > 0 do
       attrs = normalize_credential_params(params, socket.assigns.provider_catalog)
 
-      case AccountIntegrations.create_credential(
+      case AccountExternalAuth.create_credential(
              socket.assigns.current_scope,
              organization_id,
              attrs
@@ -199,7 +199,7 @@ defmodule FizzWeb.UserManagementLive do
     if is_binary(organization_id) and is_binary(credential_id) do
       attrs = normalize_rotate_credential_params(params)
 
-      case AccountIntegrations.rotate_credential(
+      case AccountExternalAuth.rotate_credential(
              socket.assigns.current_scope,
              organization_id,
              credential_id,
@@ -249,7 +249,7 @@ defmodule FizzWeb.UserManagementLive do
     credential_id = socket.assigns.selected_credential_id
 
     if is_binary(organization_id) and is_binary(credential_id) do
-      case AccountIntegrations.delete_credential(
+      case AccountExternalAuth.delete_credential(
              socket.assigns.current_scope,
              organization_id,
              credential_id
@@ -363,7 +363,7 @@ defmodule FizzWeb.UserManagementLive do
   end
 
   defp load_credentials(socket) do
-    case AccountIntegrations.list_credentials(
+    case AccountExternalAuth.list_credentials(
            socket.assigns.current_scope,
            socket.assigns.selected_organization_id
          ) do

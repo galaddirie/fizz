@@ -41,7 +41,7 @@ defmodule Fizz.Accounts do
 
   import Ecto.Query, warn: false
 
-  import Fizz.Accounts.WorkOS.Helpers, only: [read_value: 2, membership_role_slugs: 1]
+  import Fizz.Accounts.WorkOS.Helpers, only: [membership_role_slugs: 1]
 
   alias Fizz.Accounts.{
     Scope,
@@ -533,121 +533,26 @@ defmodule Fizz.Accounts do
   Lists WorkOS organizations the current scope user belongs to.
   """
   @spec list_user_workos_organizations(Scope.t() | nil) :: [map()]
-  def list_user_workos_organizations(%Scope{user: %User{workos_user_id: workos_user_id}})
-      when is_binary(workos_user_id) do
-    case WorkOS.list_user_organization_memberships(workos_user_id) do
-      {:ok, memberships} ->
-        memberships
-        |> Enum.map(&remote_organization_entry/1)
-        |> Enum.filter(& &1)
-        |> Enum.uniq_by(& &1.organization_id)
-        |> Enum.sort_by(& &1.organization_name)
-
-      {:error, _reason} ->
-        []
-    end
-  end
-
-  def list_user_workos_organizations(_scope), do: []
+  defdelegate list_user_workos_organizations(scope),
+    to: Fizz.Accounts.WorkOS.Directory,
+    as: :list_user_organizations
 
   @doc """
   Generates a WorkOS widget token for the given organization.
   """
   @spec generate_widget_token(Scope.t() | nil, String.t()) ::
           {:ok, String.t()} | {:error, term()}
-  def generate_widget_token(scope, organization_id),
-    do: generate_widget_token_for_scope(scope, organization_id, [])
+  def generate_widget_token(scope, organization_id) do
+    Fizz.Accounts.WorkOS.Tokens.generate_widget_token(scope, organization_id, [])
+  end
 
   @doc """
   Fetches a Pipes provider access token for the current scope user.
   """
   @spec get_pipes_access_token(Scope.t() | nil, String.t(), String.t() | nil) ::
           {:ok, map()} | {:error, term()}
-  def get_pipes_access_token(
-        %Scope{user: %User{workos_user_id: workos_user_id} = user},
-        provider,
-        organization_id
-      )
-      when is_binary(workos_user_id) and is_binary(provider) do
-    if is_nil(organization_id) or user_has_workos_organization?(user, organization_id) do
-      WorkOS.get_pipes_access_token(provider, workos_user_id, organization_id)
-    else
-      {:error, :forbidden}
-    end
-  end
-
-  def get_pipes_access_token(%Scope{}, _provider, _organization_id),
-    do: {:error, :missing_workos_user_id}
-
-  def get_pipes_access_token(_scope, _provider, _organization_id), do: {:error, :unauthenticated}
-
-  defp user_has_workos_organization?(%User{workos_user_id: workos_user_id}, organization_id)
-       when is_binary(workos_user_id) and is_binary(organization_id) do
-    case WorkOS.user_has_organization_membership?(workos_user_id, organization_id) do
-      {:ok, has_membership?} -> has_membership?
-      {:error, _reason} -> false
-    end
-  end
-
-  defp user_has_workos_organization?(_user, _organization_id), do: false
-
-  defp generate_widget_token_for_scope(
-         %Scope{user: %User{workos_user_id: workos_user_id} = user},
-         organization_id,
-         scopes
-       )
-       when is_binary(workos_user_id) and is_binary(organization_id) and is_list(scopes) do
-    if user_has_workos_organization?(user, organization_id) do
-      WorkOS.generate_widget_token(%{
-        organization_id: organization_id,
-        user_id: workos_user_id,
-        scopes: scopes
-      })
-    else
-      {:error, :forbidden}
-    end
-  end
-
-  defp generate_widget_token_for_scope(%Scope{}, _organization_id, _scopes),
-    do: {:error, :missing_workos_user_id}
-
-  defp generate_widget_token_for_scope(_scope, _organization_id, _scopes),
-    do: {:error, :unauthenticated}
-
-  defp remote_organization_entry(membership) do
-    case membership_organization_id(membership) do
-      organization_id when is_binary(organization_id) ->
-        %{
-          organization_id: organization_id,
-          local_organization_id: nil,
-          organization_name: membership_organization_name(membership, organization_id),
-          role: organization_role_from_membership(membership)
-        }
-
-      _ ->
-        nil
-    end
-  end
-
-  defp membership_organization_id(%{organization_id: organization_id})
-       when is_binary(organization_id),
-       do: organization_id
-
-  defp membership_organization_id(%{"organization_id" => organization_id})
-       when is_binary(organization_id),
-       do: organization_id
-
-  defp membership_organization_id(_membership), do: nil
-
-  defp membership_organization_name(membership, fallback_id) do
-    case read_value(membership, [:organization, "organization"]) do
-      %{} = organization ->
-        read_value(organization, [:name, "name"]) || fallback_id
-
-      _ ->
-        fallback_id
-    end
-  end
+  defdelegate get_pipes_access_token(scope, provider, organization_id),
+    to: Fizz.Accounts.WorkOS.Tokens
 
   ## Users
 

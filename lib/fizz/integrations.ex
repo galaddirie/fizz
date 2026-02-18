@@ -3,12 +3,12 @@ defmodule Fizz.Integrations do
   Integrations orchestration layer.
 
   This module owns provider definitions and execution-time auth routing while
-  delegating credential/connection persistence to `Fizz.Accounts.Integrations`.
+  delegating credential/connection persistence to `Fizz.Accounts.ExternalAuth`.
   """
 
   alias Fizz.Accounts
   alias Fizz.Accounts.{OauthConnection, Scope}
-  alias Fizz.Accounts.Integrations, as: AccountIntegrations
+  alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Integrations.ProviderCatalog
 
   @doc """
@@ -27,7 +27,7 @@ defmodule Fizz.Integrations do
   def get_connection(%Scope{} = scope, workspace_id, provider) do
     with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
-      AccountIntegrations.get_connection(resolved_scope, organization_id, provider)
+      AccountExternalAuth.get_connection(resolved_scope, organization_id, provider)
     end
   end
 
@@ -41,7 +41,7 @@ defmodule Fizz.Integrations do
          {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id,
          {:ok, status} <- provider_mod.check_connection(resolved_scope, organization_id) do
-      AccountIntegrations.upsert_oauth_connection(
+      AccountExternalAuth.upsert_oauth_connection(
         resolved_scope,
         organization_id,
         provider,
@@ -63,7 +63,7 @@ defmodule Fizz.Integrations do
       case auth.auth_method do
         :oauth ->
           _ =
-            AccountIntegrations.touch_connection_token_fetch(
+            AccountExternalAuth.touch_connection_token_fetch(
               auth.scope,
               auth.organization_id,
               auth.provider
@@ -114,7 +114,7 @@ defmodule Fizz.Integrations do
 
         :api_key ->
           with {:ok, credential_result} <-
-                 AccountIntegrations.resolve_credential_for_use(
+                 AccountExternalAuth.resolve_credential_for_use(
                    resolved_scope,
                    organization_id,
                    normalized_provider

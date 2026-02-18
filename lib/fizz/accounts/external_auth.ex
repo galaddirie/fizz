@@ -1,15 +1,123 @@
-defmodule Fizz.Accounts.ApiCredentials do
+defmodule Fizz.Accounts.ExternalAuth do
   @moduledoc """
-  Organization-scoped API credential operations backed by WorkOS Vault.
+  Accounts-owned integration auth primitives for organization-scoped OAuth
+  connection indexing and API credential lifecycle operations.
   """
 
   import Ecto.Query
 
   alias Fizz.Accounts
-  alias Fizz.Accounts.{ApiCredential, Scope, WorkOS}
+  alias Fizz.Accounts.{ApiCredential, OauthConnection, Scope, WorkOS}
   alias Fizz.Accounts.WorkOS.Vault
   alias Fizz.Integrations.ProviderCatalog
   alias Fizz.Repo
+
+  @doc """
+  Returns the indexed auth connection for a user/provider in an organization.
+  """
+  @spec get_connection(Scope.t(), String.t(), String.t()) ::
+          {:ok, OauthConnection.t()} | {:error, term()}
+  def get_connection(%Scope{} = scope, organization_id, provider)
+      when is_binary(organization_id) and is_binary(provider) do
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
+         {:ok, normalized_provider} <- resolve_oauth_provider(provider) do
+      query =
+        from connection in OauthConnection,
+          where:
+            connection.workos_organization_id == ^organization_id and
+              connection.user_id == ^resolved_scope.user.id and
+              connection.provider == ^normalized_provider,
+          limit: 1
+
+      case Repo.one(query) do
+        %OauthConnection{} = connection -> {:ok, connection}
+        nil -> {:error, :connection_not_found}
+      end
+    end
+  end
+
+  @doc """
+  Upserts OAuth connection metadata for a provider in an organization.
+  """
+  @spec upsert_oauth_connection(Scope.t(), String.t(), String.t(), map()) ::
+          {:ok, OauthConnection.t()} | {:error, term()}
+  def upsert_oauth_connection(%Scope{} = scope, organization_id, provider, status)
+      when is_binary(organization_id) and is_binary(provider) and is_map(status) do
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
+         {:ok, normalized_provider} <- resolve_oauth_provider(provider) do
+      now = DateTime.utc_now()
+
+      active? = status[:active] in [true, "true"]
+      status_error = status[:error]
+
+      {db_status, error, disconnected_at} =
+        cond do
+          active? ->
+            {:active, nil, nil}
+
+          status_error == :needs_reauthorization ->
+            {:needs_reauthorization, "needs_reauthorization", nil}
+
+          status_error != nil ->
+            {:error, inspect(status_error), now}
+
+          true ->
+            {:inactive, nil, now}
+        end
+
+      attrs = %{
+        workos_organization_id: organization_id,
+        user_id: resolved_scope.user.id,
+        provider: normalized_provider,
+        status: db_status,
+        scopes: status[:scopes] || [],
+        missing_scopes: status[:missing_scopes] || [],
+        provider_metadata: status[:provider_metadata] || %{},
+        last_error: error,
+        disconnected_at: disconnected_at
+      }
+
+      %OauthConnection{}
+      |> OauthConnection.changeset(attrs)
+      |> Repo.insert(
+        conflict_target: [:workos_organization_id, :user_id, :provider],
+        on_conflict:
+          {:replace,
+           [
+             :status,
+             :scopes,
+             :missing_scopes,
+             :provider_metadata,
+             :last_error,
+             :disconnected_at,
+             :updated_at
+           ]},
+        returning: true
+      )
+    end
+  end
+
+  @doc """
+  Touches token fetch timestamp for an indexed provider connection.
+  """
+  @spec touch_connection_token_fetch(Scope.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def touch_connection_token_fetch(%Scope{} = scope, organization_id, provider)
+      when is_binary(organization_id) and is_binary(provider) do
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
+         {:ok, normalized_provider} <- resolve_oauth_provider(provider) do
+      now = DateTime.utc_now()
+
+      from(connection in OauthConnection,
+        where:
+          connection.workos_organization_id == ^organization_id and
+            connection.user_id == ^resolved_scope.user.id and
+            connection.provider == ^normalized_provider
+      )
+      |> Repo.update_all(set: [last_token_fetch_at: now])
+
+      :ok
+    end
+  end
 
   @doc """
   Lists organization-scoped API credentials owned by the current user.
@@ -150,8 +258,7 @@ defmodule Fizz.Accounts.ApiCredentials do
   """
   @spec resolve_credential_for_use(Scope.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def resolve_credential_for_use(%Scope{} = scope, organization_id, provider, opts \\ [])
-      when is_binary(organization_id) and is_binary(provider) and is_list(opts) do
+  def resolve_credential_for_use(scope, organization_id, provider, opts \\ []) do
     api_credential_id = Keyword.get(opts, :api_credential_id) || Keyword.get(opts, :credential_id)
 
     with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
@@ -184,13 +291,24 @@ defmodule Fizz.Accounts.ApiCredentials do
     end
   end
 
-  @doc """
-  Returns a credential metadata record for the current scope in an organization.
-  """
-  @spec get_credential(Scope.t(), String.t(), String.t()) ::
-          {:ok, ApiCredential.t()} | {:error, :credential_not_found}
-  def get_credential(%Scope{} = resolved_scope, organization_id, api_credential_id)
-      when is_binary(organization_id) and is_binary(api_credential_id) do
+  defp resolve_organization_scope(
+         %Scope{organization_id: organization_id} = scope,
+         organization_id
+       )
+       when is_binary(organization_id),
+       do: {:ok, scope}
+
+  defp resolve_organization_scope(%Scope{} = scope, organization_id)
+       when is_binary(organization_id),
+       do: Accounts.build_scope(scope, organization_id)
+
+  defp resolve_oauth_provider(provider) when is_binary(provider),
+    do: ProviderCatalog.resolve_provider_id_for_type(provider, :oauth)
+
+  defp resolve_oauth_provider(_provider), do: {:error, :invalid_provider}
+
+  defp get_credential(%Scope{} = resolved_scope, organization_id, api_credential_id)
+       when is_binary(organization_id) and is_binary(api_credential_id) do
     query =
       from api_credential in ApiCredential,
         where:
@@ -203,17 +321,6 @@ defmodule Fizz.Accounts.ApiCredentials do
       nil -> {:error, :credential_not_found}
     end
   end
-
-  defp resolve_organization_scope(
-         %Scope{organization_id: organization_id} = scope,
-         organization_id
-       )
-       when is_binary(organization_id),
-       do: {:ok, scope}
-
-  defp resolve_organization_scope(%Scope{} = scope, organization_id)
-       when is_binary(organization_id),
-       do: Accounts.build_scope(scope, organization_id)
 
   defp touch_credential_use(api_credential_id) do
     from(api_credential in ApiCredential, where: api_credential.id == ^api_credential_id)

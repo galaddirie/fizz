@@ -7,7 +7,11 @@ defmodule Fizz.Accounts.WorkOS do
   * `WorkOS.Auth` — AuthKit PKCE authorization flow
   * `WorkOS.Memberships` — organization membership sync
   * `WorkOS.Organizations` — organization CRUD
-  * `WorkOS.Api` — audit events, widget tokens, Pipes access tokens, Vault objects
+  * `WorkOS.AuditEvents` — audit event ingestion
+  * `WorkOS.WidgetTokens` — widget token generation
+  * `WorkOS.Pipes` — Pipes provider access tokens
+  * `WorkOS.VaultObjects` — direct Vault object CRUD
+  * `WorkOS.Vault` — organization-scoped Vault wrapper
   * `WorkOS.Http` — low-level authenticated HTTP client
 
   Sync is disabled by default and can be enabled via:
@@ -58,13 +62,15 @@ defmodule Fizz.Accounts.WorkOS do
   defdelegate extract_session(authentication), to: __MODULE__.Auth
 
   # API (audit, widgets, pipes, vault)
-  defdelegate create_audit_event(org_id, actor, action, targets, context), to: __MODULE__.Api
-  defdelegate generate_widget_token(params), to: __MODULE__.Api
-  defdelegate get_pipes_access_token(provider, user_id, org_id \\ nil), to: __MODULE__.Api
-  defdelegate create_vault_object(params), to: __MODULE__.Api
-  defdelegate read_vault_object(object_id), to: __MODULE__.Api
-  defdelegate read_vault_object_by_name(name, opts \\ %{}), to: __MODULE__.Api
-  defdelegate list_vault_objects(query \\ %{}), to: __MODULE__.Api
-  defdelegate update_vault_object(object_id, params), to: __MODULE__.Api
-  defdelegate delete_vault_object(object_id, params \\ %{}), to: __MODULE__.Api
+  defdelegate create_audit_event(org_id, actor, action, targets, context),
+    to: __MODULE__.AuditEvents
+
+  defdelegate generate_widget_token(params), to: __MODULE__.WidgetTokens
+  defdelegate get_pipes_access_token(provider, user_id, org_id \\ nil), to: __MODULE__.Pipes
+  defdelegate create_vault_object(params), to: __MODULE__.VaultObjects
+  defdelegate read_vault_object(object_id), to: __MODULE__.VaultObjects
+  defdelegate read_vault_object_by_name(name, opts \\ %{}), to: __MODULE__.VaultObjects
+  defdelegate list_vault_objects(query \\ %{}), to: __MODULE__.VaultObjects
+  defdelegate update_vault_object(object_id, params), to: __MODULE__.VaultObjects
+  defdelegate delete_vault_object(object_id, params \\ %{}), to: __MODULE__.VaultObjects
 end

@@ -2,7 +2,7 @@ defmodule Fizz.IntegrationsTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.Scope
-  alias Fizz.Accounts.Integrations, as: AccountIntegrations
+  alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Accounts.ApiCredential
   alias Fizz.Integrations
   alias Fizz.WorkOSHTTPMock
@@ -71,7 +71,7 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, credential} =
-             AccountIntegrations.create_credential(scope, org_id, %{
+             AccountExternalAuth.create_credential(scope, org_id, %{
                provider: "openai_api_key",
                provider_label: "OpenAI Production",
                secret: "sk-original"
@@ -82,21 +82,21 @@ defmodule Fizz.IntegrationsTest do
     assert credential.vault_version == "version_1"
 
     assert {:ok, rotated} =
-             AccountIntegrations.rotate_credential(scope, org_id, credential.id, %{
+             AccountExternalAuth.rotate_credential(scope, org_id, credential.id, %{
                secret: "sk-new"
              })
 
     assert rotated.vault_version == "version_2"
 
     assert {:ok, resolved} =
-             AccountIntegrations.resolve_credential_for_use(scope, org_id, "openai_api_key",
+             AccountExternalAuth.resolve_credential_for_use(scope, org_id, "openai_api_key",
                api_credential_id: credential.id
              )
 
     assert resolved.api_key == "sk-new"
     assert resolved.api_credential_id == credential.id
 
-    assert {:ok, _deleted} = AccountIntegrations.delete_credential(scope, org_id, credential.id)
+    assert {:ok, _deleted} = AccountExternalAuth.delete_credential(scope, org_id, credential.id)
     refute Repo.get(ApiCredential, credential.id)
   end
 
@@ -125,7 +125,7 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, credential} =
-             AccountIntegrations.create_credential(scope, org_id, %{
+             AccountExternalAuth.create_credential(scope, org_id, %{
                provider: "openai_api_key",
                provider_label: "OpenAI",
                secret: "sk-api-key"
@@ -162,7 +162,7 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, credential} =
-             AccountIntegrations.create_credential(scope, org_id, %{
+             AccountExternalAuth.create_credential(scope, org_id, %{
                provider: "anthropic_api_key",
                provider_label: "Anthropic",
                secret: "sk-anthropic"
@@ -181,7 +181,7 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, resolved} =
-             AccountIntegrations.resolve_credential_for_use(scope, org_id, "anthropic_api_key",
+             AccountExternalAuth.resolve_credential_for_use(scope, org_id, "anthropic_api_key",
                api_credential_id: credential.id
              )
 
@@ -222,14 +222,14 @@ defmodule Fizz.IntegrationsTest do
     ])
 
     assert {:ok, credential} =
-             AccountIntegrations.create_credential(owner_runtime_scope, org_id, %{
+             AccountExternalAuth.create_credential(owner_runtime_scope, org_id, %{
                provider: "openai_api_key",
                provider_label: "OpenAI Owner",
                secret: "sk-owner"
              })
 
     assert {:error, :credential_not_found} =
-             AccountIntegrations.resolve_credential_for_use(
+             AccountExternalAuth.resolve_credential_for_use(
                member_runtime_scope,
                org_id,
                "openai_api_key",
