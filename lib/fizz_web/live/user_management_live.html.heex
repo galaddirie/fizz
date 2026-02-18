@@ -156,7 +156,7 @@
             <%!-- Credential table --%>
             <div
               id="user-management-credentials-list"
-              class="overflow-hidden rounded-box border border-base-300 bg-base-100"
+              class="overflow-visible rounded-box border border-base-300 bg-base-100"
             >
               <%!-- Empty state --%>
               <div
@@ -230,23 +230,48 @@
                   </div>
 
                   <%!-- Actions --%>
-                  <div class="flex items-center justify-end gap-1">
-                    <button
-                      id={"rotate-credential-#{credential.id}"}
-                      phx-click="open_rotate_credential_modal"
-                      phx-value-credential_id={credential.id}
-                      class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-base-content/70 transition-colors hover:bg-base-200 hover:text-base-content"
+                  <div class="relative flex items-center justify-end">
+                    <div
+                      id={"credential-actions-#{credential.id}"}
+                      class="dropdown dropdown-end"
                     >
-                      Edit
-                    </button>
-                    <button
-                      id={"delete-credential-#{credential.id}"}
-                      phx-click="open_delete_credential_modal"
-                      phx-value-credential_id={credential.id}
-                      class="rounded-lg px-2.5 py-1.5 text-xs font-medium text-error/70 transition-colors hover:bg-error/10 hover:text-error"
-                    >
-                      Delete
-                    </button>
+                      <button
+                        type="button"
+                        tabindex="0"
+                        class="btn btn-ghost btn-sm btn-square text-base-content/60 transition-colors hover:text-base-content focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                      >
+                        <span class="sr-only">Open credential actions</span>
+                        <.icon name="hero-ellipsis-horizontal" class="size-5" />
+                      </button>
+
+                      <ul
+                        tabindex="0"
+                        class="menu dropdown-content z-[20] mt-1 w-48 rounded-box border border-base-300 bg-base-100 p-2 shadow-xl shadow-base-content/10"
+                      >
+                        <li>
+                          <button
+                            id={"rotate-credential-#{credential.id}"}
+                            phx-click="open_rotate_credential_modal"
+                            phx-value-credential_id={credential.id}
+                            class="flex items-center gap-2 px-3 py-2.5 text-sm"
+                          >
+                            <.icon name="hero-pencil-square" class="size-4 shrink-0" />
+                            <span>Edit credential</span>
+                          </button>
+                        </li>
+                        <li>
+                          <button
+                            id={"delete-credential-#{credential.id}"}
+                            phx-click="open_delete_credential_modal"
+                            phx-value-credential_id={credential.id}
+                            class="flex items-center gap-2 px-3 py-2.5 text-sm text-error hover:bg-error/10"
+                          >
+                            <.icon name="hero-trash" class="size-4 shrink-0" />
+                            <span>Delete credential</span>
+                          </button>
+                        </li>
+                      </ul>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -543,59 +568,82 @@
   >
     <div class="modal-backdrop" phx-click="close_rotate_credential_modal"></div>
     <div class="modal-box max-w-md p-0">
-      <div class="border-b border-base-300 px-4 pt-4 pb-3">
-        <div class="flex items-center justify-between">
-          <h3 class="text-base font-semibold tracking-tight">Edit Credential</h3>
-          <button
-            type="button"
-            phx-click="close_rotate_credential_modal"
-            class="rounded-lg p-1 text-muted transition-colors hover:bg-base-200 hover:text-base-content"
-          >
-            <.icon name="hero-x-mark" class="size-5" />
-          </button>
-        </div>
-        <p class="mt-1 text-xs text-muted">
-          Update the display label or rotate the API key.
-        </p>
-      </div>
-      <div class="px-4 pt-4 pb-5">
-        <.form
-          for={@rotate_credential_form}
-          id="rotate-credential-form"
-          phx-change="validate_rotate_credential"
-          phx-submit="rotate_credential"
-          class="space-y-4"
-        >
-          <.input
-            field={@rotate_credential_form[:provider_label]}
-            type="text"
-            label="Display label"
-          />
-          <.input
-            field={@rotate_credential_form[:provider_custom_name]}
-            type="text"
-            label="Custom provider name (optional)"
-          />
-          <.input
-            field={@rotate_credential_form[:secret]}
-            type="password"
-            label="New API key"
-            placeholder="sk-..."
-            autocomplete="new-password"
-          />
-          <div class="flex items-center justify-end gap-2 pt-2">
+      <% selected_credential = Enum.find(@credentials, &(&1.id == @selected_credential_id)) %>
+      <div id="credential-step-edit" class="flex flex-col">
+        <div class="border-b border-base-300 px-4 pt-4 pb-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold tracking-tight">Edit Credential</h3>
             <button
               type="button"
-              class="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base-200 hover:text-base-content"
               phx-click="close_rotate_credential_modal"
+              class="rounded-lg p-1 text-muted transition-colors hover:bg-base-200 hover:text-base-content"
             >
-              Cancel
-            </button>
-            <button type="submit" class="btn btn-primary btn-sm">
-              Save changes
+              <.icon name="hero-x-mark" class="size-5" />
             </button>
           </div>
-        </.form>
+
+          <div :if={selected_credential} class="mt-3 flex items-center gap-3">
+            <div class="flex size-10 items-center justify-center rounded-lg border border-base-300 bg-base-200/60">
+              <%= if logo_path = provider_logo_path(@provider_catalog, selected_credential.provider) do %>
+                <img
+                  src={logo_path}
+                  alt={"#{selected_credential.provider_label} logo"}
+                  class="size-6 rounded-sm object-contain"
+                />
+              <% else %>
+                <.icon name="hero-cog-6-tooth" class="size-5 text-muted" />
+              <% end %>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-base-content">
+                {selected_credential.provider_label}
+              </p>
+              <p class="text-xs text-muted">
+                {selected_credential.provider_custom_name || selected_credential.provider}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-4 pt-4 pb-5">
+          <.form
+            for={@rotate_credential_form}
+            id="rotate-credential-form"
+            phx-change="validate_rotate_credential"
+            phx-submit="rotate_credential"
+            class="space-y-4"
+          >
+            <.input
+              field={@rotate_credential_form[:provider_label]}
+              type="text"
+              label="Display label"
+            />
+            <.input
+              field={@rotate_credential_form[:provider_custom_name]}
+              type="text"
+              label="Custom provider name (optional)"
+            />
+            <.input
+              field={@rotate_credential_form[:secret]}
+              type="password"
+              label="New API key"
+              placeholder="sk-..."
+              autocomplete="new-password"
+            />
+            <div class="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                class="rounded-lg px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-base-200 hover:text-base-content"
+                phx-click="close_rotate_credential_modal"
+              >
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary btn-sm">
+                Save changes
+              </button>
+            </div>
+          </.form>
+        </div>
       </div>
     </div>
   </div>
