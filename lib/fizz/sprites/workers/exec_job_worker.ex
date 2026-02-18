@@ -288,13 +288,13 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
       {:ok, connection} ->
         meta = connection.provider_metadata || %{}
         name = meta["name"] || meta["username"]
-        email = meta["email"] || github_noreply_email(meta["username"]) || scope.user.email
+        email = meta["email"] || github_noreply_email(meta["username"])
 
         [user_name: name, user_email: email]
         |> Enum.reject(fn {_k, v} -> is_nil(v) end)
 
       {:error, _} ->
-        if scope.user.email, do: [user_email: scope.user.email], else: []
+        []
     end
   end
 
