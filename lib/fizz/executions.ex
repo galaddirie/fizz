@@ -248,6 +248,11 @@ defmodule Fizz.Executions do
 
   defp internal_trigger?(_), do: false
 
+  defp can_manage_execution?(scope, %Workflow{} = workflow),
+    do: Scope.can_edit_workflow?(scope, workflow)
+
+  defp can_manage_execution?(_scope, _workflow), do: false
+
   defp normalize_trigger_type(type) when type in [:manual, :schedule, :webhook, :event], do: type
   defp normalize_trigger_type("manual"), do: :manual
   defp normalize_trigger_type("schedule"), do: :schedule
@@ -258,15 +263,15 @@ defmodule Fizz.Executions do
   @doc """
   Updates an execution status.
 
-  Returns `{:ok, execution}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.
+  Returns `{:ok, execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
   @spec update_execution_status(Scope.t() | nil, Execution.t(), Execution.status(), keyword()) ::
-          {:ok, Execution.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
+          {:ok, Execution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
   def update_execution_status(scope, %Execution{} = execution, status, opts \\ []) do
     # Ensure workflow is loaded
     execution = Repo.preload(execution, :workflow)
 
-    if Scope.can_view_workflow?(scope, execution.workflow) do
+    if can_manage_execution?(scope, execution.workflow) do
       updates = %{status: status}
 
       # Add timestamps based on status
@@ -284,16 +289,16 @@ defmodule Fizz.Executions do
 
       # Add error information if provided
       updates =
-        if error = Keyword.get(opts, :error) do
-          Map.put(updates, :error, Execution.format_error(error))
+        if Keyword.has_key?(opts, :error) do
+          Map.put(updates, :error, Execution.format_error(Keyword.get(opts, :error)))
         else
           updates
         end
 
       # Add output if provided
       updates =
-        if output = Keyword.get(opts, :output) do
-          Map.put(updates, :output, output)
+        if Keyword.has_key?(opts, :output) do
+          Map.put(updates, :output, Keyword.get(opts, :output))
         else
           updates
         end
@@ -320,7 +325,7 @@ defmodule Fizz.Executions do
   Returns `{:ok, execution}` if successful, `{:error, reason}` otherwise.
   """
   @spec cancel_execution(Scope.t() | nil, Execution.t()) ::
-          {:ok, Execution.t()} | {:error, :not_found | :access_denied | :already_terminal}
+          {:ok, Execution.t()} | {:error, :access_denied | :already_terminal}
   def cancel_execution(scope, %Execution{} = execution) do
     if Execution.terminal?(execution) do
       {:error, :already_terminal}
@@ -438,16 +443,17 @@ defmodule Fizz.Executions do
   Returns `{:ok, step_execution}` if successful, `{:error, changeset}` otherwise.
   """
   @spec create_step_execution(Scope.t() | nil, step_execution_params()) ::
-          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+          {:ok, StepExecution.t()}
+          | {:error, Ecto.Changeset.t() | :execution_not_found | :access_denied}
   def create_step_execution(scope, attrs) do
-    execution_id = attrs[:execution_id]
+    execution_id = fetch_attr(attrs, :execution_id)
 
     case Repo.get(Execution, execution_id) |> Repo.preload(:workflow) do
       nil ->
         {:error, :execution_not_found}
 
       execution ->
-        if Scope.can_view_workflow?(scope, execution.workflow) do
+        if can_manage_execution?(scope, execution.workflow) do
           %StepExecution{}
           |> StepExecution.changeset(attrs)
           |> Repo.insert()
@@ -468,59 +474,62 @@ defmodule Fizz.Executions do
           StepExecution.status(),
           keyword()
         ) ::
-          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
   def update_step_execution_status(scope, %StepExecution{} = step_execution, status, opts \\ []) do
-    # Check access via the execution's workflow
-    execution = Repo.get!(Execution, step_execution.execution_id) |> Repo.preload(:workflow)
+    case Repo.get(Execution, step_execution.execution_id) |> Repo.preload(:workflow) do
+      nil ->
+        {:error, :not_found}
 
-    if Scope.can_view_workflow?(scope, execution.workflow) do
-      updates = %{status: status}
+      execution ->
+        if can_manage_execution?(scope, execution.workflow) do
+          updates = %{status: status}
 
-      # Add timestamps based on status
-      updates =
-        case status do
-          :running ->
-            Map.put(updates, :started_at, DateTime.utc_now())
+          # Add timestamps based on status
+          updates =
+            case status do
+              :running ->
+                Map.put(updates, :started_at, DateTime.utc_now())
 
-          :queued ->
-            Map.put(updates, :queued_at, DateTime.utc_now())
+              :queued ->
+                Map.put(updates, :queued_at, DateTime.utc_now())
 
-          s when s in [:completed, :failed, :skipped] ->
-            Map.put(updates, :completed_at, DateTime.utc_now())
+              s when s in [:completed, :failed, :skipped] ->
+                Map.put(updates, :completed_at, DateTime.utc_now())
 
-          _ ->
-            updates
-        end
+              _ ->
+                updates
+            end
 
-      # Add output data if provided
-      updates =
-        if output_data = Keyword.get(opts, :output_data) do
-          Map.put(updates, :output_data, output_data)
+          # Add output data if provided
+          updates =
+            if Keyword.has_key?(opts, :output_data) do
+              Map.put(updates, :output_data, Keyword.get(opts, :output_data))
+            else
+              updates
+            end
+
+          # Add error if provided
+          updates =
+            if Keyword.has_key?(opts, :error) do
+              Map.put(updates, :error, Keyword.get(opts, :error))
+            else
+              updates
+            end
+
+          # Add output_item_count if provided
+          updates =
+            if Keyword.has_key?(opts, :output_item_count) do
+              Map.put(updates, :output_item_count, Keyword.get(opts, :output_item_count))
+            else
+              updates
+            end
+
+          step_execution
+          |> StepExecution.changeset(updates)
+          |> Repo.update()
         else
-          updates
+          {:error, :access_denied}
         end
-
-      # Add error if provided
-      updates =
-        if error = Keyword.get(opts, :error) do
-          Map.put(updates, :error, error)
-        else
-          updates
-        end
-
-      # Add output_item_count if provided
-      updates =
-        if count = Keyword.get(opts, :output_item_count) do
-          Map.put(updates, :output_item_count, count)
-        else
-          updates
-        end
-
-      step_execution
-      |> StepExecution.changeset(updates)
-      |> Repo.update()
-    else
-      {:error, :access_denied}
     end
   end
 
@@ -530,25 +539,28 @@ defmodule Fizz.Executions do
   Returns `{:ok, step_execution}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
   @spec retry_step_execution(Scope.t() | nil, StepExecution.t()) ::
-          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+          {:ok, StepExecution.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
   def retry_step_execution(scope, %StepExecution{} = original) do
-    # Check access via the execution's workflow
-    execution = Repo.get!(Execution, original.execution_id) |> Repo.preload(:workflow)
+    case Repo.get(Execution, original.execution_id) |> Repo.preload(:workflow) do
+      nil ->
+        {:error, :not_found}
 
-    if Scope.can_view_workflow?(scope, execution.workflow) do
-      %StepExecution{}
-      |> StepExecution.changeset(%{
-        execution_id: original.execution_id,
-        step_id: original.step_id,
-        step_type_id: original.step_type_id,
-        input_data: original.input_data,
-        metadata: original.metadata,
-        attempt: original.attempt + 1,
-        retry_of_id: original.id
-      })
-      |> Repo.insert()
-    else
-      {:error, :access_denied}
+      execution ->
+        if can_manage_execution?(scope, execution.workflow) do
+          %StepExecution{}
+          |> StepExecution.changeset(%{
+            execution_id: original.execution_id,
+            step_id: original.step_id,
+            step_type_id: original.step_type_id,
+            input_data: original.input_data,
+            metadata: original.metadata,
+            attempt: original.attempt + 1,
+            retry_of_id: original.id
+          })
+          |> Repo.insert()
+        else
+          {:error, :access_denied}
+        end
     end
   end
 

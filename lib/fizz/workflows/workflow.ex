@@ -58,9 +58,9 @@ defmodule Fizz.Workflows.Workflow do
   end
 
   @doc """
-  Builds a changeset for creating/updating a workflow.
+  Builds a changeset for creating a workflow.
   """
-  def changeset(workflow, attrs) do
+  def create_changeset(workflow, attrs) do
     workflow
     |> cast(attrs, [
       :name,
@@ -73,5 +73,25 @@ defmodule Fizz.Workflows.Workflow do
     ])
     |> validate_required([:name, :workspace_id, :user_id])
     |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:user_id)
+    |> foreign_key_constraint(:published_version_id)
+  end
+
+  @doc """
+  Builds a changeset for updating a workflow.
+
+  Ownership and workspace scope are immutable after creation.
+  """
+  def update_changeset(workflow, attrs) do
+    workflow
+    |> cast(attrs, [
+      :name,
+      :description,
+      :status,
+      :current_version_tag,
+      :published_version_id
+    ])
+    |> validate_required([:name])
+    |> foreign_key_constraint(:published_version_id)
   end
 end

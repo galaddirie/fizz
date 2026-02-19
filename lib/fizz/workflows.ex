@@ -135,10 +135,7 @@ defmodule Fizz.Workflows do
   """
   @spec get_workflow(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, Workflow.t()} | {:error, :not_found}
-  @spec get_workflow(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
-          {:ok, Workflow.t()} | {:error, :not_found}
-  def get_workflow(%Scope{} = scope, id), do: do_get_workflow(id, scope)
-  def get_workflow(id, scope), do: do_get_workflow(id, scope)
+  def get_workflow(scope, id), do: do_get_workflow(id, scope)
 
   @doc """
   Finds an active published workflow by its configured webhook path and method.
@@ -210,10 +207,7 @@ defmodule Fizz.Workflows do
   """
   @spec get_workflow_with_draft(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
           {:ok, Workflow.t()} | {:error, :not_found}
-  @spec get_workflow_with_draft(String.t() | Ecto.UUID.t(), Scope.t() | nil) ::
-          {:ok, Workflow.t()} | {:error, :not_found}
-  def get_workflow_with_draft(%Scope{} = scope, id), do: do_get_workflow_with_draft(id, scope)
-  def get_workflow_with_draft(id, scope), do: do_get_workflow_with_draft(id, scope)
+  def get_workflow_with_draft(scope, id), do: do_get_workflow_with_draft(id, scope)
 
   defp do_get_workflow_with_draft(id, scope) do
     case Repo.get(Workflow, id) |> Repo.preload(:draft) do
@@ -254,7 +248,7 @@ defmodule Fizz.Workflows do
         |> Map.put(:user_id, user_id)
         |> then(fn workflow_attrs ->
           %Workflow{}
-          |> Workflow.changeset(workflow_attrs)
+          |> Workflow.create_changeset(workflow_attrs)
           |> Repo.insert()
         end)
 
@@ -268,14 +262,14 @@ defmodule Fizz.Workflows do
   @doc """
   Updates a workflow, checking edit permissions.
 
-  Returns `{:ok, workflow}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.
+  Returns `{:ok, workflow}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
   @spec update_workflow(Scope.t(), Workflow.t(), workflow_params()) ::
-          {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
+          {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :access_denied}
   def update_workflow(%Scope{} = scope, %Workflow{} = workflow, attrs) do
     if Scope.can_edit_workflow?(scope, workflow) do
       workflow
-      |> Workflow.changeset(attrs)
+      |> Workflow.update_changeset(attrs)
       |> Repo.update()
     else
       {:error, :access_denied}
@@ -286,7 +280,7 @@ defmodule Fizz.Workflows do
   Deletes a workflow, checking edit permissions.
   """
   @spec delete_workflow(Scope.t(), Workflow.t()) ::
-          {:ok, Workflow.t()} | {:error, :not_found | :access_denied}
+          {:ok, Workflow.t()} | {:error, :access_denied}
   def delete_workflow(%Scope{} = scope, %Workflow{} = workflow) do
     if Scope.can_edit_workflow?(scope, workflow) do
       Fizz.Runtime.Triggers.Activator.deactivate(workflow.id)
@@ -300,7 +294,7 @@ defmodule Fizz.Workflows do
   Archives a workflow, checking edit permissions.
   """
   @spec archive_workflow(Scope.t(), Workflow.t()) ::
-          {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
+          {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :access_denied}
   def archive_workflow(%Scope{} = scope, %Workflow{} = workflow) do
     Fizz.Runtime.Triggers.Activator.deactivate(workflow.id)
     update_workflow(scope, workflow, %{status: :archived})
@@ -330,21 +324,12 @@ defmodule Fizz.Workflows do
           published_version_id: nil
         }
 
-        {:ok, duplicated} = create_workflow(scope, workflow_attrs)
-
-        draft_attrs = %{
-          steps: Enum.map(draft.steps || [], &Map.from_struct/1),
-          connections: Enum.map(draft.connections || [], &Map.from_struct/1),
-          groups: Enum.map(draft.groups || [], &Map.from_struct/1),
-          settings: draft.settings || %{}
-        }
-
-        {:ok, _draft} =
-          %WorkflowDraft{workflow_id: duplicated.id}
-          |> WorkflowDraft.changeset(draft_attrs)
-          |> Repo.insert()
-
-        duplicated
+        with {:ok, duplicated} <- create_workflow(scope, workflow_attrs),
+             {:ok, _duplicated_draft} <- insert_duplicate_draft(duplicated.id, draft) do
+          duplicated
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
       end)
       |> case do
         {:ok, duplicated} -> {:ok, duplicated}
@@ -369,40 +354,53 @@ defmodule Fizz.Workflows do
   def publish_workflow(%Scope{} = scope, %Workflow{} = workflow, version_attrs) do
     if Scope.can_edit_workflow?(scope, workflow) do
       Repo.transaction(fn ->
-        # Get the current draft
-        draft = Repo.get_by!(WorkflowDraft, workflow_id: workflow.id)
+        case Repo.get_by(WorkflowDraft, workflow_id: workflow.id) do
+          nil ->
+            Repo.rollback(:draft_not_found)
 
-        case Fizz.Workflows.Validator.validate(draft) do
-          :ok -> :ok
-          {:error, errors} -> Repo.rollback({:invalid_workflow, errors})
+          draft ->
+            case Fizz.Workflows.Validator.validate(draft) do
+              :ok ->
+                version_attrs =
+                  version_attrs
+                  |> Map.put(:workflow_id, workflow.id)
+                  |> Map.put(
+                    :source_hash,
+                    WorkflowVersion.compute_source_hash(
+                      List.wrap(draft.steps),
+                      List.wrap(draft.connections),
+                      List.wrap(draft.groups)
+                    )
+                  )
+                  |> Map.put(:steps, Enum.map(List.wrap(draft.steps), &Map.from_struct/1))
+                  |> Map.put(
+                    :connections,
+                    Enum.map(List.wrap(draft.connections), &Map.from_struct/1)
+                  )
+                  |> Map.put(:groups, Enum.map(List.wrap(draft.groups), &Map.from_struct/1))
+                  |> Map.put(:published_by, scope.user.id)
+
+                with {:ok, version} <-
+                       %WorkflowVersion{}
+                       |> WorkflowVersion.changeset(version_attrs)
+                       |> Repo.insert(),
+                     {:ok, updated_workflow} <-
+                       workflow
+                       |> Workflow.update_changeset(%{
+                         published_version_id: version.id,
+                         status: :active,
+                         current_version_tag: version.version_tag
+                       })
+                       |> Repo.update() do
+                  {updated_workflow, version}
+                else
+                  {:error, reason} -> Repo.rollback(reason)
+                end
+
+              {:error, errors} ->
+                Repo.rollback({:invalid_workflow, errors})
+            end
         end
-
-        # Create new version from draft
-        version_attrs =
-          version_attrs
-          |> Map.put(:workflow_id, workflow.id)
-          |> Map.put(:source_hash, compute_source_hash(draft))
-          |> Map.put(:steps, Enum.map(draft.steps, &Map.from_struct/1))
-          |> Map.put(:connections, Enum.map(draft.connections || [], &Map.from_struct/1))
-          |> Map.put(:groups, Enum.map(draft.groups || [], &Map.from_struct/1))
-          |> Map.put(:published_by, scope.user.id)
-
-        {:ok, version} =
-          %WorkflowVersion{}
-          |> WorkflowVersion.changeset(version_attrs)
-          |> Repo.insert()
-
-        # Update workflow to point to published version
-        {:ok, updated_workflow} =
-          workflow
-          |> Workflow.changeset(%{
-            published_version_id: version.id,
-            status: :active,
-            current_version_tag: version.version_tag
-          })
-          |> Repo.update()
-
-        {updated_workflow, version}
       end)
       |> case do
         {:ok, {updated_workflow, version}} ->
@@ -469,21 +467,24 @@ defmodule Fizz.Workflows do
 
   Returns `{:ok, draft}` if found, `{:error, :not_found}` otherwise.
   """
-  @spec get_draft(String.t() | Ecto.UUID.t()) :: {:ok, WorkflowDraft.t()} | {:error, :not_found}
-  def get_draft(workflow_id) do
-    case Repo.get_by(WorkflowDraft, workflow_id: workflow_id) do
-      nil -> {:error, :not_found}
-      draft -> {:ok, ensure_draft_defaults(draft)}
+  @spec get_draft(Scope.t() | nil, String.t() | Ecto.UUID.t()) ::
+          {:ok, WorkflowDraft.t()} | {:error, :not_found}
+  def get_draft(scope, workflow_id) do
+    with {:ok, workflow} <- get_workflow(scope, workflow_id) do
+      case Repo.get_by(WorkflowDraft, workflow_id: workflow.id) do
+        nil -> {:error, :not_found}
+        draft -> {:ok, ensure_draft_defaults(draft)}
+      end
     end
   end
 
   @doc """
   Updates a workflow draft, checking edit permissions.
 
-  Returns `{:ok, draft}` if successful, `{:error, changeset | :not_found | :access_denied}` otherwise.
+  Returns `{:ok, draft}` if successful, `{:error, changeset | :access_denied}` otherwise.
   """
   @spec update_workflow_draft(Scope.t(), Workflow.t(), map()) ::
-          {:ok, WorkflowDraft.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
+          {:ok, WorkflowDraft.t()} | {:error, Ecto.Changeset.t() | :access_denied}
   def update_workflow_draft(%Scope{} = scope, %Workflow{} = workflow, attrs) do
     if Scope.can_edit_workflow?(scope, workflow) do
       case Repo.get_by(WorkflowDraft, workflow_id: workflow.id) do
@@ -651,8 +652,17 @@ defmodule Fizz.Workflows do
   """
   @spec generate_unique_step_identity([map()], String.t()) :: {String.t(), String.t()}
   def generate_unique_step_identity(existing_steps, base_name) do
-    existing_names = existing_steps |> Enum.map(& &1.name) |> MapSet.new()
-    existing_ids = existing_steps |> Enum.map(& &1.id) |> MapSet.new()
+    existing_names =
+      existing_steps
+      |> Enum.map(&(Map.get(&1, :name) || Map.get(&1, "name")))
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
+
+    existing_ids =
+      existing_steps
+      |> Enum.map(&(Map.get(&1, :id) || Map.get(&1, "id")))
+      |> Enum.reject(&is_nil/1)
+      |> MapSet.new()
 
     do_generate_unique_identity(existing_names, existing_ids, base_name, 1)
   end
@@ -673,44 +683,21 @@ defmodule Fizz.Workflows do
     end
   end
 
-  @doc """
-  Generates a unique display name for a step in a workflow.
-  Handles "Name", "Name 2", "Name 3" etc.
-
-  Deprecated: Use `generate_unique_step_identity/2` to get both name and step_id.
-  """
-  @spec generate_unique_step_name([map()], String.t()) :: String.t()
-  def generate_unique_step_name(existing_steps, base_name) do
-    {name, _id} = generate_unique_step_identity(existing_steps, base_name)
-    name
-  end
-
-  @doc """
-  Converts a display name into a slug for use as an execution key.
-
-  Deprecated: Use `to_step_id/1` for step identifiers.
-  """
-  @spec slugify_step_name(String.t()) :: String.t()
-  def slugify_step_name(name) do
-    to_step_id(name)
-  end
-
   # ============================================================================
   # Private Helpers
   # ============================================================================
 
-  defp compute_source_hash(%WorkflowDraft{} = draft) do
-    # Create a deterministic hash of the workflow structure
-    data = %{
-      steps: draft.steps,
-      connections: draft.connections,
-      groups: draft.groups,
-      settings: draft.settings
+  defp insert_duplicate_draft(workflow_id, draft) do
+    draft_attrs = %{
+      steps: Enum.map(List.wrap(draft.steps), &Map.from_struct/1),
+      connections: Enum.map(List.wrap(draft.connections), &Map.from_struct/1),
+      groups: Enum.map(List.wrap(draft.groups), &Map.from_struct/1),
+      settings: draft.settings || %{}
     }
 
-    :crypto.hash(:sha256, :erlang.term_to_binary(data))
-    |> Base.encode16()
-    |> String.downcase()
+    %WorkflowDraft{workflow_id: workflow_id}
+    |> WorkflowDraft.changeset(draft_attrs)
+    |> Repo.insert()
   end
 
   defp ensure_draft_defaults(nil), do: nil

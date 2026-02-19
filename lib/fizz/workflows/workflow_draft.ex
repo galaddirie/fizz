@@ -50,7 +50,7 @@ defmodule Fizz.Workflows.WorkflowDraft do
 
   def changeset(draft, attrs) do
     draft
-    |> cast(attrs, [:workflow_id, :settings])
+    |> cast(attrs, [:workflow_id, :editor_state, :settings])
     |> cast_embed(:steps)
     |> cast_embed(:connections)
     |> cast_embed(:groups)

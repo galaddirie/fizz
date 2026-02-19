@@ -13,32 +13,22 @@ defmodule Fizz.Collaboration.EditSession.Persistence do
   require Logger
 
   alias Fizz.Repo
-  alias Fizz.Workflows
   alias Fizz.Workflows.WorkflowDraft
   alias Fizz.Collaboration.EditOperation
   alias Fizz.Collaboration.EditorState
 
   import Ecto.Query
 
-  @doc "Load pending operations since last snapshot."
-  @spec load_pending_ops(String.t()) :: {:ok, integer(), [EditOperation.t()]} | {:error, term()}
-  def load_pending_ops(workflow_id) do
-    # Get the last persisted sequence number from the draft
-    case Workflows.get_draft(workflow_id) do
-      {:ok, draft} ->
-        last_seq = draft.settings["last_persisted_seq"] || 0
+  @doc "Load pending operations since the last persisted sequence number."
+  @spec load_pending_ops(String.t(), integer()) :: {:ok, [EditOperation.t()]} | {:error, term()}
+  def load_pending_ops(workflow_id, last_seq) when is_integer(last_seq) and last_seq >= 0 do
+    ops =
+      EditOperation
+      |> where([o], o.workflow_id == ^workflow_id and o.seq > ^last_seq)
+      |> order_by([o], asc: o.seq)
+      |> Repo.all()
 
-        ops =
-          EditOperation
-          |> where([o], o.workflow_id == ^workflow_id and o.seq > ^last_seq)
-          |> order_by([o], asc: o.seq)
-          |> Repo.all()
-
-        {:ok, last_seq, ops}
-
-      error ->
-        error
-    end
+    {:ok, ops}
   end
 
   @doc "Persist buffered operations and update draft."

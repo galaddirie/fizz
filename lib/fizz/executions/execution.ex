@@ -175,6 +175,8 @@ defmodule Fizz.Executions.Execution do
     |> cast_embed(:trigger, required: true, with: &trigger_changeset/2)
     |> cast_embed(:metadata, with: &metadata_changeset/2)
     |> validate_required([:workflow_id, :status, :execution_type])
+    |> foreign_key_constraint(:workflow_id)
+    |> foreign_key_constraint(:triggered_by_user_id)
   end
 
   defp trigger_changeset(trigger, attrs) do

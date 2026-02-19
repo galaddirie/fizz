@@ -37,7 +37,7 @@ defmodule Fizz.Collaboration.PreviewExecution do
     target_steps = Keyword.get(opts, :target_steps, [])
     input_data = Keyword.get(opts, :input_data, %{})
 
-    with {:ok, draft} <- get_draft(workflow_id),
+    with {:ok, draft} <- get_draft(scope, workflow_id),
          {:ok, editor_state} <- get_editor_state(workflow_id),
          {:ok, effective_draft} <- apply_editor_state(draft, editor_state, mode, target_steps),
          {:ok, execution} <-
@@ -47,8 +47,8 @@ defmodule Fizz.Collaboration.PreviewExecution do
     end
   end
 
-  defp get_draft(workflow_id) do
-    case Fizz.Workflows.get_draft(workflow_id) do
+  defp get_draft(scope, workflow_id) do
+    case Fizz.Workflows.get_draft(scope, workflow_id) do
       {:error, :not_found} -> {:error, :draft_not_found}
       {:ok, draft} -> {:ok, draft}
     end

@@ -27,6 +27,7 @@ defmodule Fizz.Collaboration.EditSession.Server do
   defmodule State do
     @moduledoc false
     defstruct [
+      :scope,
       :workflow_id,
       :draft,
       :editor_state,
@@ -47,7 +48,11 @@ defmodule Fizz.Collaboration.EditSession.Server do
 
   def start_link(opts) do
     workflow_id = Keyword.fetch!(opts, :workflow_id)
-    GenServer.start_link(__MODULE__, workflow_id, name: via_tuple(workflow_id))
+    scope = Keyword.fetch!(opts, :scope)
+
+    GenServer.start_link(__MODULE__, %{workflow_id: workflow_id, scope: scope},
+      name: via_tuple(workflow_id)
+    )
   end
 
   def via_tuple(workflow_id) do
@@ -149,11 +154,11 @@ defmodule Fizz.Collaboration.EditSession.Server do
   # =============================================================================
 
   @impl true
-  def init(workflow_id) do
+  def init(%{workflow_id: workflow_id, scope: scope}) do
     Logger.metadata(workflow_id: workflow_id, component: :edit_session)
     Logger.info("Starting edit session for workflow #{workflow_id}")
 
-    case load_initial_state(workflow_id) do
+    case load_initial_state(workflow_id, scope) do
       {:ok, state} ->
         persist_timer = Process.send_after(self(), :persist, @persist_interval)
         idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
@@ -340,9 +345,10 @@ defmodule Fizz.Collaboration.EditSession.Server do
   # Private Functions
   # =============================================================================
 
-  defp load_initial_state(workflow_id) do
-    with {:ok, draft} <- Workflows.get_draft(workflow_id),
-         {:ok, last_seq, ops} <- Persistence.load_pending_ops(workflow_id) do
+  defp load_initial_state(workflow_id, scope) do
+    with {:ok, draft} <- Workflows.get_draft(scope, workflow_id),
+         last_persisted_seq <- (draft.settings || %{})["last_persisted_seq"] || 0,
+         {:ok, ops} <- Persistence.load_pending_ops(workflow_id, last_persisted_seq) do
       editor_state =
         EditorState.from_storage(
           workflow_id,
@@ -350,9 +356,11 @@ defmodule Fizz.Collaboration.EditSession.Server do
           draft.settings || %{}
         )
 
-      {draft, editor_state, seq} = replay_operations(draft, editor_state, ops, last_seq)
+      {draft, editor_state, seq} =
+        replay_operations(draft, editor_state, ops, last_persisted_seq)
 
       state = %State{
+        scope: scope,
         workflow_id: workflow_id,
         draft: draft,
         editor_state: editor_state,

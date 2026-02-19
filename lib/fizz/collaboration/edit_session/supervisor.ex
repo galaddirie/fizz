@@ -16,19 +16,19 @@ defmodule Fizz.Collaboration.EditSession.Supervisor do
   end
 
   @doc "Start or get an existing edit session for a workflow."
-  def ensure_session(workflow_id) do
+  def ensure_session(scope, workflow_id) do
     case Registry.lookup(Fizz.Collaboration.EditSession.Registry, workflow_id) do
       [{pid, _}] ->
         {:ok, pid}
 
       [] ->
-        start_session(workflow_id)
+        start_session(scope, workflow_id)
     end
   end
 
   @doc "Start a new edit session."
-  def start_session(workflow_id) do
-    spec = {Server, workflow_id: workflow_id}
+  def start_session(scope, workflow_id) do
+    spec = {Server, workflow_id: workflow_id, scope: scope}
     DynamicSupervisor.start_child(__MODULE__, spec)
   end
 

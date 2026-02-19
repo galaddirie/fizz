@@ -353,7 +353,10 @@ defmodule Fizz.Collaboration.EditSession.Operations do
 
         new_name ->
           other_steps = Enum.reject(draft.steps || [], &(&1.id == step_id))
-          unique_name = Fizz.Workflows.generate_unique_step_name(other_steps, new_name)
+
+          {unique_name, _unique_step_id} =
+            Fizz.Workflows.generate_unique_step_identity(other_steps, new_name)
+
           Map.put(changes, :name, unique_name)
       end
 

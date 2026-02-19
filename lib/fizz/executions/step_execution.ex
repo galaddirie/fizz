@@ -131,6 +131,10 @@ defmodule Fizz.Executions.StepExecution do
     ])
     |> validate_required([:execution_id, :step_id, :step_type_id, :status])
     |> validate_number(:attempt, greater_than: 0)
+    |> validate_number(:item_index, greater_than_or_equal_to: 0)
+    |> validate_number(:items_total, greater_than_or_equal_to: 1)
+    |> validate_number(:output_item_count, greater_than_or_equal_to: 0)
+    |> foreign_key_constraint(:execution_id)
     |> validate_status_transition()
   end
 

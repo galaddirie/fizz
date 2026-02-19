@@ -144,24 +144,6 @@ defmodule Fizz.Executions.PubSub do
     end
   end
 
-  @doc """
-  Deprecated: Use `authorize_execution/2` instead.
-  """
-  @deprecated "Use authorize_execution/2 instead"
-  @spec can_subscribe_execution?(Scope.t() | nil, String.t()) :: boolean()
-  def can_subscribe_execution?(scope, execution_id) do
-    authorize_execution(scope, execution_id) == :ok
-  end
-
-  @doc """
-  Deprecated: Use `authorize_workflow/2` instead.
-  """
-  @deprecated "Use authorize_workflow/2 instead"
-  @spec can_subscribe_workflow_executions?(Scope.t() | nil, String.t()) :: boolean()
-  def can_subscribe_workflow_executions?(scope, workflow_id) do
-    authorize_workflow(scope, workflow_id) == :ok
-  end
-
   # ============================================================================
   # Execution lifecycle broadcasts
   # ============================================================================
