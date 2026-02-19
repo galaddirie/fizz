@@ -1,43 +1,43 @@
 <script setup lang="ts">
-import { ref, computed } from "vue"
-import { useLiveVue, Form, useLiveForm } from "live_vue"
+import { ref, computed } from 'vue';
+import { useLiveVue, Form, useLiveForm } from 'live_vue';
 
-type FilterType = "all" | "active" | "completed"
+type FilterType = 'all' | 'active' | 'completed';
 
 // Props from LiveView - server state
 const props = defineProps<{
-  todos: Array<{ id: number; text: string; completed: boolean }>
-  form: Form<{ text: string }>
-}>()
+  todos: Array<{ id: number; text: string; completed: boolean }>;
+  form: Form<{ text: string }>;
+}>();
 
 // Phoenix hook instance responsible for syncing this Vue component
-const live = useLiveVue()
+const live = useLiveVue();
 
 // Server-side validation using changesets
 const { field, submit, isValid } = useLiveForm<{ text: string }>(() => props.form, {
-  submitEvent: "add_todo",
-  changeEvent: "validate_todo",
+  submitEvent: 'add_todo',
+  changeEvent: 'validate_todo',
   debounceInMiliseconds: 50,
-})
+});
 
-const textField = field("text")
+const textField = field('text');
 
 // Local client-side state
-const filter = ref<FilterType>("all")
+const filter = ref<FilterType>('all');
 
 const filterByType = (type: FilterType) => {
   switch (type) {
-    case "active":
-      return props.todos.filter((todo) => !todo.completed)
-    case "completed":
-      return props.todos.filter((todo) => todo.completed)
+    case 'active':
+      return props.todos.filter(todo => !todo.completed);
+    case 'completed':
+      return props.todos.filter(todo => todo.completed);
     default:
-      return props.todos
+      return props.todos;
   }
-}
+};
 // Computed properties for reactive UI
-const filteredTodos = computed(() => filterByType(filter.value))
-const completedCount = computed(() => filterByType("completed").length)
+const filteredTodos = computed(() => filterByType(filter.value));
+const completedCount = computed(() => filterByType('completed').length);
 </script>
 
 <template>
@@ -46,7 +46,9 @@ const completedCount = computed(() => filterByType("completed").length)
       <!-- Header -->
       <div>
         <h1 class="text-5xl font-bold">🎉 Welcome to LiveVue!</h1>
-        <p class="text-lg text-base-content/70">Vue.js components seamlessly integrated with Phoenix LiveView</p>
+        <p class="text-base-content/70 text-lg">
+          Vue.js components seamlessly integrated with Phoenix LiveView
+        </p>
       </div>
 
       <!-- Todo Demo Card -->
@@ -60,10 +62,14 @@ const completedCount = computed(() => filterByType("completed").length)
               placeholder="What needs to be done?"
               class="input input-bordered join-item flex-1"
             />
-            <button type="submit" :disabled="!isValid" class="btn btn-primary join-item">Add Todo</button>
+            <button type="submit" :disabled="!isValid" class="btn btn-primary join-item">
+              Add Todo
+            </button>
           </div>
           <div
-            v-if="(textField.isTouched.value || textField.isDirty.value) && textField.errorMessage.value"
+            v-if="
+              (textField.isTouched.value || textField.isDirty.value) && textField.errorMessage.value
+            "
             class="text-error text-xs"
           >
             {{ textField.errorMessage }}
@@ -71,7 +77,7 @@ const completedCount = computed(() => filterByType("completed").length)
         </form>
 
         <!-- Filter Buttons -->
-        <div class="join mb-6 mx-auto">
+        <div class="join mx-auto mb-6">
           <button
             v-for="filterType in ['all', 'active', 'completed'] as FilterType[]"
             :key="filterType"
@@ -84,20 +90,25 @@ const completedCount = computed(() => filterByType("completed").length)
         </div>
 
         <!-- Todo List -->
-        <div v-if="filteredTodos.length > 0" class="space-y-2 mb-4">
+        <div v-if="filteredTodos.length > 0" class="mb-4 space-y-2">
           <div v-for="todo in filteredTodos" :key="todo.id" class="card card-compact bg-base-200">
             <div class="card-body">
               <div class="flex items-center gap-3">
                 <input
                   type="checkbox"
                   :checked="todo.completed"
-                  @change="$live.pushEvent('toggle_todo', { id: todo.id })"
+                  @change="live.pushEvent('toggle_todo', { id: todo.id })"
                   class="checkbox checkbox-primary"
                 />
-                <span :class="['flex-1 text-left', todo.completed ? 'line-through opacity-60' : '']">
+                <span
+                  :class="['flex-1 text-left', todo.completed ? 'line-through opacity-60' : '']"
+                >
                   {{ todo.text }}
                 </span>
-                <button @click="$live.pushEvent('delete_todo', { id: todo.id })" class="btn btn-error btn-sm">
+                <button
+                  @click="live.pushEvent('delete_todo', { id: todo.id })"
+                  class="btn btn-error btn-sm"
+                >
                   Delete
                 </button>
               </div>
@@ -106,7 +117,12 @@ const completedCount = computed(() => filterByType("completed").length)
         </div>
 
         <div v-else class="alert">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-info shrink-0 w-6 h-6">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            class="stroke-info h-6 w-6 shrink-0"
+          >
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
@@ -114,13 +130,15 @@ const completedCount = computed(() => filterByType("completed").length)
               d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             ></path>
           </svg>
-          <span>{{ filter === "all" ? "No todos yet!" : `No ${filter} todos!` }}</span>
+          <span>{{ filter === 'all' ? 'No todos yet!' : `No ${filter} todos!` }}</span>
         </div>
 
         <!-- Actions -->
-        <div v-if="props.todos.some((todo) => todo.completed)" class="card-actions justify-between">
+        <div v-if="props.todos.some(todo => todo.completed)" class="card-actions justify-between">
           <span class="text-sm opacity-70">{{ completedCount }} completed</span>
-          <button @click="$live.pushEvent('clear_completed', {})" class="btn btn-error btn-sm">Clear completed</button>
+          <button @click="live.pushEvent('clear_completed', {})" class="btn btn-error btn-sm">
+            Clear completed
+          </button>
         </div>
       </div>
 
@@ -128,9 +146,11 @@ const completedCount = computed(() => filterByType("completed").length)
       <div class="alert alert-info">
         <div>
           <h4 class="font-bold">LiveVue Features Demonstrated:</h4>
-          <ul class="text-sm mt-2 space-y-1">
+          <ul class="mt-2 space-y-1 text-sm">
             <li>✅ <strong>Reactive Props:</strong> Todos flow from server state</li>
-            <li>✅ <strong>Server Events:</strong> Add, toggle, delete todos send events to LiveView</li>
+            <li>
+              ✅ <strong>Server Events:</strong> Add, toggle, delete todos send events to LiveView
+            </li>
             <li>✅ <strong>Local State:</strong> Filter buttons work entirely client-side</li>
             <li>✅ <strong>Server-side Validation:</strong> Uses Ecto.Changeset</li>
           </ul>
