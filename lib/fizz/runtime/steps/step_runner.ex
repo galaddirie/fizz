@@ -221,14 +221,21 @@ defmodule Fizz.Runtime.Steps.StepRunner do
 
     case primary_parents do
       [] ->
-        if slot_bindings == %{} do
-          input
-        else
-          nil
+        case map_size(slot_bindings) do
+          0 -> input
+          _ -> nil
         end
 
       [parent_step_id] ->
-        Map.get(step_outputs, parent_step_id, input)
+        case map_size(slot_bindings) do
+          # For non-slotted steps, trust the current fact input so fan-out
+          # descendants receive each item (not a stale output from process state).
+          0 ->
+            input
+
+          _ ->
+            Map.get(step_outputs, parent_step_id, input)
+        end
 
       _multiple_parents ->
         # Keep existing semantics for fan-in joins and multi-parent inputs.

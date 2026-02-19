@@ -201,47 +201,93 @@ defmodule Fizz.Runtime.RunicAdapter do
   # Fan-out Path Lookup
   # ===========================================================================
 
-  # Build a map of step_id => fan_out_step_id for all steps downstream of a splitter
+  # Build a map of step_id => fan_out_step_id for steps in active splitter paths.
+  # If a step is reachable by multiple splitters, pick the nearest splitter
+  # (shortest distance), with deterministic splitter-id tie-breaking.
   defp build_fan_out_path_lookup(graph, splitter_ids, step_map) do
-    Enum.reduce(splitter_ids, %{}, fn splitter_id, acc ->
-      downstream_ids = find_downstream_until_aggregator(graph, splitter_id, step_map)
+    splitter_ids
+    |> Enum.sort()
+    |> Enum.reduce(%{}, fn splitter_id, acc ->
+      distances = find_downstream_distances_until_aggregator(graph, splitter_id, step_map)
 
-      Enum.reduce(downstream_ids, acc, fn step_id, inner_acc ->
-        # If a step is downstream of multiple splitters, keep the nearest one
-        # For now, just use the first one found
-        Map.put_new(inner_acc, step_id, splitter_id)
+      Enum.reduce(distances, acc, fn {step_id, distance}, inner_acc ->
+        put_nearest_splitter(inner_acc, step_id, splitter_id, distance)
       end)
     end)
+    |> Map.new(fn {step_id, %{splitter_id: splitter_id}} -> {step_id, splitter_id} end)
   end
 
-  defp find_downstream_until_aggregator(graph, start_id, step_map) do
-    do_find_downstream(graph, [start_id], MapSet.new(), MapSet.new(), step_map)
+  defp find_downstream_distances_until_aggregator(graph, start_id, step_map) do
+    queue = :queue.from_list([{start_id, 0}])
+    do_find_downstream_distances(graph, queue, MapSet.new(), %{}, step_map)
   end
 
-  defp do_find_downstream(_graph, [], _visited, acc, _step_map), do: MapSet.to_list(acc)
+  defp do_find_downstream_distances(graph, queue, visited, acc, step_map) do
+    case :queue.out(queue) do
+      {:empty, _queue} ->
+        acc
 
-  defp do_find_downstream(graph, [current | rest], visited, acc, step_map) do
-    if MapSet.member?(visited, current) do
-      do_find_downstream(graph, rest, visited, acc, step_map)
-    else
-      visited = MapSet.put(visited, current)
+      {{:value, {current, distance}}, queue} ->
+        case MapSet.member?(visited, current) do
+          true ->
+            do_find_downstream_distances(graph, queue, visited, acc, step_map)
 
-      # Get step info to check if it's an aggregator
-      is_aggregator =
-        case Map.get(step_map, current) do
-          %{type_id: "aggregator"} -> true
-          _ -> false
+          false ->
+            visited = MapSet.put(visited, current)
+            acc = put_min_distance(acc, current, distance)
+
+            case aggregator_step?(step_map, current) do
+              true ->
+                # Don't traverse past aggregators, but do include them
+                do_find_downstream_distances(graph, queue, visited, acc, step_map)
+
+              false ->
+                queue =
+                  graph
+                  |> Fizz.Graph.children(current)
+                  |> Enum.sort()
+                  |> Enum.reduce(queue, fn child, inner_queue ->
+                    :queue.in({child, distance + 1}, inner_queue)
+                  end)
+
+                do_find_downstream_distances(graph, queue, visited, acc, step_map)
+            end
         end
+    end
+  end
 
-      if is_aggregator do
-        # Don't traverse past aggregators, but do include them
-        do_find_downstream(graph, rest, visited, MapSet.put(acc, current), step_map)
-      else
-        # Add current to accumulator and continue traversal
-        acc = MapSet.put(acc, current)
-        children = Fizz.Graph.children(graph, current)
-        do_find_downstream(graph, children ++ rest, visited, acc, step_map)
-      end
+  defp put_nearest_splitter(acc, step_id, splitter_id, distance) do
+    case Map.get(acc, step_id) do
+      nil ->
+        Map.put(acc, step_id, %{splitter_id: splitter_id, distance: distance})
+
+      %{splitter_id: current_splitter, distance: current_distance} ->
+        case {distance < current_distance,
+              distance == current_distance and splitter_id < current_splitter} do
+          {true, _} ->
+            Map.put(acc, step_id, %{splitter_id: splitter_id, distance: distance})
+
+          {false, true} ->
+            Map.put(acc, step_id, %{splitter_id: splitter_id, distance: distance})
+
+          _ ->
+            acc
+        end
+    end
+  end
+
+  defp put_min_distance(acc, step_id, distance) do
+    case Map.get(acc, step_id) do
+      nil -> Map.put(acc, step_id, distance)
+      current_distance when distance < current_distance -> Map.put(acc, step_id, distance)
+      _ -> acc
+    end
+  end
+
+  defp aggregator_step?(step_map, step_id) do
+    case Map.get(step_map, step_id) do
+      %{type_id: "aggregator"} -> true
+      _ -> false
     end
   end
 
@@ -468,18 +514,13 @@ defmodule Fizz.Runtime.RunicAdapter do
 
         :error ->
           if step.type_id == "aggregator" do
-            splitter_ids = Keyword.get(step_opts, :splitter_ids, MapSet.new())
-            upstream_lookup = Keyword.get(step_opts, :upstream_lookup, %{})
-            upstream_ids = Map.get(upstream_lookup, step.id, [])
+            fan_out_path_lookup = Keyword.get(step_opts, :fan_out_path_lookup, %{})
 
-            # Check if there's a splitter anywhere upstream
-            has_upstream_splitter = Enum.any?(upstream_ids, &MapSet.member?(splitter_ids, &1))
-
-            if has_upstream_splitter do
-              # Fan-out context: use Runic.reduce to accumulate ALL items
+            if Map.has_key?(fan_out_path_lookup, step.id) do
+              # Active fan-out context: use Runic.reduce to accumulate all items.
               create_fanout_aggregator(step, component_name)
             else
-              # No fan-out upstream: use regular step that handles list input from join
+              # Outside fan-out path: use regular step that handles list input from join.
               create_join_aggregator(step, component_name)
             end
           else

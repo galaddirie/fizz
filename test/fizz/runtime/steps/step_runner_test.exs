@@ -81,6 +81,40 @@ defmodule Fizz.Runtime.Steps.StepRunnerTest do
     end
   end
 
+  describe "execute_with_context/3 primary input resolution" do
+    test "uses fact input for one-parent steps without slot bindings" do
+      step = %Step{
+        id: "debug_step",
+        type_id: "debug",
+        name: "Debug",
+        config: %{"label" => "Debug", "level" => "info"},
+        position: %{}
+      }
+
+      result =
+        StepRunner.execute_with_context(
+          step,
+          %{"item" => 2},
+          execution_id: "exec_test",
+          workflow_id: "wf_test",
+          step_outputs: %{
+            "splitter_step" => [%{"item" => 1}, %{"item" => 2}]
+          },
+          upstream_lookup: %{
+            "debug_step" => ["splitter_step"]
+          },
+          primary_parent_lookup: %{
+            "debug_step" => ["splitter_step"]
+          },
+          slot_bindings: %{
+            "debug_step" => %{}
+          }
+        )
+
+      assert result == %{"item" => 2}
+    end
+  end
+
   defp execution_opts(step_outputs, opts \\ []) do
     primary_parents = Keyword.get(opts, :primary_parents, ["main_input_step"])
 
