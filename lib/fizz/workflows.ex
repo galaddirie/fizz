@@ -10,7 +10,7 @@ defmodule Fizz.Workflows do
 
   - Use `Scope.can_view_workflow?/2` to check view permissions
   - Use `Scope.can_edit_workflow?/2` to check edit permissions
-  - Use `Scope.owns_workflow?/2` to check ownership
+  - Workflow access is scoped to the active workspace in `Scope`
 
   ## Examples
 
@@ -27,14 +27,13 @@ defmodule Fizz.Workflows do
   import Ecto.Query, warn: false
   alias Fizz.Repo
 
-  alias Fizz.Workflows.{Workflow, WorkflowVersion, WorkflowDraft, WorkflowShare}
+  alias Fizz.Workflows.{Workflow, WorkflowVersion, WorkflowDraft}
   alias Fizz.Executions.Execution
   alias Fizz.Accounts.Scope
 
   @type workflow_params :: %{
           required(:name) => String.t(),
           optional(:description) => String.t(),
-          optional(:public) => boolean(),
           optional(:current_version_tag) => String.t()
         }
 
@@ -45,78 +44,80 @@ defmodule Fizz.Workflows do
 
   @doc """
   Lists workflows accessible to the given scope.
-
-  Returns workflows the user owns or has been shared with, including public workflows.
-  Preloads user (owner) and shares associations for display purposes.
   """
   @spec list_workflows(Scope.t() | nil) :: [Workflow.t()]
-  def list_workflows(nil), do: list_public_workflows()
+  def list_workflows(%Scope{workspace: %{id: workspace_id}} = scope)
+      when is_binary(workspace_id) do
+    case Scope.can_view_workflow?(scope, %Workflow{workspace_id: workspace_id}) do
+      true ->
+        query =
+          from w in Workflow,
+            where: w.workspace_id == ^workspace_id,
+            order_by: [desc: w.updated_at]
 
-  def list_workflows(%Scope{} = scope) do
-    user_id = scope.user.id
+        Repo.all(query) |> Repo.preload([:user, :workspace])
 
-    # Get all workflows the user can access in a single query
-    query =
-      from w in Workflow,
-        left_join: s in WorkflowShare,
-        on: s.workflow_id == w.id and s.user_id == ^user_id,
-        where: w.user_id == ^user_id or not is_nil(s.id) or w.public == true,
-        distinct: true,
-        order_by: [desc: w.updated_at]
-
-    Repo.all(query) |> Repo.preload([:user, :shares])
+      false ->
+        []
+    end
   end
 
-  @doc """
-  Lists public workflows.
+  def list_workflows(_scope), do: []
 
-  Returns all workflows marked as public.
-  """
+  @doc false
   @spec list_public_workflows() :: [Workflow.t()]
-  def list_public_workflows do
-    Repo.all(from w in Workflow, where: w.public == true, order_by: [desc: w.updated_at])
-  end
+  def list_public_workflows, do: []
 
   @doc """
   Determines the access level/state for a workflow relative to a scope.
 
   Returns:
-  - `:owner` - if the user owns the workflow
-  - `:viewer`, `:editor`, `:owner` - if the user has a share with that role
-  - `:public` - if the workflow is public and user doesn't own or have a share
-  - `nil` - if no access
+  - `:admin` for workspace admin (or organization admin) write access
+  - `:member` for workspace member write access
+  - `:viewer` for workspace viewer read-only access
+  - `nil` for no access
   """
   @spec workflow_access_state(Scope.t() | nil, Workflow.t()) ::
-          :owner | :viewer | :editor | :public | nil
+          :admin | :member | :viewer | nil
   def workflow_access_state(%Scope{} = scope, %Workflow{} = workflow) do
-    user_id = scope.user.id
-
     cond do
-      workflow.user_id == user_id ->
-        :owner
+      Scope.can_edit_workflow?(scope, workflow) and
+          (Scope.workspace_admin?(scope) or Scope.organization_admin?(scope)) ->
+        :admin
 
-      share = Enum.find(workflow.shares || [], &(&1.user_id == user_id)) ->
-        share.role
+      Scope.can_edit_workflow?(scope, workflow) ->
+        :member
 
-      workflow.public ->
-        :public
+      Scope.can_view_workflow?(scope, workflow) ->
+        :viewer
 
       true ->
         nil
     end
   end
 
-  def workflow_access_state(nil, %Workflow{public: true}), do: :public
   def workflow_access_state(_scope, _workflow), do: nil
 
   @doc """
   Lists workflows owned by the user in the scope.
   """
   @spec list_owned_workflows(Scope.t()) :: [Workflow.t()]
-  def list_owned_workflows(%Scope{} = scope) do
-    user_id = scope.user.id
-    Repo.all(from w in Workflow, where: w.user_id == ^user_id, order_by: [desc: w.updated_at])
+  def list_owned_workflows(%Scope{workspace: %{id: workspace_id}, user: %{id: user_id}} = scope)
+      when is_binary(workspace_id) do
+    case Scope.can_view_workflow?(scope, %Workflow{workspace_id: workspace_id}) do
+      true ->
+        Repo.all(
+          from w in Workflow,
+            where: w.workspace_id == ^workspace_id and w.user_id == ^user_id,
+            order_by: [desc: w.updated_at]
+        )
+
+      false ->
+        []
+    end
   end
+
+  def list_owned_workflows(%Scope{}), do: []
 
   @doc """
   Returns a query for active workflows.
@@ -235,17 +236,34 @@ defmodule Fizz.Workflows do
   @doc """
   Creates a new workflow for the user in the scope.
 
-  Returns `{:ok, workflow}` if successful, `{:error, changeset}` otherwise.
+  Requires member/admin workflow permissions in the active workspace.
   """
   @spec create_workflow(Scope.t(), workflow_params()) ::
-          {:ok, Workflow.t()} | {:error, Ecto.Changeset.t()}
-  def create_workflow(%Scope{} = scope, attrs) do
-    user_id = scope.user.id
+          {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :access_denied}
+  def create_workflow(
+        %Scope{workspace: %{id: workspace_id}, user: %{id: user_id}} = scope,
+        attrs
+      )
+      when is_binary(workspace_id) do
+    seed_workflow = %Workflow{workspace_id: workspace_id}
 
-    %Workflow{}
-    |> Workflow.changeset(Map.put(attrs, :user_id, user_id))
-    |> Repo.insert()
+    case Scope.can_edit_workflow?(scope, seed_workflow) do
+      true ->
+        attrs
+        |> Map.put(:workspace_id, workspace_id)
+        |> Map.put(:user_id, user_id)
+        |> then(fn workflow_attrs ->
+          %Workflow{}
+          |> Workflow.changeset(workflow_attrs)
+          |> Repo.insert()
+        end)
+
+      false ->
+        {:error, :access_denied}
+    end
   end
+
+  def create_workflow(%Scope{}, _attrs), do: {:error, :access_denied}
 
   @doc """
   Updates a workflow, checking edit permissions.
@@ -265,15 +283,12 @@ defmodule Fizz.Workflows do
   end
 
   @doc """
-  Deletes a workflow, checking ownership permissions.
-
-  Only owners can delete workflows. Returns `{:ok, workflow}` if successful,
-  `{:error, :not_found | :access_denied}` otherwise.
+  Deletes a workflow, checking edit permissions.
   """
   @spec delete_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, :not_found | :access_denied}
   def delete_workflow(%Scope{} = scope, %Workflow{} = workflow) do
-    if Scope.owns_workflow?(scope, workflow) do
+    if Scope.can_edit_workflow?(scope, workflow) do
       Fizz.Runtime.Triggers.Activator.deactivate(workflow.id)
       Repo.delete(workflow)
     else
@@ -282,10 +297,7 @@ defmodule Fizz.Workflows do
   end
 
   @doc """
-  Archives a workflow, checking ownership permissions.
-
-  Only owners can archive workflows. Returns `{:ok, workflow}` if successful,
-  `{:error, changeset | :not_found | :access_denied}` otherwise.
+  Archives a workflow, checking edit permissions.
   """
   @spec archive_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :not_found | :access_denied}
@@ -314,7 +326,6 @@ defmodule Fizz.Workflows do
           name: "Copy of #{workflow.name}",
           description: workflow.description,
           status: :draft,
-          public: false,
           current_version_tag: nil,
           published_version_id: nil
         }

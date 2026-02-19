@@ -28,6 +28,7 @@ defmodule Fizz.Executions do
     failed: 6
   }
   @max_timestamp 9_999_999_999_999_999
+  @internal_trigger_types [:schedule, :webhook, :event]
 
   @type execution_params :: %{
           required(:workflow_id) => Ecto.UUID.t(),
@@ -48,28 +49,29 @@ defmodule Fizz.Executions do
   @doc """
   Lists executions accessible to the given scope.
 
-  Returns executions for workflows the user can access.
+  Returns executions for workflows in the active workspace.
   """
   @spec list_executions(Scope.t() | nil) :: [Execution.t()]
-  def list_executions(nil), do: []
+  def list_executions(%Scope{workspace: %{id: workspace_id}} = scope)
+      when is_binary(workspace_id) do
+    case Scope.can_view_workflow?(scope, %Workflow{workspace_id: workspace_id}) do
+      true ->
+        query =
+          from e in Execution,
+            join: w in Workflow,
+            on: e.workflow_id == w.id,
+            where: w.workspace_id == ^workspace_id,
+            order_by: [desc: e.inserted_at],
+            limit: 100
 
-  def list_executions(%Scope{} = scope) do
-    user = scope.user
+        Repo.all(query)
 
-    # Get executions for workflows the user can access
-    query =
-      from e in Execution,
-        join: w in Workflow,
-        on: e.workflow_id == w.id,
-        left_join: s in Fizz.Workflows.WorkflowShare,
-        on: s.workflow_id == w.id and s.user_id == ^user.id,
-        where: w.user_id == ^user.id or not is_nil(s.id) or w.public == true,
-        distinct: true,
-        order_by: [desc: e.inserted_at],
-        limit: 100
-
-    Repo.all(query)
+      false ->
+        []
+    end
   end
+
+  def list_executions(_scope), do: []
 
   @doc """
   Lists executions for a specific workflow, checking access permissions.
@@ -152,11 +154,20 @@ defmodule Fizz.Executions do
   Returns `{:ok, execution}` if successful, `{:error, changeset}` otherwise.
   """
   @spec create_execution(Scope.t() | nil, execution_params()) ::
-          {:ok, Execution.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Execution.t()}
+          | {:error,
+             Ecto.Changeset.t() | :workflow_not_found | :workflow_not_published | :access_denied}
   def create_execution(scope, attrs) do
-    # Check if user can view the workflow
-    workflow_id = attrs[:workflow_id]
-    execution_type = Map.get(attrs, :execution_type, :production)
+    workflow_id = fetch_attr(attrs, :workflow_id)
+
+    execution_type =
+      attrs
+      |> fetch_attr(:execution_type)
+      |> normalize_execution_type()
+      |> case do
+        nil -> :production
+        normalized_type -> normalized_type
+      end
 
     case Repo.get(Workflow, workflow_id) do
       nil ->
@@ -165,8 +176,14 @@ defmodule Fizz.Executions do
       workflow ->
         can_create = Scope.can_create_execution?(scope, workflow, execution_type)
 
+        internal_scope_allowed? =
+          internal_scope_execution_allowed?(scope, execution_type, fetch_attr(attrs, :trigger))
+
         cond do
           not can_create ->
+            {:error, :access_denied}
+
+          not internal_scope_allowed? ->
             {:error, :access_denied}
 
           true ->
@@ -204,6 +221,39 @@ defmodule Fizz.Executions do
       attrs
     end
   end
+
+  defp fetch_attr(attrs, key) when is_map(attrs) do
+    Map.get(attrs, key) || Map.get(attrs, Atom.to_string(key))
+  end
+
+  defp fetch_attr(_attrs, _key), do: nil
+
+  defp normalize_execution_type(type) when type in [:production, :preview, :partial], do: type
+  defp normalize_execution_type("production"), do: :production
+  defp normalize_execution_type("preview"), do: :preview
+  defp normalize_execution_type("partial"), do: :partial
+  defp normalize_execution_type(_type), do: nil
+
+  defp internal_scope_execution_allowed?(nil, :production, trigger),
+    do: internal_trigger?(trigger)
+
+  defp internal_scope_execution_allowed?(nil, _execution_type, _trigger), do: false
+  defp internal_scope_execution_allowed?(_scope, _execution_type, _trigger), do: true
+
+  defp internal_trigger?(%{type: type}),
+    do: normalize_trigger_type(type) in @internal_trigger_types
+
+  defp internal_trigger?(%{"type" => type}),
+    do: normalize_trigger_type(type) in @internal_trigger_types
+
+  defp internal_trigger?(_), do: false
+
+  defp normalize_trigger_type(type) when type in [:manual, :schedule, :webhook, :event], do: type
+  defp normalize_trigger_type("manual"), do: :manual
+  defp normalize_trigger_type("schedule"), do: :schedule
+  defp normalize_trigger_type("webhook"), do: :webhook
+  defp normalize_trigger_type("event"), do: :event
+  defp normalize_trigger_type(_type), do: nil
 
   @doc """
   Updates an execution status.
@@ -1105,32 +1155,26 @@ defmodule Fizz.Executions do
   Returns a map with status counts.
   """
   @spec count_executions_by_status(Scope.t() | nil) :: %{optional(atom()) => non_neg_integer()}
-  def count_executions_by_status(scope) do
-    user = scope && scope.user
+  def count_executions_by_status(%Scope{workspace: %{id: workspace_id}} = scope)
+      when is_binary(workspace_id) do
+    case Scope.can_view_workflow?(scope, %Workflow{workspace_id: workspace_id}) do
+      true ->
+        query =
+          from e in Execution,
+            join: w in Workflow,
+            on: e.workflow_id == w.id,
+            where: w.workspace_id == ^workspace_id,
+            select: {e.status, count(e.id)},
+            group_by: e.status
 
-    # Base query for accessible executions
-    base_query =
-      if user do
-        from e in Execution,
-          join: w in Workflow,
-          on: e.workflow_id == w.id,
-          left_join: s in Fizz.Workflows.WorkflowShare,
-          on: s.workflow_id == w.id and s.user_id == ^user.id,
-          where: w.user_id == ^user.id or not is_nil(s.id) or w.public == true
-      else
-        from e in Execution,
-          join: w in Workflow,
-          on: e.workflow_id == w.id,
-          where: w.public == true
-      end
+        Repo.all(query) |> Map.new()
 
-    query =
-      from [e, w, s] in base_query,
-        select: {e.status, count(e.id)},
-        group_by: e.status
-
-    Repo.all(query) |> Map.new()
+      false ->
+        %{}
+    end
   end
+
+  def count_executions_by_status(_scope), do: %{}
 
   @doc """
   Gets execution statistics for the last N days.
@@ -1140,37 +1184,33 @@ defmodule Fizz.Executions do
   @spec get_execution_stats(Scope.t() | nil, pos_integer()) :: [
           %{date: Date.t(), count: non_neg_integer()}
         ]
-  def get_execution_stats(scope, days \\ 30) do
-    user = scope && scope.user
-    start_date = Date.add(Date.utc_today(), -days)
+  def get_execution_stats(scope, days \\ 30)
 
-    # Base query for accessible executions
-    base_query =
-      if user do
-        from e in Execution,
-          join: w in Workflow,
-          on: e.workflow_id == w.id,
-          left_join: s in Fizz.Workflows.WorkflowShare,
-          on: s.workflow_id == w.id and s.user_id == ^user.id,
-          where: w.user_id == ^user.id or not is_nil(s.id) or w.public == true,
-          where: fragment("date(?) >= ?", e.inserted_at, ^start_date)
-      else
-        from e in Execution,
-          join: w in Workflow,
-          on: e.workflow_id == w.id,
-          where: w.public == true,
-          where: fragment("date(?) >= ?", e.inserted_at, ^start_date)
-      end
+  def get_execution_stats(%Scope{workspace: %{id: workspace_id}} = scope, days)
+      when is_binary(workspace_id) do
+    case Scope.can_view_workflow?(scope, %Workflow{workspace_id: workspace_id}) do
+      true ->
+        start_date = Date.add(Date.utc_today(), -days)
 
-    query =
-      from [e, w, s] in base_query,
-        select: %{
-          date: fragment("date(?)", e.inserted_at),
-          count: count(e.id)
-        },
-        group_by: fragment("date(?)", e.inserted_at),
-        order_by: fragment("date(?)", e.inserted_at)
+        query =
+          from e in Execution,
+            join: w in Workflow,
+            on: e.workflow_id == w.id,
+            where: w.workspace_id == ^workspace_id,
+            where: fragment("date(?) >= ?", e.inserted_at, ^start_date),
+            select: %{
+              date: fragment("date(?)", e.inserted_at),
+              count: count(e.id)
+            },
+            group_by: fragment("date(?)", e.inserted_at),
+            order_by: fragment("date(?)", e.inserted_at)
 
-    Repo.all(query)
+        Repo.all(query)
+
+      false ->
+        []
+    end
   end
+
+  def get_execution_stats(_scope, _days), do: []
 end

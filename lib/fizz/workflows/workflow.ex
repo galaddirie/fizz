@@ -4,7 +4,8 @@ defmodule Fizz.Workflows.Workflow do
   """
   use Fizz.Schema
   import Ecto.Changeset
-  alias Fizz.Workflows.{WorkflowDraft, WorkflowVersion, WorkflowShare}
+  alias Fizz.Accounts.Workspace
+  alias Fizz.Workflows.{WorkflowDraft, WorkflowVersion}
 
   defimpl LiveVue.Encoder, for: Ecto.Association.NotLoaded do
     def encode(_struct, _opts), do: nil
@@ -16,9 +17,9 @@ defmodule Fizz.Workflows.Workflow do
              :name,
              :description,
              :status,
-             :public,
              :current_version_tag,
              :published_version_id,
+             :workspace_id,
              :user_id,
              :inserted_at,
              :updated_at
@@ -29,13 +30,14 @@ defmodule Fizz.Workflows.Workflow do
              :name,
              :description,
              :status,
-             :public,
              :current_version_tag,
              :published_version_id,
+             :workspace_id,
              :user_id,
              :inserted_at,
              :updated_at,
              :draft,
+             :workspace,
              :user,
              :published_version
            ]}
@@ -44,14 +46,13 @@ defmodule Fizz.Workflows.Workflow do
     field :name, :string
     field :description, :string
     field :status, Ecto.Enum, values: [:draft, :active, :archived], default: :draft
-    field :public, :boolean, default: false
     field :current_version_tag, :string
 
     belongs_to :published_version, WorkflowVersion
+    belongs_to :workspace, Workspace
     belongs_to :user, Fizz.Accounts.User
     has_one :draft, WorkflowDraft
     has_many :versions, WorkflowVersion
-    has_many :shares, WorkflowShare
 
     timestamps()
   end
@@ -65,11 +66,12 @@ defmodule Fizz.Workflows.Workflow do
       :name,
       :description,
       :status,
-      :public,
       :current_version_tag,
       :published_version_id,
+      :workspace_id,
       :user_id
     ])
-    |> validate_required([:name, :user_id])
+    |> validate_required([:name, :workspace_id, :user_id])
+    |> foreign_key_constraint(:workspace_id)
   end
 end
