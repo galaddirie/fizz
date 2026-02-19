@@ -2,17 +2,17 @@ defmodule Fizz.Steps.Executors.Condition do
   @moduledoc """
   Executor for Condition (If/Else) steps.
 
-  Evaluates a condition expression and routes data accordingly.
+  Routes data based on a pre-resolved condition value.
   In Runic, this becomes a `Runic.rule` that only fires when the condition passes.
 
   ## Configuration
 
-  - `condition` (required) - Liquid expression that evaluates to truthy/falsy.
-    Supports the standard expression variables: `{{ json }}`, `{{ steps.X.json }}`, etc.
+  - `condition` (required) - Value that evaluates to truthy/falsy.
+    This can be configured with expressions in the workflow editor and is resolved before execute/3 runs.
 
   ## Input
 
-  Receives input from parent step(s). The input is available as `{{ json }}` in expressions.
+  Receives input from parent step(s).
 
   ## Output
 
@@ -58,9 +58,7 @@ defmodule Fizz.Steps.Executors.Condition do
     }
   }
 
-  @input_schema %{
-    "description" => "Any data - available as {{ json }} in the condition"
-  }
+  @input_schema %{"description" => "Any data"}
 
   @output_schema %{
     "description" => "Input data, passed through if condition is true"
@@ -68,26 +66,13 @@ defmodule Fizz.Steps.Executors.Condition do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
-  alias Fizz.Runtime.Expression
-
   @impl true
-  def execute(config, input, ctx) do
-    condition_expr = Map.fetch!(config, "condition")
+  def execute(config, input, _ctx) do
+    condition = Map.fetch!(config, "condition")
 
-    # Build variables for expression evaluation
-    vars = build_vars(input, ctx)
-
-    case evaluate_condition(condition_expr, vars) do
-      {:ok, true} ->
-        # Condition passed - pass input through
-        {:ok, input}
-
-      {:ok, false} ->
-        # Condition failed - skip this branch
-        {:skip, :condition_false}
-
-      {:error, reason} ->
-        {:error, {:condition_evaluation_failed, reason}}
+    case truthy?(condition) do
+      true -> {:ok, input}
+      false -> {:skip, :condition_false}
     end
   end
 
@@ -101,10 +86,9 @@ defmodule Fizz.Steps.Executors.Condition do
         {:error, [condition: "cannot be empty"]}
 
       expr when is_binary(expr) ->
-        # Validate the expression syntax
-        case Expression.validate(expr) do
-          :ok -> :ok
-          {:error, _} = err -> err
+        case String.trim(expr) do
+          "" -> {:error, [condition: "cannot be empty"]}
+          _ -> :ok
         end
 
       _ ->
@@ -112,42 +96,9 @@ defmodule Fizz.Steps.Executors.Condition do
     end
   end
 
-  @doc """
-  Evaluates a condition expression and returns {:ok, boolean} or {:error, reason}.
-  Exported for use by RunicAdapter when building rules.
-  """
-  @spec evaluate_condition(String.t(), map()) :: {:ok, boolean()} | {:error, term()}
-  def evaluate_condition(expr, vars) do
-    case Expression.evaluate_with_vars(expr, vars) do
-      {:ok, result} ->
-        {:ok, truthy?(result)}
-
-      {:error, _} = err ->
-        err
-    end
-  end
-
   # ===========================================================================
   # Private Helpers
   # ===========================================================================
-
-  defp build_vars(input, ctx) do
-    step_outputs =
-      case ctx do
-        %{step_outputs: outputs} when is_map(outputs) ->
-          Map.new(outputs, fn {k, v} -> {k, %{"json" => v}} end)
-
-        _ ->
-          %{}
-      end
-
-    %{
-      "json" => input,
-      "steps" => step_outputs,
-      "variables" => Map.get(ctx, :variables, %{}),
-      "metadata" => Map.get(ctx, :metadata, %{})
-    }
-  end
 
   defp truthy?("true"), do: true
   defp truthy?("false"), do: false

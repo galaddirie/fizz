@@ -2,18 +2,19 @@ defmodule Fizz.Steps.Executors.Switch do
   @moduledoc """
   Executor for Switch steps.
 
-  Routes data to different outputs based on matching a value against cases.
+  Routes data to different outputs based on matching a pre-resolved value against cases.
   Unlike Condition which is binary, Switch supports multiple branches.
 
   ## Configuration
 
-  - `value` (required) - Expression to evaluate and match against cases.
+  - `value` (required) - Value to match against cases.
+    This can be configured with expressions in the workflow editor and is resolved before execute/3 runs.
   - `cases` (required) - List of case objects with `match` and `output` fields.
   - `default_output` (optional) - Output name when no case matches (default: "default")
 
   ## Input
 
-  Receives input from parent step(s). Available as `{{ json }}` in expressions.
+  Receives input from parent step(s).
 
   ## Output
 
@@ -77,9 +78,7 @@ defmodule Fizz.Steps.Executors.Switch do
     }
   }
 
-  @input_schema %{
-    "description" => "Any data - the value field is extracted for matching"
-  }
+  @input_schema %{"description" => "Any data"}
 
   @output_schema %{
     "description" => "Tagged tuple {:branch, output_name, input_data}"
@@ -87,39 +86,27 @@ defmodule Fizz.Steps.Executors.Switch do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
-  alias Fizz.Runtime.Expression
-
   @impl true
-  def execute(config, input, ctx) do
-    value_expr = Map.fetch!(config, "value")
+  def execute(config, input, _ctx) do
+    value = Map.fetch!(config, "value")
     cases = Map.get(config, "cases", [])
     default_output = Map.get(config, "default_output", "default")
 
-    # Evaluate the value expression
-    vars = build_vars(input, ctx)
+    # Find matching case
+    matched_case =
+      Enum.find(cases, fn case_def ->
+        match_value = Map.get(case_def, "match")
+        normalize_for_match(value) == normalize_for_match(match_value)
+      end)
 
-    case Expression.evaluate_with_vars(value_expr, vars) do
-      {:ok, value} ->
-        # Find matching case
-        matched_case =
-          Enum.find(cases, fn case_def ->
-            match_value = Map.get(case_def, "match")
-            normalize_for_match(value) == normalize_for_match(match_value)
-          end)
+    output =
+      case matched_case do
+        nil -> default_output
+        case_def -> Map.get(case_def, "output", "matched")
+      end
 
-        output =
-          if matched_case do
-            Map.get(matched_case, "output", "matched")
-          else
-            default_output
-          end
-
-        # Return tagged output for routing
-        {:ok, {:branch, output, input}}
-
-      {:error, reason} ->
-        {:error, {:value_evaluation_failed, reason}}
-    end
+    # Return tagged output for routing
+    {:ok, {:branch, output, input}}
   end
 
   @impl true
@@ -151,24 +138,6 @@ defmodule Fizz.Steps.Executors.Switch do
   # ===========================================================================
   # Private Helpers
   # ===========================================================================
-
-  defp build_vars(input, ctx) do
-    step_outputs =
-      case ctx do
-        %{step_outputs: outputs} when is_map(outputs) ->
-          Map.new(outputs, fn {k, v} -> {k, %{"json" => v}} end)
-
-        _ ->
-          %{}
-      end
-
-    %{
-      "json" => input,
-      "steps" => step_outputs,
-      "variables" => Map.get(ctx, :variables, %{}),
-      "metadata" => Map.get(ctx, :metadata, %{})
-    }
-  end
 
   defp validate_cases(cases, errors) do
     Enum.reduce(cases, {errors, 0}, fn case_def, {errs, idx} ->
