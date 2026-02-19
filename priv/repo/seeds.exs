@@ -129,30 +129,92 @@ linear_steps = [
     type_id: "manual_input",
     name: "Start",
     config: %{
-      "trigger_data" => "{\"name\": \"John Doe\", \"timestamp\": \"2026-01-04 20:00:00\"}"
+      "trigger_data" => "{\"name\": \"John Doe\", \"timestamp\": \"2026-01-04 20:00:00\", \"arr\":[1,2,3,4,5]}"
     },
-    position: %{"x" => 100, "y" => 100}
+    position: %{"x" => -161.17957584024998, "y" => -569.2425531914893}
   },
   %{
     id: "format_greeting",
     type_id: "format",
     name: "Format Greeting",
     config: %{"template" => "Hello {{json.name}}! Welcome to the workflow."},
-    position: %{"x" => 300, "y" => 100}
+    position: %{"x" => 40.66991013933023, "y" => 70.26862929139838}
   },
   %{
     id: "add_timestamp",
     type_id: "format",
     name: "Add Timestamp",
     config: %{"template" => "{{json.greeting}} Processed at {{json.timestamp}}"},
-    position: %{"x" => 500, "y" => 100}
+    position: %{"x" => 431.25889887340765, "y" => 78.97413492435965}
   },
   %{
     id: "end",
     type_id: "debug",
     name: "End",
     config: %{"message" => "Linear workflow completed"},
-    position: %{"x" => 700, "y" => 100}
+    position: %{"x" => 1062.82042415975, "y" => -720.2425531914893}
+  },
+  %{
+    id: "webhook_trigger",
+    type_id: "webhook_trigger",
+    name: "Webhook Trigger",
+    config: %{
+      "http_method" => "POST",
+      "path" => "7f011ee3-555d-418f-bc6b-603f21983f7a",
+      "response_mode" => "immediate",
+      "validate_input" => false
+    },
+    position: %{"x" => -161.17957584024998, "y" => -418.24255319148926}
+  },
+  %{
+    id: "split_items",
+    type_id: "splitter",
+    name: "Split Items",
+    config: %{"field" => "{{ json.arr }}"},
+    position: %{"x" => 246.82042415975002, "y" => -493.74255319148926}
+  },
+  %{
+    id: "math",
+    type_id: "math",
+    name: "Multiply by 10",
+    config: %{
+      "operand" => "{{ json }}",
+      "operation" => "multiply",
+      "value" => "10"
+    },
+    position: %{"x" => 654.82042415975, "y" => -569.2425531914893}
+  },
+  %{
+    id: "math_2",
+    type_id: "math",
+    name: "Multiply by 1",
+    config: %{
+      "operand" => "{{ json }}",
+      "operation" => "multiply",
+      "value" => "1"
+    },
+    position: %{"x" => 654.82042415975, "y" => -418.24255319148926}
+  },
+  %{
+    id: "format_string",
+    type_id: "format",
+    name: "Format String",
+    config: %{"template" => "({{ json[0] }}, {{ json[1] }})"},
+    position: %{"x" => 1062.82042415975, "y" => -493.74255319148926}
+  },
+  %{
+    id: "aggregate_items",
+    type_id: "aggregator",
+    name: "Aggregate Items",
+    config: %{},
+    position: %{"x" => 1470.82042415975, "y" => -493.74255319148926}
+  },
+  %{
+    id: "format_string_2",
+    type_id: "format",
+    name: "Format String 2",
+    config: %{"template" => "{{ json }}"},
+    position: %{"x" => 1878.82042415975, "y" => -493.74255319148926}
   }
 ]
 
@@ -176,6 +238,55 @@ linear_connections = [
     source_step_id: "add_timestamp",
     source_output: "main",
     target_step_id: "end",
+    target_input: "main"
+  },
+  %{
+    id: "2bdb85af-0e52-42d5-a92e-47bad4b23c11",
+    source_step_id: "start",
+    source_output: "main",
+    target_step_id: "split_items",
+    target_input: "main"
+  },
+  %{
+    id: "0eff119f-e1dd-4e8e-8d95-fdad64b06641",
+    source_step_id: "split_items",
+    source_output: "main",
+    target_step_id: "math",
+    target_input: "main"
+  },
+  %{
+    id: "af9d53ea-c06c-4ee6-952a-c1406b937726",
+    source_step_id: "split_items",
+    source_output: "main",
+    target_step_id: "math_2",
+    target_input: "main"
+  },
+  %{
+    id: "4af4bde9-42ab-4b44-9589-d43109b5e869",
+    source_step_id: "math",
+    source_output: "main",
+    target_step_id: "format_string",
+    target_input: "main"
+  },
+  %{
+    id: "995449ee-2925-46e1-a86e-532b28efb9c7",
+    source_step_id: "math_2",
+    source_output: "main",
+    target_step_id: "format_string",
+    target_input: "main"
+  },
+  %{
+    id: "bb5c1a59-a6d1-49a3-94f7-916f07655412",
+    source_step_id: "format_string",
+    source_output: "main",
+    target_step_id: "aggregate_items",
+    target_input: "main"
+  },
+  %{
+    id: "d7a53977-73ca-4654-aa9f-fe181c55f281",
+    source_step_id: "aggregate_items",
+    source_output: "main",
+    target_step_id: "format_string_2",
     target_input: "main"
   }
 ]
