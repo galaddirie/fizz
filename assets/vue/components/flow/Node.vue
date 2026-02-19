@@ -5,8 +5,7 @@ import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
-import { useClientStore } from '@/stores/clientStore';
-import type { StepNodeData } from '@/types/workflow';
+import type { StepNodeData, StepSubnodeSlot } from '@/types/workflow';
 import {
   GlobeAltIcon,
   ServerIcon,
@@ -44,8 +43,8 @@ import { PlayIcon, PowerIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroico
 
 const props = defineProps<NodeProps<StepNodeData>>();
 const themeStore = useThemeStore();
-const clientStore = useClientStore();
 const canEdit = computed(() => props.data.canEdit ?? true);
+const isSubnode = computed(() => props.data.node_role === 'subnode');
 
 const isEditing = ref(false);
 const nameDraft = ref(props.data.name || 'Untitled Step');
@@ -182,9 +181,12 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 // Node classes
 const nodeClasses = computed(() => [
-  'group relative flex items-start gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md transition-shadow',
+  'group relative flex items-start transition-shadow',
+  isSubnode.value
+    ? 'gap-2.5 rounded-xl border border-dashed border-base-300 bg-base-200/20 p-3 shadow-sm'
+    : 'gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md',
   // Different styling for trigger nodes
-  props.data.step_kind === 'trigger' ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
+  props.data.step_kind === 'trigger' && !isSubnode.value ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
   props.dragging
     ? 'cursor-grabbing shadow-xl'
     : canEdit.value
@@ -198,12 +200,20 @@ const nodeClasses = computed(() => [
 // Node style with selection ring
 const nodeStyle = computed(() => {
   const isDark = themeStore.theme === 'dark';
-  let shadow = isDark
-    ? 'inset 0px 2px 3px 0px rgba(255,255,255,0.25), 0 6px 12px 4px rgba(255, 255, 255, 0.01)'
-    : 'inset 0px 2px 3px 0px rgba(255,255,255,0.95), 0 6px 12px 4px rgba(0, 0, 0, 0.08)';
+  let shadow = isSubnode.value
+    ? isDark
+      ? '0 4px 10px 2px rgba(255, 255, 255, 0.03)'
+      : '0 4px 10px 2px rgba(0, 0, 0, 0.06)'
+    : isDark
+      ? 'inset 0px 2px 3px 0px rgba(255,255,255,0.25), 0 6px 12px 4px rgba(255, 255, 255, 0.01)'
+      : 'inset 0px 2px 3px 0px rgba(255,255,255,0.95), 0 6px 12px 4px rgba(0, 0, 0, 0.08)';
 
   if (props.selected) {
-    const ringColor = isDark ? 'rgba(255, 255, 255, 0.55)' : 'rgba(0, 0, 0, 0.95)';
+    const ringColor = isSubnode.value
+      ? hexToRgba(oklchToHex(colorMap.queued), isDark ? 0.7 : 0.9)
+      : isDark
+        ? 'rgba(255, 255, 255, 0.55)'
+        : 'rgba(0, 0, 0, 0.95)';
     shadow += `, 0 0 0 2px ${ringColor}`;
   }
 
@@ -216,6 +226,15 @@ const nodeStyle = computed(() => {
   const style: Record<string, string> = {
     boxShadow: shadow,
   };
+
+  if (isSubnode.value) {
+    const accent = oklchToHex(colorMap.queued);
+    style.backgroundColor = hexToRgba(accent, isDark ? 0.08 : 0.04);
+
+    if (!hasStatusStyle.value || !props.selected) {
+      style.borderColor = hexToRgba(accent, isDark ? 0.45 : 0.35);
+    }
+  }
 
   if (hasStatusStyle.value) {
     style.borderColor = props.selected
@@ -258,6 +277,10 @@ const showInputHandle = computed(
   () => props.data.hasInput !== false && props.data.step_kind !== 'trigger'
 );
 const showOutputHandle = computed(() => props.data.hasOutput !== false);
+const subnodeInputHandles = computed<StepSubnodeSlot[]>(() => {
+  const slots = props.data.subnode_slots ?? [];
+  return slots.filter(slot => slot.id && slot.id !== 'main');
+});
 
 // Inline editing functions
 const startEditing = () => {
@@ -302,7 +325,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
   <div class="relative inline-flex group">
     <!-- Run Node Icon -->
     <PlayIcon
-      v-if="canEdit"
+      v-if="canEdit && !isSubnode"
       class="absolute -top-7 left-3 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-50 group-hover:opacity-70"
       :class="{
         'pointer-events-none opacity-50': data.disabled,
@@ -315,7 +338,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
     <!-- Power Icon -->
     <PowerIcon
-      v-if="canEdit"
+      v-if="canEdit && !isSubnode"
       class="absolute -top-7 left-12 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
       :class="{ 'opacity-70': props.selected }"
       aria-label="Power"
@@ -324,7 +347,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
     <!-- Pin Output Icon -->
     <component
-      v-if="canEdit"
+      v-if="canEdit && !isSubnode"
       :is="BookmarkSolidIcon"
       class="absolute -top-7 left-21 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
       :class="{ 'opacity-70': props.selected }"
@@ -334,21 +357,43 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       @click.stop="handleTogglePin"
     />
 
-    <!-- Input Handle -->
+    <!-- Input Handles -->
     <div
-      v-if="showInputHandle"
-      class="absolute top-1/2 left-0 z-10 -translate-x-1/2 -translate-y-1/2"
+      v-if="showInputHandle || subnodeInputHandles.length > 0"
+      class="absolute top-0 left-0 z-10 h-full -translate-x-1/2"
     >
-      <Handle id="main" type="target" :position="Position.Left" />
+      <div
+        v-if="showInputHandle"
+        class="absolute top-1/2 left-0 -translate-y-1/2"
+      >
+        <Handle id="main" type="target" :position="Position.Left" />
+      </div>
+
+      <div
+        v-for="(slot, idx) in subnodeInputHandles"
+        :key="slot.id"
+        class="absolute left-0 flex items-center gap-1.5"
+        :style="{ top: `${20 + idx * 20}px` }"
+      >
+        <Handle :id="slot.id" type="target" :position="Position.Left" />
+        <span class="rounded bg-base-100/90 px-1.5 py-0.5 text-[9px] font-semibold text-base-content/70">
+          {{ slot.title || slot.id }}
+        </span>
+      </div>
     </div>
 
     <!-- Node Card -->
     <div :class="nodeClasses" :style="nodeStyle">
       <!-- Icon Container -->
       <div
-        class="bg-base-200 flex size-11 shrink-0 items-center justify-center rounded-2xl shadow-inner"
+        :class="[
+          'flex shrink-0 items-center justify-center',
+          isSubnode
+            ? 'bg-base-100 size-9 rounded-xl border border-base-300/70'
+            : 'bg-base-200 size-11 rounded-2xl shadow-inner',
+        ]"
       >
-        <component :is="IconComponent" class="text-base-content/80 size-6" />
+        <component :is="IconComponent" :class="isSubnode ? 'text-base-content/75 size-5' : 'text-base-content/80 size-6'" />
       </div>
 
       <!-- Content -->
@@ -360,7 +405,10 @@ const handleNameKeydown = (event: KeyboardEvent) => {
               v-if="isEditing && canEdit"
               ref="nameInputRef"
               v-model="nameDraft"
-              class="input input-xs nodrag bg-base-100/90 text-base-content/80 h-6 w-full rounded-lg text-xs font-semibold"
+              :class="[
+                'input input-xs nodrag bg-base-100/90 text-base-content/80 h-6 w-full rounded-lg font-semibold',
+                isSubnode ? 'text-[11px]' : 'text-xs',
+              ]"
               type="text"
               @keydown="handleNameKeydown"
               @blur="commitName"
@@ -368,7 +416,10 @@ const handleNameKeydown = (event: KeyboardEvent) => {
             />
             <h3
               v-else
-              class="text-base-content truncate text-sm leading-tight font-semibold h-6 flex items-center"
+              :class="[
+                'text-base-content truncate leading-tight font-semibold h-6 flex items-center',
+                isSubnode ? 'text-[12px]' : 'text-sm',
+              ]"
               :title="canEdit ? 'Double click to rename' : ''"
               @dblclick.stop="canEdit && startEditing()"
             >
@@ -421,6 +472,12 @@ const handleNameKeydown = (event: KeyboardEvent) => {
           <div class="flex min-w-0 items-center gap-2">
             <span class="text-base-content/60 truncate font-mono text-[11px]">
               {{ data.type_id }}
+            </span>
+            <span
+              v-if="isSubnode"
+              class="rounded border border-dashed border-base-300 px-1.5 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-base-content/60"
+            >
+              Sub-node
             </span>
           </div>
         </div>

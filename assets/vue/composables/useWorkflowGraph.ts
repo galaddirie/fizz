@@ -142,5 +142,54 @@ export function useWorkflowGraph(workflow: () => Workflow) {
     );
   });
 
-  return { stepNameById, incomingStepIdsByStepId, upstreamStepIdsByStepId };
+  const incomingConnectionsByTargetInputByStepId = computed<
+    Record<string, Record<string, string[]>>
+  >(() => {
+    const steps = workflow().draft?.steps || [];
+    const connections = workflow().draft?.connections || [];
+    const orderById = stepOrderById.value;
+    const incoming = new Map<string, Map<string, string[]>>();
+
+    for (const connection of connections) {
+      const targetId = connection.target_step_id;
+      const sourceId = connection.source_step_id;
+      const targetInput = connection.target_input || 'main';
+
+      const byInput = incoming.get(targetId) ?? new Map<string, string[]>();
+      const list = byInput.get(targetInput) ?? [];
+
+      if (!list.includes(sourceId)) {
+        list.push(sourceId);
+      }
+
+      byInput.set(targetInput, list);
+      incoming.set(targetId, byInput);
+    }
+
+    return steps.reduce(
+      (acc, step) => {
+        const byInput = incoming.get(step.id) ?? new Map<string, string[]>();
+        const inputMap: Record<string, string[]> = {};
+
+        for (const [targetInput, sourceIds] of byInput.entries()) {
+          inputMap[targetInput] = [...sourceIds].sort((a, b) => {
+            const aOrder = orderById[a] ?? Number.MAX_SAFE_INTEGER;
+            const bOrder = orderById[b] ?? Number.MAX_SAFE_INTEGER;
+            return aOrder - bOrder;
+          });
+        }
+
+        acc[step.id] = inputMap;
+        return acc;
+      },
+      {} as Record<string, Record<string, string[]>>
+    );
+  });
+
+  return {
+    stepNameById,
+    incomingStepIdsByStepId,
+    incomingConnectionsByTargetInputByStepId,
+    upstreamStepIdsByStepId,
+  };
 }

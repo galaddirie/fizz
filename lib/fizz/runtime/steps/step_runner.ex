@@ -29,6 +29,8 @@ defmodule Fizz.Runtime.Steps.StepRunner do
           variables: map(),
           metadata: map(),
           step_outputs: map(),
+          slot_bindings: map(),
+          primary_parent_lookup: map(),
           trigger_data: map(),
           trigger_type: atom(),
           current_group: map(),
@@ -111,6 +113,7 @@ defmodule Fizz.Runtime.Steps.StepRunner do
   def execute_with_context(step, input, opts) do
     # Build context from options and input
     ctx = build_context(step, input, opts)
+    executor_input = build_executor_input(step, ctx.input, ctx.step_outputs, opts)
 
     # Check if this is a non-active trigger that should be skipped
     if should_skip_trigger?(step.type_id, ctx.trigger_type) do
@@ -118,7 +121,7 @@ defmodule Fizz.Runtime.Steps.StepRunner do
       # Return nil to avoid propagating input from skipped triggers (prevents duplicates in joins)
       nil
     else
-      do_execute(step, input, ctx)
+      do_execute(step, executor_input, ctx)
     end
   end
 
@@ -190,17 +193,91 @@ defmodule Fizz.Runtime.Steps.StepRunner do
     step_outputs =
       Map.take(step_outputs, upstream_ids)
 
+    primary_input = build_primary_input(step, input, step_outputs, opts)
+
     ExecutionContext.new(
       execution_id: Keyword.get(opts, :execution_id),
       workflow_id: Keyword.get(opts, :workflow_id),
       step_id: step.id,
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
-      input: input,
+      input: primary_input,
       step_outputs: step_outputs,
       trigger: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type)
     )
+  end
+
+  defp build_primary_input(step, input, step_outputs, opts) do
+    primary_parents =
+      opts
+      |> Keyword.get(:primary_parent_lookup, %{})
+      |> Map.get(step.id, [])
+
+    slot_bindings =
+      opts
+      |> Keyword.get(:slot_bindings, %{})
+      |> Map.get(step.id, %{})
+
+    case primary_parents do
+      [] ->
+        if slot_bindings == %{} do
+          input
+        else
+          nil
+        end
+
+      [parent_step_id] ->
+        Map.get(step_outputs, parent_step_id, input)
+
+      _multiple_parents ->
+        # Keep existing semantics for fan-in joins and multi-parent inputs.
+        input
+    end
+  end
+
+  defp build_executor_input(step, primary_input, step_outputs, opts) do
+    case subnode_slots_for_step(step.type_id) do
+      [] ->
+        primary_input
+
+      slot_defs ->
+        slot_bindings =
+          opts
+          |> Keyword.get(:slot_bindings, %{})
+          |> Map.get(step.id, %{})
+
+        Enum.reduce(slot_defs, %{"_primary" => primary_input}, fn slot_def, acc ->
+          slot_id = slot_field(slot_def, :id)
+          input_key = slot_field(slot_def, :input_key) || slot_id
+          cardinality = slot_field(slot_def, :cardinality) || "one"
+          source_step_ids = Map.get(slot_bindings, slot_id, [])
+
+          slot_value =
+            source_step_ids
+            |> Enum.map(&Map.get(step_outputs, &1))
+            |> slot_value_for_cardinality(cardinality)
+
+          Map.put(acc, input_key, slot_value)
+        end)
+    end
+  end
+
+  defp slot_value_for_cardinality(values, "many"), do: values
+  defp slot_value_for_cardinality(values, _cardinality), do: List.first(values)
+
+  defp subnode_slots_for_step(type_id) when is_binary(type_id) do
+    case Fizz.Steps.Registry.get(type_id) do
+      {:ok, type} when is_list(type.subnode_slots) ->
+        type.subnode_slots
+
+      _ ->
+        []
+    end
+  end
+
+  defp slot_field(slot, key) when is_map(slot) and is_atom(key) do
+    Map.get(slot, key) || Map.get(slot, Atom.to_string(key))
   end
 
   defp maybe_filter_group_outputs(step_outputs, opts) do

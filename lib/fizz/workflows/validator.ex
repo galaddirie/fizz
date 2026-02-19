@@ -3,6 +3,7 @@ defmodule Fizz.Workflows.Validator do
   Validates workflow draft integrity, including node group boundaries.
   """
 
+  alias Fizz.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.WorkflowDraft
 
   @spec validate(WorkflowDraft.t()) :: :ok | {:error, list()}
@@ -13,6 +14,7 @@ defmodule Fizz.Workflows.Validator do
       |> Kernel.++(validate_group_connectivity(draft))
       |> Kernel.++(validate_group_connections(draft))
       |> Kernel.++(validate_no_cross_group_references(draft))
+      |> Kernel.++(validate_subnode_connections(draft))
 
     if errors == [] do
       :ok
@@ -68,7 +70,11 @@ defmodule Fizz.Workflows.Validator do
 
   defp validate_group_connectivity(draft) do
     groups = draft.groups || []
-    connections = draft.connections || []
+
+    connections =
+      draft.connections
+      |> List.wrap()
+      |> Enum.filter(&main_connection?/1)
 
     Enum.flat_map(groups, fn group ->
       entry_step_id = group_entry_step(group, connections)
@@ -95,7 +101,11 @@ defmodule Fizz.Workflows.Validator do
 
   defp validate_group_connections(draft) do
     groups = draft.groups || []
-    connections = draft.connections || []
+
+    connections =
+      draft.connections
+      |> List.wrap()
+      |> Enum.filter(&main_connection?/1)
 
     Enum.flat_map(groups, fn group ->
       entry_step_id = group_entry_step(group, connections)
@@ -164,6 +174,170 @@ defmodule Fizz.Workflows.Validator do
         end
       end)
     end)
+  end
+
+  defp validate_subnode_connections(draft) do
+    steps = draft.steps || []
+    connections = draft.connections || []
+    steps_by_id = Map.new(steps, &{&1.id, &1})
+
+    connection_errors =
+      Enum.flat_map(connections, fn conn ->
+        target_input = connection_field(conn, :target_input)
+
+        if main_target_input?(target_input) do
+          []
+        else
+          validate_subnode_connection(conn, steps_by_id)
+        end
+      end)
+
+    required_and_cardinality_errors =
+      Enum.flat_map(steps, fn step ->
+        validate_step_slot_requirements(step, connections)
+      end)
+
+    connection_errors ++ required_and_cardinality_errors
+  end
+
+  defp validate_subnode_connection(conn, steps_by_id) do
+    source_step_id = connection_field(conn, :source_step_id)
+    target_step_id = connection_field(conn, :target_step_id)
+    slot_id = normalize_target_input(connection_field(conn, :target_input))
+
+    with {:ok, source_step} <- fetch_step(steps_by_id, source_step_id),
+         {:ok, target_step} <- fetch_step(steps_by_id, target_step_id),
+         {:ok, target_type} <- StepRegistry.get(target_step.type_id),
+         {:ok, slot_def} <- fetch_slot_def(target_type, slot_id),
+         :ok <- validate_slot_accepts_source(slot_def, source_step.type_id) do
+      []
+    else
+      {:error, {:step_not_found, step_id}} ->
+        [{:connection, connection_field(conn, :id), "references missing step #{step_id}"}]
+
+      {:error, {:unknown_target_type, type_id}} ->
+        [
+          {:connection, connection_field(conn, :id),
+           "target step type #{type_id} is not registered"}
+        ]
+
+      {:error, {:unknown_slot, target_type_id, unknown_slot_id}} ->
+        [
+          {:connection, connection_field(conn, :id),
+           "slot #{unknown_slot_id} is not defined on step type #{target_type_id}"}
+        ]
+
+      {:error, {:disallowed_source_type, source_type_id, slot_id_value}} ->
+        [
+          {:connection, connection_field(conn, :id),
+           "step type #{source_type_id} is not allowed for slot #{slot_id_value}"}
+        ]
+    end
+  end
+
+  defp validate_step_slot_requirements(step, connections) do
+    case StepRegistry.get(step.type_id) do
+      {:ok, target_type} ->
+        target_type
+        |> slot_defs()
+        |> Enum.flat_map(fn slot_def ->
+          slot_id = slot_field(slot_def, :id)
+          slot_connections = slot_connections_for_step(connections, step.id, slot_id)
+          required? = slot_field(slot_def, :required) == true
+          cardinality = slot_field(slot_def, :cardinality) || "one"
+          slot_errors = []
+
+          slot_errors =
+            if required? and slot_connections == [] do
+              [{:step, step.id, "required slot #{slot_id} must have at least one connection"}]
+            else
+              slot_errors
+            end
+
+          if cardinality == "one" and length(slot_connections) > 1 do
+            [
+              {:step, step.id, "slot #{slot_id} allows only one sub-node connection"}
+              | slot_errors
+            ]
+          else
+            slot_errors
+          end
+        end)
+
+      {:error, :not_found} ->
+        [{:step, step.id, "step type #{step.type_id} is not registered"}]
+    end
+  end
+
+  defp fetch_step(steps_by_id, step_id) when is_binary(step_id) do
+    case Map.get(steps_by_id, step_id) do
+      nil -> {:error, {:step_not_found, step_id}}
+      step -> {:ok, step}
+    end
+  end
+
+  defp fetch_slot_def(target_type, slot_id) when is_binary(slot_id) do
+    case Enum.find(slot_defs(target_type), fn slot_def -> slot_field(slot_def, :id) == slot_id end) do
+      nil -> {:error, {:unknown_slot, target_type.id, slot_id}}
+      slot_def -> {:ok, slot_def}
+    end
+  end
+
+  defp validate_slot_accepts_source(slot_def, source_type_id) do
+    accepted_type_ids = slot_accepts_type_ids(slot_def)
+
+    if source_type_id in accepted_type_ids do
+      :ok
+    else
+      {:error, {:disallowed_source_type, source_type_id, slot_field(slot_def, :id)}}
+    end
+  end
+
+  defp slot_connections_for_step(connections, step_id, slot_id) do
+    Enum.filter(connections, fn conn ->
+      connection_field(conn, :target_step_id) == step_id and
+        normalize_target_input(connection_field(conn, :target_input)) == slot_id
+    end)
+  end
+
+  defp slot_defs(type) when is_map(type),
+    do: Map.get(type, :subnode_slots) || Map.get(type, "subnode_slots") || []
+
+  defp slot_accepts_type_ids(slot_def) do
+    slot_def
+    |> slot_field(:accepts)
+    |> case do
+      accepts when is_map(accepts) ->
+        Map.get(accepts, "type_ids") || Map.get(accepts, :type_ids) || []
+
+      _ ->
+        []
+    end
+  end
+
+  defp slot_field(slot_def, field) when is_map(slot_def) and is_atom(field) do
+    Map.get(slot_def, field) || Map.get(slot_def, Atom.to_string(field))
+  end
+
+  defp connection_field(conn, field) when is_map(conn) and is_atom(field) do
+    Map.get(conn, field) || Map.get(conn, Atom.to_string(field))
+  end
+
+  defp normalize_target_input(target_input) when target_input in [nil, :main, "main", ""],
+    do: "main"
+
+  defp normalize_target_input(target_input) when is_atom(target_input),
+    do: Atom.to_string(target_input)
+
+  defp normalize_target_input(target_input) when is_binary(target_input), do: target_input
+  defp normalize_target_input(_target_input), do: "main"
+
+  defp main_target_input?(target_input), do: normalize_target_input(target_input) == "main"
+
+  defp main_connection?(connection) do
+    connection
+    |> connection_field(:target_input)
+    |> main_target_input?()
   end
 
   defp group_entry_step(group, connections) do

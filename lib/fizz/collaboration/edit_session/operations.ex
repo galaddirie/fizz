@@ -6,6 +6,7 @@ defmodule Fizz.Collaboration.EditSession.Operations do
   alias Fizz.Workflows.WorkflowDraft
   alias Fizz.Workflows.Embeds.{Step, Connection, NodeGroup}
   alias Fizz.Graph
+  alias Fizz.Steps.Registry, as: StepRegistry
   require Logger
 
   @doc """
@@ -164,7 +165,7 @@ defmodule Fizz.Collaboration.EditSession.Operations do
         {:error, :would_create_cycle}
 
       true ->
-        :ok
+        validate_subnode_slot_connection(draft, conn_data)
     end
   end
 
@@ -698,8 +699,114 @@ defmodule Fizz.Collaboration.EditSession.Operations do
 
   defp valid_step_type?(step_data) do
     type_id = field(step_data, :type_id)
-    Fizz.Steps.Registry.exists?(type_id)
+    StepRegistry.exists?(type_id)
   end
+
+  defp validate_subnode_slot_connection(draft, conn_data) do
+    target_input = normalize_target_input(field(conn_data, :target_input))
+
+    if target_input == "main" do
+      :ok
+    else
+      with {:ok, target_step} <- fetch_step(draft, field(conn_data, :target_step_id)),
+           {:ok, source_step} <- fetch_step(draft, field(conn_data, :source_step_id)),
+           {:ok, target_type} <- StepRegistry.get(target_step.type_id),
+           {:ok, slot_def} <- fetch_slot_definition(target_type, target_input),
+           :ok <- validate_slot_accepts_type(slot_def, source_step.type_id),
+           :ok <- validate_slot_cardinality(draft, conn_data, slot_def) do
+        :ok
+      else
+        {:error, :step_not_found} ->
+          {:error, :step_not_found}
+
+        {:error, :not_found} ->
+          {:error, :target_step_type_not_found}
+
+        {:error, {:slot_not_found, slot_id}} ->
+          {:error, {:invalid_target_input, slot_id}}
+
+        {:error, {:slot_disallows_type, slot_id, source_type_id}} ->
+          {:error, {:slot_disallows_source_type, slot_id, source_type_id}}
+
+        {:error, {:slot_cardinality_exceeded, slot_id}} ->
+          {:error, {:slot_cardinality_exceeded, slot_id}}
+      end
+    end
+  end
+
+  defp validate_slot_cardinality(draft, conn_data, slot_def) do
+    case slot_field(slot_def, :cardinality) do
+      "many" ->
+        :ok
+
+      _ ->
+        target_step_id = field(conn_data, :target_step_id)
+        slot_id = normalize_target_input(field(conn_data, :target_input))
+
+        existing_count =
+          draft.connections
+          |> List.wrap()
+          |> Enum.count(fn conn ->
+            field(conn, :target_step_id) == target_step_id and
+              normalize_target_input(field(conn, :target_input)) == slot_id
+          end)
+
+        if existing_count >= 1 do
+          {:error, {:slot_cardinality_exceeded, slot_id}}
+        else
+          :ok
+        end
+    end
+  end
+
+  defp fetch_step(draft, step_id) do
+    case find_step(draft, step_id) do
+      nil -> {:error, :step_not_found}
+      step -> {:ok, step}
+    end
+  end
+
+  defp fetch_slot_definition(target_type, slot_id) do
+    slots = Map.get(target_type, :subnode_slots, [])
+
+    case Enum.find(slots, fn slot -> slot_field(slot, :id) == slot_id end) do
+      nil -> {:error, {:slot_not_found, slot_id}}
+      slot -> {:ok, slot}
+    end
+  end
+
+  defp validate_slot_accepts_type(slot_def, source_type_id) do
+    accepted_type_ids =
+      slot_def
+      |> slot_field(:accepts)
+      |> case do
+        accepts when is_map(accepts) ->
+          Map.get(accepts, "type_ids") || Map.get(accepts, :type_ids) || []
+
+        _ ->
+          []
+      end
+
+    if source_type_id in accepted_type_ids do
+      :ok
+    else
+      {:error, {:slot_disallows_type, slot_field(slot_def, :id), source_type_id}}
+    end
+  end
+
+  defp slot_field(slot, key) when is_map(slot) and is_atom(key) do
+    Map.get(slot, key) || Map.get(slot, Atom.to_string(key))
+  end
+
+  defp normalize_target_input(target_input) when target_input in [nil, "", :main, "main"],
+    do: "main"
+
+  defp normalize_target_input(target_input) when is_binary(target_input), do: target_input
+
+  defp normalize_target_input(target_input) when is_atom(target_input),
+    do: Atom.to_string(target_input)
+
+  defp normalize_target_input(_target_input), do: "main"
 
   defp would_create_cycle?(draft, source_id, target_id) do
     # Build graph with proposed edge and check for cycles

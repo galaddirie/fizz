@@ -44,6 +44,7 @@ defmodule Fizz.Steps.Definition do
   - `:description` (required) - Description of what the step does
   - `:icon` (required) - Heroicon name (e.g., "hero-globe-alt")
   - `:kind` (required) - One of :action, :trigger, :control_flow, :transform
+  - `:role` (optional) - One of :root, :subnode (default: :root)
 
   ## Schema Attributes
 
@@ -59,6 +60,7 @@ defmodule Fizz.Steps.Definition do
 
   @required_opts [:id, :name, :category, :description, :icon, :kind]
   @valid_kinds [:action, :trigger, :control_flow, :transform]
+  @valid_roles [:root, :subnode]
 
   defmacro __using__(opts) do
     # Validate required options at compile time
@@ -69,9 +71,14 @@ defmodule Fizz.Steps.Definition do
     end
 
     kind = Keyword.fetch!(opts, :kind)
+    role = Keyword.get(opts, :role, :root)
 
     unless kind in @valid_kinds do
       raise ArgumentError, "kind must be one of #{inspect(@valid_kinds)}, got: #{inspect(kind)}"
+    end
+
+    unless role in @valid_roles do
+      raise ArgumentError, "role must be one of #{inspect(@valid_roles)}, got: #{inspect(role)}"
     end
 
     quote do
@@ -84,6 +91,7 @@ defmodule Fizz.Steps.Definition do
       Module.register_attribute(__MODULE__, :step_description, persist: true)
       Module.register_attribute(__MODULE__, :step_icon, persist: true)
       Module.register_attribute(__MODULE__, :step_kind, persist: true)
+      Module.register_attribute(__MODULE__, :step_role, persist: true)
 
       @step_id unquote(opts[:id])
       @step_name unquote(opts[:name])
@@ -91,18 +99,21 @@ defmodule Fizz.Steps.Definition do
       @step_description unquote(opts[:description])
       @step_icon unquote(opts[:icon])
       @step_kind unquote(opts[:kind])
+      @step_role unquote(role)
 
       # Default schemas (can be overridden)
       @config_schema %{"type" => "object", "properties" => %{}}
       @default_config %{}
       @input_schema %{"type" => "object"}
       @output_schema %{"type" => "object"}
+      @subnode_slots []
 
       # Allow redefinition
       Module.register_attribute(__MODULE__, :config_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :default_config, accumulate: false)
       Module.register_attribute(__MODULE__, :input_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :output_schema, accumulate: false)
+      Module.register_attribute(__MODULE__, :subnode_slots, accumulate: false)
     end
   end
 
@@ -118,11 +129,13 @@ defmodule Fizz.Steps.Definition do
           category: @step_category,
           description: @step_description,
           icon: @step_icon,
+          node_role: @step_role,
           step_kind: @step_kind,
           executor: Atom.to_string(__MODULE__),
           config_schema: @config_schema,
           input_schema: @input_schema,
           output_schema: @output_schema,
+          subnode_slots: @subnode_slots,
           inserted_at: nil,
           updated_at: nil
         }

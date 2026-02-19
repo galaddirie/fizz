@@ -39,6 +39,8 @@ defmodule Fizz.Runtime.RunicAdapter do
 
     # Build step map for looking up step data by ID
     step_map = Map.new(outer_steps, &{&1.id, &1})
+    slot_bindings = build_slot_binding_lookup(outer_connections)
+    primary_parent_lookup = build_primary_parent_lookup(outer_connections)
 
     step_opts = [
       execution_id: Keyword.get(opts, :execution_id),
@@ -47,6 +49,8 @@ defmodule Fizz.Runtime.RunicAdapter do
       metadata: Keyword.get(opts, :metadata, %{}),
       step_outputs: step_outputs,
       upstream_lookup: upstream_lookup,
+      slot_bindings: slot_bindings,
+      primary_parent_lookup: primary_parent_lookup,
       trigger_data: Keyword.get(opts, :trigger_data, %{}),
       trigger_type: Keyword.get(opts, :trigger_type),
       all_groups: groups
@@ -406,10 +410,14 @@ defmodule Fizz.Runtime.RunicAdapter do
     graph = Fizz.Graph.from_workflow!(steps, connections, validate: false)
     upstream_lookup = build_upstream_lookup(graph)
     step_map = Map.new(steps, &{&1.id, &1})
+    slot_bindings = build_slot_binding_lookup(connections)
+    primary_parent_lookup = build_primary_parent_lookup(connections)
 
     step_opts =
       opts
       |> Keyword.put(:upstream_lookup, upstream_lookup)
+      |> Keyword.put(:slot_bindings, slot_bindings)
+      |> Keyword.put(:primary_parent_lookup, primary_parent_lookup)
       |> Keyword.put(:all_groups, [])
 
     wrk = Workflow.new(name: "group_#{group.id}")
@@ -692,8 +700,54 @@ defmodule Fizz.Runtime.RunicAdapter do
   end
 
   defp build_parent_lookup(connections) do
-    Enum.group_by(connections, & &1.target_step_id, & &1.source_step_id)
+    Enum.group_by(
+      connections,
+      &connection_field(&1, :target_step_id),
+      &connection_field(&1, :source_step_id)
+    )
   end
+
+  defp build_primary_parent_lookup(connections) do
+    connections
+    |> Enum.filter(fn conn ->
+      conn
+      |> connection_field(:target_input)
+      |> main_target_input?()
+    end)
+    |> Enum.group_by(
+      &connection_field(&1, :target_step_id),
+      &connection_field(&1, :source_step_id)
+    )
+  end
+
+  defp build_slot_binding_lookup(connections) do
+    connections
+    |> Enum.reduce(%{}, fn conn, acc ->
+      target_input = connection_field(conn, :target_input)
+
+      if main_target_input?(target_input) do
+        acc
+      else
+        target_step_id = connection_field(conn, :target_step_id)
+        source_step_id = connection_field(conn, :source_step_id)
+        slot_id = normalize_target_input(target_input)
+
+        update_in(acc, [target_step_id, slot_id], fn existing ->
+          (existing || []) ++ [source_step_id]
+        end)
+      end
+    end)
+  end
+
+  defp normalize_target_input(target_input) when is_binary(target_input), do: target_input
+
+  defp normalize_target_input(target_input) when is_atom(target_input),
+    do: Atom.to_string(target_input)
+
+  defp normalize_target_input(_target_input), do: "main"
+
+  defp main_target_input?(target_input) when target_input in [nil, "main", :main, ""], do: true
+  defp main_target_input?(_target_input), do: false
 
   defp build_upstream_lookup(graph) do
     Enum.reduce(Fizz.Graph.vertex_ids(graph), %{}, fn step_id, acc ->
@@ -709,12 +763,14 @@ defmodule Fizz.Runtime.RunicAdapter do
 
     in_degrees =
       Enum.reduce(connections, in_degrees, fn conn, acc ->
-        Map.update(acc, conn.target_step_id, 0, &(&1 + 1))
+        Map.update(acc, connection_field(conn, :target_step_id), 0, &(&1 + 1))
       end)
 
     adjacency =
       Enum.reduce(connections, %{}, fn conn, acc ->
-        Map.update(acc, conn.source_step_id, [conn.target_step_id], &[conn.target_step_id | &1])
+        source_step_id = connection_field(conn, :source_step_id)
+        target_step_id = connection_field(conn, :target_step_id)
+        Map.update(acc, source_step_id, [target_step_id], &[target_step_id | &1])
       end)
 
     roots = Enum.filter(step_ids, &(Map.get(in_degrees, &1) == 0))

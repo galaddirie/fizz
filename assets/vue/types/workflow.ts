@@ -79,6 +79,19 @@ export interface Trigger {
 // =============================================================================
 
 export type StepKind = 'trigger' | 'action' | 'transform' | 'control_flow';
+export type NodeRole = 'root' | 'subnode';
+
+export interface StepSubnodeSlot {
+  id: string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  cardinality?: 'one' | 'many';
+  accepts?: {
+    type_ids?: string[];
+  };
+  input_key?: string;
+}
 
 export interface StepType {
   id: string;
@@ -87,9 +100,11 @@ export interface StepType {
   category: string;
   icon?: string;
   step_kind: StepKind;
+  node_role?: NodeRole;
   config_schema?: Record<string, unknown>;
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
+  subnode_slots?: StepSubnodeSlot[];
 }
 
 export interface NodeLibraryItem {
@@ -99,6 +114,7 @@ export interface NodeLibraryItem {
   category: string;
   icon: string;
   step_kind: StepKind;
+  node_role?: NodeRole;
 }
 
 // =============================================================================
@@ -114,12 +130,14 @@ export interface StepNodeData {
   icon?: string;
   category?: string;
   step_kind?: StepKind;
+  node_role?: NodeRole;
   status?: StepExecutionStatus;
   stats?: {
     duration_us?: number;
     bytes?: number;
     out?: number;
   };
+  subnode_slots?: StepSubnodeSlot[];
   // Fan-out item stats for multi-item steps
   itemStats?: {
     isMultiItem: boolean;

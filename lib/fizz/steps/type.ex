@@ -24,6 +24,7 @@ defmodule Fizz.Steps.Type do
   """
 
   @type step_kind :: :action | :trigger | :control_flow | :transform
+  @type node_role :: :root | :subnode
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -31,9 +32,11 @@ defmodule Fizz.Steps.Type do
           category: String.t(),
           description: String.t(),
           icon: String.t(),
+          node_role: node_role(),
           config_schema: map(),
           input_schema: map(),
           output_schema: map(),
+          subnode_slots: [map()],
           executor: String.t(),
           step_kind: step_kind(),
           inserted_at: DateTime.t() | nil,
@@ -47,11 +50,13 @@ defmodule Fizz.Steps.Type do
              :category,
              :description,
              :icon,
+             :node_role,
              :step_kind,
              :executor,
              :config_schema,
              :input_schema,
-             :output_schema
+             :output_schema,
+             :subnode_slots
            ]}
   @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
@@ -64,9 +69,11 @@ defmodule Fizz.Steps.Type do
     :step_kind,
     :inserted_at,
     :updated_at,
+    node_role: :root,
     config_schema: %{},
     input_schema: %{},
-    output_schema: %{}
+    output_schema: %{},
+    subnode_slots: []
   ]
 
   @doc """

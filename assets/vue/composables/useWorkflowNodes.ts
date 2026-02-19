@@ -267,13 +267,15 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           icon: stepType?.icon,
           category: stepType?.category,
           step_kind: stepType?.step_kind,
+          node_role: stepType?.node_role,
           status: displayStatus,
           stats:
             stepExecution && totalDurationUs !== undefined
               ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
               : undefined,
+          subnode_slots: stepType?.subnode_slots ?? [],
           itemStats: stepItemStats,
-          hasInput: stepType?.step_kind !== 'trigger',
+          hasInput: stepType?.step_kind !== 'trigger' && stepType?.node_role !== 'subnode',
           hasOutput: true,
           disabled: isDisabled,
           pinned: isPinned,

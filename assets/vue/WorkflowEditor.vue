@@ -225,6 +225,7 @@ onMounted(() => {
         :editor-state="editor.editorState"
         :step-name-by-id="editor.stepNameById"
         :incoming-step-ids="editor.incomingStepIdsByStepId"
+        :incoming-connections-by-target-input="editor.incomingConnectionsByTargetInputByStepId"
         :upstream-step-ids="editor.upstreamStepIdsByStepId"
         :can-edit="editor.canEdit"
         @close="editor.store.closeConfigModal"

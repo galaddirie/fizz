@@ -227,7 +227,8 @@ defmodule Fizz.Steps.Registry do
       description: type.description,
       icon: type.icon,
       category: type.category,
-      step_kind: Atom.to_string(type.step_kind)
+      step_kind: Atom.to_string(type.step_kind),
+      node_role: Atom.to_string(type.node_role)
     }
   end
 
@@ -254,7 +255,12 @@ defmodule Fizz.Steps.Registry do
       Fizz.Steps.Executors.WebhookTrigger,
       Fizz.Steps.Executors.ScheduleTrigger,
       Fizz.Steps.Executors.RespondToWebhook,
-      Fizz.Steps.Executors.Wait
+      Fizz.Steps.Executors.Wait,
+      Fizz.Steps.Executors.AIAgent,
+      Fizz.Steps.Executors.OpenAIModel,
+      Fizz.Steps.Executors.AnthropicModel,
+      Fizz.Steps.Executors.AIPromptTemplate,
+      Fizz.Steps.Executors.AIToolHttp
     ]
   end
 

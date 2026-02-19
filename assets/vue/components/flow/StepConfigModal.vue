@@ -9,6 +9,7 @@ import type {
   StepExecution,
   StepExecutionStatus,
   StepNodeData,
+  StepSubnodeSlot,
   StepType,
 } from '@/types/workflow';
 
@@ -53,6 +54,7 @@ interface Props {
   editorState?: EditorState;
   stepNameById?: Record<string, string>;
   incomingStepIds?: Record<string, string[]>;
+  incomingConnectionsByTargetInput?: Record<string, Record<string, string[]>>;
   upstreamStepIds?: Record<string, string[]>;
 }
 
@@ -350,6 +352,31 @@ const directUpstreamStepIds = computed(() => {
 const inputIndexLabels = computed(() => {
   const upstreamIds = directUpstreamStepIds.value;
   return upstreamIds.map(stepId => props.stepNameById?.[stepId] || stepId);
+});
+
+const subnodeSlots = computed<StepSubnodeSlot[]>(() => {
+  if (props.stepType?.subnode_slots?.length) return props.stepType.subnode_slots;
+  return props.node?.data?.subnode_slots ?? [];
+});
+
+const incomingConnectionsByTargetInputForStep = computed<Record<string, string[]>>(() => {
+  if (!props.node) return {};
+  return props.incomingConnectionsByTargetInput?.[props.node.id] ?? {};
+});
+
+const subnodeSlotRows = computed(() => {
+  return subnodeSlots.value.map(slot => {
+    const slotId = slot.id;
+    const sourceStepIds = incomingConnectionsByTargetInputForStep.value[slotId] ?? [];
+    const sourceStepNames = sourceStepIds.map(stepId => props.stepNameById?.[stepId] || stepId);
+
+    return {
+      slot,
+      sourceStepIds,
+      sourceStepNames,
+      isConnected: sourceStepIds.length > 0,
+    };
+  });
 });
 
 const timestampFor = (value: unknown): number => {
@@ -1286,6 +1313,70 @@ const toggleWebhookListening = () => {
                         </div>
                       </div>
                     </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-if="subnodeSlotRows.length > 0"
+              class="bg-base-100 border-base-300 space-y-4 rounded-2xl border p-5 shadow-sm"
+            >
+              <div>
+                <h4 class="text-base-content text-sm font-bold">Sub-node Slots</h4>
+                <p class="text-base-content/50 mt-1 text-xs">
+                  These inputs are populated directly from connected sub-node outputs.
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <div
+                  v-for="row in subnodeSlotRows"
+                  :key="row.slot.id"
+                  class="border-base-200 bg-base-200/10 flex items-start justify-between gap-4 rounded-xl border px-3 py-2.5"
+                >
+                  <div class="space-y-1">
+                    <div class="flex items-center gap-2">
+                      <span class="text-base-content text-xs font-semibold">
+                        {{ row.slot.title || row.slot.id }}
+                      </span>
+                      <span
+                        class="badge badge-xs"
+                        :class="row.slot.required ? 'badge-warning' : 'badge-ghost'"
+                      >
+                        {{ row.slot.required ? 'required' : 'optional' }}
+                      </span>
+                      <span class="badge badge-ghost badge-xs">
+                        {{ row.slot.cardinality === 'many' ? 'many' : 'one' }}
+                      </span>
+                    </div>
+                    <p v-if="row.slot.description" class="text-base-content/50 text-[11px]">
+                      {{ row.slot.description }}
+                    </p>
+                    <p class="text-base-content/50 text-[11px]">
+                      Accepts:
+                      {{
+                        row.slot.accepts?.type_ids?.length
+                          ? row.slot.accepts.type_ids.join(', ')
+                          : 'None'
+                      }}
+                    </p>
+                  </div>
+
+                  <div class="max-w-[55%] text-right">
+                    <p
+                      class="text-[11px] font-semibold"
+                      :class="row.isConnected ? 'text-success' : 'text-base-content/40'"
+                    >
+                      {{ row.isConnected ? 'Connected' : 'Not connected' }}
+                    </p>
+                    <p
+                      v-if="row.isConnected"
+                      class="text-base-content/60 mt-1 truncate text-[11px]"
+                      :title="row.sourceStepNames.join(', ')"
+                    >
+                      {{ row.sourceStepNames.join(', ') }}
+                    </p>
                   </div>
                 </div>
               </div>
