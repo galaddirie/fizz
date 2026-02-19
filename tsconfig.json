@@ -8,6 +8,7 @@
     "noEmit": true,
     "skipLibCheck": true,
     "paths": {
+      "@/*": [ "./assets/vue/*" ],
       "*": [ "./deps/*", "node_modules/*" ]
     },
     "strict": true,

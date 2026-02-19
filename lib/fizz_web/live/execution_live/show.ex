@@ -4,49 +4,68 @@ defmodule FizzWeb.ExecutionLive.Show do
   """
   use FizzWeb, :live_view
 
+  alias Fizz.Accounts
   alias Fizz.Executions
   alias Fizz.Executions.{Execution, StepExecution}
   alias Fizz.Executions.PubSub, as: ExecutionPubSub
+  alias FizzWeb.ExecutionLive.ShowPresenter
+  alias FizzWeb.WorkflowLive.Paths
   import FizzWeb.Formatters
 
   @impl true
-  def mount(%{"workflow_id" => workflow_id, "execution_id" => execution_id}, _session, socket) do
-    scope = socket.assigns.current_scope
+  def mount(
+        %{
+          "workspace_id" => workspace_id,
+          "workflow_id" => workflow_id,
+          "execution_id" => execution_id
+        },
+        _session,
+        socket
+      ) do
+    case Accounts.build_scope_for_workspace(socket.assigns.current_scope, workspace_id) do
+      {:ok, scope} ->
+        case Executions.get_execution_with_steps(scope, execution_id) do
+          {:ok, execution} ->
+            if execution.workflow_id == workflow_id do
+              step_executions = sort_step_executions(execution.step_executions)
+              item_stats = build_item_stats(step_executions)
 
-    case Executions.get_execution_with_steps(scope, execution_id) do
-      {:ok, execution} ->
-        if execution.workflow_id == workflow_id do
-          step_executions = sort_step_executions(execution.step_executions)
-          item_stats = build_item_stats(step_executions)
+              socket =
+                socket
+                |> assign(:current_scope, scope)
+                |> assign(:page_title, "Execution #{short_id(execution.id)}")
+                |> assign(:workflow, execution.workflow)
+                |> assign(:execution, execution)
+                |> assign(:execution_id, execution.id)
+                |> assign(:step_executions_count, length(step_executions))
+                |> assign(:item_stats_by_step_id, item_stats.by_step_id)
+                |> assign(:item_stats_summary, item_stats.summary)
+                |> assign(:step_executions_data, step_executions)
+                |> assign_raw_execution_data(execution, step_executions)
+                |> stream(:step_executions, step_executions, reset: true)
 
-          socket =
-            socket
-            |> assign(:page_title, "Execution #{short_id(execution.id)}")
-            |> assign(:workflow, execution.workflow)
-            |> assign(:execution, execution)
-            |> assign(:execution_id, execution.id)
-            |> assign(:step_executions_count, length(step_executions))
-            |> assign(:item_stats_by_step_id, item_stats.by_step_id)
-            |> assign(:item_stats_summary, item_stats.summary)
-            |> assign(:step_executions_data, step_executions)
-            |> assign_raw_execution_data(execution, step_executions)
-            |> stream(:step_executions, step_executions, reset: true)
+              socket =
+                if connected?(socket) do
+                  _ = ExecutionPubSub.subscribe_execution(scope, execution.id)
+                  socket
+                else
+                  socket
+                end
 
-          socket =
-            if connected?(socket) do
-              _ = ExecutionPubSub.subscribe_execution(scope, execution.id)
-              socket
+              {:ok, socket}
             else
-              socket
+              {:ok, redirect_to_workflows(socket, "Execution not found")}
             end
 
-          {:ok, socket}
-        else
-          {:ok, redirect_to_workflows(socket, "Execution not found")}
+          {:error, :not_found} ->
+            {:ok, redirect_to_workflows(socket, "Execution not found")}
         end
 
-      {:error, :not_found} ->
-        {:ok, redirect_to_workflows(socket, "Execution not found")}
+      {:error, _reason} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Workspace not found")
+         |> redirect(to: ~p"/workspaces")}
     end
   end
 
@@ -103,7 +122,7 @@ defmodule FizzWeb.ExecutionLive.Show do
               <div class="flex items-center gap-3">
                 <.link
                   id="execution-back-link"
-                  navigate={~p"/workflows/#{@workflow.id}"}
+                  navigate={Paths.workflow_show_path(@current_scope, @workflow.id)}
                   class="inline-flex items-center gap-2 rounded-full border border-base-300 bg-base-100 px-4 py-2 text-xs font-semibold text-base-content/80 transition hover:border-base-300 hover:text-base-content"
                 >
                   <.icon name="hero-arrow-left" class="size-4" />
@@ -162,7 +181,7 @@ defmodule FizzWeb.ExecutionLive.Show do
             <div class="flex flex-wrap gap-3">
               <.link
                 id="execution-workflow-link"
-                navigate={~p"/workflows/#{@workflow.id}"}
+                navigate={Paths.workflow_show_path(@current_scope, @workflow.id)}
                 class="inline-flex items-center gap-2 rounded-full border border-base-300 bg-base-100 px-4 py-2 text-xs font-semibold text-base-content/80 transition hover:border-base-300 hover:text-base-content"
               >
                 <.icon name="hero-squares-2x2" class="size-4" />
@@ -170,7 +189,7 @@ defmodule FizzWeb.ExecutionLive.Show do
               </.link>
               <.link
                 id="execution-debug-link"
-                navigate={~p"/workflows/#{@workflow.id}/edit?debug_execution_id=#{@execution.id}"}
+                navigate={Paths.workflow_edit_path(@current_scope, @workflow.id, @execution.id)}
                 class="inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-800 transition hover:border-amber-400/70 hover:text-amber-900 dark:text-amber-200 dark:hover:text-amber-100"
               >
                 <.icon name="hero-bug-ant" class="size-4" />
@@ -178,7 +197,7 @@ defmodule FizzWeb.ExecutionLive.Show do
               </.link>
               <.link
                 id="execution-edit-link"
-                navigate={~p"/workflows/#{@workflow.id}/edit"}
+                navigate={Paths.workflow_edit_path(@current_scope, @workflow.id)}
                 class="inline-flex items-center gap-2 rounded-full border border-transparent bg-primary px-4 py-2 text-xs font-semibold text-primary-content shadow-sm transition hover:bg-primary/90"
               >
                 <.icon name="hero-play" class="size-4" />
@@ -350,7 +369,10 @@ defmodule FizzWeb.ExecutionLive.Show do
             phx-update="stream"
             class="space-y-4"
           >
-            <div class="hidden rounded-3xl border border-base-300 bg-base-100 p-6 text-center text-sm text-base-content/60 only:block">
+            <div
+              id="execution-step-list-empty"
+              class="hidden rounded-3xl border border-base-300 bg-base-100 p-6 text-center text-sm text-base-content/60 only:block"
+            >
               No step executions yet.
             </div>
 
@@ -510,322 +532,33 @@ defmodule FizzWeb.ExecutionLive.Show do
   defp redirect_to_workflows(socket, message) do
     socket
     |> put_flash(:error, message)
-    |> redirect(to: ~p"/workflows")
+    |> redirect(to: Paths.workflows_index_path(socket.assigns.current_scope))
   end
 
-  defp execution_trigger_label(%Execution{} = execution) do
-    execution
-    |> trigger_type()
-    |> humanize()
-  end
+  defp execution_trigger_label(execution), do: ShowPresenter.execution_trigger_label(execution)
+  defp trigger_payload(execution), do: ShowPresenter.trigger_payload(execution)
+  defp trace_value(execution), do: ShowPresenter.trace_value(execution)
+  defp correlation_value(execution), do: ShowPresenter.correlation_value(execution)
+  defp parent_execution_value(execution), do: ShowPresenter.parent_execution_value(execution)
+  defp triggered_by_label(execution), do: ShowPresenter.triggered_by_label(execution)
+  defp execution_type_label(type), do: ShowPresenter.execution_type_label(type)
+  defp execution_type_class(type), do: ShowPresenter.execution_type_class(type)
+  defp status_pill_class(status), do: ShowPresenter.status_pill_class(status)
+  defp humanize(value), do: ShowPresenter.humanize(value)
 
-  defp trigger_type(%Execution{trigger: %Execution.Trigger{type: type}}), do: type
-  defp trigger_type(_), do: nil
+  defp sort_step_executions(step_executions),
+    do: ShowPresenter.sort_step_executions(step_executions)
 
-  defp trigger_payload(%Execution{trigger: %Execution.Trigger{data: data}}), do: data
-  defp trigger_payload(_), do: nil
-
-  defp trace_value(%Execution{metadata: %Execution.Metadata{trace_id: trace_id}}),
-    do: trace_id || "-"
-
-  defp trace_value(_), do: "-"
-
-  defp correlation_value(%Execution{
-         metadata: %Execution.Metadata{correlation_id: correlation_id}
-       }),
-       do: correlation_id || "-"
-
-  defp correlation_value(_), do: "-"
-
-  defp parent_execution_value(%Execution{
-         metadata: %Execution.Metadata{parent_execution_id: parent_execution_id}
-       }),
-       do: parent_execution_id || "-"
-
-  defp parent_execution_value(_), do: "-"
-
-  defp triggered_by_label(%Execution{triggered_by_user: %Fizz.Accounts.User{email: email}}),
-    do: email
-
-  defp triggered_by_label(%Execution{triggered_by_user_id: nil}), do: "System"
-  defp triggered_by_label(_), do: "Unknown"
-
-  defp execution_type_label(nil), do: "-"
-  defp execution_type_label(type), do: humanize(type)
-
-  defp execution_type_class(:production),
-    do:
-      "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-300"
-
-  defp execution_type_class(:preview),
-    do: "bg-sky-500/10 text-sky-700 ring-sky-500/30 dark:bg-sky-500/20 dark:text-sky-300"
-
-  defp execution_type_class(:partial),
-    do:
-      "bg-amber-500/10 text-amber-700 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-300"
-
-  defp execution_type_class(_), do: "bg-base-200/60 text-base-content/70 ring-base-200"
-
-  defp status_pill_class(:completed),
-    do:
-      "bg-emerald-500/10 text-emerald-700 ring-emerald-500/30 dark:bg-emerald-500/20 dark:text-emerald-300"
-
-  defp status_pill_class(:failed),
-    do: "bg-rose-500/10 text-rose-700 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-300"
-
-  defp status_pill_class(:running),
-    do: "bg-sky-500/10 text-sky-700 ring-sky-500/30 dark:bg-sky-500/20 dark:text-sky-300"
-
-  defp status_pill_class(:pending),
-    do:
-      "bg-amber-500/10 text-amber-700 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-300"
-
-  defp status_pill_class(:paused),
-    do:
-      "bg-amber-500/10 text-amber-700 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-300"
-
-  defp status_pill_class(:cancelled), do: "bg-base-200/60 text-base-content/70 ring-base-200"
-
-  defp status_pill_class(:timeout),
-    do: "bg-rose-500/10 text-rose-700 ring-rose-500/30 dark:bg-rose-500/20 dark:text-rose-300"
-
-  defp status_pill_class(:queued),
-    do:
-      "bg-violet-500/10 text-violet-700 ring-violet-500/30 dark:bg-violet-500/20 dark:text-violet-300"
-
-  defp status_pill_class(:skipped), do: "bg-base-200/60 text-base-content/70 ring-base-200"
-  defp status_pill_class(_), do: "bg-base-200/60 text-base-content/70 ring-base-200"
-
-  defp humanize(nil), do: "-"
-
-  defp humanize(value) when is_atom(value) do
-    value
-    |> Atom.to_string()
-    |> String.replace("_", " ")
-    |> String.capitalize()
-  end
-
-  defp humanize(value), do: to_string(value)
-
-  defp sort_step_executions(step_executions) do
-    Enum.sort_by(step_executions, fn step ->
-      case step.inserted_at || step.started_at do
-        nil -> 0
-        datetime -> DateTime.to_unix(datetime, :microsecond)
-      end
-    end)
-  end
-
-  defp fetch_payload_value(payload, key) when is_map(payload) do
-    Map.get(payload, key) || Map.get(payload, Atom.to_string(key))
-  end
-
-  defp fetch_payload_value(_payload, _key), do: nil
-
-  defp payload_preview(nil), do: "-"
-
-  defp payload_preview(payload) do
-    payload
-    |> inspect(limit: 6, printable_limit: 200, pretty: true)
-    |> String.replace(~r/\s+/, " ")
-    |> truncate(90)
-  end
-
-  defp truncate(value, max) when is_binary(value) and byte_size(value) > max do
-    String.slice(value, 0, max) <> "..."
-  end
-
-  defp truncate(value, _max), do: value
-
-  defp format_payload(nil), do: "-"
-
-  defp format_payload(payload) do
-    case Jason.encode(payload, pretty: true) do
-      {:ok, json} -> json
-      {:error, _} -> inspect(payload, pretty: true, limit: :infinity)
-    end
-  end
+  defp fetch_payload_value(payload, key), do: ShowPresenter.fetch_payload_value(payload, key)
+  defp payload_preview(payload), do: ShowPresenter.payload_preview(payload)
+  defp format_payload(payload), do: ShowPresenter.format_payload(payload)
 
   defp assign_raw_execution_data(socket, %Execution{} = execution, step_executions) do
-    workflow = socket.assigns.workflow
+    raw_json =
+      ShowPresenter.raw_execution_json(socket.assigns.workflow, execution, step_executions)
 
-    raw_payload = %{
-      workflow: workflow_raw(workflow),
-      execution: execution_raw(execution),
-      trigger: execution.trigger,
-      context: execution.context,
-      output: execution.output,
-      error: execution.error,
-      metadata: execution.metadata,
-      pinned: pinned_data(execution),
-      step_executions: Enum.map(step_executions, &step_execution_raw/1)
-    }
-
-    assign(socket, :raw_execution_json, format_payload(raw_payload))
+    assign(socket, :raw_execution_json, raw_json)
   end
 
-  defp workflow_raw(nil), do: nil
-
-  defp workflow_raw(workflow) do
-    # Load published version and draft if not already loaded
-    workflow = Fizz.Repo.preload(workflow, [:published_version, :draft])
-
-    base_workflow =
-      Map.take(workflow, [
-        :id,
-        :name,
-        :description,
-        :status,
-        :public,
-        :current_version_tag,
-        :published_version_id,
-        :user_id,
-        :inserted_at,
-        :updated_at
-      ])
-
-    # Include full workflow definition from published version or draft
-    definition =
-      case workflow.published_version do
-        %{} = published_version ->
-          %{
-            version_tag: published_version.version_tag,
-            steps: published_version.steps,
-            connections: published_version.connections,
-            source_hash: published_version.source_hash,
-            published_at: published_version.published_at,
-            source: "published"
-          }
-
-        nil ->
-          case workflow.draft do
-            %{} = draft ->
-              %{
-                version_tag: nil,
-                steps: draft.steps,
-                connections: draft.connections,
-                source_hash: nil,
-                published_at: nil,
-                source: "draft"
-              }
-
-            _ ->
-              nil
-          end
-      end
-
-    Map.put(base_workflow, :definition, definition)
-  end
-
-  defp execution_raw(%Execution{} = execution) do
-    base =
-      Map.take(execution, [
-        :id,
-        :workflow_id,
-        :status,
-        :execution_type,
-        :trigger,
-        :context,
-        :output,
-        :error,
-        :waiting_for,
-        :started_at,
-        :completed_at,
-        :expires_at,
-        :metadata,
-        # :runic_log,
-        :triggered_by_user_id,
-        :inserted_at,
-        :updated_at
-      ])
-
-    base
-  end
-
-  defp step_execution_raw(step_execution) do
-    Map.take(step_execution, [
-      :id,
-      :execution_id,
-      :step_id,
-      :step_type_id,
-      :status,
-      :input_data,
-      :output_data,
-      :output_item_count,
-      :item_index,
-      :items_total,
-      :error,
-      :attempt,
-      :retry_of_id,
-      :queued_at,
-      :started_at,
-      :completed_at,
-      :metadata,
-      :inserted_at,
-      :updated_at
-    ])
-  end
-
-  defp build_item_stats(step_executions) do
-    by_step_id =
-      step_executions
-      |> Enum.group_by(& &1.step_id)
-      |> Enum.into(%{}, fn {step_id, executions} ->
-        items_total =
-          executions
-          |> Enum.find_value(fn se -> se.items_total end) ||
-            if(length(executions) > 1, do: length(executions), else: 1)
-
-        completed = Enum.count(executions, &(&1.status == :completed))
-        failed = Enum.count(executions, &(&1.status == :failed))
-        running = Enum.count(executions, &(&1.status == :running))
-        skipped = Enum.count(executions, &(&1.status == :skipped))
-
-        {step_id,
-         %{
-           items_total: items_total,
-           completed: completed,
-           failed: failed,
-           running: running,
-           skipped: skipped,
-           count: length(executions)
-         }}
-      end)
-
-    summary = %{
-      total_item_runs: length(step_executions),
-      multi_item_steps: Enum.count(by_step_id, fn {_id, stats} -> stats.items_total > 1 end)
-    }
-
-    %{by_step_id: by_step_id, summary: summary}
-  end
-
-  defp pinned_data(%Execution{} = execution) do
-    extras = execution.metadata && execution.metadata.extras
-
-    pinned_steps =
-      case extras do
-        %{} -> Map.get(extras, :pinned_steps) || Map.get(extras, "pinned_steps") || []
-        _ -> []
-      end
-
-    pinned_outputs =
-      if is_list(pinned_steps) and is_map(execution.context) do
-        Map.take(execution.context, pinned_steps)
-      else
-        %{}
-      end
-
-    %{
-      pinned_steps: pinned_steps,
-      pinned_outputs: pinned_outputs,
-      disabled_steps: fetch_metadata_list(extras, :disabled_steps)
-    }
-  end
-
-  defp fetch_metadata_list(extras, key) when is_map(extras) do
-    Map.get(extras, key) || Map.get(extras, Atom.to_string(key)) || []
-  end
-
-  defp fetch_metadata_list(_extras, _key), do: []
+  defp build_item_stats(step_executions), do: ShowPresenter.build_item_stats(step_executions)
 end

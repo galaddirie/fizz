@@ -6,27 +6,57 @@ defmodule FizzWeb.WorkflowLive.Index do
   """
   use FizzWeb, :live_view
 
+  alias Fizz.Accounts
   alias Fizz.Workflows
+  alias FizzWeb.WorkflowLive.Paths
   import FizzWeb.Formatters
 
   @impl true
-  def mount(_params, _session, socket) do
-    scope = socket.assigns.current_scope
+  def mount(%{"workspace_id" => workspace_id}, _session, socket) do
+    case Accounts.build_scope_for_workspace(socket.assigns.current_scope, workspace_id) do
+      {:ok, scope} ->
+        workflows =
+          scope
+          |> Workflows.list_workflows()
+          |> sort_workflows()
 
-    workflows =
-      scope
-      |> Workflows.list_workflows()
-      |> sort_workflows()
+        {:ok,
+         socket
+         |> assign(:current_scope, scope)
+         |> assign(workflows_empty?: workflows == [])
+         |> stream(:workflows, workflows)}
 
-    {:ok,
-     socket
-     |> assign(workflows_empty?: workflows == [])
-     |> stream(:workflows, workflows)}
+      {:error, _reason} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Workspace not found")
+         |> redirect(to: ~p"/workspaces")}
+    end
   end
 
   @impl true
   def handle_event("open_workflow", %{"workflow_id" => workflow_id}, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/workflows/#{workflow_id}")}
+    {:noreply,
+     push_navigate(socket,
+       to: Paths.workflow_show_path(socket.assigns.current_scope, workflow_id)
+     )}
+  end
+
+  @impl true
+  def handle_event("create_workflow", _params, socket) do
+    scope = socket.assigns.current_scope
+    default_name = "Untitled Workflow"
+
+    case Workflows.create_workflow(scope, %{name: default_name}) do
+      {:ok, workflow} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Workflow created")
+         |> push_navigate(to: Paths.workflow_edit_path(scope, workflow.id))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to create workflow")}
+    end
   end
 
   @impl true
@@ -98,16 +128,9 @@ defmodule FizzWeb.WorkflowLive.Index do
             <div class="flex gap-3">
               <button
                 type="button"
-                phx-click={show_modal("test-modal")}
-                class="btn btn-sm btn-outline gap-2"
-              >
-                <.icon name="hero-beaker" class="size-5" />
-                <span>Test Modal</span>
-              </button>
-
-              <button
-                type="button"
-                phx-click="open_create_modal"
+                id="workflow-create-button"
+                phx-click="create_workflow"
+                phx-disable-with="Creating..."
                 class="btn btn-sm btn-primary gap-2 "
               >
                 <.icon name="hero-plus" class="size-5" />
@@ -127,7 +150,7 @@ defmodule FizzWeb.WorkflowLive.Index do
               rows={@streams.workflows}
               rows_empty?={@workflows_empty?}
               tbody_class="divide-y divide-base-200"
-              row_click={&navigate_to_workflow/1}
+              row_click={&navigate_to_workflow(&1, @current_scope)}
               row_class="cursor-pointer hover:bg-neutral/10"
             >
               <:col :let={workflow} label="Workflow">
@@ -259,22 +282,6 @@ defmodule FizzWeb.WorkflowLive.Index do
           </div>
         </section>
       </div>
-
-      <.modal id="test-modal">
-        <div class="space-y-4">
-          <h2 class="text-xl font-bold">Test Modal</h2>
-          <p>This is a test modal component using DaisyUI.</p>
-          <div class="flex justify-end">
-            <button
-              type="button"
-              phx-click={hide_modal("test-modal")}
-              class="btn btn-primary"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </.modal>
     </Layouts.app>
     """
   end
@@ -289,8 +296,11 @@ defmodule FizzWeb.WorkflowLive.Index do
     )
   end
 
-  defp navigate_to_workflow({_, workflow}), do: JS.navigate(~p"/workflows/#{workflow.id}")
-  defp navigate_to_workflow(workflow), do: JS.navigate(~p"/workflows/#{workflow.id}")
+  defp navigate_to_workflow({_, workflow}, current_scope),
+    do: JS.navigate(Paths.workflow_show_path(current_scope, workflow.id))
+
+  defp navigate_to_workflow(workflow, current_scope),
+    do: JS.navigate(Paths.workflow_show_path(current_scope, workflow.id))
 
   # ============================================================================
   # Display Helpers
@@ -307,17 +317,14 @@ defmodule FizzWeb.WorkflowLive.Index do
     state = Workflows.workflow_access_state(scope, workflow)
 
     case state do
-      :owner ->
-        {"Owner", "badge-primary"}
+      :admin ->
+        {"Admin", "badge-primary"}
 
-      :editor ->
-        {"Editor", "badge-secondary"}
+      :member ->
+        {"Member", "badge-secondary"}
 
       :viewer ->
         {"Viewer", "badge-ghost"}
-
-      :public ->
-        {"Public", "badge-outline"}
 
       nil ->
         {"No Access", "badge-error"}

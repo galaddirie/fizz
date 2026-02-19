@@ -4,34 +4,40 @@ defmodule FizzWeb.WorkflowLive.Show do
   """
   use FizzWeb, :live_view
 
+  alias Fizz.Accounts
   alias Fizz.Workflows
   alias Fizz.Executions
   alias Fizz.Executions.Execution
+  alias FizzWeb.WorkflowLive.Paths
   import FizzWeb.Formatters
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
-    scope = socket.assigns.current_scope
+  def mount(%{"workspace_id" => workspace_id, "id" => id}, _session, socket) do
+    with {:ok, scope} <-
+           Accounts.build_scope_for_workspace(socket.assigns.current_scope, workspace_id),
+         {:ok, workflow} <- Workflows.get_workflow(scope, id) do
+      executions = Executions.list_workflow_executions(scope, workflow, limit: 10)
 
-    case Workflows.get_workflow(id, scope) do
-      {:ok, workflow} ->
-        executions = Executions.list_workflow_executions(scope, workflow, limit: 10)
+      socket =
+        socket
+        |> assign(:current_scope, scope)
+        |> assign(:page_title, workflow.name)
+        |> assign(:workflow, workflow)
+        |> assign(:executions, executions)
 
-        socket =
-          socket
-          |> assign(:page_title, workflow.name)
-          |> assign(:workflow, workflow)
-          |> assign(:executions, executions)
-
-        {:ok, socket}
-
+      {:ok, socket}
+    else
       {:error, :not_found} ->
-        socket =
-          socket
-          |> put_flash(:error, "Workflow not found")
-          |> redirect(to: ~p"/workflows")
+        {:ok,
+         socket
+         |> put_flash(:error, "Workflow not found")
+         |> redirect(to: ~p"/workspaces")}
 
-        {:ok, socket}
+      {:error, _reason} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Workspace not found")
+         |> redirect(to: ~p"/workspaces")}
     end
   end
 
@@ -44,7 +50,10 @@ defmodule FizzWeb.WorkflowLive.Show do
           <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
             <div class="space-y-3">
               <div class="flex items-center gap-3">
-                <.link navigate={~p"/workflows"} class="btn btn-ghost btn-sm">
+                <.link
+                  navigate={Paths.workflows_index_path(@current_scope)}
+                  class="btn btn-ghost btn-sm"
+                >
                   <.icon name="hero-arrow-left" class="size-4" />
                   <span>Back to Workflows</span>
                 </.link>
@@ -62,7 +71,7 @@ defmodule FizzWeb.WorkflowLive.Show do
               </div>
               <div class="flex items-center gap-3">
                 <.link
-                  navigate={~p"/workflows/#{@workflow.id}/edit"}
+                  navigate={Paths.workflow_edit_path(@current_scope, @workflow.id)}
                   class="btn btn-primary gap-2"
                 >
                   <.icon name="hero-play" class="size-4" />
@@ -148,7 +157,9 @@ defmodule FizzWeb.WorkflowLive.Show do
                         </td>
                         <td>
                           <.link
-                            navigate={~p"/workflows/#{@workflow.id}/execution/#{execution.id}"}
+                            navigate={
+                              Paths.execution_show_path(@current_scope, @workflow.id, execution.id)
+                            }
                             class="btn btn-ghost btn-xs"
                             title="Inspect execution"
                           >

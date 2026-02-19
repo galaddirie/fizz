@@ -4,6 +4,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
   """
   use FizzWeb, :live_view
 
+  alias Fizz.Accounts
   alias Fizz.Workflows
   alias Fizz.Repo
   alias Fizz.Steps
@@ -14,67 +15,76 @@ defmodule FizzWeb.WorkflowLive.Edit do
   alias Fizz.Executions.Execution
   alias Fizz.Executions.PubSub, as: ExecutionPubSub
   alias Fizz.Runtime.Execution.Supervisor, as: ExecutionSupervisor
+  alias FizzWeb.WorkflowLive.Paths
   alias Ecto.UUID
   require Logger
 
   @impl true
-  def mount(%{"id" => id} = params, _session, socket) do
-    scope = socket.assigns.current_scope
-    user = scope.user
+  def mount(%{"workspace_id" => workspace_id, "id" => id} = params, _session, socket) do
     debug_execution_id = normalize_debug_execution_id(params)
 
-    case Workflows.get_workflow_with_draft(id, scope) do
-      {:ok, workflow} ->
-        case PubSub.authorize_edit(scope, workflow.id) do
-          :ok ->
-            step_types = Steps.list_types()
-            node_library_items = Steps.list_library_items()
+    case Accounts.build_scope_for_workspace(socket.assigns.current_scope, workspace_id) do
+      {:ok, scope} ->
+        user = scope.user
 
-            socket =
-              socket
-              |> assign(:page_title, "Editing #{workflow.name}")
-              |> assign(:workflow, workflow)
-              |> assign(:step_types, step_types)
-              |> assign(:node_library_items, node_library_items)
-              |> assign(:editor_state, %EditorState{workflow_id: workflow.id})
-              |> assign(:presences, [])
-              |> assign(:current_user_id, user.id)
-              |> assign(:execution, nil)
-              |> assign(:step_executions, [])
-              |> assign(:execution_id, nil)
-              |> assign(:expression_previews, %{})
-              |> assign(:webhook_execution_subscribed, false)
-              |> assign(:undo_state, nil)
-              |> assign(:debug_execution_id, nil)
+        case Workflows.get_workflow_with_draft(scope, id) do
+          {:ok, workflow} ->
+            case PubSub.authorize_edit(scope, workflow.id) do
+              :ok ->
+                step_types = Steps.list_types()
+                node_library_items = Steps.list_library_items()
 
-            # Only set up collaboration when WebSocket is connected
-            socket =
-              if connected?(socket) do
-                socket
-                |> setup_collaboration(workflow.id, user)
-                |> maybe_load_debug_execution(debug_execution_id)
-              else
-                socket
-              end
+                socket =
+                  socket
+                  |> assign(:current_scope, scope)
+                  |> assign(:page_title, "Editing #{workflow.name}")
+                  |> assign(:workflow, workflow)
+                  |> assign(:step_types, step_types)
+                  |> assign(:node_library_items, node_library_items)
+                  |> assign(:editor_state, %EditorState{workflow_id: workflow.id})
+                  |> assign(:presences, [])
+                  |> assign(:current_user_id, user.id)
+                  |> assign(:execution, nil)
+                  |> assign(:step_executions, [])
+                  |> assign(:execution_id, nil)
+                  |> assign(:expression_previews, %{})
+                  |> assign(:webhook_execution_subscribed, false)
+                  |> assign(:undo_state, nil)
+                  |> assign(:debug_execution_id, nil)
 
-            {:ok, socket, layout: false}
+                # Only set up collaboration when WebSocket is connected
+                socket =
+                  if connected?(socket) do
+                    socket
+                    |> setup_collaboration(workflow.id, user)
+                    |> maybe_load_debug_execution(debug_execution_id)
+                  else
+                    socket
+                  end
 
-          {:error, :unauthorized} ->
-            socket =
-              socket
-              |> put_flash(:error, "You do not have permission to edit this workflow")
-              |> redirect(to: ~p"/workflows/#{workflow.id}")
+                {:ok, socket, layout: false}
 
-            {:ok, socket}
+              {:error, :unauthorized} ->
+                {:ok,
+                 socket
+                 |> assign(:current_scope, scope)
+                 |> put_flash(:error, "You do not have permission to edit this workflow")
+                 |> redirect(to: Paths.workflow_show_path(scope, workflow.id))}
+            end
+
+          {:error, :not_found} ->
+            {:ok,
+             socket
+             |> assign(:current_scope, scope)
+             |> put_flash(:error, "Workflow not found")
+             |> redirect(to: Paths.workflows_index_path(scope))}
         end
 
-      {:error, :not_found} ->
-        socket =
-          socket
-          |> put_flash(:error, "Workflow not found")
-          |> redirect(to: ~p"/workflows")
-
-        {:ok, socket}
+      {:error, _reason} ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Workspace not found")
+         |> redirect(to: ~p"/workspaces")}
     end
   end
 
@@ -84,7 +94,11 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   defp setup_collaboration(socket, workflow_id, user) do
     # Ensure edit session server is running
-    {:ok, _pid} = Fizz.Collaboration.EditSession.Supervisor.ensure_session(workflow_id)
+    {:ok, _pid} =
+      Fizz.Collaboration.EditSession.Supervisor.ensure_session(
+        socket.assigns.current_scope,
+        workflow_id
+      )
 
     # Subscribe to operation broadcasts
     :ok = Phoenix.PubSub.subscribe(Fizz.PubSub, PubSub.session_topic(workflow_id))
@@ -538,7 +552,9 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   @impl true
   def handle_event("navigate_revisions", _params, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/workflows/#{socket.assigns.workflow.id}/revisions")}
+    scope = socket.assigns.current_scope
+    workflow = socket.assigns.workflow
+    {:noreply, push_navigate(socket, to: Paths.workflow_revisions_path(scope, workflow.id))}
   end
 
   # =============================================================================

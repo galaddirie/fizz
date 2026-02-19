@@ -126,7 +126,11 @@ defmodule Fizz.Executions do
           {:ok, Execution.t()} | {:error, :not_found}
   def get_execution_with_steps(scope, id) do
     case Repo.get(Execution, id)
-         |> Repo.preload([:workflow, :triggered_by_user, :step_executions]) do
+         |> Repo.preload([
+           :triggered_by_user,
+           :step_executions,
+           workflow: [:published_version, :draft]
+         ]) do
       nil ->
         {:error, :not_found}
 

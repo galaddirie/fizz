@@ -2,20 +2,23 @@ defmodule FizzWeb.WorkflowLive.Revision do
   use FizzWeb, :live_view
 
   alias Ecto.UUID
+  alias Fizz.Accounts
   alias Fizz.Collaboration.EditSession.{Server, Supervisor}
   alias Fizz.Workflows
   alias Fizz.Steps
+  alias FizzWeb.WorkflowLive.Paths
   require Logger
 
   @impl true
-  def mount(%{"id" => workflow_id}, _session, socket) do
-    scope = socket.assigns.current_scope
-    user = scope.user
-
-    with {:ok, workflow} <- Workflows.get_workflow_with_draft(scope, workflow_id),
-         {:ok, _pid} <- Supervisor.ensure_session(workflow.id) do
+  def mount(%{"workspace_id" => workspace_id, "id" => workflow_id}, _session, socket) do
+    with {:ok, scope} <-
+           Accounts.build_scope_for_workspace(socket.assigns.current_scope, workspace_id),
+         %{id: user_id} = _user <- scope.user,
+         {:ok, workflow} <- Workflows.get_workflow_with_draft(scope, workflow_id),
+         {:ok, _pid} <- Supervisor.ensure_session(scope, workflow.id) do
       socket =
         socket
+        |> assign(:current_scope, scope)
         |> assign(:page_title, "Revisions · #{workflow.name}")
         |> assign(:workflow, workflow)
         |> assign(:draft, workflow.draft)
@@ -24,21 +27,24 @@ defmodule FizzWeb.WorkflowLive.Revision do
           :versions,
           serialize_versions(Workflows.list_workflow_versions(scope, workflow))
         )
-        |> assign(:undo_stack, fetch_undo_stack(workflow.id, user.id))
+        |> assign(:undo_stack, fetch_undo_stack(workflow.id, user_id))
         |> assign(:revision, %{kind: "current", label: "Current Draft"})
         |> assign(:editor_state, fetch_editor_state(workflow.id))
-        |> assign(:current_user_id, user.id)
+        |> assign(:current_user_id, user_id)
 
       {:ok, socket, layout: false}
     else
       {:error, :not_found} ->
-        {:ok, socket |> put_flash(:error, "Workflow not found") |> redirect(to: ~p"/workflows")}
+        {:ok,
+         socket
+         |> put_flash(:error, "Workflow not found")
+         |> redirect(to: ~p"/workspaces")}
 
       {:error, :unauthorized} ->
         {:ok,
          socket
          |> put_flash(:error, "You do not have permission to view this workflow")
-         |> redirect(to: ~p"/workflows")}
+         |> redirect(to: ~p"/workspaces")}
 
       {:error, reason} ->
         Logger.warning("Revision viewer mount failed: #{inspect(reason)}")
@@ -46,7 +52,13 @@ defmodule FizzWeb.WorkflowLive.Revision do
         {:ok,
          socket
          |> put_flash(:error, "Unable to load revisions")
-         |> redirect(to: ~p"/workflows")}
+         |> redirect(to: ~p"/workspaces")}
+
+      _reason ->
+        {:ok,
+         socket
+         |> put_flash(:error, "Unable to load revisions")
+         |> redirect(to: ~p"/workspaces")}
     end
   end
 
@@ -82,21 +94,28 @@ defmodule FizzWeb.WorkflowLive.Revision do
 
   @impl true
   def handle_event("select_revision", %{"kind" => "current"}, socket) do
-    {:noreply, push_patch(socket, to: ~p"/workflows/#{socket.assigns.workflow.id}/revisions")}
+    workflow = socket.assigns.workflow
+    scope = socket.assigns.current_scope
+    {:noreply, push_patch(socket, to: Paths.workflow_revisions_path(scope, workflow.id))}
   end
 
   def handle_event("select_revision", %{"kind" => "undo", "depth" => depth}, socket) do
     depth = parse_count(depth)
+    workflow = socket.assigns.workflow
+    scope = socket.assigns.current_scope
 
     {:noreply,
-     push_patch(socket, to: ~p"/workflows/#{socket.assigns.workflow.id}/revisions?undo=#{depth}")}
+     push_patch(socket, to: Paths.workflow_revisions_path(scope, workflow.id, %{undo: depth}))}
   end
 
   def handle_event("select_revision", %{"kind" => "version", "id" => version_id}, socket) do
+    workflow = socket.assigns.workflow
+    scope = socket.assigns.current_scope
+
     {:noreply,
      push_patch(
        socket,
-       to: ~p"/workflows/#{socket.assigns.workflow.id}/revisions?version=#{version_id}"
+       to: Paths.workflow_revisions_path(scope, workflow.id, %{version: version_id})
      )}
   end
 
@@ -104,7 +123,9 @@ defmodule FizzWeb.WorkflowLive.Revision do
   def handle_event("apply_revision", _params, socket) do
     case apply_current_revision(socket) do
       {:ok, _} ->
-        {:noreply, push_navigate(socket, to: ~p"/workflows/#{socket.assigns.workflow.id}/edit")}
+        workflow = socket.assigns.workflow
+        scope = socket.assigns.current_scope
+        {:noreply, push_navigate(socket, to: Paths.workflow_edit_path(scope, workflow.id))}
 
       {:error, reason} ->
         Logger.warning("Revision apply failed: #{inspect(reason)}")
@@ -113,7 +134,9 @@ defmodule FizzWeb.WorkflowLive.Revision do
   end
 
   def handle_event("navigate_back", _params, socket) do
-    {:noreply, push_navigate(socket, to: ~p"/workflows/#{socket.assigns.workflow.id}/edit")}
+    workflow = socket.assigns.workflow
+    scope = socket.assigns.current_scope
+    {:noreply, push_navigate(socket, to: Paths.workflow_edit_path(scope, workflow.id))}
   end
 
   defp load_revision(socket, %{"undo" => depth}) do
