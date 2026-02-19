@@ -53,6 +53,13 @@ defmodule FizzWeb.Router do
   end
 
   ## Authentication routes
+  scope "/api", FizzWeb do
+    pipe_through :api
+
+    get "/workflows/:id/contract", WorkflowContractController, :show
+    match :*, "/hooks/*path", Plugs.WebhookHandler, :handle
+    match :*, "/hook-test/*path", Plugs.WebhookHandler, :handle
+  end
 
   scope "/", FizzWeb do
     pipe_through [:browser]
@@ -73,6 +80,12 @@ defmodule FizzWeb.Router do
       live "/workspaces/:workspace_id", WorkspacesLive.Show, :show
       live "/workspaces/:workspace_id/sprites", SpritesLive.Index, :index
       live "/workspaces/:workspace_id/sprites/:sprite_id", SpritesLive.Show, :show
+
+      live "/workflows", WorkflowLive.Index, :index
+      live "/workflows/:id", WorkflowLive.Show, :show
+      live "/workflows/:workflow_id/execution/:execution_id", ExecutionLive.Show, :show
+      live "/workflows/:id/edit", WorkflowLive.Edit, :edit
+      live "/workflows/:id/revisions", WorkflowLive.Revision, :index
     end
   end
 end
