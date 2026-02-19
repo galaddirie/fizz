@@ -346,7 +346,7 @@ defmodule Fizz.Collaboration.EditSession.Server do
   # =============================================================================
 
   defp load_initial_state(workflow_id, scope) do
-    with {:ok, draft} <- Workflows.get_draft(scope, workflow_id),
+    with {:ok, draft} <- get_or_create_draft(scope, workflow_id),
          last_persisted_seq <- (draft.settings || %{})["last_persisted_seq"] || 0,
          {:ok, ops} <- Persistence.load_pending_ops(workflow_id, last_persisted_seq) do
       editor_state =
@@ -372,6 +372,35 @@ defmodule Fizz.Collaboration.EditSession.Server do
       }
 
       {:ok, state}
+    end
+  end
+
+  defp get_or_create_draft(scope, workflow_id) do
+    case Workflows.get_draft(scope, workflow_id) do
+      {:ok, draft} ->
+        {:ok, draft}
+
+      {:error, :not_found} ->
+        create_empty_draft(scope, workflow_id)
+    end
+  end
+
+  defp create_empty_draft(scope, workflow_id) do
+    with {:ok, workflow} <- Workflows.get_workflow(scope, workflow_id),
+         {:ok, draft} <-
+           Workflows.update_workflow_draft(scope, workflow, %{
+             steps: [],
+             connections: [],
+             groups: [],
+             settings: %{}
+           }) do
+      {:ok, draft}
+    else
+      {:error, :access_denied} ->
+        {:error, :not_found}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

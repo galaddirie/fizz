@@ -55,9 +55,13 @@ defmodule FizzWeb.WorkflowLive.Edit do
                 # Only set up collaboration when WebSocket is connected
                 socket =
                   if connected?(socket) do
-                    socket
-                    |> setup_collaboration(workflow.id, user)
-                    |> maybe_load_debug_execution(debug_execution_id)
+                    case setup_collaboration(socket, workflow.id, user) do
+                      {:ok, collaboration_socket} ->
+                        maybe_load_debug_execution(collaboration_socket, debug_execution_id)
+
+                      {:error, collaboration_socket} ->
+                        collaboration_socket
+                    end
                   else
                     socket
                   end
@@ -94,12 +98,27 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   defp setup_collaboration(socket, workflow_id, user) do
     # Ensure edit session server is running
-    {:ok, _pid} =
-      Fizz.Collaboration.EditSession.Supervisor.ensure_session(
-        socket.assigns.current_scope,
-        workflow_id
-      )
+    case Fizz.Collaboration.EditSession.Supervisor.ensure_session(
+           socket.assigns.current_scope,
+           workflow_id
+         ) do
+      {:ok, _pid} ->
+        {:ok, do_setup_collaboration(socket, workflow_id, user)}
 
+      {:error, reason} ->
+        Logger.error("Failed to start edit session",
+          workflow_id: workflow_id,
+          reason: inspect(reason)
+        )
+
+        {:error,
+         socket
+         |> put_flash(:error, "Unable to start collaborative editing session")
+         |> redirect(to: Paths.workflow_show_path(socket.assigns.current_scope, workflow_id))}
+    end
+  end
+
+  defp do_setup_collaboration(socket, workflow_id, user) do
     # Subscribe to operation broadcasts
     :ok = Phoenix.PubSub.subscribe(Fizz.PubSub, PubSub.session_topic(workflow_id))
 
