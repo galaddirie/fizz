@@ -13,7 +13,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: "/images/github.svg",
       custom: false,
       type: :oauth,
-      oauth_module: Fizz.Integrations.Providers.GitHub
+      oauth_module: Fizz.Integrations.Providers.GitHubOAuth
     },
     %{
       id: "github_api_key",

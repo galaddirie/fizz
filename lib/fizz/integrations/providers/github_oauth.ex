@@ -1,4 +1,4 @@
-defmodule Fizz.Integrations.Providers.GitHub do
+defmodule Fizz.Integrations.Providers.GitHubOauth do
   @moduledoc """
   GitHub integration provider. Uses WorkOS Pipes for OAuth token management.
   """
