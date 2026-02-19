@@ -83,6 +83,10 @@ const iconComponents = {
 
 type IconName = keyof typeof iconComponents;
 
+const isImageIcon = (iconName?: string) =>
+  !!iconName &&
+  (iconName.startsWith('/') || /\.(svg|png|jpe?g|webp)$/i.test(iconName));
+
 const IconComponent = computed(() => {
   const iconKey = props.data.icon as IconName;
   return iconComponents[iconKey] || CodeBracketIcon;
@@ -180,11 +184,15 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 // Node classes
+const hasBottomSlots = computed(() => subnodeInputHandles.value.length > 0);
+
 const nodeClasses = computed(() => [
   'group relative flex items-start transition-shadow',
   isSubnode.value
     ? 'gap-2.5 rounded-xl border border-dashed border-base-300 bg-base-200/20 p-3 shadow-sm'
     : 'gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md',
+  // Extra bottom padding when subnode slots are present
+  hasBottomSlots.value ? 'pb-6' : '',
   // Different styling for trigger nodes
   props.data.step_kind === 'trigger' && !isSubnode.value ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
   props.dragging
@@ -357,30 +365,30 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       @click.stop="handleTogglePin"
     />
 
-    <!-- Input Handles -->
+    <!-- Input Handle (left side — main flow) -->
     <div
-      v-if="showInputHandle || subnodeInputHandles.length > 0"
-      class="absolute top-0 left-0 z-10 h-full -translate-x-1/2"
+      v-if="showInputHandle"
+      class="absolute top-1/2 left-0 z-10 -translate-x-1/2 -translate-y-1/2"
     >
-      <div
-        v-if="showInputHandle"
-        class="absolute top-1/2 left-0 -translate-y-1/2"
-      >
-        <Handle id="main" type="target" :position="Position.Left" />
-      </div>
+      <Handle id="main" type="target" :position="Position.Left" />
+    </div>
 
+    <!-- Subnode Slot Handles (bottom edge, inset from bottom) -->
+    <template v-if="subnodeInputHandles.length > 0">
       <div
         v-for="(slot, idx) in subnodeInputHandles"
         :key="slot.id"
-        class="absolute left-0 flex items-center gap-1.5"
-        :style="{ top: `${20 + idx * 20}px` }"
+        class="absolute bottom-3 z-10 flex translate-y-1/2 flex-col items-center"
+        :style="{
+          left: `${((idx + 1) / (subnodeInputHandles.length + 1)) * 100}%`,
+        }"
       >
-        <Handle :id="slot.id" type="target" :position="Position.Left" />
-        <span class="rounded bg-base-100/90 px-1.5 py-0.5 text-[9px] font-semibold text-base-content/70">
+        <Handle :id="slot.id" type="target" :position="Position.Bottom" />
+        <span class="mt-2.5 whitespace-nowrap text-[9px] font-medium text-base-content/45">
           {{ slot.title || slot.id }}
         </span>
       </div>
-    </div>
+    </template>
 
     <!-- Node Card -->
     <div :class="nodeClasses" :style="nodeStyle">
@@ -393,7 +401,17 @@ const handleNameKeydown = (event: KeyboardEvent) => {
             : 'bg-base-200 size-11 rounded-2xl shadow-inner',
         ]"
       >
-        <component :is="IconComponent" :class="isSubnode ? 'text-base-content/75 size-5' : 'text-base-content/80 size-6'" />
+        <img
+          v-if="isImageIcon(data.icon)"
+          :src="data.icon"
+          alt=""
+          :class="isSubnode ? 'size-5 object-contain' : 'size-6 object-contain'"
+        />
+        <component
+          v-else
+          :is="IconComponent"
+          :class="isSubnode ? 'text-base-content/75 size-5' : 'text-base-content/80 size-6'"
+        />
       </div>
 
       <!-- Content -->

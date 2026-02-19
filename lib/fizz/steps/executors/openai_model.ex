@@ -8,7 +8,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
     name: "OpenAI Model",
     category: "AI",
     description: "Configure OpenAI model parameters for AI agent steps",
-    icon: "hero-variable",
+    icon: "/images/openai.svg",
     kind: :transform,
     role: :subnode
 

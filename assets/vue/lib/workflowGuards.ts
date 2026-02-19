@@ -8,4 +8,4 @@ export const isGroupNode = (
 
 export const isStepNode = (
   node: GraphNode<WorkflowNodeData> | Node<WorkflowNodeData>
-): node is GraphNode<StepNodeData> => node.type === 'step';
+): node is GraphNode<StepNodeData> => node.type === 'step' || node.type === 'subnode';

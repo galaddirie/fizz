@@ -10,7 +10,7 @@ defmodule Fizz.Steps.Executors.AnthropicModel do
     name: "Anthropic Model",
     category: "AI",
     description: "Configure Anthropic model parameters for AI agent steps",
-    icon: "hero-variable",
+    icon: "/images/anthropic.svg",
     kind: :transform,
     role: :subnode
 

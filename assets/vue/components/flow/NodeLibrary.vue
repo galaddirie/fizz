@@ -149,7 +149,12 @@ const onDragStart = (event: DragEvent, typeId: string) => {
   emit('dragStart', typeId, event);
 };
 
-const getIcon = (iconName: string) => iconMap[iconName] || CodeBracketIcon;
+const isImageIcon = (iconName?: string) =>
+  !!iconName &&
+  (iconName.startsWith('/') || /\.(svg|png|jpe?g|webp)$/i.test(iconName));
+
+const getIcon = (iconName?: string) =>
+  iconName ? iconMap[iconName] || CodeBracketIcon : CodeBracketIcon;
 </script>
 
 <template>
@@ -214,7 +219,13 @@ const getIcon = (iconName: string) => iconMap[iconName] || CodeBracketIcon;
               class="bg-base-200/50 group-hover:bg-primary/10 border-base-200/50 group-hover:border-primary/20 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-all duration-200"
               :class="kindStyles[item.step_kind]"
             >
-              <component :is="getIcon(item.icon)" class="h-4.5 w-4.5" />
+              <img
+                v-if="isImageIcon(item.icon)"
+                :src="item.icon"
+                alt=""
+                class="h-4.5 w-4.5 object-contain"
+              />
+              <component v-else :is="getIcon(item.icon)" class="h-4.5 w-4.5" />
             </div>
 
             <!-- Content -->

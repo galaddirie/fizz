@@ -4,6 +4,7 @@ import { VueFlow, useVueFlow } from '@vue-flow/core';
 import type { NodeMouseEvent, Node, Edge } from '@vue-flow/core';
 
 import WorkflowStepNode from '@/components/flow/Node.vue';
+import WorkflowSubNode from '@/components/flow/SubNode.vue';
 import GroupNode from '@/components/flow/GroupNode.vue';
 import CustomEdge from '@/components/flow/Edge.vue';
 import { useWorkflowEdges } from '@/composables/useWorkflowEdges';
@@ -54,7 +55,7 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   );
   const { miniMapNodeColor } = useMiniMapNodeColor();
 
-  const nodeTypes = { step: markRaw(WorkflowStepNode), group: markRaw(GroupNode) };
+  const nodeTypes = { step: markRaw(WorkflowStepNode), subnode: markRaw(WorkflowSubNode), group: markRaw(GroupNode) };
   const edgeTypes = { custom: markRaw(CustomEdge as any) };
 
   const workflowName = computed(() => props.workflow.name);

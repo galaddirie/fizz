@@ -8,7 +8,10 @@
       "Bash(grep:*)",
       "Bash(mix ecto.gen.migration:*)",
       "Bash(mix ecto.migrate:*)",
-      "Bash(mix precommit:*)"
+      "Bash(mix precommit:*)",
+      "WebSearch",
+      "Bash(npx tsc:*)",
+      "Bash(mix assets.build:*)"
     ]
   }
 }

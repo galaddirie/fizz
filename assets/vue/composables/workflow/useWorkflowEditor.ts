@@ -4,6 +4,7 @@ import { useLiveVue } from 'live_vue';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
 import type { EdgeTypesObject, NodeTypesObject } from '@vue-flow/core';
 import WorkflowStepNode from '@/components/flow/Node.vue';
+import WorkflowSubNode from '@/components/flow/SubNode.vue';
 import GroupNode from '@/components/flow/GroupNode.vue';
 import CustomEdge from '@/components/flow/Edge.vue';
 import { useClientStore } from '@/stores/clientStore';
@@ -106,7 +107,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     incomingConnectionsByTargetInputByStepId,
     upstreamStepIdsByStepId,
   } = useWorkflowGraph(() => activeWorkflow.value);
-  const nodeTypes: NodeTypesObject = { step: markRaw(WorkflowStepNode), group: markRaw(GroupNode) };
+  const nodeTypes: NodeTypesObject = { step: markRaw(WorkflowStepNode), subnode: markRaw(WorkflowSubNode), group: markRaw(GroupNode) };
   const edgeTypes: EdgeTypesObject = { custom: markRaw(CustomEdge as any) };
   const collaboration = useCollaboration({
     presences: () => props.presences ?? [],

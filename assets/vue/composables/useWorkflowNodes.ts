@@ -251,9 +251,11 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         }
       }
 
+      const isSubnode = stepType?.node_role === 'subnode';
+
       const node = {
         id: step.id,
-        type: 'step',
+        type: isSubnode ? 'subnode' : 'step',
         position: transientPositions.value[step.id] || step.position,
         parentNode: parentGroupId,
         expandParent: parentGroupId ? true : undefined,

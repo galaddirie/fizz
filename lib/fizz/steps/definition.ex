@@ -42,7 +42,7 @@ defmodule Fizz.Steps.Definition do
   - `:name` (required) - Human-readable display name
   - `:category` (required) - Category for grouping in the UI
   - `:description` (required) - Description of what the step does
-  - `:icon` (required) - Heroicon name (e.g., "hero-globe-alt")
+  - `:icon` (required) - Icon identifier (Heroicon name like "hero-globe-alt" or static path like "/images/openai.svg")
   - `:kind` (required) - One of :action, :trigger, :control_flow, :transform
   - `:role` (optional) - One of :root, :subnode (default: :root)
 
