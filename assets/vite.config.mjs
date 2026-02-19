@@ -16,7 +16,7 @@ export default defineConfig({
     include: ["live_vue", "phoenix", "phoenix_html", "phoenix_live_view", "@xterm/xterm", "@xterm/addon-fit"],
   },
   ssr: { noExternal: process.env.NODE_ENV === "production" ? true : undefined },
-    build: {
+  build: {
     manifest: false,
     ssrManifest: false,
     rollupOptions: {
