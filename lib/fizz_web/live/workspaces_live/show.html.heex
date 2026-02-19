@@ -54,9 +54,16 @@
 
         <div class="mt-4 space-y-2">
           <.link
+            id="workspace-show-open-workflows"
+            navigate={~p"/workspaces/#{@workspace.id}/workflows"}
+            class="btn btn-primary btn-sm w-full"
+          >
+            Open Workflows
+          </.link>
+          <.link
             id="workspace-show-open-sprites"
             navigate={~p"/workspaces/#{@workspace.id}/sprites"}
-            class="btn btn-primary btn-sm w-full"
+            class="btn btn-outline btn-sm w-full"
           >
             Open Sprites
           </.link>

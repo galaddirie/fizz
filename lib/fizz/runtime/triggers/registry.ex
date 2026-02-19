@@ -72,11 +72,7 @@ defmodule Fizz.Runtime.Triggers.Registry do
   @impl true
   def handle_continue(:load_active_workflows, state) do
     # Load all active workflows from DB and register them
-    active_ids =
-      Workflows.list_active_workflows_query()
-      |> Repo.all()
-      |> Enum.map(& &1.id)
-      |> MapSet.new()
+    active_ids = load_active_workflow_ids()
 
     Logger.info("Trigger Registry: Loaded #{MapSet.size(active_ids)} active workflows")
 
@@ -91,6 +87,25 @@ defmodule Fizz.Runtime.Triggers.Registry do
 
     {:noreply, %{state | active_workflows: active_ids}}
   end
+
+  defp load_active_workflow_ids do
+    Workflows.list_active_workflows_query()
+    |> Repo.all()
+    |> Enum.map(& &1.id)
+    |> MapSet.new()
+  rescue
+    error in Postgrex.Error ->
+      if missing_workflows_table?(error) do
+        Logger.warning("Trigger Registry: workflows table missing, skipping trigger bootstrap")
+        MapSet.new()
+      else
+        reraise(error, __STACKTRACE__)
+      end
+  end
+
+  defp missing_workflows_table?(%Postgrex.Error{postgres: %{code: :undefined_table}}), do: true
+  defp missing_workflows_table?(%Postgrex.Error{postgres: %{pg_code: "42P01"}}), do: true
+  defp missing_workflows_table?(_error), do: false
 
   @impl true
   def handle_cast({:register, workflow_id, opts}, state) do

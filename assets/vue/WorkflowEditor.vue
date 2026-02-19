@@ -77,12 +77,12 @@ const debugStatusBadge = computed(() => {
   return debugStatusConfig[key] ?? debugStatusConfig.pending;
 });
 const debugExecutionLink = computed(() => {
-  if (!props.workflow?.id || !props.debugExecutionId) return null;
-  return `/workflows/${props.workflow.id}/execution/${props.debugExecutionId}`;
+  if (!props.workflow?.id || !props.workflow?.workspace_id || !props.debugExecutionId) return null;
+  return `/workspaces/${props.workflow.workspace_id}/workflows/${props.workflow.id}/execution/${props.debugExecutionId}`;
 });
 const debugExitLink = computed(() => {
-  if (!props.workflow?.id) return null;
-  return `/workflows/${props.workflow.id}/edit`;
+  if (!props.workflow?.id || !props.workflow?.workspace_id) return null;
+  return `/workspaces/${props.workflow.workspace_id}/workflows/${props.workflow.id}/edit`;
 });
 
 // Listen for publish result from backend
