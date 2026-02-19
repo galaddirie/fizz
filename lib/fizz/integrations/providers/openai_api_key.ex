@@ -8,6 +8,7 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   @behaviour Fizz.Integrations.Provider
 
   alias Fizz.Accounts.{ExternalAuth, Scope}
+  alias Fizz.Integrations.CredentialRef
 
   @type model_spec ::
           String.t()
@@ -140,10 +141,42 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   end
 
   defp req_llm_opts(%Scope{} = scope, organization_id, opts) when is_list(opts) do
-    with {:ok, %{access_token: api_key}} <- fetch_token(scope, organization_id) do
-      {:ok, Keyword.put(opts, :api_key, api_key)}
+    credential_ref = Keyword.get(opts, :credential_ref)
+
+    with {:ok, normalized_ref} <-
+           CredentialRef.normalize_for_provider(credential_ref, provider_id(), :api_key),
+         :ok <- ensure_scope_owner_matches_ref(scope, normalized_ref),
+         {:ok, %{access_token: api_key}} <-
+           fetch_token_for_credential_ref(scope, organization_id, normalized_ref) do
+      filtered_opts = Keyword.delete(opts, :credential_ref)
+      {:ok, Keyword.put(filtered_opts, :api_key, api_key)}
     end
   end
+
+  defp fetch_token_for_credential_ref(scope, organization_id, credential_ref) do
+    with {:ok, credential_id} <- CredentialRef.id(credential_ref),
+         {:ok, credential_result} <-
+           ExternalAuth.resolve_credential_for_use(scope, organization_id, provider_id(),
+             api_credential_id: credential_id
+           ) do
+      {:ok,
+       %{
+         access_token: credential_result.api_key,
+         expires_at: nil,
+         scopes: [],
+         missing_scopes: [],
+         api_credential_id: credential_result.api_credential_id,
+         credential_id: credential_result.credential_id
+       }}
+    end
+  end
+
+  defp ensure_scope_owner_matches_ref(%Scope{user: %{id: user_id}}, credential_ref)
+       when is_binary(user_id) do
+    CredentialRef.ensure_owner(credential_ref, user_id)
+  end
+
+  defp ensure_scope_owner_matches_ref(_scope, _credential_ref), do: {:error, :scope_not_available}
 
   defp req_llm_client do
     Application.get_env(:fizz, :req_llm_client_module, ReqLLM)

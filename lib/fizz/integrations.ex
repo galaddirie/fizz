@@ -9,6 +9,7 @@ defmodule Fizz.Integrations do
   alias Fizz.Accounts
   alias Fizz.Accounts.{OauthConnection, Scope}
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
+  alias Fizz.Integrations.CredentialRef
   alias Fizz.Integrations.ProviderCatalog
 
   @doc """
@@ -47,6 +48,18 @@ defmodule Fizz.Integrations do
         provider,
         status
       )
+    end
+  end
+
+  @doc """
+  Lists metadata-only credential options for workflow editor credential selectors.
+  """
+  @spec list_credential_options(Scope.t(), String.t(), keyword()) ::
+          {:ok, [map()]} | {:error, term()}
+  def list_credential_options(%Scope{} = scope, workspace_id, opts \\ []) do
+    with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+         organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
+      AccountExternalAuth.list_credential_options(resolved_scope, organization_id, opts)
     end
   end
 
@@ -119,6 +132,57 @@ defmodule Fizz.Integrations do
   end
 
   @doc """
+  Resolves provider auth for execution using an explicit credential reference.
+  """
+  @spec resolve_auth_for_execution(Scope.t(), String.t(), String.t(), map()) ::
+          {:ok,
+           %{
+             auth_method: :oauth,
+             provider: String.t(),
+             token_result: map(),
+             scope: Scope.t(),
+             organization_id: String.t(),
+             oauth_connection_id: String.t()
+           }}
+          | {:ok,
+             %{
+               auth_method: :api_key,
+               provider: String.t(),
+               api_key: String.t(),
+               api_credential_id: String.t()
+             }}
+          | {:error, term()}
+  def resolve_auth_for_execution(%Scope{} = scope, workspace_id, provider, credential_ref)
+      when is_binary(provider) and is_map(credential_ref) do
+    with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+         organization_id when is_binary(organization_id) <- resolved_scope.organization_id,
+         {:ok, normalized_ref} <- CredentialRef.normalize(credential_ref),
+         :ok <- CredentialRef.ensure_owner(normalized_ref, resolved_scope.user.id),
+         :ok <- ensure_ref_provider_matches_requested(provider, normalized_ref["provider"]) do
+      case normalized_ref["auth_type"] do
+        "oauth" ->
+          fetch_oauth_token_with_ref(
+            resolved_scope,
+            organization_id,
+            normalized_ref["provider"],
+            normalized_ref
+          )
+
+        "api_key" ->
+          fetch_api_key_token_with_ref(
+            resolved_scope,
+            organization_id,
+            normalized_ref["provider"],
+            normalized_ref
+          )
+
+        _ ->
+          {:error, :invalid_credential_ref_auth_type}
+      end
+    end
+  end
+
+  @doc """
   Lists repos from an OAuth provider.
   """
   @spec list_repos(Scope.t(), String.t(), String.t(), keyword()) ::
@@ -180,6 +244,38 @@ defmodule Fizz.Integrations do
     end
   end
 
+  defp fetch_oauth_token_with_ref(resolved_scope, organization_id, provider, credential_ref) do
+    with {:ok, normalized_provider} <-
+           ProviderCatalog.resolve_provider_id_for_type(provider, :oauth),
+         {:ok, provider_mod} <- provider_module(normalized_provider),
+         {:ok, oauth_connection_id} <- CredentialRef.id(credential_ref),
+         {:ok, _connection} <-
+           AccountExternalAuth.resolve_connection_for_use(
+             resolved_scope,
+             organization_id,
+             normalized_provider,
+             oauth_connection_id: oauth_connection_id
+           ),
+         {:ok, token_result} <- provider_mod.fetch_token(resolved_scope, organization_id) do
+      _ =
+        AccountExternalAuth.touch_connection_token_fetch(
+          resolved_scope,
+          organization_id,
+          normalized_provider
+        )
+
+      {:ok,
+       %{
+         auth_method: :oauth,
+         provider: normalized_provider,
+         token_result: token_result,
+         scope: resolved_scope,
+         organization_id: organization_id,
+         oauth_connection_id: oauth_connection_id
+       }}
+    end
+  end
+
   defp fetch_api_key_token(resolved_scope, organization_id, provider) do
     case ProviderCatalog.api_key_provider_module(provider) do
       {:ok, provider_mod} ->
@@ -211,6 +307,27 @@ defmodule Fizz.Integrations do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp fetch_api_key_token_with_ref(resolved_scope, organization_id, provider, credential_ref) do
+    with {:ok, normalized_provider} <-
+           ProviderCatalog.resolve_provider_id_for_type(provider, :api_key),
+         {:ok, api_credential_id} <- CredentialRef.id(credential_ref),
+         {:ok, credential_result} <-
+           AccountExternalAuth.resolve_credential_for_use(
+             resolved_scope,
+             organization_id,
+             normalized_provider,
+             api_credential_id: api_credential_id
+           ) do
+      {:ok,
+       %{
+         auth_method: :api_key,
+         provider: normalized_provider,
+         api_key: credential_result.api_key,
+         api_credential_id: credential_result.api_credential_id
+       }}
     end
   end
 
@@ -251,6 +368,26 @@ defmodule Fizz.Integrations do
           {:ok, normalized_provider} -> {:ok, :api_key, normalized_provider}
           {:error, _reason} -> {:error, :invalid_provider}
         end
+    end
+  end
+
+  defp ensure_ref_provider_matches_requested(requested_provider, ref_provider) do
+    oauth_match? =
+      match?(
+        {:ok, ^ref_provider},
+        ProviderCatalog.resolve_provider_id_for_type(requested_provider, :oauth)
+      )
+
+    api_key_match? =
+      match?(
+        {:ok, ^ref_provider},
+        ProviderCatalog.resolve_provider_id_for_type(requested_provider, :api_key)
+      )
+
+    if oauth_match? or api_key_match? do
+      :ok
+    else
+      {:error, :credential_ref_provider_mismatch}
     end
   end
 end

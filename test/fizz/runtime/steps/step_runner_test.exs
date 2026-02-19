@@ -22,6 +22,12 @@ defmodule Fizz.Runtime.Steps.StepRunnerTest do
             "main_input_step" => %{"question" => "What is Elixir?"},
             "model_step" => %{
               "provider" => "openai_api_key",
+              "credential_ref" => %{
+                "id" => "cred_openai",
+                "provider" => "openai_api_key",
+                "auth_type" => "api_key",
+                "owner_user_id" => "user_123"
+              },
               "model" => "gpt-4.1-mini",
               "temperature" => 0.1,
               "max_tokens" => 240
@@ -55,7 +61,16 @@ defmodule Fizz.Runtime.Steps.StepRunnerTest do
           %{"joined" => "slot_only"},
           execution_opts(
             %{
-              "model_step" => %{"provider" => "openai_api_key", "model" => "gpt-4.1-mini"},
+              "model_step" => %{
+                "provider" => "openai_api_key",
+                "credential_ref" => %{
+                  "id" => "cred_openai",
+                  "provider" => "openai_api_key",
+                  "auth_type" => "api_key",
+                  "owner_user_id" => "user_123"
+                },
+                "model" => "gpt-4.1-mini"
+              },
               "prompt_step" => %{"messages" => [%{"role" => "user", "content" => "Hi"}]}
             },
             primary_parents: []

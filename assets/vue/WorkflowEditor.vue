@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   presences: () => [],
   currentUserId: undefined,
   expressionPreviews: () => ({}),
+  credentialOptions: () => [],
   debugExecutionId: null,
 });
 
@@ -222,6 +223,7 @@ onMounted(() => {
         :execution="editor.execution"
         :step-executions="editor.stepExecutions"
         :expression-previews="editor.expressionPreviews"
+        :credential-options="props.credentialOptions"
         :editor-state="editor.editorState"
         :step-name-by-id="editor.stepNameById"
         :incoming-step-ids="editor.incomingStepIdsByStepId"

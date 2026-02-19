@@ -7,7 +7,7 @@ defmodule Fizz.Accounts.ExternalAuth do
   import Ecto.Query
 
   alias Fizz.Accounts
-  alias Fizz.Accounts.{ApiCredential, OauthConnection, Scope, WorkOS}
+  alias Fizz.Accounts.{ApiCredential, OauthConnection, Scope, User, WorkOS}
   alias Fizz.Accounts.WorkOS.Vault
   alias Fizz.Integrations.ProviderCatalog
   alias Fizz.Repo
@@ -134,6 +134,82 @@ defmodule Fizz.Accounts.ExternalAuth do
           order_by: [asc: credential.provider_label, asc: credential.inserted_at]
 
       {:ok, Repo.all(query)}
+    end
+  end
+
+  @doc """
+  Lists non-sensitive auth options (API keys + OAuth connections) for an organization.
+
+  This endpoint is intended for workflow editor credential selection and does not
+  return any secret/token material.
+  """
+  @spec list_credential_options(Scope.t(), String.t(), keyword()) ::
+          {:ok, [map()]} | {:error, term()}
+  def list_credential_options(%Scope{} = scope, organization_id, opts \\ [])
+      when is_binary(organization_id) and is_list(opts) do
+    with {:ok, _resolved_scope} <- resolve_organization_scope(scope, organization_id) do
+      provider_filter = normalize_provider_filter(opts)
+      auth_types = normalize_auth_type_filter(opts)
+
+      api_key_options =
+        if :api_key in auth_types do
+          list_api_key_credential_options(organization_id, provider_filter)
+        else
+          []
+        end
+
+      oauth_options =
+        if :oauth in auth_types do
+          list_oauth_connection_options(organization_id, provider_filter)
+        else
+          []
+        end
+
+      options =
+        (api_key_options ++ oauth_options)
+        |> Enum.sort_by(fn option ->
+          {
+            option["provider_label"],
+            option["display_name"] || "",
+            option["owner_display_name"] || "",
+            option["created_at"]
+          }
+        end)
+
+      {:ok, options}
+    end
+  end
+
+  @doc """
+  Resolves an OAuth connection metadata record for strict execution-time binding.
+  """
+  @spec resolve_connection_for_use(Scope.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def resolve_connection_for_use(scope, organization_id, provider, opts \\ [])
+      when is_binary(organization_id) and is_binary(provider) and is_list(opts) do
+    oauth_connection_id =
+      Keyword.get(opts, :oauth_connection_id) || Keyword.get(opts, :connection_id)
+
+    with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
+         {:ok, normalized_provider} <- resolve_oauth_provider(provider),
+         {:ok, connection} <-
+           fetch_connection_for_use(
+             resolved_scope,
+             organization_id,
+             normalized_provider,
+             oauth_connection_id
+           ) do
+      {:ok,
+       %{
+         oauth_connection_id: connection.id,
+         connection_id: connection.id,
+         provider: connection.provider,
+         status: connection.status,
+         scopes: connection.scopes || [],
+         missing_scopes: connection.missing_scopes || [],
+         provider_metadata: connection.provider_metadata || %{},
+         user_id: connection.user_id
+       }}
     end
   end
 
@@ -319,6 +395,21 @@ defmodule Fizz.Accounts.ExternalAuth do
     end
   end
 
+  defp get_connection_by_id(%Scope{} = resolved_scope, organization_id, oauth_connection_id)
+       when is_binary(organization_id) and is_binary(oauth_connection_id) do
+    query =
+      from oauth_connection in OauthConnection,
+        where:
+          oauth_connection.id == ^oauth_connection_id and
+            oauth_connection.workos_organization_id == ^organization_id and
+            oauth_connection.user_id == ^resolved_scope.user.id
+
+    case Repo.one(query) do
+      %OauthConnection{} = oauth_connection -> {:ok, oauth_connection}
+      nil -> {:error, :connection_not_found}
+    end
+  end
+
   defp touch_credential_use(api_credential_id) do
     from(api_credential in ApiCredential, where: api_credential.id == ^api_credential_id)
     |> Repo.update_all(set: [last_used_at: DateTime.utc_now()])
@@ -360,6 +451,36 @@ defmodule Fizz.Accounts.ExternalAuth do
       %ApiCredential{} = api_credential -> {:ok, api_credential}
       nil -> {:error, :credential_not_found}
     end
+  end
+
+  defp fetch_connection_for_use(
+         %Scope{} = resolved_scope,
+         organization_id,
+         provider,
+         oauth_connection_id
+       )
+       when is_binary(oauth_connection_id) do
+    with {:ok, oauth_connection} <-
+           get_connection_by_id(resolved_scope, organization_id, oauth_connection_id),
+         true <- oauth_connection.provider == provider do
+      if oauth_connection.status == :active do
+        {:ok, oauth_connection}
+      else
+        {:error, :connection_inactive}
+      end
+    else
+      false -> {:error, :connection_provider_mismatch}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp fetch_connection_for_use(
+         %Scope{} = _resolved_scope,
+         _organization_id,
+         _provider,
+         _oauth_connection_id
+       ) do
+    {:error, :oauth_connection_id_required}
   end
 
   defp normalize_credential_attrs(attrs) when is_map(attrs) do
@@ -433,6 +554,164 @@ defmodule Fizz.Accounts.ExternalAuth do
   end
 
   defp normalize_optional_string(_value), do: nil
+
+  defp normalize_provider_filter(opts) do
+    opts
+    |> Keyword.get(:provider_filter, [])
+    |> List.wrap()
+    |> Enum.map(&normalize_provider_id/1)
+    |> Enum.reject(&(&1 == ""))
+    |> MapSet.new()
+  end
+
+  defp normalize_provider_id(provider_id) when is_binary(provider_id),
+    do: provider_id |> String.trim() |> String.downcase()
+
+  defp normalize_provider_id(_provider_id), do: ""
+
+  defp normalize_auth_type_filter(opts) do
+    opts
+    |> Keyword.get(:auth_types, [:api_key, :oauth])
+    |> List.wrap()
+    |> Enum.reduce([], fn
+      :api_key, acc -> [:api_key | acc]
+      :oauth, acc -> [:oauth | acc]
+      "api_key", acc -> [:api_key | acc]
+      "oauth", acc -> [:oauth | acc]
+      _, acc -> acc
+    end)
+    |> Enum.uniq()
+  end
+
+  defp list_api_key_credential_options(organization_id, provider_filter) do
+    query =
+      from credential in ApiCredential,
+        join: user in User,
+        on: user.id == credential.user_id,
+        where: credential.workos_organization_id == ^organization_id,
+        order_by: [
+          asc: credential.provider,
+          asc: credential.provider_label,
+          asc: credential.inserted_at
+        ],
+        select: %{
+          id: credential.id,
+          provider: credential.provider,
+          display_name: credential.provider_label,
+          owner_user_id: credential.user_id,
+          owner_email: user.email,
+          status: "active",
+          created_at: credential.inserted_at,
+          last_used_at: credential.last_used_at
+        }
+
+    query
+    |> Repo.all()
+    |> Enum.filter(fn option ->
+      provider_allowed?(provider_filter, option.provider)
+    end)
+    |> Enum.map(fn option ->
+      %{
+        "id" => option.id,
+        "provider" => option.provider,
+        "provider_label" => provider_display_name(option.provider),
+        "auth_type" => "api_key",
+        "display_name" => option.display_name,
+        "owner_user_id" => option.owner_user_id,
+        "owner_display_name" => owner_display_name(option.owner_email, option.owner_user_id),
+        "status" => option.status,
+        "created_at" => datetime_to_iso8601(option.created_at),
+        "last_used_at" => datetime_to_iso8601(option.last_used_at)
+      }
+    end)
+  end
+
+  defp list_oauth_connection_options(organization_id, provider_filter) do
+    query =
+      from connection in OauthConnection,
+        join: user in User,
+        on: user.id == connection.user_id,
+        where: connection.workos_organization_id == ^organization_id,
+        order_by: [asc: connection.provider, asc: connection.inserted_at],
+        select: %{
+          id: connection.id,
+          provider: connection.provider,
+          provider_metadata: connection.provider_metadata,
+          owner_user_id: connection.user_id,
+          owner_email: user.email,
+          status: connection.status,
+          created_at: connection.inserted_at,
+          last_used_at: connection.last_token_fetch_at
+        }
+
+    query
+    |> Repo.all()
+    |> Enum.filter(fn option ->
+      provider_allowed?(provider_filter, option.provider)
+    end)
+    |> Enum.map(fn option ->
+      display_name = oauth_display_name(option.provider, option.provider_metadata)
+
+      %{
+        "id" => option.id,
+        "provider" => option.provider,
+        "provider_label" => provider_display_name(option.provider),
+        "auth_type" => "oauth",
+        "display_name" => display_name,
+        "owner_user_id" => option.owner_user_id,
+        "owner_display_name" => owner_display_name(option.owner_email, option.owner_user_id),
+        "status" => to_string(option.status),
+        "created_at" => datetime_to_iso8601(option.created_at),
+        "last_used_at" => datetime_to_iso8601(option.last_used_at)
+      }
+    end)
+  end
+
+  defp provider_allowed?(provider_filter, provider) do
+    if is_struct(provider_filter, MapSet) and MapSet.size(provider_filter) > 0 do
+      MapSet.member?(provider_filter, normalize_provider_id(provider))
+    else
+      true
+    end
+  end
+
+  defp provider_display_name(provider_id) when is_binary(provider_id) do
+    case ProviderCatalog.provider(provider_id) do
+      {:ok, provider} -> provider.label
+      {:error, :unknown_provider} -> provider_id
+    end
+  end
+
+  defp owner_display_name(owner_email, owner_user_id) when is_binary(owner_email) do
+    owner_email
+    |> String.split("@")
+    |> List.first()
+    |> case do
+      value when is_binary(value) and value != "" -> value
+      _ -> owner_user_id
+    end
+  end
+
+  defp owner_display_name(_owner_email, owner_user_id), do: owner_user_id
+
+  defp oauth_display_name(provider, provider_metadata) when is_map(provider_metadata) do
+    username =
+      provider_metadata["username"] ||
+        provider_metadata[:username] ||
+        provider_metadata["name"] ||
+        provider_metadata[:name]
+
+    case username do
+      value when is_binary(value) and value != "" -> value
+      _ -> provider_display_name(provider)
+    end
+  end
+
+  defp oauth_display_name(provider, _provider_metadata), do: provider_display_name(provider)
+
+  defp datetime_to_iso8601(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
+  defp datetime_to_iso8601(%NaiveDateTime{} = datetime), do: NaiveDateTime.to_iso8601(datetime)
+  defp datetime_to_iso8601(_datetime), do: nil
 
   defp extract_vault_object_id(vault_response) when is_map(vault_response) do
     case vault_response["id"] || vault_response[:id] do

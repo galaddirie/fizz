@@ -4,6 +4,7 @@ import type {
   Workflow,
   Step,
   StepType,
+  CredentialOption,
   NodeLibraryItem,
   Execution,
   StepExecution,
@@ -25,6 +26,7 @@ export interface WorkflowEditorProps {
   presences?: UserPresence[];
   currentUserId?: string;
   expressionPreviews?: Record<string, unknown>;
+  credentialOptions?: CredentialOption[];
   debugExecutionId?: string | null;
 }
 

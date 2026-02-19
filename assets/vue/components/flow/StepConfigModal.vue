@@ -4,6 +4,7 @@ import { watchDebounced } from '@vueuse/core';
 import type { Node } from '@vue-flow/core';
 import ExpressionPreviewError from './ExpressionPreviewError.vue';
 import type {
+  CredentialOption,
   EditorState,
   Execution,
   StepExecution,
@@ -37,6 +38,13 @@ type ConfigSchemaField = {
   type?: string;
   format?: string;
   default?: unknown;
+  description?: string;
+  enum?: unknown[];
+  ['x-ui']?: {
+    control?: string;
+    provider_filter?: string[];
+    auth_types?: Array<'api_key' | 'oauth' | string>;
+  };
 };
 
 type ConfigSchema = {
@@ -48,6 +56,7 @@ interface Props {
   isOpen: boolean;
   canEdit?: boolean;
   stepType?: StepType | null;
+  credentialOptions?: CredentialOption[];
   execution?: Execution | null;
   stepExecutions?: StepExecution[];
   expressionPreviews?: Record<string, unknown>;
@@ -57,6 +66,18 @@ interface Props {
   incomingConnectionsByTargetInput?: Record<string, Record<string, string[]>>;
   upstreamStepIds?: Record<string, string[]>;
 }
+
+type FieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json';
+type ExtendedFieldType = FieldType | 'credential';
+
+type ConfigField = {
+  key: string;
+  label: string;
+  type: ExtendedFieldType;
+  description?: string;
+  expressionCapable: boolean;
+  credentialOptions?: CredentialOption[];
+};
 
 const props = defineProps<Props>();
 const emit = defineEmits([
@@ -110,13 +131,22 @@ watch(
   ([newNode, open]) => {
     if (open && newNode && newNode.data) {
       const config = newNode.data.config || {};
+      const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
+      const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
       const modes: Record<string, 'literal' | 'expression'> = {};
       const values: Record<string, unknown> = {};
 
-      Object.entries(config).forEach(([key, value]) => {
-        const isExpr = typeof value === 'string' && (value.includes('{{') || value.includes('{%'));
+      allKeys.forEach(key => {
+        const schemaField = schema[key] ?? {};
+        const rawValue = config[key] ?? schemaField.default;
+        const fieldType = schemaField['x-ui']?.control === 'credential_select' ? 'credential' : 'literal';
+        const isExpr =
+          fieldType !== 'credential' &&
+          typeof rawValue === 'string' &&
+          (rawValue.includes('{{') || rawValue.includes('{%'));
+
         modes[key] = isExpr ? 'expression' : 'literal';
-        values[key] = value;
+        values[key] = rawValue ?? null;
       });
 
       fieldModes.value = modes;
@@ -141,7 +171,12 @@ watchDebounced(
     if (!props.isOpen || !props.node) return;
 
     Object.entries(newValues).forEach(([key, value]) => {
-      if (fieldModes.value[key] === 'expression' && typeof value === 'string' && props.node) {
+      if (
+        fieldModes.value[key] === 'expression' &&
+        fieldSupportsExpression(key) &&
+        typeof value === 'string' &&
+        props.node
+      ) {
         emit('preview_expression', {
           step_id: props.node.id,
           field_key: key,
@@ -190,13 +225,11 @@ const saveConfig = () => {
 
 const toggleMode = (field: string) => {
   if (!canEdit.value) return;
+  if (!fieldSupportsExpression(field)) return;
   fieldModes.value[field] = fieldModes.value[field] === 'literal' ? 'expression' : 'literal';
 };
 
-// Map schema types to input types
-type FieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json';
-
-const fields = computed(() => {
+const fields = computed<ConfigField[]>(() => {
   if (!props.node || !props.node.data) return [];
 
   const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
@@ -207,27 +240,151 @@ const fields = computed(() => {
 
   return Array.from(allKeys).map(key => {
     const schemaField: ConfigSchemaField = schema[key] ?? {};
-    let type = inferType(config[key] ?? schemaField.default);
-
-    if (schemaField.format === 'json') {
-      type = 'json';
-    } else if (schemaField.type === 'string' && schemaField.format === 'textarea') {
-      type = 'textarea';
-    }
+    const type = inferFieldType(schemaField, config[key] ?? schemaField.default);
+    const expressionCapable = type !== 'credential';
+    const filteredCredentialOptions =
+      type === 'credential'
+        ? filterCredentialOptions(
+            normalizeProviderFilter(schemaField['x-ui']?.provider_filter),
+            normalizeAuthTypeFilter(schemaField['x-ui']?.auth_types)
+          )
+        : undefined;
 
     return {
       key,
       label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      description: schemaField.description,
       type,
+      expressionCapable,
+      credentialOptions: filteredCredentialOptions,
     };
   });
 });
+
+const fieldByKey = computed(() => {
+  return fields.value.reduce<Record<string, ConfigField>>((acc, field) => {
+    acc[field.key] = field;
+    return acc;
+  }, {});
+});
+
+const fieldSupportsExpression = (fieldKey: string) => {
+  return fieldByKey.value[fieldKey]?.expressionCapable !== false;
+};
 
 const inferType = (val: unknown): FieldType => {
   if (typeof val === 'boolean') return 'boolean';
   if (typeof val === 'number') return 'number';
   if (typeof val === 'string' && val.length > 50) return 'textarea';
   return 'text';
+};
+
+const inferFieldType = (schemaField: ConfigSchemaField, value: unknown): ExtendedFieldType => {
+  if (schemaField['x-ui']?.control === 'credential_select') {
+    return 'credential';
+  }
+
+  if (schemaField.format === 'json') {
+    return 'json';
+  }
+
+  if (schemaField.type === 'string' && schemaField.format === 'textarea') {
+    return 'textarea';
+  }
+
+  return inferType(value);
+};
+
+const normalizeProviderFilter = (providerFilter: unknown): string[] => {
+  if (!Array.isArray(providerFilter)) return [];
+
+  return providerFilter
+    .filter((provider): provider is string => typeof provider === 'string' && provider.trim().length > 0)
+    .map(provider => provider.trim().toLowerCase());
+};
+
+const normalizeAuthTypeFilter = (
+  authTypes: unknown
+): Array<'api_key' | 'oauth'> => {
+  if (!Array.isArray(authTypes)) return ['api_key', 'oauth'];
+
+  const normalized = authTypes.reduce<Array<'api_key' | 'oauth'>>((acc, value) => {
+    if (value === 'api_key' || value === 'oauth') {
+      acc.push(value);
+    }
+
+    return acc;
+  }, []);
+
+  return normalized.length > 0 ? Array.from(new Set(normalized)) : ['api_key', 'oauth'];
+};
+
+const filterCredentialOptions = (
+  providerFilter: string[],
+  authTypeFilter: Array<'api_key' | 'oauth'>
+) => {
+  const options = props.credentialOptions ?? [];
+
+  return options.filter(option => {
+    const optionProvider = option.provider.toLowerCase();
+    const providerMatch = providerFilter.length === 0 || providerFilter.includes(optionProvider);
+    const authTypeMatch = authTypeFilter.includes(option.auth_type);
+    return providerMatch && authTypeMatch;
+  });
+};
+
+const credentialOptionKey = (option: CredentialOption) => {
+  return [option.auth_type, option.provider, option.owner_user_id, option.id].join(':');
+};
+
+const credentialSelectionValue = (fieldKey: string) => {
+  const value = fieldValues.value[fieldKey];
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+
+  const ref = value as Record<string, unknown>;
+  const id = typeof ref.id === 'string' ? ref.id : '';
+  const provider = typeof ref.provider === 'string' ? ref.provider : '';
+  const authType = typeof ref.auth_type === 'string' ? ref.auth_type : '';
+  const ownerUserId = typeof ref.owner_user_id === 'string' ? ref.owner_user_id : '';
+
+  if (id === '' || provider === '' || authType === '' || ownerUserId === '') {
+    return '';
+  }
+
+  return [authType, provider, ownerUserId, id].join(':');
+};
+
+const updateCredentialSelection = (fieldKey: string, selectedValue: string) => {
+  const field = fieldByKey.value[fieldKey];
+  const options = field?.credentialOptions || [];
+
+  if (selectedValue === '') {
+    fieldValues.value[fieldKey] = null;
+    return;
+  }
+
+  const selectedOption = options.find(option => credentialOptionKey(option) === selectedValue);
+
+  if (!selectedOption) {
+    fieldValues.value[fieldKey] = null;
+    return;
+  }
+
+  fieldValues.value[fieldKey] = {
+    id: selectedOption.id,
+    provider: selectedOption.provider,
+    auth_type: selectedOption.auth_type,
+    owner_user_id: selectedOption.owner_user_id,
+  };
+};
+
+const credentialOptionLabel = (option: CredentialOption) => {
+  const ownerName = option.owner_display_name || option.owner_user_id;
+  const status = option.status && option.status !== 'active' ? ` [${option.status}]` : '';
+  return `${option.provider_label} - ${ownerName} (${option.display_name})${status}`;
 };
 
 const expandedSections = ref<Record<string, boolean>>({
@@ -1152,7 +1309,7 @@ const toggleWebhookListening = () => {
                 <div
                   class="rounded-2xl border transition-all duration-300"
                   :class="
-                    fieldModes[field.key] === 'literal'
+                    fieldModes[field.key] === 'literal' || !field.expressionCapable
                       ? 'border-base-300 bg-base-100 shadow-sm'
                       : 'border-secondary/20 bg-secondary/[0.02] shadow-inner'
                   "
@@ -1164,7 +1321,7 @@ const toggleWebhookListening = () => {
                       field.label
                     }}</label>
 
-                    <div v-if="canEdit" class="join">
+                    <div v-if="field.expressionCapable && canEdit" class="join">
                       <button
                         class="join-item btn btn-xs capitalize"
                         :class="fieldModes[field.key] === 'literal' ? 'btn-primary' : 'btn-ghost'"
@@ -1183,17 +1340,48 @@ const toggleWebhookListening = () => {
                       </button>
                     </div>
                     <div
-                      v-else
+                      v-else-if="field.expressionCapable"
                       class="text-base-content/50 rounded-full border border-base-200 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide"
                     >
                       {{ fieldModes[field.key] === 'expression' ? 'Expression' : 'Fixed' }}
                     </div>
+                    <div
+                      v-else
+                      class="text-base-content/50 rounded-full border border-base-200 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide"
+                    >
+                      Credential
+                    </div>
                   </div>
 
                   <div class="p-5">
-                    <template v-if="fieldModes[field.key] === 'literal'">
+                    <template v-if="fieldModes[field.key] === 'literal' || !field.expressionCapable">
+                      <div v-if="field.type === 'credential'" class="space-y-2">
+                        <select
+                          class="select select-bordered bg-base-200/20 border-base-300 focus:border-primary w-full rounded-xl text-sm font-medium"
+                          :disabled="!canEdit"
+                          :value="credentialSelectionValue(field.key)"
+                          @change="
+                            updateCredentialSelection(
+                              field.key,
+                              ($event.target as HTMLSelectElement).value
+                            )
+                          "
+                        >
+                          <option value="">Select credential</option>
+                          <option
+                            v-for="option in field.credentialOptions"
+                            :key="credentialOptionKey(option)"
+                            :value="credentialOptionKey(option)"
+                          >
+                            {{ credentialOptionLabel(option) }}
+                          </option>
+                        </select>
+                        <p class="text-base-content/50 text-xs">
+                          Only non-sensitive credential metadata is visible here.
+                        </p>
+                      </div>
                       <textarea
-                        v-if="field.type === 'textarea' || field.type === 'json'"
+                        v-else-if="field.type === 'textarea' || field.type === 'json'"
                         v-model="
                           fieldValues[field.key] as
                             | string

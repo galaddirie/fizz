@@ -77,6 +77,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
     "properties" => %{
       "_primary" => %{"description" => "Primary flow input"},
       "provider" => %{"type" => "string"},
+      "credential_ref" => %{"type" => "object"},
       "model" => %{"type" => "string"},
       "temperature" => %{"type" => "number"},
       "max_tokens" => %{"type" => "integer"},
@@ -121,17 +122,19 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   defp build_output(input, model_config, messages) do
     provider = Map.get(model_config, "provider", "openai_api_key")
+    credential_ref = Map.get(model_config, "credential_ref")
     model = Map.get(model_config, "model")
     temperature = Map.get(model_config, "temperature", 0.2)
     max_tokens = Map.get(model_config, "max_tokens", 800)
     tools = normalize_tools(slot_value(input, "tools"))
     primary = slot_value(input, "_primary")
 
-    if is_binary(model) and model != "" do
+    if is_binary(model) and model != "" and is_map(credential_ref) do
       {:ok,
        %{
          "_primary" => primary,
          "provider" => provider,
+         "credential_ref" => credential_ref,
          "model" => model,
          "temperature" => temperature,
          "max_tokens" => max_tokens,
@@ -176,33 +179,39 @@ defmodule Fizz.Steps.Executors.AIAgent do
     []
     |> maybe_put_opt(:temperature, assembled["temperature"])
     |> maybe_put_opt(:max_tokens, assembled["max_tokens"])
+    |> maybe_put_opt(:credential_ref, assembled["credential_ref"])
   end
 
   defp maybe_put_opt(opts, _key, nil), do: opts
   defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp normalize_model_config(%{"model" => model} = model_config) when is_binary(model) do
-    {:ok, model_config}
+    if is_map(Map.get(model_config, "credential_ref")) do
+      {:ok, model_config}
+    else
+      {:error, {:invalid_subnode_output, :model}}
+    end
   end
 
   defp normalize_model_config(%{model: model} = model_config) when is_binary(model) do
-    {:ok,
-     %{
-       "provider" => Map.get(model_config, :provider, "openai_api_key"),
-       "model" => model,
-       "temperature" => Map.get(model_config, :temperature, 0.2),
-       "max_tokens" => Map.get(model_config, :max_tokens, 800)
-     }}
+    credential_ref = Map.get(model_config, :credential_ref)
+
+    if is_map(credential_ref) do
+      {:ok,
+       %{
+         "provider" => Map.get(model_config, :provider, "openai_api_key"),
+         "credential_ref" => credential_ref,
+         "model" => model,
+         "temperature" => Map.get(model_config, :temperature, 0.2),
+         "max_tokens" => Map.get(model_config, :max_tokens, 800)
+       }}
+    else
+      {:error, {:invalid_subnode_output, :model}}
+    end
   end
 
   defp normalize_model_config(model) when is_binary(model) do
-    {:ok,
-     %{
-       "provider" => "openai_api_key",
-       "model" => model,
-       "temperature" => 0.2,
-       "max_tokens" => 800
-     }}
+    {:error, {:invalid_subnode_output, :model}}
   end
 
   defp normalize_model_config(_), do: {:error, {:invalid_subnode_output, :model}}

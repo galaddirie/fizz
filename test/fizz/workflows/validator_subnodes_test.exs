@@ -91,11 +91,39 @@ defmodule Fizz.Workflows.ValidatorSubnodesTest do
   end
 
   defp step(id, type_id) do
+    config =
+      case type_id do
+        "openai_model" ->
+          %{
+            "model" => "gpt-4.1-mini",
+            "credential_ref" => %{
+              "id" => "cred_openai_#{id}",
+              "provider" => "openai_api_key",
+              "auth_type" => "api_key",
+              "owner_user_id" => "user_123"
+            }
+          }
+
+        "anthropic_model" ->
+          %{
+            "model" => "claude-3-5-sonnet-latest",
+            "credential_ref" => %{
+              "id" => "cred_anthropic_#{id}",
+              "provider" => "anthropic_api_key",
+              "auth_type" => "api_key",
+              "owner_user_id" => "user_123"
+            }
+          }
+
+        _ ->
+          %{}
+      end
+
     %Step{
       id: id,
       type_id: type_id,
       name: id,
-      config: %{},
+      config: config,
       position: %{}
     }
   end

@@ -74,6 +74,19 @@ export interface Trigger {
   enabled: boolean;
 }
 
+export interface CredentialOption {
+  id: string;
+  provider: string;
+  provider_label: string;
+  auth_type: 'api_key' | 'oauth';
+  display_name: string;
+  owner_user_id: string;
+  owner_display_name: string;
+  status: string;
+  created_at?: string;
+  last_used_at?: string;
+}
+
 // =============================================================================
 // Step Type Registry
 // =============================================================================

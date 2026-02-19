@@ -6,6 +6,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   alias Fizz.Accounts
   alias Fizz.Workflows
+  alias Fizz.Integrations
   alias Fizz.Repo
   alias Fizz.Steps
   alias Fizz.Steps.Registry, as: StepRegistry
@@ -33,6 +34,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
               :ok ->
                 step_types = Steps.list_types()
                 node_library_items = Steps.list_library_items()
+                credential_options = credential_options_for_editor(scope, workspace_id)
 
                 socket =
                   socket
@@ -48,6 +50,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
                   |> assign(:step_executions, [])
                   |> assign(:execution_id, nil)
                   |> assign(:expression_previews, %{})
+                  |> assign(:credential_options, credential_options)
                   |> assign(:webhook_execution_subscribed, false)
                   |> assign(:undo_state, nil)
                   |> assign(:debug_execution_id, nil)
@@ -261,6 +264,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
           v-on:preview_expression={JS.push("preview_expression")}
           v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
           expressionPreviews={@expression_previews}
+          credentialOptions={@credential_options}
           debugExecutionId={@debug_execution_id}
         />
       </div>
@@ -2093,6 +2097,21 @@ defmodule FizzWeb.WorkflowLive.Edit do
   defp format_error_message(%{message: message}), do: message
   defp format_error_message(%{"message" => message}), do: message
   defp format_error_message(error), do: inspect(error)
+
+  defp credential_options_for_editor(scope, workspace_id) do
+    case Integrations.list_credential_options(scope, workspace_id) do
+      {:ok, options} ->
+        options
+
+      {:error, reason} ->
+        Logger.warning("Unable to list credential options for workflow editor",
+          workspace_id: workspace_id,
+          reason: inspect(reason)
+        )
+
+        []
+    end
+  end
 
   # Convert any expression result value to a display-friendly string for live preview
   defp value_to_display_string(value) do

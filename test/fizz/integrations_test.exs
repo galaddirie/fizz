@@ -199,12 +199,19 @@ defmodule Fizz.IntegrationsTest do
        }}
     ])
 
-    assert {:ok, _credential} =
+    assert {:ok, credential} =
              AccountExternalAuth.create_credential(scope, org_id, %{
                provider: "openai_api_key",
                provider_label: "OpenAI ReqLLM",
                secret: "sk-openai-req-llm"
              })
+
+    credential_ref = %{
+      id: credential.id,
+      provider: "openai_api_key",
+      auth_type: "api_key",
+      owner_user_id: user.id
+    }
 
     assert {:ok, %{operation: :generate_text}} =
              OpenAIApiKey.generate_text(
@@ -212,7 +219,8 @@ defmodule Fizz.IntegrationsTest do
                org_id,
                "openai:gpt-4o-mini",
                "Say hello",
-               temperature: 0.2
+               temperature: 0.2,
+               credential_ref: credential_ref
              )
 
     assert_receive {:req_llm_called, :generate_text, "openai:gpt-4o-mini", "Say hello",
@@ -222,7 +230,9 @@ defmodule Fizz.IntegrationsTest do
     assert generate_text_opts[:temperature] == 0.2
 
     assert {:ok, %{operation: :stream_text}} =
-             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-4o-mini", "Stream hello")
+             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-4o-mini", "Stream hello",
+               credential_ref: credential_ref
+             )
 
     assert_receive {:req_llm_called, :stream_text, "openai:gpt-4o-mini", "Stream hello",
                     stream_text_opts}
@@ -235,7 +245,8 @@ defmodule Fizz.IntegrationsTest do
                org_id,
                "openai:gpt-4o-mini",
                "Generate a person",
-               name: [type: :string, required: true]
+               [name: [type: :string, required: true]],
+               credential_ref: credential_ref
              )
 
     assert_receive {:req_llm_called, :generate_object, "openai:gpt-4o-mini", "Generate a person",
@@ -248,13 +259,27 @@ defmodule Fizz.IntegrationsTest do
                scope,
                org_id,
                "openai:gpt-image-1",
-               "A red square"
+               "A red square",
+               credential_ref: credential_ref
              )
 
     assert_receive {:req_llm_called, :generate_image, "openai:gpt-image-1", "A red square",
                     generate_image_opts}
 
     assert generate_image_opts[:api_key] == "sk-openai-req-llm"
+  end
+
+  test "openai ReqLLM helpers require explicit credential_ref" do
+    user = user_fixture()
+    scope = Scope.for_user(user)
+
+    assert {:error, :credential_ref_required} =
+             OpenAIApiKey.generate_text(
+               scope,
+               "org_missing_ref",
+               "openai:gpt-4o-mini",
+               "Say hello"
+             )
   end
 
   test "fetch_token_for_sprite/3 resolves api_key auth directly from credentials" do

@@ -3,6 +3,7 @@ defmodule Fizz.Workflows.Validator do
   Validates workflow draft integrity, including node group boundaries.
   """
 
+  alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.WorkflowDraft
 
@@ -15,6 +16,7 @@ defmodule Fizz.Workflows.Validator do
       |> Kernel.++(validate_group_connections(draft))
       |> Kernel.++(validate_no_cross_group_references(draft))
       |> Kernel.++(validate_subnode_connections(draft))
+      |> Kernel.++(validate_auth_step_configs(draft))
 
     if errors == [] do
       :ok
@@ -392,4 +394,50 @@ defmodule Fizz.Workflows.Validator do
   end
 
   defp extract_step_references(_), do: []
+
+  defp validate_auth_step_configs(draft) do
+    draft
+    |> Map.get(:steps, [])
+    |> List.wrap()
+    |> Enum.flat_map(fn step ->
+      case StepRegistry.get(step.type_id) do
+        {:ok, step_type} ->
+          if credential_ref_required?(step_type) do
+            case StepExecutorBehaviour.validate_config(step.type_id, step.config || %{}) do
+              :ok ->
+                []
+
+              {:error, errors} ->
+                Enum.map(errors, &step_config_error(step.id, &1))
+            end
+          else
+            []
+          end
+
+        {:error, :not_found} ->
+          []
+      end
+    end)
+  end
+
+  defp credential_ref_required?(step_type) do
+    properties =
+      step_type
+      |> Map.get(:config_schema, %{})
+      |> Map.get("properties", %{})
+
+    Map.has_key?(properties, "credential_ref")
+  end
+
+  defp step_config_error(step_id, {field, message}) when is_atom(field) and is_binary(message) do
+    {:step, step_id, "#{field} #{message}"}
+  end
+
+  defp step_config_error(step_id, {field, message})
+       when is_binary(field) and is_binary(message) do
+    {:step, step_id, "#{field} #{message}"}
+  end
+
+  defp step_config_error(step_id, message) when is_binary(message), do: {:step, step_id, message}
+  defp step_config_error(step_id, message), do: {:step, step_id, inspect(message)}
 end
