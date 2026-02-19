@@ -6,6 +6,7 @@ defmodule Fizz.IntegrationsTest do
   alias Fizz.Accounts.ApiCredential
   alias Fizz.Integrations
   alias Fizz.Integrations.ProviderCatalog
+  alias Fizz.Integrations.Providers.OpenAIApiKey
   alias Fizz.WorkOSHTTPMock
 
   import Fizz.AccountsFixtures
@@ -148,6 +149,112 @@ defmodule Fizz.IntegrationsTest do
     assert token_result.access_token == "sk-openai-provider"
     assert token_result.api_credential_id == credential.id
     assert token_result.credential_id == credential.id
+  end
+
+  test "openai ReqLLM helpers use user vault key for each operation" do
+    previous_req_llm_client = Application.get_env(:fizz, :req_llm_client_module)
+    Application.put_env(:fizz, :req_llm_client_module, Fizz.TestSupport.ReqLLMMock)
+
+    on_exit(fn ->
+      restore_env(:fizz, :req_llm_client_module, previous_req_llm_client)
+    end)
+
+    user = user_fixture()
+    org_id = "org_openai_req_llm"
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "vault_obj_openai_req_llm",
+           "metadata" => %{"version_id" => "version_1"}
+         }
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_req_llm", "value" => "sk-openai-req-llm"}
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_req_llm", "value" => "sk-openai-req-llm"}
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_req_llm", "value" => "sk-openai-req-llm"}
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_req_llm", "value" => "sk-openai-req-llm"}
+       }}
+    ])
+
+    assert {:ok, _credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI ReqLLM",
+               secret: "sk-openai-req-llm"
+             })
+
+    assert {:ok, %{operation: :generate_text}} =
+             OpenAIApiKey.generate_text(
+               scope,
+               org_id,
+               "openai:gpt-4o-mini",
+               "Say hello",
+               temperature: 0.2
+             )
+
+    assert_receive {:req_llm_called, :generate_text, "openai:gpt-4o-mini", "Say hello",
+                    generate_text_opts}
+
+    assert generate_text_opts[:api_key] == "sk-openai-req-llm"
+    assert generate_text_opts[:temperature] == 0.2
+
+    assert {:ok, %{operation: :stream_text}} =
+             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-4o-mini", "Stream hello")
+
+    assert_receive {:req_llm_called, :stream_text, "openai:gpt-4o-mini", "Stream hello",
+                    stream_text_opts}
+
+    assert stream_text_opts[:api_key] == "sk-openai-req-llm"
+
+    assert {:ok, %{operation: :generate_object}} =
+             OpenAIApiKey.generate_object(
+               scope,
+               org_id,
+               "openai:gpt-4o-mini",
+               "Generate a person",
+               name: [type: :string, required: true]
+             )
+
+    assert_receive {:req_llm_called, :generate_object, "openai:gpt-4o-mini", "Generate a person",
+                    [name: [type: :string, required: true]], generate_object_opts}
+
+    assert generate_object_opts[:api_key] == "sk-openai-req-llm"
+
+    assert {:ok, %{operation: :generate_image}} =
+             OpenAIApiKey.generate_image(
+               scope,
+               org_id,
+               "openai:gpt-image-1",
+               "A red square"
+             )
+
+    assert_receive {:req_llm_called, :generate_image, "openai:gpt-image-1", "A red square",
+                    generate_image_opts}
+
+    assert generate_image_opts[:api_key] == "sk-openai-req-llm"
   end
 
   test "fetch_token_for_sprite/3 resolves api_key auth directly from credentials" do

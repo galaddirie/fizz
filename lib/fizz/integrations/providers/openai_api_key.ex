@@ -1,11 +1,22 @@
 defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   @moduledoc """
   OpenAI integration provider backed by user-owned Vault API credentials.
+
+  Includes helper functions that call ReqLLM with the current user's Vault key.
   """
 
   @behaviour Fizz.Integrations.Provider
 
-  alias Fizz.Accounts.ExternalAuth
+  alias Fizz.Accounts.{ExternalAuth, Scope}
+
+  @type model_spec ::
+          String.t()
+          | {atom(), keyword()}
+          | {atom(), String.t(), keyword()}
+          | struct()
+  @type messages :: String.t() | list() | ReqLLM.Context.t()
+  @type response :: ReqLLM.Response.t()
+  @type stream_response :: ReqLLM.StreamResponse.t()
 
   @impl true
   def provider_id, do: "openai_api_key"
@@ -64,6 +75,78 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   @impl true
   def network_domains do
     ["api.openai.com"]
+  end
+
+  @doc """
+  Generates text through ReqLLM using the user's Vault-managed OpenAI API key.
+  """
+  @spec generate_text(Scope.t(), String.t(), model_spec(), messages(), keyword()) ::
+          {:ok, response()} | {:error, term()}
+  def generate_text(%Scope{} = scope, organization_id, model, messages, opts \\ [])
+      when is_binary(organization_id) and is_list(opts) do
+    with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
+      req_llm_client().generate_text(model, messages, req_llm_opts)
+    end
+  end
+
+  @doc """
+  Streams text through ReqLLM using the user's Vault-managed OpenAI API key.
+  """
+  @spec stream_text(Scope.t(), String.t(), model_spec(), messages(), keyword()) ::
+          {:ok, stream_response()} | {:error, term()}
+  def stream_text(%Scope{} = scope, organization_id, model, messages, opts \\ [])
+      when is_binary(organization_id) and is_list(opts) do
+    with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
+      req_llm_client().stream_text(model, messages, req_llm_opts)
+    end
+  end
+
+  @doc """
+  Generates a structured object through ReqLLM using the user's Vault-managed key.
+  """
+  @spec generate_object(
+          Scope.t(),
+          String.t(),
+          model_spec(),
+          messages(),
+          keyword() | map() | term(),
+          keyword()
+        ) ::
+          {:ok, response()} | {:error, term()}
+  def generate_object(
+        %Scope{} = scope,
+        organization_id,
+        model,
+        messages,
+        object_schema,
+        opts \\ []
+      )
+      when is_binary(organization_id) and is_list(opts) do
+    with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
+      req_llm_client().generate_object(model, messages, object_schema, req_llm_opts)
+    end
+  end
+
+  @doc """
+  Generates images through ReqLLM using the user's Vault-managed OpenAI API key.
+  """
+  @spec generate_image(Scope.t(), String.t(), model_spec(), messages(), keyword()) ::
+          {:ok, response()} | {:error, term()}
+  def generate_image(%Scope{} = scope, organization_id, model, prompt_or_messages, opts \\ [])
+      when is_binary(organization_id) and is_list(opts) do
+    with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
+      req_llm_client().generate_image(model, prompt_or_messages, req_llm_opts)
+    end
+  end
+
+  defp req_llm_opts(%Scope{} = scope, organization_id, opts) when is_list(opts) do
+    with {:ok, %{access_token: api_key}} <- fetch_token(scope, organization_id) do
+      {:ok, Keyword.put(opts, :api_key, api_key)}
+    end
+  end
+
+  defp req_llm_client do
+    Application.get_env(:fizz, :req_llm_client_module, ReqLLM)
   end
 
   defp credential_metadata(credential_result) do
