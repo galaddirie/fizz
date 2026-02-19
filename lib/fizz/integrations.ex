@@ -113,20 +113,7 @@ defmodule Fizz.Integrations do
           fetch_oauth_token(resolved_scope, organization_id, normalized_provider)
 
         :api_key ->
-          with {:ok, credential_result} <-
-                 AccountExternalAuth.resolve_credential_for_use(
-                   resolved_scope,
-                   organization_id,
-                   normalized_provider
-                 ) do
-            {:ok,
-             %{
-               auth_method: :api_key,
-               provider: normalized_provider,
-               api_key: credential_result.api_key,
-               api_credential_id: credential_result.api_credential_id
-             }}
-          end
+          fetch_api_key_token(resolved_scope, organization_id, normalized_provider)
       end
     end
   end
@@ -166,7 +153,7 @@ defmodule Fizz.Integrations do
   """
   @spec network_domains_for_provider(String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def network_domains_for_provider(provider) do
-    with {:ok, provider_mod} <- provider_module(provider) do
+    with {:ok, provider_mod} <- provider_module_for_network_domains(provider) do
       {:ok, provider_mod.network_domains()}
     end
   end
@@ -190,6 +177,67 @@ defmodule Fizz.Integrations do
          scope: resolved_scope,
          organization_id: organization_id
        }}
+    end
+  end
+
+  defp fetch_api_key_token(resolved_scope, organization_id, provider) do
+    case ProviderCatalog.api_key_provider_module(provider) do
+      {:ok, provider_mod} ->
+        with {:ok, %{access_token: api_key} = token_result}
+             when is_binary(api_key) <-
+               provider_mod.fetch_token(resolved_scope, organization_id),
+             api_credential_id when is_binary(api_credential_id) <-
+               token_result[:api_credential_id] || token_result[:credential_id] do
+          {:ok,
+           %{
+             auth_method: :api_key,
+             provider: provider,
+             api_key: api_key,
+             api_credential_id: api_credential_id
+           }}
+        else
+          {:ok, _token_result} ->
+            {:error, :no_access_token}
+
+          nil ->
+            fetch_api_key_token_from_vault_credentials(resolved_scope, organization_id, provider)
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      {:error, :provider_not_implemented} ->
+        fetch_api_key_token_from_vault_credentials(resolved_scope, organization_id, provider)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp fetch_api_key_token_from_vault_credentials(resolved_scope, organization_id, provider) do
+    with {:ok, credential_result} <-
+           AccountExternalAuth.resolve_credential_for_use(
+             resolved_scope,
+             organization_id,
+             provider
+           ) do
+      {:ok,
+       %{
+         auth_method: :api_key,
+         provider: provider,
+         api_key: credential_result.api_key,
+         api_credential_id: credential_result.api_credential_id
+       }}
+    end
+  end
+
+  defp provider_module_for_network_domains(provider) do
+    case provider_module(provider) do
+      {:ok, provider_mod} ->
+        {:ok, provider_mod}
+
+      {:error, _reason} ->
+        ProviderCatalog.api_key_provider_module(provider)
     end
   end
 

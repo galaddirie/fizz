@@ -13,7 +13,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: "/images/github.svg",
       custom: false,
       type: :oauth,
-      oauth_module: Fizz.Integrations.Providers.GitHubOAuth
+      oauth_module: Fizz.Integrations.Providers.GitHubOAuth,
+      api_key_module: nil
     },
     %{
       id: "github_api_key",
@@ -21,7 +22,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: "/images/github.svg",
       custom: false,
       type: :api_key,
-      oauth_module: nil
+      oauth_module: nil,
+      api_key_module: nil
     },
     %{
       id: "openai_api_key",
@@ -29,7 +31,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: "/images/openai.svg",
       custom: false,
       type: :api_key,
-      oauth_module: nil
+      oauth_module: nil,
+      api_key_module: Fizz.Integrations.Providers.OpenAIApiKey
     },
     %{
       id: "anthropic_api_key",
@@ -37,7 +40,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: "/images/anthropic.svg",
       custom: false,
       type: :api_key,
-      oauth_module: nil
+      oauth_module: nil,
+      api_key_module: nil
     },
     %{
       id: "custom_api_key",
@@ -45,7 +49,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: nil,
       custom: true,
       type: :api_key,
-      oauth_module: nil
+      oauth_module: nil,
+      api_key_module: nil
     }
   ]
 
@@ -147,6 +152,18 @@ defmodule Fizz.Integrations.ProviderCatalog do
     end
   end
 
+  @spec api_key_provider_module(String.t()) :: {:ok, module()} | {:error, term()}
+  def api_key_provider_module(provider_id) when is_binary(provider_id) do
+    with {:ok, entry} <- provider_for_type(provider_id, :api_key),
+         module when is_atom(module) <- entry.api_key_module do
+      {:ok, module}
+    else
+      nil -> {:error, :provider_not_implemented}
+      {:error, reason} -> {:error, reason}
+      _ -> {:error, :provider_not_implemented}
+    end
+  end
+
   @spec api_key_providers() :: [map()]
   def api_key_providers do
     providers()
@@ -208,7 +225,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
       logo_path: legacy_entry.logo_path || default_entry.logo_path,
       custom: legacy_entry.custom || default_entry.custom,
       type: legacy_entry.type || default_entry.type,
-      oauth_module: default_entry.oauth_module || legacy_entry.oauth_module
+      oauth_module: default_entry.oauth_module || legacy_entry.oauth_module,
+      api_key_module: default_entry.api_key_module || legacy_entry.api_key_module
     }
   end
 
@@ -227,6 +245,9 @@ defmodule Fizz.Integrations.ProviderCatalog do
     types = normalize_types(auth_type, auth_methods)
     oauth_module = normalize_oauth_module(entry[:oauth_module] || entry["oauth_module"])
 
+    api_key_module =
+      normalize_api_key_module(entry[:api_key_module] || entry["api_key_module"])
+
     cond do
       id == "" or label == "" ->
         []
@@ -242,7 +263,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
             logo_path: logo_path,
             custom: custom in [true, "true", 1],
             type: type,
-            oauth_module: if(type == :oauth, do: oauth_module, else: nil)
+            oauth_module: if(type == :oauth, do: oauth_module, else: nil),
+            api_key_module: if(type == :api_key, do: api_key_module, else: nil)
           }
         end)
     end
@@ -327,4 +349,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
 
   defp normalize_oauth_module(module) when is_atom(module), do: module
   defp normalize_oauth_module(_module), do: nil
+
+  defp normalize_api_key_module(module) when is_atom(module), do: module
+  defp normalize_api_key_module(_module), do: nil
 end

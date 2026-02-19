@@ -17,10 +17,12 @@ defmodule Fizz.Integrations.Provider do
         }
 
   @type token_result :: %{
-          access_token: String.t(),
-          expires_at: String.t() | nil,
-          scopes: [String.t()],
-          missing_scopes: [String.t()]
+          required(:access_token) => String.t(),
+          required(:expires_at) => String.t() | nil,
+          required(:scopes) => [String.t()],
+          required(:missing_scopes) => [String.t()],
+          optional(:api_credential_id) => String.t(),
+          optional(:credential_id) => String.t()
         }
 
   @callback provider_id() :: String.t()

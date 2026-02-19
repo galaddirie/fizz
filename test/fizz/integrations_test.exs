@@ -5,6 +5,7 @@ defmodule Fizz.IntegrationsTest do
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Accounts.ApiCredential
   alias Fizz.Integrations
+  alias Fizz.Integrations.ProviderCatalog
   alias Fizz.WorkOSHTTPMock
 
   import Fizz.AccountsFixtures
@@ -98,6 +99,55 @@ defmodule Fizz.IntegrationsTest do
 
     assert {:ok, _deleted} = AccountExternalAuth.delete_credential(scope, org_id, credential.id)
     refute Repo.get(ApiCredential, credential.id)
+  end
+
+  test "provider catalog resolves openai API-key module" do
+    assert {:ok, Fizz.Integrations.Providers.OpenAIApiKey} =
+             ProviderCatalog.api_key_provider_module("openai_api_key")
+
+    assert {:ok, ["api.openai.com"]} =
+             Integrations.network_domains_for_provider("openai_api_key")
+  end
+
+  test "openai API-key provider fetches vault-backed user credential" do
+    user = user_fixture()
+    org_id = "org_openai_provider"
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "vault_obj_openai_provider",
+           "metadata" => %{"version_id" => "version_1"}
+         }
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{
+           "id" => "vault_obj_openai_provider",
+           "value" => "sk-openai-provider"
+         }
+       }}
+    ])
+
+    assert {:ok, credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Provider",
+               secret: "sk-openai-provider"
+             })
+
+    assert {:ok, provider_mod} = ProviderCatalog.api_key_provider_module("openai_api_key")
+    assert {:ok, token_result} = provider_mod.fetch_token(scope, org_id)
+
+    assert token_result.access_token == "sk-openai-provider"
+    assert token_result.api_credential_id == credential.id
+    assert token_result.credential_id == credential.id
   end
 
   test "fetch_token_for_sprite/3 resolves api_key auth directly from credentials" do
