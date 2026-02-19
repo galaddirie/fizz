@@ -264,21 +264,33 @@ defmodule Fizz.Steps.Executors.AIAgent do
   defp slot_key_atom("tools"), do: :tools
   defp slot_key_atom(_key), do: nil
 
-  defp scope_and_organization(%ExecutionContext{metadata: metadata}) when is_map(metadata) do
-    scope = Map.get(metadata, :scope) || Map.get(metadata, "scope")
-
-    case scope do
-      %Scope{organization_id: organization_id} = scope
-      when is_binary(organization_id) and byte_size(organization_id) > 0 ->
-        {:ok, scope, organization_id}
-
-      %Scope{} ->
-        {:error, :organization_scope_required}
-
-      _ ->
-        {:error, :scope_not_available}
+  defp scope_and_organization(%ExecutionContext{} = ctx) do
+    with {:ok, scope} <- scope_from_context(ctx),
+         {:ok, organization_id} <- organization_from_scope(scope) do
+      {:ok, scope, organization_id}
     end
   end
 
   defp scope_and_organization(_), do: {:error, :scope_not_available}
+
+  defp scope_from_context(%ExecutionContext{scope: %Scope{} = scope}), do: {:ok, scope}
+
+  defp scope_from_context(%ExecutionContext{metadata: metadata}) when is_map(metadata) do
+    case Map.get(metadata, :scope) || Map.get(metadata, "scope") do
+      %Scope{} = scope -> {:ok, scope}
+      _ -> {:error, :scope_not_available}
+    end
+  end
+
+  defp scope_from_context(%ExecutionContext{}), do: {:error, :scope_not_available}
+
+  defp organization_from_scope(%Scope{organization_id: organization_id} = _scope)
+       when is_binary(organization_id) and byte_size(organization_id) > 0,
+       do: {:ok, organization_id}
+
+  defp organization_from_scope(%Scope{workspace: %{workos_organization_id: organization_id}})
+       when is_binary(organization_id) and byte_size(organization_id) > 0,
+       do: {:ok, organization_id}
+
+  defp organization_from_scope(%Scope{}), do: {:error, :organization_scope_required}
 end

@@ -86,7 +86,7 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   def generate_text(%Scope{} = scope, organization_id, model, messages, opts \\ [])
       when is_binary(organization_id) and is_list(opts) do
     with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
-      req_llm_client().generate_text(model, messages, req_llm_opts)
+      req_llm_client().generate_text(normalize_model_spec(model), messages, req_llm_opts)
     end
   end
 
@@ -98,7 +98,7 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   def stream_text(%Scope{} = scope, organization_id, model, messages, opts \\ [])
       when is_binary(organization_id) and is_list(opts) do
     with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
-      req_llm_client().stream_text(model, messages, req_llm_opts)
+      req_llm_client().stream_text(normalize_model_spec(model), messages, req_llm_opts)
     end
   end
 
@@ -124,7 +124,12 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
       )
       when is_binary(organization_id) and is_list(opts) do
     with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
-      req_llm_client().generate_object(model, messages, object_schema, req_llm_opts)
+      req_llm_client().generate_object(
+        normalize_model_spec(model),
+        messages,
+        object_schema,
+        req_llm_opts
+      )
     end
   end
 
@@ -136,7 +141,11 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   def generate_image(%Scope{} = scope, organization_id, model, prompt_or_messages, opts \\ [])
       when is_binary(organization_id) and is_list(opts) do
     with {:ok, req_llm_opts} <- req_llm_opts(scope, organization_id, opts) do
-      req_llm_client().generate_image(model, prompt_or_messages, req_llm_opts)
+      req_llm_client().generate_image(
+        normalize_model_spec(model),
+        prompt_or_messages,
+        req_llm_opts
+      )
     end
   end
 
@@ -177,6 +186,26 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   end
 
   defp ensure_scope_owner_matches_ref(_scope, _credential_ref), do: {:error, :scope_not_available}
+
+  defp normalize_model_spec(model) when is_binary(model) do
+    trimmed_model = String.trim(model)
+
+    cond do
+      trimmed_model == "" ->
+        trimmed_model
+
+      String.contains?(trimmed_model, ":") ->
+        trimmed_model
+
+      String.contains?(trimmed_model, "@") ->
+        trimmed_model
+
+      true ->
+        "openai:" <> trimmed_model
+    end
+  end
+
+  defp normalize_model_spec(model), do: model
 
   defp req_llm_client do
     Application.get_env(:fizz, :req_llm_client_module, ReqLLM)

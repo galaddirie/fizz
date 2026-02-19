@@ -7,6 +7,7 @@ defmodule Fizz.Runtime.RunicAdapter do
   alias Runic.Component
   alias Runic.Workflow
   alias Runic.Workflow.FanOut
+  alias Fizz.Accounts.Scope
   alias Fizz.Runtime.ExecutionContext
   alias Fizz.Runtime.Hooks.Observability
   alias Fizz.Runtime.Steps.StepRunner
@@ -16,6 +17,7 @@ defmodule Fizz.Runtime.RunicAdapter do
           execution_id: String.t(),
           variables: map(),
           metadata: map(),
+          scope: Scope.t() | nil,
           step_outputs: map(),
           trigger_data: map(),
           trigger_type: atom()
@@ -47,6 +49,7 @@ defmodule Fizz.Runtime.RunicAdapter do
       workflow_id: extract_source_id(source),
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
+      scope: Keyword.get(opts, :scope),
       step_outputs: step_outputs,
       upstream_lookup: upstream_lookup,
       slot_bindings: slot_bindings,

@@ -1,6 +1,7 @@
 defmodule Fizz.Runtime.RunicAdapterTest do
   use ExUnit.Case, async: true
 
+  alias Fizz.Accounts.Scope
   alias Runic.Component
   alias Runic.Workflow
   alias Fizz.Runtime.Hooks.Observability
@@ -140,6 +141,23 @@ defmodule Fizz.Runtime.RunicAdapterTest do
       assert outputs["ai_agent"]["model"] == "gpt-4.1-mini"
       assert is_list(outputs["ai_agent"]["messages"])
       assert outputs["debug_after"] == outputs["ai_agent"]
+    end
+  end
+
+  describe "execution scope propagation" do
+    test "passes scope option into step runner opts" do
+      source =
+        workflow_source(
+          [step("debug_step", "debug", %{"label" => "Debug", "level" => "info"})],
+          []
+        )
+
+      scope = %Scope{organization_id: "org_test"}
+      workflow = RunicAdapter.to_runic_workflow(source, execution_id: "exec_test", scope: scope)
+      component = Workflow.get_component!(workflow, "debug_step")
+
+      assert {:env, [_step, opts]} = :erlang.fun_info(component.work, :env)
+      assert Keyword.get(opts, :scope) == scope
     end
   end
 

@@ -18,6 +18,7 @@ defmodule Fizz.Runtime.Steps.StepRunner do
   """
 
   require Runic
+  alias Fizz.Accounts.Scope
   alias Fizz.Runtime.ExecutionContext
   alias Fizz.Runtime.Expression
   alias Fizz.Steps.Executors.Behaviour, as: ExecutorBehaviour
@@ -28,6 +29,7 @@ defmodule Fizz.Runtime.Steps.StepRunner do
           workflow_id: String.t(),
           variables: map(),
           metadata: map(),
+          scope: Scope.t() | nil,
           step_outputs: map(),
           slot_bindings: map(),
           primary_parent_lookup: map(),
@@ -52,6 +54,7 @@ defmodule Fizz.Runtime.Steps.StepRunner do
   - `:workflow_id` - The source workflow ID
   - `:variables` - Workflow-level variables for expression evaluation
   - `:metadata` - Execution metadata
+  - `:scope` - Authenticated caller scope for execution-time integrations
   """
   @spec create(workflow_step(), step_opts()) :: Runic.Workflow.Step.t()
   def create(step, opts \\ []) do
@@ -201,6 +204,7 @@ defmodule Fizz.Runtime.Steps.StepRunner do
       step_id: step.id,
       variables: Keyword.get(opts, :variables, %{}),
       metadata: Keyword.get(opts, :metadata, %{}),
+      scope: Keyword.get(opts, :scope),
       input: primary_input,
       step_outputs: step_outputs,
       trigger: Keyword.get(opts, :trigger_data, %{}),

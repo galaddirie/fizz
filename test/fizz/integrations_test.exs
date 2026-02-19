@@ -196,6 +196,12 @@ defmodule Fizz.IntegrationsTest do
        %Req.Response{
          status: 200,
          body: %{"id" => "vault_obj_openai_req_llm", "value" => "sk-openai-req-llm"}
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_req_llm", "value" => "sk-openai-req-llm"}
        }}
     ])
 
@@ -228,6 +234,20 @@ defmodule Fizz.IntegrationsTest do
 
     assert generate_text_opts[:api_key] == "sk-openai-req-llm"
     assert generate_text_opts[:temperature] == 0.2
+
+    assert {:ok, %{operation: :generate_text}} =
+             OpenAIApiKey.generate_text(
+               scope,
+               org_id,
+               "gpt-5",
+               "Say hello bare model",
+               credential_ref: credential_ref
+             )
+
+    assert_receive {:req_llm_called, :generate_text, "openai:gpt-5", "Say hello bare model",
+                    bare_generate_text_opts}
+
+    assert bare_generate_text_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :stream_text}} =
              OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-4o-mini", "Stream hello",

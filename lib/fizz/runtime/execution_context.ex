@@ -13,8 +13,11 @@ defmodule Fizz.Runtime.ExecutionContext do
   - `:step_outputs` - Map of step_id => output for all completed steps
   - `:variables` - Workflow-level variables
   - `:metadata` - Execution metadata (trace_id, etc.)
+  - `:scope` - Authenticated caller scope for execution-time integrations
   - `:input` - The input value for this step (from parent facts)
   """
+
+  alias Fizz.Accounts.Scope
 
   @type t :: %__MODULE__{
           execution_id: String.t() | nil,
@@ -23,6 +26,7 @@ defmodule Fizz.Runtime.ExecutionContext do
           step_outputs: %{String.t() => term()},
           variables: map(),
           metadata: map(),
+          scope: Scope.t() | nil,
           input: term(),
           trigger: term(),
           trigger_type: atom() | nil,
@@ -36,6 +40,7 @@ defmodule Fizz.Runtime.ExecutionContext do
     step_outputs: %{},
     variables: %{},
     metadata: %{},
+    scope: nil,
     input: nil,
     trigger: nil,
     trigger_type: nil,
@@ -58,6 +63,7 @@ defmodule Fizz.Runtime.ExecutionContext do
       step_outputs: step_outputs,
       variables: Map.get(opts, :variables, %{}),
       metadata: Map.get(opts, :metadata, %{}),
+      scope: Map.get(opts, :scope),
       input: Map.get(opts, :input),
       trigger: Map.get(opts, :trigger),
       trigger_type: Map.get(opts, :trigger_type),

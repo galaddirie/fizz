@@ -7,6 +7,7 @@ defmodule Fizz.Runtime.Execution.Server do
 
   require Logger
   alias Runic.Workflow
+  alias Fizz.Accounts.Scope
   alias Fizz.Runtime.RunicAdapter
   alias Fizz.Runtime.Events
   alias Fizz.Runtime.Hooks.Observability
@@ -204,7 +205,7 @@ defmodule Fizz.Runtime.Execution.Server do
     execution =
       Execution
       |> Repo.get(id)
-      |> Repo.preload(workflow: [:user, :draft, :published_version])
+      |> Repo.preload(workflow: [:user, :workspace, :draft, :published_version])
 
     if execution, do: {:ok, execution}, else: {:error, :not_found}
   end
@@ -260,12 +261,40 @@ defmodule Fizz.Runtime.Execution.Server do
           trigger_type: (execution.trigger && execution.trigger.type) || :manual,
           metadata: metadata,
           step_outputs: Keyword.get(runtime_opts, :step_outputs, %{}),
-          scope: Fizz.Accounts.Scope.for_user(execution.workflow.user)
+          scope: build_execution_scope(execution.workflow)
         ]
 
         RunicAdapter.to_runic_workflow(source, opts)
     end
   end
+
+  defp build_execution_scope(%{user: user, workspace: workspace}) do
+    user
+    |> Scope.for_user()
+    |> maybe_put_scope_workspace(workspace)
+    |> maybe_put_scope_organization_id(workspace)
+  end
+
+  defp build_execution_scope(%{user: user}), do: Scope.for_user(user)
+  defp build_execution_scope(_workflow), do: nil
+
+  defp maybe_put_scope_workspace(%Scope{} = scope, %{id: _workspace_id} = workspace) do
+    Scope.with_workspace(scope, workspace)
+  end
+
+  defp maybe_put_scope_workspace(%Scope{} = scope, _workspace), do: scope
+  defp maybe_put_scope_workspace(_scope, _workspace), do: nil
+
+  defp maybe_put_scope_organization_id(
+         %Scope{} = scope,
+         %{workos_organization_id: organization_id}
+       )
+       when is_binary(organization_id) and byte_size(organization_id) > 0 do
+    Scope.with_organization_id(scope, organization_id)
+  end
+
+  defp maybe_put_scope_organization_id(%Scope{} = scope, _workspace), do: scope
+  defp maybe_put_scope_organization_id(_scope, _workspace), do: nil
 
   defp get_source(%Execution{
          execution_type: :production,

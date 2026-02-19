@@ -1,6 +1,7 @@
 defmodule Fizz.Runtime.Steps.StepRunnerTest do
   use ExUnit.Case, async: true
 
+  alias Fizz.Accounts.Scope
   alias Fizz.Runtime.Steps.StepRunner
   alias Fizz.Workflows.Embeds.Step
 
@@ -79,6 +80,45 @@ defmodule Fizz.Runtime.Steps.StepRunnerTest do
 
       assert result["_primary"] == nil
     end
+
+    test "propagates scope into ai_agent provider_chat execution context" do
+      step = %Step{
+        id: "agent_step",
+        type_id: "ai_agent",
+        name: "Agent",
+        config: %{"mode" => "provider_chat"},
+        position: %{}
+      }
+
+      scope = %Scope{organization_id: "org_test"}
+
+      assert {:step_error, "agent_step", {:unsupported_provider, "custom_provider"}} =
+               catch_throw(
+                 StepRunner.execute_with_context(
+                   step,
+                   %{"joined" => "raw_input"},
+                   execution_opts(
+                     %{
+                       "main_input_step" => %{"question" => "What is Elixir?"},
+                       "model_step" => %{
+                         "provider" => "custom_provider",
+                         "credential_ref" => %{
+                           "id" => "cred_openai",
+                           "provider" => "openai_api_key",
+                           "auth_type" => "api_key",
+                           "owner_user_id" => "user_123"
+                         },
+                         "model" => "custom-model"
+                       },
+                       "prompt_step" => %{
+                         "messages" => [%{"role" => "user", "content" => "Explain Elixir."}]
+                       }
+                     },
+                     scope: scope
+                   )
+                 )
+               )
+    end
   end
 
   describe "execute_with_context/3 primary input resolution" do
@@ -117,8 +157,9 @@ defmodule Fizz.Runtime.Steps.StepRunnerTest do
 
   defp execution_opts(step_outputs, opts \\ []) do
     primary_parents = Keyword.get(opts, :primary_parents, ["main_input_step"])
+    extra_opts = Keyword.drop(opts, [:primary_parents])
 
-    [
+    base_opts = [
       execution_id: "exec_test",
       workflow_id: "wf_test",
       step_outputs: step_outputs,
@@ -136,5 +177,7 @@ defmodule Fizz.Runtime.Steps.StepRunnerTest do
         }
       }
     ]
+
+    base_opts ++ extra_opts
   end
 end
