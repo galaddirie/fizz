@@ -3,7 +3,7 @@ defmodule FizzWeb.UserManagementLive do
 
   alias Fizz.Accounts
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
-  alias Fizz.Integrations.CredentialProviderCatalog
+  alias Fizz.Integrations.ProviderCatalog
 
   @user_tabs [
     %{
@@ -53,7 +53,7 @@ defmodule FizzWeb.UserManagementLive do
   def mount(_params, _session, socket) do
     organizations = Accounts.ensure_personal_organization(socket.assigns.current_scope)
     selected_organization_id = default_organization_id(organizations)
-    provider_catalog = CredentialProviderCatalog.providers()
+    provider_catalog = ProviderCatalog.api_key_providers()
 
     socket =
       socket
