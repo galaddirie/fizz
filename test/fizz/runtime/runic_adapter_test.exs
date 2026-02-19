@@ -102,6 +102,47 @@ defmodule Fizz.Runtime.RunicAdapterTest do
     end
   end
 
+  describe "subnode slot wiring" do
+    test "builds and runs ai_agent with prompt/model slot connections" do
+      source =
+        workflow_source(
+          [
+            step("ai_prompt_template", "ai_prompt_template", %{
+              "system_prompt" => "You are a helpful assistant.",
+              "user_prompt" => "Hello from test",
+              "context" => %{}
+            }),
+            step("openai_model", "openai_model", %{
+              "model" => "gpt-4.1-mini",
+              "temperature" => 0.2,
+              "max_tokens" => 400,
+              "credential_ref" => %{
+                "id" => "cred_openai",
+                "provider" => "openai_api_key",
+                "auth_type" => "api_key",
+                "owner_user_id" => "user_123"
+              }
+            }),
+            step("ai_agent", "ai_agent", %{"mode" => "assemble_only"}),
+            step("debug_after", "debug", %{"label" => "After", "level" => "info"})
+          ],
+          [
+            slot_connection("c1", "ai_prompt_template", "ai_agent", "prompt"),
+            slot_connection("c2", "openai_model", "ai_agent", "model"),
+            connection("c3", "ai_agent", "debug_after")
+          ]
+        )
+
+      outputs = run_workflow(source, %{"name" => "John"})
+
+      assert is_map(outputs["ai_agent"])
+      assert outputs["ai_agent"]["provider"] == "openai_api_key"
+      assert outputs["ai_agent"]["model"] == "gpt-4.1-mini"
+      assert is_list(outputs["ai_agent"]["messages"])
+      assert outputs["debug_after"] == outputs["ai_agent"]
+    end
+  end
+
   defp run_workflow(source, input) do
     reset_runtime_process_state()
 
@@ -159,6 +200,16 @@ defmodule Fizz.Runtime.RunicAdapterTest do
       source_output: "main",
       target_step_id: target_step_id,
       target_input: "main"
+    }
+  end
+
+  defp slot_connection(id, source_step_id, target_step_id, target_input) do
+    %Connection{
+      id: id,
+      source_step_id: source_step_id,
+      source_output: "main",
+      target_step_id: target_step_id,
+      target_input: target_input
     }
   end
 end

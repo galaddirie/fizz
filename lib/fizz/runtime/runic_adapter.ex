@@ -773,8 +773,10 @@ defmodule Fizz.Runtime.RunicAdapter do
         source_step_id = connection_field(conn, :source_step_id)
         slot_id = normalize_target_input(target_input)
 
-        update_in(acc, [target_step_id, slot_id], fn existing ->
-          (existing || []) ++ [source_step_id]
+        Map.update(acc, target_step_id, %{slot_id => [source_step_id]}, fn slot_bindings ->
+          Map.update(slot_bindings, slot_id, [source_step_id], fn existing ->
+            existing ++ [source_step_id]
+          end)
         end)
       end
     end)
