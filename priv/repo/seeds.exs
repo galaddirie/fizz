@@ -15,7 +15,10 @@ user1 = Accounts.get_user_by_email("galad360@gmail.com")
 user2 = Accounts.get_user_by_email("galad.work@gmail.com")
 
 if is_nil(user1) or is_nil(user2) do
-  IO.puts("⚠️  Skipping seeds: Both users (galad360@gmail.com and galad.work@gmail.com) must exist.")
+  IO.puts(
+    "⚠️  Skipping seeds: Both users (galad360@gmail.com and galad.work@gmail.com) must exist."
+  )
+
   IO.puts("   Found:")
   IO.puts("     galad360@gmail.com: #{if user1, do: "✓", else: "✗"}")
   IO.puts("     galad.work@gmail.com: #{if user2, do: "✓", else: "✗"}")
@@ -108,7 +111,10 @@ create_workflow_with_draft = fn attrs, steps, connections ->
           workflow
 
         {:error, reason} ->
-          IO.puts("⚠️  Warning: Failed to create draft for workflow #{workflow.name}: #{inspect(reason)}")
+          IO.puts(
+            "⚠️  Warning: Failed to create draft for workflow #{workflow.name}: #{inspect(reason)}"
+          )
+
           workflow
       end
 
@@ -129,7 +135,8 @@ linear_steps = [
     type_id: "manual_input",
     name: "Start",
     config: %{
-      "trigger_data" => "{\"name\": \"John Doe\", \"timestamp\": \"2026-01-04 20:00:00\", \"arr\":[1,2,3,4,5]}"
+      "trigger_data" =>
+        "{\"name\": \"John Doe\", \"timestamp\": \"2026-01-04 20:00:00\", \"arr\":[1,2,3,4,5]}"
     },
     position: %{"x" => -161.17957584024998, "y" => -569.2425531914893}
   },
