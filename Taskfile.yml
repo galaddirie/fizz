@@ -1,6 +1,15 @@
 version: '3'
 
 tasks:
+  init:
+    desc: Initialize development environment
+    cmds:
+      - mix deps.get
+      - mix ecto.create
+      - mix ecto.migrate
+      - mix assets.setup
+      - mix assets.build
+
   up:
     desc: Start development services (PostgreSQL + Adminer)
     cmds:
