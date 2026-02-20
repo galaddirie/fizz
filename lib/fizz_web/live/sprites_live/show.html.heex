@@ -144,6 +144,65 @@
         </div>
 
         <%= if @active_console do %>
+          <section id="sprite-console-repos" class="mb-4 rounded-lg border border-base-300">
+            <div class="flex items-center justify-between px-3 py-2">
+              <p class="text-xs font-medium text-muted">Repositories</p>
+              <button
+                id="sprite-console-repos-refresh"
+                class="text-muted transition-colors hover:text-base-content"
+                phx-click="refresh_repos"
+              >
+                <.icon name="hero-arrow-path" class="size-3.5" />
+              </button>
+            </div>
+
+            <%= if @github_repos_error do %>
+              <div id="sprite-console-repos-error" class="px-3 pb-3 text-xs text-warning">
+                {@github_repos_error}
+              </div>
+            <% else %>
+              <div
+                id="sprite-console-repos-stream"
+                phx-update="stream"
+                class="max-h-64 overflow-y-auto border-t border-base-300"
+              >
+                <p
+                  id="sprite-console-repos-empty"
+                  class="hidden only:block px-3 py-4 text-center text-xs text-muted"
+                >
+                  No repositories found.
+                </p>
+
+                <div
+                  :for={{dom_id, repo} <- @streams.github_repos}
+                  id={dom_id}
+                  class="group flex items-center justify-between gap-3 border-b border-base-300 px-3 py-2 last:border-b-0"
+                >
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                      <.icon
+                        name={if(repo.private, do: "hero-lock-closed", else: "hero-globe-alt")}
+                        class={[
+                          "size-3 shrink-0",
+                          if(repo.private, do: "text-warning", else: "text-muted")
+                        ]}
+                      />
+                      <p class="truncate text-sm">{repo.full_name}</p>
+                    </div>
+                  </div>
+                  <button
+                    id={"sprite-console-clone-repo-#{repo.id}"}
+                    class="shrink-0 text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-primary"
+                    phx-click="clone_repo"
+                    phx-value-repo-id={repo.id}
+                  >
+                    Clone
+                  </button>
+                </div>
+              </div>
+            <% end %>
+          </section>
+
           <div
             id="sprite-console"
             phx-hook="SpriteConsole"

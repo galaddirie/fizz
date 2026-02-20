@@ -1,6 +1,7 @@
 defmodule FizzWeb.SpritesLive.Show do
   use FizzWeb, :live_view
 
+  alias Fizz.Integrations
   alias Fizz.Sprites
 
   @impl true
@@ -11,6 +12,8 @@ defmodule FizzWeb.SpritesLive.Show do
       |> assign(:sprite_id, sprite_id)
       |> assign(:sprite, nil)
       |> assign(:active_console, nil)
+      |> assign(:github_repo_lookup, %{})
+      |> assign(:github_repos_error, nil)
       |> assign(:job_form, to_form(%{"command" => "echo hello"}, as: :job))
       |> assign(:checkpoint_form, to_form(%{"comment" => ""}, as: :checkpoint))
       |> assign(:selected_job_id, nil)
@@ -22,6 +25,7 @@ defmodule FizzWeb.SpritesLive.Show do
       |> stream(:services, [])
       |> stream(:checkpoints, [])
       |> stream(:job_output, [])
+      |> stream(:github_repos, [])
 
     {:ok, load_page(socket)}
   end
@@ -94,6 +98,14 @@ defmodule FizzWeb.SpritesLive.Show do
     {:noreply, load_page(socket)}
   end
 
+  def handle_event("refresh_repos", _params, %{assigns: %{active_console: nil}} = socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("refresh_repos", _params, socket) do
+    {:noreply, load_github_repos(socket)}
+  end
+
   def handle_event("open_console", _params, socket) do
     case Sprites.open_console(
            socket.assigns.current_scope,
@@ -102,7 +114,10 @@ defmodule FizzWeb.SpritesLive.Show do
            %{"rows" => 30, "cols" => 120}
          ) do
       {:ok, console_session} ->
-        {:noreply, assign(socket, :active_console, console_session)}
+        {:noreply,
+         socket
+         |> assign(:active_console, console_session)
+         |> load_github_repos()}
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Could not open console: #{inspect(reason)}")}
@@ -120,8 +135,58 @@ defmodule FizzWeb.SpritesLive.Show do
            socket.assigns.sprite_id,
            socket.assigns.active_console.id
          ) do
-      {:ok, _console_session} -> {:noreply, assign(socket, :active_console, nil)}
-      {:error, _reason} -> {:noreply, assign(socket, :active_console, nil)}
+      {:ok, _console_session} ->
+        {:noreply,
+         socket
+         |> assign(:active_console, nil)
+         |> reset_github_repos()}
+
+      {:error, _reason} ->
+        {:noreply,
+         socket
+         |> assign(:active_console, nil)
+         |> reset_github_repos()}
+    end
+  end
+
+  def handle_event("clone_repo", _params, %{assigns: %{active_console: nil}} = socket) do
+    {:noreply, put_flash(socket, :error, "Open a console before cloning a repo")}
+  end
+
+  def handle_event("clone_repo", params, socket) when is_map(params) do
+    repo_id =
+      case params do
+        %{"repo_id" => value} when is_binary(value) and byte_size(value) > 0 ->
+          value
+
+        %{"repo-id" => value} when is_binary(value) and byte_size(value) > 0 ->
+          value
+
+        _ ->
+          nil
+      end
+
+    repo = repo_id && Map.get(socket.assigns.github_repo_lookup, repo_id)
+
+    with repo_id when is_binary(repo_id) <- repo_id,
+         %{} <- repo,
+         clone_url when is_binary(clone_url) and byte_size(clone_url) > 0 <-
+           Map.get(repo, :clone_url) do
+      command = "git clone #{clone_url}\n"
+
+      {:noreply,
+       socket
+       |> push_event("sprite_console_run_command", %{
+         console_id: socket.assigns.active_console.id,
+         command: command
+       })
+       |> put_flash(:info, "Cloning #{Map.get(repo, :full_name, "repository")}")}
+    else
+      nil ->
+        {:noreply, put_flash(socket, :error, "Repository unavailable")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Repository has no clone URL")}
     end
   end
 
@@ -366,6 +431,50 @@ defmodule FizzWeb.SpritesLive.Show do
       {:error, _reason} -> socket
     end
   end
+
+  defp load_github_repos(socket) do
+    case Integrations.list_repos(
+           socket.assigns.current_scope,
+           socket.assigns.workspace_id,
+           "github_oauth",
+           per_page: 100,
+           sort: "updated",
+           visibility: "all"
+         ) do
+      {:ok, repos} ->
+        socket
+        |> assign(:github_repo_lookup, Map.new(repos, &{to_string(&1.id), &1}))
+        |> assign(:github_repos_error, nil)
+        |> stream(:github_repos, repos, reset: true)
+
+      {:error, reason} ->
+        socket
+        |> reset_github_repos()
+        |> assign(:github_repos_error, format_github_repo_error(reason))
+    end
+  end
+
+  defp reset_github_repos(socket) do
+    socket
+    |> assign(:github_repo_lookup, %{})
+    |> assign(:github_repos_error, nil)
+    |> stream(:github_repos, [], reset: true)
+  end
+
+  defp format_github_repo_error(:unauthorized),
+    do: "GitHub access expired. Reconnect your GitHub integration."
+
+  defp format_github_repo_error(:forbidden),
+    do: "GitHub denied repo access. Confirm your GitHub scopes."
+
+  defp format_github_repo_error({:provider_inactive, _reason}),
+    do: "GitHub integration is not active in this workspace."
+
+  defp format_github_repo_error(:organization_not_found),
+    do: "Workspace is missing an organization context for GitHub."
+
+  defp format_github_repo_error(reason),
+    do: "Could not load repositories: #{inspect(reason)}"
 
   # -- View helpers --
 

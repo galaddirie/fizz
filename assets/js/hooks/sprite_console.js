@@ -16,6 +16,8 @@ export const SpriteConsole = {
   mounted() {
     this.consoleId = this.el.dataset.consoleId
     this.outputEl = this.el.querySelector("[data-console-output]")
+    this.channelReady = false
+    this.pendingCommands = []
 
     if (!this.consoleId || !this.outputEl) {
       return
@@ -48,7 +50,9 @@ export const SpriteConsole = {
     this.channel
       .join()
       .receive("ok", () => {
+        this.channelReady = true
         this.term.writeln("\r\n[connected]")
+        this.flushPendingCommands()
         this.pushResize()
       })
       .receive("error", ({reason}) => {
@@ -61,8 +65,20 @@ export const SpriteConsole = {
     this.channel.on("error", ({reason}) => this.term.writeln(`\r\n[error: ${reason}]`))
     this.channel.on("closed", ({reason}) => this.term.writeln(`\r\n[closed: ${reason}]`))
 
+    this.handleEvent("sprite_console_run_command", payload => {
+      if (!payload || typeof payload.command !== "string") {
+        return
+      }
+
+      if (payload.console_id && String(payload.console_id) !== this.consoleId) {
+        return
+      }
+
+      this.pushStdin(payload.command)
+    })
+
     this.termDataDispose = this.term.onData(data => {
-      this.channel.push("stdin", {data})
+      this.pushStdin(data)
     })
 
     this.resizeHandler = () => {
@@ -84,11 +100,36 @@ export const SpriteConsole = {
     })
   },
 
+  pushStdin(data) {
+    if (!this.channel || typeof data !== "string" || data.length === 0) {
+      return
+    }
+
+    if (!this.channelReady) {
+      this.pendingCommands.push(data)
+      return
+    }
+
+    this.channel.push("stdin", {data})
+  },
+
+  flushPendingCommands() {
+    if (!this.channel || !this.channelReady || this.pendingCommands.length === 0) {
+      return
+    }
+
+    this.pendingCommands.forEach(data => this.channel.push("stdin", {data}))
+    this.pendingCommands = []
+  },
+
   destroyed() {
     if (this.channel) {
       this.channel.push("close", {})
       this.channel.leave()
     }
+
+    this.channelReady = false
+    this.pendingCommands = []
 
     if (this.termDataDispose) {
       this.termDataDispose.dispose()
