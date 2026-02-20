@@ -1,3 +1,8 @@
+---
+name: liveview-forms
+description: Build correct, resilient Phoenix LiveView forms using `to_form`, changesets, `phx-change`, `phx-submit`, reconnect recovery, nested forms, uploads, and component form patterns.
+---
+
 # LiveView Forms
 
 A Claude Code skill for building correct, resilient forms in Phoenix LiveView. Covers the full form lifecycle from validation to reconnect recovery.
