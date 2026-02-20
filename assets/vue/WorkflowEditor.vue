@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
-import { useLiveVue } from 'live_vue';
+import { computed, reactive, ref } from 'vue';
+import { useLiveEvent } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
@@ -27,7 +27,6 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
 
 const emit = defineEmits<WorkflowEditorEmits>();
 const editor = reactive(useWorkflowEditor(props, emit));
-const live = useLiveVue();
 
 // Publish modal state
 const isPublishModalOpen = ref(false);
@@ -86,17 +85,17 @@ const debugExitLink = computed(() => {
   return `/workspaces/${props.workflow.workspace_id}/workflows/${props.workflow.id}/edit`;
 });
 
-// Listen for publish result from backend
-onMounted(() => {
-  live.handleEvent('publish_result', (payload: { success: boolean; error?: string }) => {
+useLiveEvent<{ success: boolean; error?: string }>(
+  'workflow:publish_result',
+  payload => {
     isPublishing.value = false;
     if (payload.success) {
       isPublishModalOpen.value = false;
     } else if (payload.error) {
       publishError.value = payload.error;
     }
-  });
-});
+  }
+);
 </script>
 
 <template>

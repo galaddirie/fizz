@@ -12,6 +12,21 @@ defmodule FizzWeb.ExecutionLive.Show do
   alias FizzWeb.WorkflowLive.Paths
   import FizzWeb.Formatters
 
+  @execution_lifecycle_events [
+    :execution_started,
+    :execution_updated,
+    :execution_completed,
+    :execution_cancelled,
+    :execution_failed
+  ]
+  @step_lifecycle_events [
+    :step_started,
+    :step_completed,
+    :step_failed,
+    :step_skipped,
+    :step_cancelled
+  ]
+
   @impl true
   def mount(
         %{
@@ -81,8 +96,11 @@ defmodule FizzWeb.ExecutionLive.Show do
   end
 
   @impl true
-  def handle_info({event, %Execution{id: execution_id}}, socket)
-      when event in [:execution_started, :execution_updated, :execution_completed] do
+  def handle_info(
+        {:execution_event, %{event_name: event_name, execution_id: execution_id}},
+        socket
+      )
+      when event_name in @execution_lifecycle_events do
     if execution_id == socket.assigns.execution_id do
       {:noreply, refresh_execution(socket)}
     else
@@ -91,20 +109,12 @@ defmodule FizzWeb.ExecutionLive.Show do
   end
 
   @impl true
-  def handle_info({:execution_failed, %Execution{id: execution_id}, _error}, socket) do
+  def handle_info(
+        {:execution_event, %{event_name: event_name, execution_id: execution_id}},
+        socket
+      )
+      when event_name in @step_lifecycle_events do
     if execution_id == socket.assigns.execution_id do
-      {:noreply, refresh_execution(socket)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_info({event, payload}, socket)
-      when event in [:step_started, :step_completed, :step_failed] do
-    payload_execution_id = fetch_payload_value(payload, :execution_id)
-
-    if payload_execution_id == socket.assigns.execution_id do
       {:noreply, refresh_step_executions(socket)}
     else
       {:noreply, socket}
@@ -549,7 +559,6 @@ defmodule FizzWeb.ExecutionLive.Show do
   defp sort_step_executions(step_executions),
     do: ShowPresenter.sort_step_executions(step_executions)
 
-  defp fetch_payload_value(payload, key), do: ShowPresenter.fetch_payload_value(payload, key)
   defp payload_preview(payload), do: ShowPresenter.payload_preview(payload)
   defp format_payload(payload), do: ShowPresenter.format_payload(payload)
 

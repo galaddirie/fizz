@@ -10,7 +10,7 @@ defmodule Fizz.Executions do
   require Logger
   alias Fizz.Repo
 
-  alias Fizz.Executions.{Execution, StepExecution}
+  alias Fizz.Executions.{Execution, Events, StepExecution}
   alias Fizz.Workflows.Workflow
   alias Fizz.Accounts.Scope
   alias Fizz.Runtime.Serializer
@@ -336,11 +336,13 @@ defmodule Fizz.Executions do
     else
       case update_execution_status(scope, execution, :cancelled) do
         {:ok, updated_execution} ->
-          # Broadcast cancellation
-          Fizz.Executions.PubSub.broadcast_execution_cancelled(updated_execution)
-
-          # Emit execution cancelled event
-          Fizz.Runtime.Events.emit(:execution_cancelled, updated_execution.id)
+          Events.emit(
+            :execution_cancelled,
+            updated_execution.id,
+            %{status: :cancelled},
+            workflow_id: updated_execution.workflow_id,
+            source: :executions
+          )
 
           # Cancel active steps
           cancel_active_step_executions(updated_execution.id)
@@ -392,7 +394,6 @@ defmodule Fizz.Executions do
         }
 
         Fizz.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)
-        Fizz.Runtime.Events.emit(:step_cancelled, execution_id, payload)
       end)
     end)
 

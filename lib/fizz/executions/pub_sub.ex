@@ -1,36 +1,24 @@
 defmodule Fizz.Executions.PubSub do
   @moduledoc """
-  PubSub broadcasting for workflow execution and step execution updates.
+  PubSub topic and authorization helpers for execution updates.
 
-  All subscriptions require a valid scope with appropriate permissions.
-  This ensures users can only receive updates for resources they have access to.
-
-  ## Topics
-
-  - `execution:{id}` - Updates for a specific execution
-  - `workflow_executions:{workflow_id}` - All executions for a workflow
-
-  ## Events
-
-  Execution lifecycle:
-  - `{:execution_started, execution}`
-  - `{:execution_updated, execution}`
-  - `{:execution_completed, execution}`
-  - `{:execution_failed, execution, error}`
-
-  Step lifecycle:
-  - `{:step_started, step_payload}`
-  - `{:step_completed, step_payload}`
-  - `{:step_failed, step_payload}`
+  Canonical event payloads are emitted through `Fizz.Executions.Events`.
   """
 
-  alias Fizz.Executions.{Execution, StepExecution}
   alias Fizz.Accounts.Scope
+  alias Fizz.Executions.Events
 
   @pubsub Fizz.PubSub
 
-  # Topic builders
+  @step_lifecycle_events [
+    :step_started,
+    :step_completed,
+    :step_failed,
+    :step_skipped,
+    :step_cancelled
+  ]
 
+  # Topic builders
   def execution_topic(execution_id), do: "execution:#{execution_id}"
   def workflow_executions_topic(workflow_id), do: "workflow_executions:#{workflow_id}"
 
@@ -145,117 +133,21 @@ defmodule Fizz.Executions.PubSub do
   end
 
   # ============================================================================
-  # Execution lifecycle broadcasts
+  # Runtime Step Broadcasts
   # ============================================================================
 
-  @doc "Broadcast that an execution has started."
-  def broadcast_execution_started(%Execution{} = execution) do
-    broadcast_execution(:execution_started, execution)
-  end
-
-  @doc "Broadcast that an execution has been updated."
-  def broadcast_execution_updated(%Execution{} = execution) do
-    broadcast_execution(:execution_updated, execution)
-  end
-
-  @doc "Broadcast that an execution completed successfully."
-  def broadcast_execution_completed(%Execution{} = execution) do
-    broadcast_execution(:execution_completed, execution)
-  end
-
-  @doc "Broadcast that an execution has been cancelled."
-  def broadcast_execution_cancelled(%Execution{} = execution) do
-    broadcast_execution(:execution_cancelled, execution)
-  end
-
-  @doc "Broadcast that an execution failed."
-  def broadcast_execution_failed(%Execution{} = execution, error \\ nil) do
-    error = error || execution.error
-    message = {:execution_failed, execution, error}
-
-    broadcast(execution.id, message)
-    broadcast_workflow(execution.workflow_id, message)
-  end
-
-  # ============================================================================
-  # Step execution broadcasts
-  # ============================================================================
-
-  @doc "Broadcast that a step has started executing."
-  def broadcast_step_started(%Execution{} = execution, %StepExecution{} = step_execution) do
-    payload = build_step_payload(step_execution)
-    broadcast_step(:step_started, execution.id, execution.workflow_id, payload)
-  end
-
-  @doc "Broadcast that a step completed successfully."
-  def broadcast_step_completed(%Execution{} = execution, %StepExecution{} = step_execution) do
-    payload = build_step_payload(step_execution)
-    broadcast_step(:step_completed, execution.id, execution.workflow_id, payload)
-  end
-
-  @doc "Broadcast that a step failed."
-  def broadcast_step_failed(
-        %Execution{} = execution,
-        %StepExecution{} = step_execution,
-        error \\ nil
-      ) do
-    payload =
-      step_execution
-      |> build_step_payload()
-      |> Map.put(:error, error || step_execution.error)
-
-    broadcast_step(:step_failed, execution.id, execution.workflow_id, payload)
-  end
-
-  @doc "Broadcast a step event with a raw payload."
-  def broadcast_step(event, execution_id, workflow_id, payload) do
-    message = {event, payload}
-    broadcast(execution_id, message)
-    broadcast_workflow(workflow_id, message)
-  end
-
-  # ============================================================================
-  # Private helpers
-  # ============================================================================
-
-  defp broadcast_execution(event, %Execution{} = execution) do
-    message = {event, execution}
-
-    broadcast(execution.id, message)
-    broadcast_workflow(execution.workflow_id, message)
-  end
-
-  defp build_step_payload(%StepExecution{} = se) do
-    %{
-      id: se.id,
-      execution_id: se.execution_id,
-      step_id: se.step_id,
-      step_type_id: se.step_type_id,
-      status: se.status,
-      attempt: se.attempt,
-      input_data: se.input_data,
-      output_data: se.output_data,
-      output_item_count: se.output_item_count,
-      item_index: se.item_index,
-      items_total: se.items_total,
-      error: se.error,
-      queued_at: se.queued_at,
-      started_at: se.started_at,
-      completed_at: se.completed_at,
-      duration_us: StepExecution.duration_us(se),
-      queue_time_us: StepExecution.queue_time_us(se)
-    }
-  end
-
-  defp build_step_payload(step_data) when is_map(step_data), do: step_data
-
-  defp broadcast(execution_id, message) do
-    Phoenix.PubSub.broadcast(@pubsub, execution_topic(execution_id), message)
-  end
-
-  defp broadcast_workflow(workflow_id, message) do
-    if workflow_id do
-      Phoenix.PubSub.broadcast(@pubsub, workflow_executions_topic(workflow_id), message)
-    end
+  @doc """
+  Broadcasts a step lifecycle event using the canonical execution event envelope.
+  """
+  @spec broadcast_step(atom(), String.t(), String.t() | nil, map()) :: :ok
+  def broadcast_step(event_name, execution_id, workflow_id, payload)
+      when event_name in @step_lifecycle_events and is_binary(execution_id) and is_map(payload) do
+    Events.emit(
+      event_name,
+      execution_id,
+      payload,
+      workflow_id: workflow_id,
+      source: :runtime_step
+    )
   end
 end

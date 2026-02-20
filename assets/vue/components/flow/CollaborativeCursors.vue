@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref, watch, onMounted } from 'vue';
+import { computed } from 'vue';
 import type { UserPresence } from '@/types/workflow';
 import { generateColor } from '@/lib/color';
-import { useLiveVue } from 'live_vue';
 
 const props = defineProps<{
   presences: UserPresence[];
@@ -10,36 +9,9 @@ const props = defineProps<{
   zoom?: number;
 }>();
 
-// Use local state for presences to allow fast updates via events
-// independent of the slower prop update cycle
-// Initialize with props data
-const localPresences = ref<UserPresence[]>(props.presences);
-
-// Sync with props when they change (initial load or full updates)
-// This ensures consistency if the server pushes a full update via assigns
-watch(
-  () => props.presences,
-  newVal => {
-    localPresences.value = newVal;
-  }
-);
-
-const live = useLiveVue();
-
-onMounted(() => {
-  // Listen for fast cursor updates bypassing the DOM prop cycle
-  live.handleEvent('presence_update', (payload: unknown) => {
-    if (!payload || typeof payload !== 'object') return;
-    const data = payload as { presences?: UserPresence[] };
-    if (Array.isArray(data.presences)) {
-      localPresences.value = data.presences;
-    }
-  });
-});
-
 // Filter out current user and users without valid cursor positions
 const visibleCursors = computed(() => {
-  return localPresences.value.filter(p => {
+  return props.presences.filter(p => {
     // Skip current user
     if (p.user.id === props.currentUserId) return false;
 

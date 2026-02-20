@@ -11,7 +11,6 @@ interface UseCollaborationOptions {
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
   canEdit: () => boolean;
-  getSelectedNodes: () => Node<WorkflowNodeData>[];
   getNodes: () => Node<WorkflowNodeData>[];
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
   emit: WorkflowEditorEmits;
@@ -40,16 +39,6 @@ export function useCollaboration(options: UseCollaborationOptions) {
     isUpdatingSelection.value = false;
     options.emit('selection_changed', { step_ids: selectedIds });
   };
-
-  watch(
-    () => options.getSelectedNodes(),
-    newSelection => {
-      if (!options.canEdit()) return;
-      const selectedIds = newSelection.filter(node => node.type === 'step').map(node => node.id);
-      options.emit('selection_changed', { step_ids: selectedIds });
-    },
-    { deep: true }
-  );
 
   watch(
     () => options.store.selectedNodeId,

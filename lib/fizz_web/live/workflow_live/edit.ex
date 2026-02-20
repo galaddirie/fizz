@@ -16,9 +16,25 @@ defmodule FizzWeb.WorkflowLive.Edit do
   alias Fizz.Executions.Execution
   alias Fizz.Executions.PubSub, as: ExecutionPubSub
   alias Fizz.Runtime.Execution.Supervisor, as: ExecutionSupervisor
+  alias FizzWeb.WorkflowLive.EditStepProjection
   alias FizzWeb.WorkflowLive.Paths
   alias Ecto.UUID
   require Logger
+
+  @execution_lifecycle_events [
+    :execution_started,
+    :execution_updated,
+    :execution_completed,
+    :execution_cancelled,
+    :execution_failed
+  ]
+  @step_lifecycle_events [
+    :step_started,
+    :step_completed,
+    :step_failed,
+    :step_skipped,
+    :step_cancelled
+  ]
 
   @impl true
   def mount(%{"workspace_id" => workspace_id, "id" => id} = params, _session, socket) do
@@ -361,7 +377,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
           socket =
             socket
-            |> push_event("duplicate_selection", %{step_ids: new_step_ids})
+            |> push_event("workflow:duplicate_selection", %{step_ids: new_step_ids})
             |> push_undo_state()
 
           {:noreply, socket}
@@ -527,7 +543,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       {:ok, result} ->
         socket =
           socket
-          |> push_event("undo_applied", %{success: true, label: result.label})
+          |> push_event("workflow:undo_applied", %{success: true, label: result.label})
           |> push_undo_state()
 
         {:noreply, socket}
@@ -535,7 +551,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       {:error, {:conflict, reason, label}} ->
         socket =
           socket
-          |> push_event("undo_conflict", %{reason: inspect(reason), label: label})
+          |> push_event("workflow:undo_conflict", %{reason: inspect(reason), label: label})
           |> push_undo_state()
 
         {:noreply, socket}
@@ -554,7 +570,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       {:ok, result} ->
         socket =
           socket
-          |> push_event("redo_applied", %{success: true, label: result.label})
+          |> push_event("workflow:redo_applied", %{success: true, label: result.label})
           |> push_undo_state()
 
         {:noreply, socket}
@@ -562,7 +578,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       {:error, {:conflict, reason, label}} ->
         socket =
           socket
-          |> push_event("redo_conflict", %{reason: inspect(reason), label: label})
+          |> push_event("workflow:redo_conflict", %{reason: inspect(reason), label: label})
           |> push_undo_state()
 
         {:noreply, socket}
@@ -695,7 +711,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
         socket =
           socket
           |> assign(:workflow, Repo.preload(updated_workflow, :draft, force: true))
-          |> push_event("publish_result", %{success: true})
+          |> push_event("workflow:publish_result", %{success: true})
           |> put_flash(:info, "Workflow published as version #{version_tag}")
 
         {:noreply, socket}
@@ -705,7 +721,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
         socket =
           socket
-          |> push_event("publish_result", %{success: false, error: error_msg})
+          |> push_event("workflow:publish_result", %{success: false, error: error_msg})
 
         {:noreply, socket}
 
@@ -715,7 +731,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
         socket =
           socket
-          |> push_event("publish_result", %{success: false, error: error_msg})
+          |> push_event("workflow:publish_result", %{success: false, error: error_msg})
 
         {:noreply, socket}
     end
@@ -968,12 +984,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
     handle_presence_diff(socket, diff)
   end
 
-  # Alternative format - plain presence_diff tuple (just in case)
-  @impl true
-  def handle_info({:presence_diff, diff}, socket) do
-    handle_presence_diff(socket, diff)
-  end
-
   # Handle lock events
   @impl true
   def handle_info({:lock_acquired, step_id, user_id}, socket) do
@@ -1005,76 +1015,27 @@ defmodule FizzWeb.WorkflowLive.Edit do
   end
 
   @impl true
-  def handle_info({:execution_event, %{execution_id: execution_id} = event}, socket) do
-    if execution_id == socket.assigns.execution_id do
-      socket =
-        if event.type == :execution_failed do
-          put_flash(socket, :error, "Execution failed: #{format_error_message(event.data)}")
-        else
-          socket
-        end
-
-      socket = refresh_execution_from_event(socket, event)
-
-      {:noreply, socket}
-    else
-      {:noreply, socket}
-    end
+  def handle_info({:execution_event, %{event_name: event_name} = event}, socket)
+      when event_name in @execution_lifecycle_events do
+    {:noreply, handle_execution_lifecycle_event(socket, event)}
   end
 
   @impl true
   def handle_info(
-        {:execution_started,
-         %Execution{execution_type: :preview, trigger: %Execution.Trigger{type: :webhook}} =
-           execution},
+        {:execution_event, %{event_name: event_name, payload: payload}},
         socket
-      ) do
-    if webhook_listening?(socket) do
-      {:noreply, switch_to_execution(socket, execution)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_info({:execution_started, %Execution{} = execution}, socket) do
-    {:noreply, update_execution_assign(socket, execution)}
-  end
-
-  @impl true
-  def handle_info({:execution_updated, %Execution{} = execution}, socket) do
-    {:noreply, update_execution_assign(socket, execution)}
-  end
-
-  @impl true
-  def handle_info({:execution_completed, %Execution{} = execution}, socket) do
-    {:noreply, update_execution_assign(socket, execution)}
-  end
-
-  @impl true
-  def handle_info({:execution_cancelled, %Execution{} = execution}, socket) do
-    {:noreply, update_execution_assign(socket, execution)}
-  end
-
-  @impl true
-  def handle_info({:execution_failed, %Execution{} = execution, error}, socket) do
-    socket = put_flash(socket, :error, "Execution failed: #{format_execution_error(error)}")
-    {:noreply, update_execution_assign(socket, execution)}
-  end
-
-  @impl true
-  def handle_info({event, payload}, socket)
-      when event in [:step_started, :step_completed, :step_failed, :step_skipped, :step_cancelled] do
+      )
+      when event_name in @step_lifecycle_events do
     socket =
-      if event == :step_failed do
-        step_id = payload[:step_id] || payload["step_id"]
-        error = payload[:error] || payload["error"]
+      if event_name == :step_failed do
+        step_id = fetch_payload_value(payload, :step_id)
+        error = fetch_payload_value(payload, :error)
         put_flash(socket, :error, "Step #{step_id} failed: #{format_error_message(error)}")
       else
         socket
       end
 
-    {:noreply, update_step_executions(socket, event, payload)}
+    {:noreply, update_step_executions(socket, event_name, payload)}
   end
 
   # Catch-all for unhandled messages (useful for debugging)
@@ -1319,7 +1280,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
   defp push_undo_state(socket) do
     case Server.get_undo_state(socket.assigns.workflow.id, socket.assigns.current_user_id) do
       {:ok, undo_state} ->
-        push_event(socket, "undo_state", undo_state)
+        push_event(socket, "workflow:undo_state", undo_state)
 
       _ ->
         socket
@@ -1717,60 +1678,92 @@ defmodule FizzWeb.WorkflowLive.Edit do
     end
   end
 
-  defp update_execution_assign(socket, %Execution{id: execution_id} = execution) do
+  defp handle_execution_lifecycle_event(socket, %{event_name: event_name} = event)
+       when event_name in @execution_lifecycle_events do
+    socket =
+      case event_name do
+        :execution_started ->
+          maybe_switch_to_webhook_execution(socket, event)
+
+        :execution_failed ->
+          socket
+          |> maybe_switch_to_webhook_execution(event)
+          |> maybe_put_execution_failed_flash(event)
+
+        _ ->
+          socket
+      end
+
+    maybe_refresh_current_execution(socket, event)
+  end
+
+  defp maybe_refresh_current_execution(socket, %{execution_id: execution_id} = event) do
     if execution_id == socket.assigns.execution_id do
-      assign(socket, :execution, execution)
+      refresh_execution_from_event(socket, event)
     else
       socket
     end
   end
 
-  defp update_step_executions(socket, event, payload) do
-    execution_id = socket.assigns.execution_id
-    step_execution = normalize_step_payload(payload, execution_id, event)
+  defp maybe_switch_to_webhook_execution(
+         socket,
+         %{execution_id: execution_id, workflow_id: workflow_id}
+       ) do
+    with true <- webhook_listening?(socket),
+         true <- workflow_id == socket.assigns.workflow.id,
+         false <- execution_id == socket.assigns.execution_id,
+         {:ok, execution} <- Executions.get_execution(socket.assigns.current_scope, execution_id),
+         true <- webhook_preview_execution?(execution) do
+      switch_to_execution(socket, execution)
+    else
+      _ -> socket
+    end
+  end
 
-    if step_execution do
-      step_executions = upsert_step_execution(socket.assigns.step_executions, step_execution)
-      assign(socket, :step_executions, step_executions)
+  defp maybe_switch_to_webhook_execution(socket, _event), do: socket
+
+  defp webhook_preview_execution?(%Execution{
+         execution_type: :preview,
+         trigger: %Execution.Trigger{type: :webhook}
+       }),
+       do: true
+
+  defp webhook_preview_execution?(_execution), do: false
+
+  defp maybe_put_execution_failed_flash(
+         socket,
+         %{event_name: :execution_failed, execution_id: execution_id, payload: payload}
+       ) do
+    if execution_id == socket.assigns.execution_id do
+      error = fetch_payload_value(payload, :error) || payload
+      put_flash(socket, :error, "Execution failed: #{format_error_message(error)}")
     else
       socket
     end
   end
 
-  defp normalize_step_payload(payload, execution_id, event) do
-    step_id = fetch_payload_value(payload, :step_id)
-    payload_execution_id = fetch_payload_value(payload, :execution_id) || execution_id
-    item_index = fetch_payload_value(payload, :item_index)
-    attempt = fetch_payload_value(payload, :attempt) || 1
+  defp maybe_put_execution_failed_flash(socket, _event), do: socket
 
-    if step_id && payload_execution_id && payload_execution_id == execution_id do
-      %{
-        id:
-          fetch_payload_value(payload, :id) ||
-            step_execution_id(payload_execution_id, step_id, item_index, attempt),
-        execution_id: payload_execution_id,
-        step_id: step_id,
-        step_type_id: fetch_payload_value(payload, :step_type_id),
-        status: fetch_payload_value(payload, :status) || default_step_status(event),
-        input_data: fetch_payload_value(payload, :input_data),
-        output_data: fetch_payload_value(payload, :output_data),
-        output_item_count: fetch_payload_value(payload, :output_item_count),
-        item_index: item_index,
-        items_total: fetch_payload_value(payload, :items_total),
-        error: fetch_payload_value(payload, :error),
-        attempt: attempt,
-        retry_of_id: fetch_payload_value(payload, :retry_of_id),
-        queued_at: fetch_payload_value(payload, :queued_at),
-        started_at: fetch_payload_value(payload, :started_at),
-        completed_at: fetch_payload_value(payload, :completed_at),
-        duration_us: fetch_payload_value(payload, :duration_us),
-        metadata: fetch_payload_value(payload, :metadata)
-      }
-    end
+  defp update_step_executions(socket, event_name, payload) do
+    step_executions =
+      EditStepProjection.apply_event(
+        socket.assigns.step_executions,
+        socket.assigns.execution_id,
+        event_name,
+        payload
+      )
+
+    assign(socket, :step_executions, step_executions)
   end
 
   defp fetch_payload_value(payload, key) when is_map(payload) do
-    Map.get(payload, key) || Map.get(payload, Atom.to_string(key))
+    string_key = Atom.to_string(key)
+
+    cond do
+      Map.has_key?(payload, key) -> Map.get(payload, key)
+      Map.has_key?(payload, string_key) -> Map.get(payload, string_key)
+      true -> nil
+    end
   end
 
   defp fetch_payload_value(_payload, _key), do: nil
@@ -1880,94 +1873,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   defp timestamp_from(_value), do: nil
 
-  defp default_step_status(:step_started), do: :running
-  defp default_step_status(:step_failed), do: :failed
-  defp default_step_status(:step_completed), do: :completed
-  defp default_step_status(:step_skipped), do: :skipped
-  defp default_step_status(:step_cancelled), do: :cancelled
-  defp default_step_status(_event), do: :pending
-
-  defp step_execution_id(execution_id, step_id, nil, attempt) do
-    "#{execution_id}:#{step_id}:#{attempt}"
-  end
-
-  defp step_execution_id(execution_id, step_id, item_index, attempt) do
-    "#{execution_id}:#{step_id}:#{item_index}:#{attempt}"
-  end
-
-  defp upsert_step_execution(step_executions, step_execution) do
-    step_id = Map.get(step_execution, :step_id)
-    item_index = Map.get(step_execution, :item_index)
-    attempt = Map.get(step_execution, :attempt) || 1
-
-    step_executions =
-      if is_nil(item_index) do
-        step_executions
-      else
-        Enum.reject(step_executions, fn existing ->
-          Map.get(existing, :step_id) == step_id and is_nil(Map.get(existing, :item_index))
-        end)
-      end
-
-    case Enum.find_index(step_executions, fn existing ->
-           Map.get(existing, :step_id) == step_id and
-             Map.get(existing, :item_index) == item_index and
-             (Map.get(existing, :attempt) || 1) == attempt
-         end) do
-      nil ->
-        step_executions ++ [step_execution]
-
-      index ->
-        existing = Enum.at(step_executions, index)
-        resolved_status = resolve_step_status(existing, step_execution)
-
-        # Merge but preserve existing values if new ones are nil
-        updated =
-          Enum.reduce(step_execution, existing, fn {k, v}, acc ->
-            if k == :status or is_nil(v) do
-              acc
-            else
-              Map.put(acc, k, v)
-            end
-          end)
-          |> Map.put(:status, resolved_status)
-
-        List.replace_at(step_executions, index, updated)
-    end
-  end
-
-  defp resolve_step_status(existing, incoming) do
-    existing_status = Map.get(existing, :status)
-    incoming_status = Map.get(incoming, :status)
-    existing_rank = step_status_rank(existing_status)
-    incoming_rank = step_status_rank(incoming_status)
-
-    cond do
-      is_nil(existing_status) -> incoming_status
-      is_nil(incoming_status) -> existing_status
-      incoming_rank < existing_rank -> existing_status
-      true -> incoming_status
-    end
-  end
-
-  defp step_status_rank(status) do
-    case status do
-      :pending -> 0
-      "pending" -> 0
-      :running -> 1
-      "running" -> 1
-      :completed -> 2
-      "completed" -> 2
-      :skipped -> 2
-      "skipped" -> 2
-      :failed -> 3
-      "failed" -> 3
-      :cancelled -> 3
-      "cancelled" -> 3
-      _ -> -1
-    end
-  end
-
   defp format_test_webhook_error(:webhook_not_found), do: "webhook trigger not found"
   defp format_test_webhook_error(:not_found), do: "edit session not running"
   defp format_test_webhook_error(reason), do: inspect(reason)
@@ -1992,13 +1897,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
   defp handle_presence_diff(socket, _diff) do
     # Fetch latest full presence list
     presences = format_presences(Presence.list_users(socket.assigns.workflow.id))
-    # todo: should we assign and push_event?
-    socket =
-      socket
-      |> assign(:presences, presences)
-      |> push_event("presence_update", %{presences: presences})
-
-    {:noreply, socket}
+    {:noreply, assign(socket, :presences, presences)}
   end
 
   defp format_presences(presence_list) do

@@ -1,6 +1,6 @@
 import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { VNodeRef } from 'vue';
-import { useLiveVue } from 'live_vue';
+import { useLiveEvent } from 'live_vue';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
 import type { EdgeTypesObject, NodeTypesObject } from '@vue-flow/core';
 import WorkflowStepNode from '@/components/flow/Node.vue';
@@ -34,7 +34,6 @@ import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowE
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
   const store = useClientStore();
   const undoStore = useUndoStore();
-  const live = useLiveVue();
 
   // Initialize undo state from props if available
   if (props.undoState) {
@@ -113,7 +112,6 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     presences: () => props.presences ?? [],
     currentUserId: () => props.currentUserId,
     canEdit: () => canEdit.value,
-    getSelectedNodes: () => getSelectedNodes.value,
     getNodes: () => getNodes.value,
     setNodes,
     emit,
@@ -182,7 +180,6 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     groupByStepId: () => grouping.groupByStepId.value,
     store,
     emit,
-    live,
     requestNodeRemoval: nodeInteraction.requestNodeRemoval,
     withSelectionLock: collaboration.withSelectionLock,
   });
@@ -250,19 +247,16 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const executionState = useWorkflowExecutionState({ execution: () => props.execution });
   const miniMap = useMiniMapNodeColor();
   const closeContextMenu = () => store.hideContextMenu();
+  useLiveEvent<any>('workflow:undo_state', payload => {
+    undoStore.handleStateUpdate(payload);
+  });
+  useLiveEvent('workflow:undo_applied', () => undoStore.handleUndoApplied());
+  useLiveEvent('workflow:undo_conflict', () => undoStore.handleUndoConflict());
+  useLiveEvent('workflow:redo_applied', () => undoStore.handleRedoApplied());
+  useLiveEvent('workflow:redo_conflict', () => undoStore.handleRedoConflict());
+
   onMounted(() => {
     keyboard.registerShortcuts();
-
-    // Listen for undo state updates
-    live.handleEvent('undo_state', (payload: any) => {
-      undoStore.handleStateUpdate(payload);
-    });
-
-    // Listen for undo/redo application results
-    live.handleEvent('undo_applied', () => undoStore.handleUndoApplied());
-    live.handleEvent('undo_conflict', () => undoStore.handleUndoConflict());
-    live.handleEvent('redo_applied', () => undoStore.handleRedoApplied());
-    live.handleEvent('redo_conflict', () => undoStore.handleRedoConflict());
   });
   onBeforeUnmount(() => keyboard.unregisterShortcuts());
   onPaneClick(() => store.hideContextMenu());

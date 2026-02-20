@@ -1,5 +1,5 @@
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import type { LiveHook } from 'live_vue';
+import { computed, nextTick, ref, watch } from 'vue';
+import { useLiveEvent } from 'live_vue';
 import type { Node, XYPosition } from '@vue-flow/core';
 
 import type { WorkflowNodeData } from '@/types/workflow';
@@ -15,7 +15,6 @@ interface UseClipboardOptions {
   groupByStepId: () => Map<string, string>;
   store: ReturnType<typeof useClientStore>;
   emit: WorkflowEditorEmits;
-  live: LiveHook;
   requestNodeRemoval: (nodeId: string) => void;
   withSelectionLock?: (callback: () => void) => void;
 }
@@ -126,6 +125,8 @@ export function useClipboard(options: UseClipboardOptions) {
     } else {
       updateSelection();
     }
+
+    options.emit('selection_changed', { step_ids: stepIds });
   };
 
   const applyPendingDuplicateSelection = () => {
@@ -147,18 +148,15 @@ export function useClipboard(options: UseClipboardOptions) {
     }
   );
 
-  onMounted(() => {
-    options.live.handleEvent('duplicate_selection', payload => {
-      if (!payload || typeof payload !== 'object') return;
-      const data = payload as { step_ids?: string[] };
-      if (!Array.isArray(data.step_ids) || data.step_ids.length === 0) return;
-      pendingDuplicateSelection.value = data.step_ids;
-      nextTick(() => {
-        applyPendingDuplicateSelection();
-      });
+  useLiveEvent('workflow:duplicate_selection', payload => {
+    if (!payload || typeof payload !== 'object') return;
+    const data = payload as { step_ids?: string[] };
+    if (!Array.isArray(data.step_ids) || data.step_ids.length === 0) return;
+    pendingDuplicateSelection.value = data.step_ids;
+    nextTick(() => {
+      applyPendingDuplicateSelection();
     });
   });
-
   return {
     clipboard,
     canPaste,

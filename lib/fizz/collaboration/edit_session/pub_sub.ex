@@ -15,11 +15,10 @@ defmodule Fizz.Collaboration.EditSession.PubSub do
 
   Operations:
   - `{:operation_applied, operation}` - An edit operation was applied
-  - `{:sync_state, state}` - Full state sync for reconnection
   - `{:webhook_test_execution, %{execution_id: execution_id}}` - Test webhook execution created
 
   Presence:
-  - `{:presence_diff, diff}` - Phoenix.Presence diff
+  - `%Phoenix.Socket.Broadcast{event: "presence_diff", ...}` - Phoenix.Presence diff
   - `{:lock_acquired, step_id, user_id}` - Step lock acquired
   - `{:lock_released, step_id}` - Step lock released
   """
@@ -32,95 +31,6 @@ defmodule Fizz.Collaboration.EditSession.PubSub do
 
   def session_topic(workflow_id), do: "edit_session:#{workflow_id}"
   def presence_topic(workflow_id), do: "edit_presence:#{workflow_id}"
-
-  # ============================================================================
-  # Subscriptions (Scope Required)
-  # ============================================================================
-
-  @doc """
-  Subscribe to edit session updates for a workflow.
-
-  Requires a scope with edit access to the workflow.
-  Returns `:ok` on success, `{:error, :unauthorized}` if access denied,
-  or `{:error, :not_found}` if workflow doesn't exist.
-  """
-  @spec subscribe_session(Scope.t() | nil, String.t()) ::
-          :ok | {:error, :unauthorized | :not_found}
-  def subscribe_session(scope, workflow_id) do
-    case authorize_edit(scope, workflow_id) do
-      :ok ->
-        Phoenix.PubSub.subscribe(@pubsub, session_topic(workflow_id))
-        :ok
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Unsubscribe from edit session updates.
-  """
-  @spec unsubscribe_session(String.t()) :: :ok
-  def unsubscribe_session(workflow_id) do
-    Phoenix.PubSub.unsubscribe(@pubsub, session_topic(workflow_id))
-  end
-
-  @doc """
-  Subscribe to presence updates for a workflow's edit session.
-
-  Requires a scope with edit access to the workflow.
-  Returns `:ok` on success, `{:error, :unauthorized}` if access denied,
-  or `{:error, :not_found}` if workflow doesn't exist.
-  """
-  @spec subscribe_presence(Scope.t() | nil, String.t()) ::
-          :ok | {:error, :unauthorized | :not_found}
-  def subscribe_presence(scope, workflow_id) do
-    case authorize_edit(scope, workflow_id) do
-      :ok ->
-        Phoenix.PubSub.subscribe(@pubsub, presence_topic(workflow_id))
-        :ok
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Unsubscribe from presence updates.
-  """
-  @spec unsubscribe_presence(String.t()) :: :ok
-  def unsubscribe_presence(workflow_id) do
-    Phoenix.PubSub.unsubscribe(@pubsub, presence_topic(workflow_id))
-  end
-
-  @doc """
-  Subscribe to both session and presence updates.
-
-  Convenience function that subscribes to both topics.
-  Returns `:ok` on success, or error tuple if authorization fails.
-  """
-  @spec subscribe_all(Scope.t() | nil, String.t()) ::
-          :ok | {:error, :unauthorized | :not_found}
-  def subscribe_all(scope, workflow_id) do
-    case authorize_edit(scope, workflow_id) do
-      :ok ->
-        Phoenix.PubSub.subscribe(@pubsub, session_topic(workflow_id))
-        Phoenix.PubSub.subscribe(@pubsub, presence_topic(workflow_id))
-        :ok
-
-      error ->
-        error
-    end
-  end
-
-  @doc """
-  Unsubscribe from both session and presence updates.
-  """
-  @spec unsubscribe_all(String.t()) :: :ok
-  def unsubscribe_all(workflow_id) do
-    Phoenix.PubSub.unsubscribe(@pubsub, session_topic(workflow_id))
-    Phoenix.PubSub.unsubscribe(@pubsub, presence_topic(workflow_id))
-  end
 
   # ============================================================================
   # Authorization
@@ -153,28 +63,6 @@ defmodule Fizz.Collaboration.EditSession.PubSub do
     end
   end
 
-  @doc """
-  Checks if the scope can view edit session (for read-only observation).
-
-  Some use cases may want to allow viewers to observe edits without
-  participating. This requires only view access.
-  """
-  @spec authorize_view(Scope.t() | nil, String.t()) ::
-          :ok | {:error, :unauthorized | :not_found}
-  def authorize_view(scope, workflow_id) do
-    case Fizz.Repo.get(Fizz.Workflows.Workflow, workflow_id) do
-      nil ->
-        {:error, :not_found}
-
-      workflow ->
-        if Scope.can_view_workflow?(scope, workflow) do
-          :ok
-        else
-          {:error, :unauthorized}
-        end
-    end
-  end
-
   # ============================================================================
   # Broadcasting
   # ============================================================================
@@ -185,14 +73,6 @@ defmodule Fizz.Collaboration.EditSession.PubSub do
   @spec broadcast_operation(String.t(), term()) :: :ok
   def broadcast_operation(workflow_id, operation) do
     Phoenix.PubSub.broadcast(@pubsub, session_topic(workflow_id), {:operation_applied, operation})
-  end
-
-  @doc """
-  Broadcast a full state sync to all session subscribers.
-  """
-  @spec broadcast_sync(String.t(), map()) :: :ok
-  def broadcast_sync(workflow_id, state) do
-    Phoenix.PubSub.broadcast(@pubsub, session_topic(workflow_id), {:sync_state, state})
   end
 
   @doc """

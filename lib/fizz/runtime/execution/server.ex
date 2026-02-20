@@ -8,8 +8,8 @@ defmodule Fizz.Runtime.Execution.Server do
   require Logger
   alias Runic.Workflow
   alias Fizz.Accounts.Scope
+  alias Fizz.Executions.Events
   alias Fizz.Runtime.RunicAdapter
-  alias Fizz.Runtime.Events
   alias Fizz.Runtime.Hooks.Observability
   alias Fizz.Executions
   alias Fizz.Executions.Execution
@@ -123,7 +123,13 @@ defmodule Fizz.Runtime.Execution.Server do
           })
           |> Repo.update()
 
-          Events.emit(:execution_failed, execution_id, %{status: :failed, error: error_map})
+          Events.emit(
+            :execution_failed,
+            execution_id,
+            %{status: :failed, error: error_map},
+            workflow_id: execution.workflow_id,
+            source: :execution_server
+          )
 
           # Also cancel any active steps
           Executions.cancel_active_step_executions(execution_id)
@@ -155,7 +161,13 @@ defmodule Fizz.Runtime.Execution.Server do
     end
 
     # Emit execution started event
-    Events.emit(:execution_started, state.execution_id, %{status: :running})
+    Events.emit(
+      :execution_started,
+      state.execution_id,
+      %{status: :running},
+      workflow_id: workflow_id_from_state(state),
+      source: :execution_server
+    )
 
     # Use cached trigger data from state
     trigger_data = state.trigger_data
@@ -179,9 +191,13 @@ defmodule Fizz.Runtime.Execution.Server do
         flush_step_executions(state.execution_id)
 
         # Emit completion event
-        Events.emit(:execution_completed, new_state.execution_id, %{
-          status: :completed
-        })
+        Events.emit(
+          :execution_completed,
+          new_state.execution_id,
+          %{status: :completed},
+          workflow_id: workflow_id_from_state(new_state),
+          source: :execution_server
+        )
 
         {:stop, :normal, new_state}
       end
@@ -309,8 +325,9 @@ defmodule Fizz.Runtime.Execution.Server do
   defp handle_init_failure(execution_id, reason) do
     error_map = Execution.format_error(reason)
 
-    Execution
-    |> Repo.get!(execution_id)
+    execution = Repo.get!(Execution, execution_id)
+
+    execution
     |> Execution.changeset(%{
       status: :failed,
       error: error_map,
@@ -318,7 +335,13 @@ defmodule Fizz.Runtime.Execution.Server do
     })
     |> Repo.update!()
 
-    Events.emit(:execution_failed, execution_id, %{status: :failed, error: error_map})
+    Events.emit(
+      :execution_failed,
+      execution_id,
+      %{status: :failed, error: error_map},
+      workflow_id: execution.workflow_id,
+      source: :execution_server
+    )
   end
 
   defp update_status(id, status) do
@@ -404,10 +427,13 @@ defmodule Fizz.Runtime.Execution.Server do
     |> Repo.update!()
 
     # Emit execution failed event
-    Events.emit(:execution_failed, state.execution_id, %{
-      status: :failed,
-      error: error_map
-    })
+    Events.emit(
+      :execution_failed,
+      state.execution_id,
+      %{status: :failed, error: error_map},
+      workflow_id: workflow_id_from_state(state),
+      source: :execution_server
+    )
 
     # Flush step events to DB
     flush_step_executions(state.execution_id)
@@ -496,4 +522,10 @@ defmodule Fizz.Runtime.Execution.Server do
       _ -> false
     end
   end
+
+  defp workflow_id_from_state(%State{metadata: metadata}) when is_map(metadata) do
+    Map.get(metadata, :workflow_id) || Map.get(metadata, "workflow_id")
+  end
+
+  defp workflow_id_from_state(_state), do: nil
 end
