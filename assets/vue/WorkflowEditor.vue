@@ -9,7 +9,12 @@ import StepConfigModal from '@/components/flow/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
 import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
-import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
+import type {
+  WorkflowEditorCommandType,
+  WorkflowEditorEmits,
+  WorkflowEditorLiveEmits,
+  WorkflowEditorProps,
+} from '@/types/workflowEditor';
 import { BugAntIcon } from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
@@ -25,7 +30,21 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   debugExecutionId: null,
 });
 
-const emit = defineEmits<WorkflowEditorEmits>();
+const emitToLiveView = defineEmits<WorkflowEditorLiveEmits>();
+
+function emitCommand(type: WorkflowEditorCommandType, payload?: unknown) {
+  const normalizedPayload =
+    payload !== null && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : {};
+
+  emitToLiveView('editor_command', { type, payload: normalizedPayload });
+}
+
+const emit = ((event: WorkflowEditorCommandType, payload?: unknown) => {
+  emitCommand(event, payload);
+}) as WorkflowEditorEmits;
+
 const editor = reactive(useWorkflowEditor(props, emit));
 
 // Publish modal state

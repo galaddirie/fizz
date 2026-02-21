@@ -19,6 +19,7 @@ interface UseCollaborationOptions {
 
 export function useCollaboration(options: UseCollaborationOptions) {
   const isUpdatingSelection = ref(false);
+  const lastSelectionKey = ref('');
 
   const otherUserPresences = computed(() => {
     return options.presences().filter(p => p.user.id !== options.currentUserId());
@@ -34,10 +35,16 @@ export function useCollaboration(options: UseCollaborationOptions) {
   const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) => {
     if (!options.canEdit()) return;
     const selectedIds = nodes.filter(node => node.type === 'step').map(node => node.id);
+    const selectionKey = selectedIds.slice().sort().join(',');
+
     isUpdatingSelection.value = true;
     options.store.selectNode(selectedIds.length === 1 ? selectedIds[0] : null);
     isUpdatingSelection.value = false;
-    options.emit('selection_changed', { step_ids: selectedIds });
+
+    if (selectionKey !== lastSelectionKey.value) {
+      lastSelectionKey.value = selectionKey;
+      options.emit('selection_changed', { step_ids: selectedIds });
+    }
   };
 
   watch(
@@ -51,6 +58,10 @@ export function useCollaboration(options: UseCollaborationOptions) {
         selected: node.id === newSelectedId,
       }));
       options.setNodes(nodes);
+
+      if (!newSelectedId) {
+        lastSelectionKey.value = '';
+      }
     }
   );
 

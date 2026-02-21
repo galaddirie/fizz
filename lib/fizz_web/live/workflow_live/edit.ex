@@ -16,6 +16,9 @@ defmodule FizzWeb.WorkflowLive.Edit do
   alias Fizz.Executions.Execution
   alias Fizz.Executions.PubSub, as: ExecutionPubSub
   alias Fizz.Runtime.Execution.Supervisor, as: ExecutionSupervisor
+  alias FizzWeb.WorkflowLive.Edit.Command
+  alias FizzWeb.WorkflowLive.Edit.ExpressionPreview
+  alias FizzWeb.WorkflowLive.Edit.PresenceFormatter
   alias FizzWeb.WorkflowLive.EditStepProjection
   alias FizzWeb.WorkflowLive.Paths
   alias Ecto.UUID
@@ -155,7 +158,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       end
 
     # Get initial presence list
-    presences = format_presences(Presence.list_users(workflow_id))
+    presences = PresenceFormatter.format(Presence.list_users(workflow_id))
 
     {draft, editor_state} =
       case Server.get_sync_state(workflow_id) do
@@ -251,34 +254,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
           execution={@execution}
           stepExecutions={@step_executions}
           undoState={@undo_state}
-          v-on:add_step={JS.push("add_step")}
-          v-on:duplicate_steps={JS.push("duplicate_steps")}
-          v-on:move_step={JS.push("move_step")}
-          v-on:update_step={JS.push("update_step")}
-          v-on:remove_step={JS.push("remove_step")}
-          v-on:add_group={JS.push("add_group")}
-          v-on:update_group={JS.push("update_group")}
-          v-on:remove_group={JS.push("remove_group")}
-          v-on:set_group_membership={JS.push("set_group_membership")}
-          v-on:add_connection={JS.push("add_connection")}
-          v-on:remove_connection={JS.push("remove_connection")}
-          v-on:save_workflow={JS.push("save_workflow")}
-          v-on:publish_workflow={JS.push("publish_workflow")}
-          v-on:mouse_move={JS.push("mouse_move")}
-          v-on:selection_changed={JS.push("selection_changed")}
-          v-on:pin_output={JS.push("pin_output")}
-          v-on:unpin_output={JS.push("unpin_output")}
-          v-on:disable_step={JS.push("disable_step")}
-          v-on:enable_step={JS.push("enable_step")}
-          v-on:run_test={JS.push("run_test")}
-          v-on:run_node={JS.push("run_node")}
-          v-on:cancel_execution={JS.push("cancel_execution")}
-          v-on:undo={JS.push("undo")}
-          v-on:redo={JS.push("redo")}
-          v-on:navigate_revisions={JS.push("navigate_revisions")}
-          v-on:tidy_layout={JS.push("tidy_layout")}
-          v-on:preview_expression={JS.push("preview_expression")}
-          v-on:toggle_webhook_test={JS.push("toggle_webhook_test")}
+          v-on:editor_command={JS.push("editor_command")}
           expressionPreviews={@expression_previews}
           credentialOptions={@credential_options}
           debugExecutionId={@debug_execution_id}
@@ -286,6 +262,25 @@ defmodule FizzWeb.WorkflowLive.Edit do
       </div>
     </Layouts.app>
     """
+  end
+
+  @impl true
+  def handle_event("editor_command", params, socket) do
+    with {:ok, command, payload} <- Command.parse(params),
+         true <- Command.valid?(command) do
+      handle_event(command, payload, socket)
+    else
+      false ->
+        Logger.debug("Ignoring unsupported workflow editor command",
+          command: Map.get(params, "type")
+        )
+
+        {:noreply, socket}
+
+      {:error, :invalid} ->
+        Logger.debug("Ignoring invalid workflow editor command payload", payload: inspect(params))
+        {:noreply, socket}
+    end
   end
 
   # =============================================================================
@@ -826,79 +821,17 @@ defmodule FizzWeb.WorkflowLive.Edit do
         %{"expression" => template, "step_id" => step_id, "field_key" => field_key},
         socket
       ) do
-    execution = socket.assigns.execution
-    step_executions = socket.assigns.step_executions
-
-    # Step ID is now the key-safe slug, no mapping needed
-    step_outputs =
-      Enum.reduce(step_executions, %{}, fn se, acc ->
-        Map.put(acc, se.step_id, Map.get(se, :output_data))
-      end)
-
-    pinned_outputs = socket.assigns.editor_state.pinned_outputs || %{}
-    step_outputs = Map.merge(step_outputs, pinned_outputs)
-
-    # Filter outputs to only include upstream steps
-    draft = socket.assigns.workflow.draft
-    graph = Fizz.Graph.from_workflow!(draft.steps, draft.connections, validate: false)
-    upstream_ids = Fizz.Graph.upstream(graph, step_id)
-    step_outputs = Map.take(step_outputs, upstream_ids)
-
-    current_step_execution = Enum.find(step_executions, fn se -> se.step_id == step_id end)
-
-    current_input =
-      if current_step_execution, do: Map.get(current_step_execution, :input_data), else: nil
-
     result =
-      cond do
-        !Fizz.Runtime.Expression.contains_expression?(template) ->
-          template
-
-        execution ->
-          vars = Fizz.Runtime.Expression.Context.build(execution, step_outputs, current_input)
-
-          case Fizz.Runtime.Expression.evaluate_with_vars(template, vars) do
-            {:ok, val} -> value_to_display_string(val)
-            {:error, reason} -> Map.put(reason, :text, template)
-          end
-
-        # Attempt to load the latest execution if nil
-        true ->
-          case Executions.list_workflow_executions(
-                 socket.assigns.current_scope,
-                 socket.assigns.workflow,
-                 limit: 1
-               ) do
-            [latest] ->
-              {:ok, full_execution} =
-                Executions.get_execution_with_steps(socket.assigns.current_scope, latest.id)
-
-              # Step ID is now the key-safe slug, no mapping needed
-              pinned_outputs = socket.assigns.editor_state.pinned_outputs || %{}
-
-              so =
-                Map.new(full_execution.step_executions, fn se -> {se.step_id, se.output_data} end)
-                |> Map.merge(pinned_outputs)
-                |> Map.take(upstream_ids)
-
-              ci =
-                Enum.find(full_execution.step_executions, fn se -> se.step_id == step_id end)
-                |> then(fn
-                  nil -> nil
-                  se -> se.input_data
-                end)
-
-              vars = Fizz.Runtime.Expression.Context.build(full_execution, so, ci)
-
-              case Fizz.Runtime.Expression.evaluate_with_vars(template, vars) do
-                {:ok, val} -> to_string(val)
-                {:error, reason} -> Map.put(reason, :text, template)
-              end
-
-            [] ->
-              "Run a test to see preview results"
-          end
-      end
+      ExpressionPreview.evaluate(
+        %{
+          workflow: socket.assigns.workflow,
+          editor_state: socket.assigns.editor_state,
+          execution: socket.assigns.execution,
+          step_executions: socket.assigns.step_executions
+        },
+        template,
+        step_id
+      )
 
     # Update previews in socket assigns
     previews = socket.assigns.expression_previews
@@ -943,8 +876,8 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
         # Fallback: reload from database
         case Workflows.get_workflow_with_draft(
-               socket.assigns.workflow.id,
-               socket.assigns.current_scope
+               socket.assigns.current_scope,
+               socket.assigns.workflow.id
              ) do
           {:ok, workflow} ->
             {:noreply, assign(socket, :workflow, workflow)}
@@ -1896,64 +1829,8 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   defp handle_presence_diff(socket, _diff) do
     # Fetch latest full presence list
-    presences = format_presences(Presence.list_users(socket.assigns.workflow.id))
+    presences = PresenceFormatter.format(Presence.list_users(socket.assigns.workflow.id))
     {:noreply, assign(socket, :presences, presences)}
-  end
-
-  defp format_presences(presence_list) do
-    real_presences =
-      presence_list
-      |> Enum.map(fn {user_id, %{metas: metas}} ->
-        # Take the most recent meta (first one)
-        meta = List.first(metas) || %{}
-
-        %{
-          user: %{
-            id: user_id,
-            name: get_in(meta, [:user, :name]),
-            email: get_in(meta, [:user, :email])
-          },
-          cursor: meta[:cursor],
-          dragging_steps: meta[:dragging_steps],
-          selected_steps: meta[:selected_steps] || [],
-          focused_step: meta[:focused_step]
-        }
-      end)
-
-    # Add mock cursors for testing (always add them to see the appearance)
-    mock_presences =
-      if Mix.env() == :dev do
-        [
-          %{
-            user: %{id: "mock-1", name: "Alice", email: "alice@example.com"},
-            cursor: %{x: 200, y: 100},
-            selected_steps: [],
-            focused_step: nil
-          },
-          %{
-            user: %{id: "mock-2", name: "Bob", email: "bob@example.com"},
-            cursor: %{x: 350, y: 250},
-            selected_steps: [],
-            focused_step: nil
-          },
-          %{
-            user: %{id: "mock-3", name: "Charlie", email: "charlie@example.com"},
-            cursor: %{x: 500, y: 180},
-            selected_steps: [],
-            focused_step: nil
-          },
-          %{
-            user: %{id: "mock-4", name: "Diana", email: "diana@example.com"},
-            cursor: %{x: 650, y: 300},
-            selected_steps: [],
-            focused_step: nil
-          }
-        ]
-      else
-        []
-      end
-
-    real_presences ++ mock_presences
   end
 
   defp deserialize_editor_state(nil, workflow_id) do
@@ -2009,26 +1886,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
         )
 
         []
-    end
-  end
-
-  # Convert any expression result value to a display-friendly string for live preview
-  defp value_to_display_string(value) do
-    cond do
-      is_binary(value) ->
-        value
-
-      is_number(value) ->
-        to_string(value)
-
-      is_atom(value) ->
-        Atom.to_string(value)
-
-      is_list(value) or is_map(value) ->
-        inspect(value, limit: :infinity, printable_limit: :infinity)
-
-      true ->
-        inspect(value)
     end
   end
 end

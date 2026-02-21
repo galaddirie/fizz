@@ -30,6 +30,45 @@ export interface WorkflowEditorProps {
   debugExecutionId?: string | null;
 }
 
+export type WorkflowEditorCommandType =
+  | 'add_step'
+  | 'add_group'
+  | 'update_group'
+  | 'remove_group'
+  | 'set_group_membership'
+  | 'duplicate_steps'
+  | 'update_step'
+  | 'remove_step'
+  | 'move_step'
+  | 'add_connection'
+  | 'remove_connection'
+  | 'pin_output'
+  | 'unpin_output'
+  | 'disable_step'
+  | 'enable_step'
+  | 'run_test'
+  | 'run_node'
+  | 'cancel_execution'
+  | 'undo'
+  | 'redo'
+  | 'tidy_layout'
+  | 'save_workflow'
+  | 'publish_workflow'
+  | 'mouse_move'
+  | 'selection_changed'
+  | 'preview_expression'
+  | 'toggle_webhook_test'
+  | 'navigate_revisions';
+
+export interface WorkflowEditorCommand {
+  type: WorkflowEditorCommandType;
+  payload?: Record<string, unknown>;
+}
+
+export type WorkflowEditorLiveEmits = {
+  (e: 'editor_command', payload: WorkflowEditorCommand): void;
+};
+
 export type WorkflowEditorEmits = {
   (
     e: 'add_step',
