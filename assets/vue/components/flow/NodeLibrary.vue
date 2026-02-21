@@ -91,13 +91,6 @@ const categorizedTypes = computed(() => {
 
   for (const category of Object.keys(grouped)) {
     grouped[category] = grouped[category].sort((a, b) => {
-      const aRoleWeight = a.node_role === 'subnode' ? 1 : 0;
-      const bRoleWeight = b.node_role === 'subnode' ? 1 : 0;
-
-      if (aRoleWeight !== bRoleWeight) {
-        return aRoleWeight - bRoleWeight;
-      }
-
       return a.name.localeCompare(b.name);
     });
   }
@@ -124,14 +117,6 @@ const kindStyles = computed(() => ({
   transform: themeStore.theme === 'dark' ? 'text-secondary' : 'text-info',
   control_flow: 'text-warning',
 }));
-
-const roleBadgeClass = (role?: string) => {
-  if (role === 'subnode') {
-    return 'border-info/30 bg-info/10 text-info';
-  }
-
-  return 'border-base-300 bg-base-200/40 text-base-content/70';
-};
 
 const toggleCategory = (category: string) => {
   if (expandedCategories.value.has(category)) {
@@ -205,12 +190,7 @@ const getIcon = (iconName?: string) =>
           <div
             v-for="item in items"
             :key="item.type_id"
-            :class="[
-              'group flex cursor-grab items-start gap-3 rounded-xl border p-3 transition-all duration-200 active:cursor-grabbing',
-              item.node_role === 'subnode'
-                ? 'bg-info/5 hover:bg-info/10 border-dashed border-info/20 hover:border-info/35'
-                : 'bg-base-100 hover:bg-base-200/50 hover:border-base-300/50 border-transparent',
-            ]"
+            class="group flex cursor-grab items-start gap-3 rounded-xl border border-transparent bg-base-100 p-3 transition-all duration-200 hover:bg-base-200/50 hover:border-base-300/50 active:cursor-grabbing"
             draggable="true"
             @dragstart="onDragStart($event, item.type_id)"
           >
@@ -230,19 +210,11 @@ const getIcon = (iconName?: string) =>
 
             <!-- Content -->
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <span
-                  class="text-base-content/90 group-hover:text-base-content truncate text-sm font-medium"
-                >
-                  {{ item.name }}
-                </span>
-                <span
-                  class="rounded border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide uppercase"
-                  :class="roleBadgeClass(item.node_role)"
-                >
-                  {{ item.node_role === 'subnode' ? 'Sub-node' : 'Node' }}
-                </span>
-              </div>
+              <span
+                class="text-base-content/90 group-hover:text-base-content block truncate text-sm font-medium"
+              >
+                {{ item.name }}
+              </span>
               <p class="text-base-content/50 mt-0.5 line-clamp-2 text-xs leading-relaxed">
                 {{ item.description }}
               </p>
