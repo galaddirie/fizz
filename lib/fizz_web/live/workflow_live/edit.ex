@@ -19,7 +19,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
   alias FizzWeb.WorkflowLive.Edit.Command
   alias FizzWeb.WorkflowLive.Edit.ExpressionPreview
   alias FizzWeb.WorkflowLive.Edit.PresenceFormatter
-  alias FizzWeb.WorkflowLive.EditStepProjection
+  alias FizzWeb.WorkflowLive.Edit.EditStepProjection
   alias FizzWeb.WorkflowLive.Paths
   alias Ecto.UUID
   require Logger

@@ -1,4 +1,4 @@
-defmodule FizzWeb.WorkflowLive.EditStepProjection do
+defmodule FizzWeb.WorkflowLive.Edit.EditStepProjection do
   @moduledoc false
 
   @step_lifecycle_events [
