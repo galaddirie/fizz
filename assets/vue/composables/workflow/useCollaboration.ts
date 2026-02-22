@@ -3,6 +3,7 @@ import type { Node } from '@vue-flow/core';
 import { useThrottleFn } from '@vueuse/core';
 
 import { CURSOR_THROTTLE_MS } from '@/constants/layout';
+import { isStepNode } from '@/lib/workflowGuards';
 import type { WorkflowNodeData, UserPresence } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 import type { useClientStore } from '@/stores/clientStore';
@@ -34,7 +35,7 @@ export function useCollaboration(options: UseCollaborationOptions) {
 
   const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) => {
     if (!options.canEdit()) return;
-    const selectedIds = nodes.filter(node => node.type === 'step').map(node => node.id);
+    const selectedIds = nodes.filter(node => isStepNode(node)).map(node => node.id);
     const selectionKey = selectedIds.slice().sort().join(',');
 
     isUpdatingSelection.value = true;

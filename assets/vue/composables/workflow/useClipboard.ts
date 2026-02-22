@@ -2,6 +2,7 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import type { Node, XYPosition } from '@vue-flow/core';
 
+import { isStepNode } from '@/lib/workflowGuards';
 import type { WorkflowNodeData } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 import type { useClientStore } from '@/stores/clientStore';
@@ -29,12 +30,12 @@ export function useClipboard(options: UseClipboardOptions) {
   const resolveActiveNodeIds = (fallbackNodeId?: string | null) => {
     const selectedIds = options
       .getSelectedNodes()
-      .filter(node => node.type === 'step')
+      .filter(node => isStepNode(node))
       .map(node => node.id);
     if (selectedIds.length) return Array.from(new Set(selectedIds));
     if (fallbackNodeId) {
       const fallbackNode = options.getNodes().find(node => node.id === fallbackNodeId);
-      if (fallbackNode?.type === 'step') return [fallbackNodeId];
+      if (fallbackNode && isStepNode(fallbackNode)) return [fallbackNodeId];
     }
     if (options.store.selectedNodeId) return [options.store.selectedNodeId];
     return [];

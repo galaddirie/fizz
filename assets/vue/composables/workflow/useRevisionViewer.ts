@@ -12,6 +12,7 @@ import { useWorkflowGraph } from '@/composables/useWorkflowGraph';
 import { useWorkflowNodes } from '@/composables/useWorkflowNodes';
 import { useDraftSync } from '@/composables/workflow/useDraftSync';
 import { useMiniMapNodeColor } from '@/composables/workflow/useMiniMapNodeColor';
+import { isStepNode } from '@/lib/workflowGuards';
 import type { RevisionViewerProps } from '@/types/revisionViewer';
 import type { EdgeData, WorkflowNodeData } from '@/types/workflow';
 
@@ -68,7 +69,8 @@ export function useRevisionViewer(props: RevisionViewerProps) {
 
   const selectedNode = computed(() => {
     if (!selectedNodeId.value) return null;
-    return nodes.value.find(node => node.id === selectedNodeId.value && node.type === 'step') ?? null;
+    const node = nodes.value.find(node => node.id === selectedNodeId.value);
+    return node && isStepNode(node) ? node : null;
   });
 
   const selectedStepType = computed(() => {
@@ -78,20 +80,20 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   });
 
   const handleNodeClick = (event: NodeMouseEvent) => {
-    if (event.node.type === 'step') {
+    if (isStepNode(event.node)) {
       selectedNodeId.value = event.node.id;
     }
   };
 
   const handleNodeDoubleClick = (event: NodeMouseEvent) => {
-    if (event.node.type === 'step') {
+    if (isStepNode(event.node)) {
       selectedNodeId.value = event.node.id;
       isInspectorOpen.value = true;
     }
   };
 
   const handleSelectionChange = ({ nodes: selected }: { nodes: Node<WorkflowNodeData>[] }) => {
-    const stepNode = selected.find(node => node.type === 'step');
+    const stepNode = selected.find(node => isStepNode(node));
     selectedNodeId.value = stepNode?.id ?? null;
   };
 

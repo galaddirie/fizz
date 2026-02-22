@@ -1,6 +1,7 @@
 import { computed } from 'vue';
 import type { Node } from '@vue-flow/core';
 
+import { isStepNode } from '@/lib/workflowGuards';
 import type { StepNodeData, StepType, WorkflowNodeData } from '@/types/workflow';
 
 interface UseWorkflowSelectionOptions {
@@ -14,7 +15,7 @@ export function useWorkflowSelection(options: UseWorkflowSelectionOptions) {
     const nodeId = options.selectedNodeId();
     if (!nodeId) return null;
     const node = options.nodes().find(n => n.id === nodeId);
-    if (!node || node.type !== 'step') return null;
+    if (!node || !isStepNode(node)) return null;
     return node as Node<StepNodeData>;
   });
 

@@ -5,6 +5,7 @@ import type { NodeProps } from '@vue-flow/core';
 import type { GroupNodeData } from '@/types/workflow';
 import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS, DEFAULT_NODE_DIMENSIONS } from '@/constants/layout';
 import { DEFAULT_GROUP_PADDING } from '@/lib/workflowGeometry';
+import { isStepNode } from '@/lib/workflowGuards';
 import { useThemeStore } from '@/stores/theme';
 import { PencilIcon, Squares2X2Icon } from '@heroicons/vue/24/outline';
 
@@ -141,7 +142,7 @@ const getStepPositions = () => {
   if (stepIds.size === 0) return positions;
 
   getNodes.value.forEach(node => {
-    if (node.type !== 'step') return;
+    if (!isStepNode(node)) return;
     if (!stepIds.has(node.id)) return;
     positions[node.id] = { x: node.position.x, y: node.position.y };
   });

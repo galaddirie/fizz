@@ -48,7 +48,7 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
     }
 
     clickTimer.value = setTimeout(() => {
-      if (node.type === 'step') {
+      if (isStepNode(node)) {
         options.store.selectNode(node.id);
       } else {
         options.store.selectNode(null);
@@ -63,7 +63,7 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
       clearTimeout(clickTimer.value);
       clickTimer.value = null;
     }
-    if (event.node.type === 'step') {
+    if (isStepNode(event.node)) {
       options.store.openConfigModal(event.node.id);
     }
   };
