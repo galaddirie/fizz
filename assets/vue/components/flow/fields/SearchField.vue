@@ -1,6 +1,6 @@
 <template>
   <div class="form-control w-full relative">
-    <label v-if="field.label" class="label">
+    <label v-if="showLabel && field.label" class="label">
       <span class="label-text font-medium">{{ field.label }}</span>
     </label>
     
@@ -101,11 +101,13 @@ const props = defineProps<{
   modelValue: unknown;
   field: ConfigField;
   nodeId: string;
+  showLabel?: boolean;
 }>();
 
 const emit = defineEmits(['update:modelValue']);
 
 const live = useLiveVue();
+const showLabel = computed(() => props.showLabel ?? true);
 
 interface MetaBadge {
   value: string;

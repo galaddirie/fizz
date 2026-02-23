@@ -19,15 +19,7 @@ import type {
   ConfigField,
   ExtendedFieldType 
 } from '@/types/configSchema';
-
-interface ErrorPayload {
-  type: 'parse_error' | 'render_error';
-  message?: string;
-  errors?: string[];
-  line?: number;
-  column?: number;
-  text: string;
-}
+import {
   ArrowRightOnRectangleIcon,
   BoltIcon,
   CpuChipIcon,
@@ -46,6 +38,15 @@ interface ErrorPayload {
 import { unwrapData, formatDataForDisplay } from '@/lib/dataUtils';
 import { colorMap, oklchToHex } from '@/lib/color';
 import FieldWrapper from './fields/FieldWrapper.vue';
+
+interface ErrorPayload {
+  type: 'parse_error' | 'render_error';
+  message?: string;
+  errors?: string[];
+  line?: number;
+  column?: number;
+  text: string;
+}
 
 interface Props {
   node: Node<StepNodeData> | null;
@@ -147,23 +148,17 @@ watch(
   { immediate: true }
 );
 
+const hasExpressionSyntax = (value: unknown) =>
+  typeof value === 'string' && (value.includes('{{') || value.includes('{%'));
+
 // Watch for changes and emit preview events
 watchDebounced(
-  fieldValues,
-  newValues => {
+  [fieldValues, fieldModes],
+  () => {
     if (!canEdit.value) return;
     if (!props.isOpen || !props.node) return;
 
-    // 2. Clear values mapping to fields that no longer exist
-    const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
-    const currentFieldKeys = Object.keys(schema);
-    const originalConfig = props.node?.data?.config || {};
-    const initialConfig: Record<string, unknown> = {};
-    Object.entries(originalConfig).forEach(([key, value]) => {
-      if (currentFieldKeys.includes(key)) {
-        initialConfig[key] = value;
-      }
-    });
+    const newValues = fieldValues.value;
     
     Object.entries(newValues).forEach(([key, value]) => {
       if (
@@ -180,7 +175,7 @@ watchDebounced(
       }
     });
   },
-  { debounce: 300, deep: true }
+  { debounce: 300, deep: true, immediate: true }
 );
 
 const closeModal = () => {
@@ -218,10 +213,10 @@ const saveConfig = () => {
   emit('close');
 };
 
-const toggleMode = (field: string) => {
+const setFieldMode = (field: string, mode: 'literal' | 'expression') => {
   if (!canEdit.value) return;
   if (!fieldSupportsExpression(field)) return;
-  fieldModes.value[field] = fieldModes.value[field] === 'literal' ? 'expression' : 'literal';
+  fieldModes.value[field] = mode;
 };
 
 const fields = computed<ConfigField[]>(() => {
@@ -269,6 +264,18 @@ const fieldByKey = computed(() => {
 
 const fieldSupportsExpression = (fieldKey: string) => {
   return true; // All fields support expressions with the new FieldWrapper
+};
+
+const handleFieldValueUpdate = (fieldKey: string, value: unknown) => {
+  fieldValues.value[fieldKey] = value;
+
+  if (!fieldSupportsExpression(fieldKey)) return;
+  const field = fieldByKey.value[fieldKey];
+  const isSearchField = field?.ui?.component === 'search';
+
+  if (!isSearchField && hasExpressionSyntax(value)) {
+    fieldModes.value[fieldKey] = 'expression';
+  }
 };
 
 const expandedSections = ref<Record<string, boolean>>({
@@ -643,6 +650,25 @@ const previewValueFor = (fieldKey: string) => {
   const key = previewKeyFor(fieldKey);
   if (!key) return undefined;
   return props.expressionPreviews?.[key];
+};
+
+const previewIsError = (value: unknown): value is ErrorPayload => {
+  if (!value || typeof value !== 'object') return false;
+  const payload = value as Record<string, unknown>;
+  return payload.type === 'parse_error' || payload.type === 'render_error';
+};
+
+const previewToText = (value: unknown) => {
+  if (value === null) return 'null';
+  if (value === undefined) return 'undefined';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 };
 
 // Webhook Logic
@@ -1100,18 +1126,20 @@ const toggleWebhookListening = () => {
 
                     <div v-if="field.expressionCapable && canEdit" class="join">
                       <button
+                        type="button"
                         class="join-item btn btn-xs capitalize"
                         :class="fieldModes[field.key] === 'literal' ? 'btn-primary' : 'btn-ghost'"
-                        @click="toggleMode(field.key)"
+                        @click="setFieldMode(field.key, 'literal')"
                       >
                         Fixed
                       </button>
                       <button
+                        type="button"
                         class="join-item btn btn-xs capitalize"
                         :class="
                           fieldModes[field.key] === 'expression' ? 'btn-secondary' : 'btn-ghost'
                         "
-                        @click="toggleMode(field.key)"
+                        @click="setFieldMode(field.key, 'expression')"
                       >
                         Expression
                       </button>
@@ -1132,10 +1160,37 @@ const toggleWebhookListening = () => {
 
                   <div class="p-5">
                     <FieldWrapper
-                      v-model="fieldValues[field.key]"
+                      :modelValue="fieldValues[field.key]"
+                      @update:modelValue="value => handleFieldValueUpdate(field.key, value)"
+                      :mode="fieldModes[field.key] || 'literal'"
                       :field="field"
                       :nodeId="node?.id || ''"
                     />
+
+                    <div
+                      v-if="field.expressionCapable && fieldModes[field.key] === 'expression'"
+                      class="border-base-200/70 bg-base-200/20 mt-4 space-y-2 rounded-xl border p-3"
+                    >
+                      <div
+                        class="text-base-content/50 text-[10px] font-semibold tracking-wide uppercase"
+                      >
+                        Preview
+                      </div>
+                      <ExpressionPreviewError
+                        v-if="hasPreviewFor(field.key) && previewIsError(previewValueFor(field.key))"
+                        :error="previewValueFor(field.key) as ErrorPayload"
+                      />
+                      <pre
+                        v-else-if="hasPreviewFor(field.key)"
+                        class="text-base-content/80 bg-base-100 border-base-200 overflow-auto rounded-lg border p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap"
+                      >{{ previewToText(previewValueFor(field.key)) }}</pre>
+                      <div
+                        v-else
+                        class="text-base-content/60 bg-base-100 border-base-200 rounded-lg border p-2 text-xs"
+                      >
+                        Evaluating expression...
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

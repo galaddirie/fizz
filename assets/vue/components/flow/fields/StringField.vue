@@ -1,6 +1,6 @@
 <template>
   <div class="form-control w-full">
-    <label v-if="field.label" class="label">
+    <label v-if="showLabel && field.label" class="label">
       <span class="label-text font-medium">{{ field.label }}</span>
     </label>
     
@@ -27,7 +27,9 @@ const props = defineProps<{
   modelValue: unknown;
   field: any;
   nodeId: string;
+  showLabel?: boolean;
 }>();
 
 const emit = defineEmits(['update:modelValue']);
+const showLabel = computed(() => props.showLabel ?? true);
 </script>
