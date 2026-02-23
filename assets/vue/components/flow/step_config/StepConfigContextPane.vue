@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { inject } from 'vue';
 import {
   MagnifyingGlassIcon,
   ChevronRightIcon,
@@ -10,25 +11,9 @@ import {
   VariableIcon
 } from '@heroicons/vue/24/outline';
 import { formatDataForDisplay } from '@/lib/dataUtils';
+import { StepConfigKey } from './useStepConfig';
 
-const props = defineProps<{
-  searchQuery: string;
-  explorerData: any[];
-  expandedSections: Record<string, boolean>;
-  currentInputState: any;
-  currentInputEmptyState: any;
-  runInputLabel: string;
-  canEdit: boolean;
-}>();
-
-const emit = defineEmits<{
-  (e: 'update:searchQuery', value: string): void;
-  (e: 'toggleSection', id: string): void;
-  (e: 'runInput'): void;
-  (e: 'copyExpression', sectionId: string, key?: string): void;
-  (e: 'formatSectionKey', sectionId: string, key: string): string;
-  (e: 'getExpressionFor', sectionId: string, key?: string): string;
-}>();
+const state = inject(StepConfigKey)!;
 
 const iconMap: Record<string, any> = {
   ArrowRightOnRectangleIcon,
@@ -45,8 +30,8 @@ const iconMap: Record<string, any> = {
       <div class="relative">
         <MagnifyingGlassIcon class="text-base-content/40 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
         <input
-          :value="searchQuery"
-          @input="emit('update:searchQuery', ($event.target as HTMLInputElement).value)"
+          :value="state.searchQuery.value"
+          @input="state.searchQuery.value = ($event.target as HTMLInputElement).value"
           type="text"
           placeholder="Search variables..."
           class="input input-sm input-bordered bg-base-100 border-base-300 focus:border-primary w-full pl-9 text-xs font-medium"
@@ -54,15 +39,15 @@ const iconMap: Record<string, any> = {
       </div>
     </div>
     <div class="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-2">
-      <div v-for="section in explorerData" :key="section.id" class="overflow-hidden">
+      <div v-for="section in state.explorerData.value" :key="section.id" class="overflow-hidden">
         <button
           class="hover:bg-primary/5 group flex w-full items-center justify-between rounded-xl p-2 text-xs font-bold transition-all"
           :class="
-            expandedSections[section.id]
+            state.expandedSections.value[section.id]
               ? 'text-primary bg-primary/5'
               : 'text-base-content/60'
           "
-          @click="emit('toggleSection', section.id)"
+          @click="state.toggleSection(section.id)"
         >
           <div class="flex items-center gap-2">
             <span class="opacity-70 group-hover:opacity-100">
@@ -71,28 +56,28 @@ const iconMap: Record<string, any> = {
             {{ section.label }}
           </div>
           <ChevronRightIcon
-            :class="{ 'rotate-90': expandedSections[section.id] }"
+            :class="{ 'rotate-90': state.expandedSections.value[section.id] }"
             class="h-3 w-3 opacity-40 transition-transform"
           />
         </button>
         <div
-          v-if="expandedSections[section.id]"
+          v-if="state.expandedSections.value[section.id]"
           class="border-base-200 mt-1 ml-4 space-y-1 border-l py-1 pl-2 text-wrap"
         >
-          <template v-if="section.id === 'json' && currentInputState.status !== 'available'">
+          <template v-if="section.id === 'json' && state.currentInputState.value.status !== 'available'">
             <div class="bg-base-300/20 space-y-2 rounded-xl p-3">
               <div class="text-base-content text-[11px] font-semibold">
-                {{ currentInputEmptyState.title }}
+                {{ state.currentInputEmptyState.value.title }}
               </div>
               <p class="text-base-content/60 text-[10px] leading-relaxed">
-                {{ currentInputEmptyState.description }}
+                {{ state.currentInputEmptyState.value.description }}
               </p>
               <button
                 class="btn btn-xs btn-primary w-full"
-                :disabled="!canEdit"
-                @click.stop="emit('runInput')"
+                :disabled="!state.canEdit.value"
+                @click.stop="state.runInput()"
               >
-                {{ runInputLabel }}
+                {{ state.runInputLabel.value }}
               </button>
             </div>
           </template>
@@ -110,11 +95,10 @@ const iconMap: Record<string, any> = {
             >
               <div class="flex items-center justify-between">
                 <span class="text-base-content font-mono text-[11px]">
-                  <!-- Note: this assumes formatSectionKey was passed or we provide it -->
-                  {{ section.id === 'json' ? key : key }}
+                  {{ state.formatSectionKey(section.id, String(key)) }}
                 </span>
                 <button
-                  @click.stop="emit('copyExpression', section.id, String(key))"
+                  @click.stop="state.copyExpression(section.id, String(key))"
                   class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
                   title="Copy expression"
                 >
@@ -135,7 +119,7 @@ const iconMap: Record<string, any> = {
                 {{ formatDataForDisplay(section.data) }}
               </div>
               <button
-                @click.stop="emit('copyExpression', section.id)"
+                @click.stop="state.copyExpression(section.id)"
                 class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
                 title="Copy expression"
               >

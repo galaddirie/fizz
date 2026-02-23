@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { provide } from 'vue';
 import type { Node } from '@vue-flow/core';
 import type {
-  CredentialOption,
   EditorState,
   Execution,
   StepExecution,
@@ -10,7 +9,7 @@ import type {
   StepType,
 } from '@/types/workflow';
 import { CubeIcon, XMarkIcon, PencilIcon } from '@heroicons/vue/24/outline';
-import { useStepConfig } from './useStepConfig';
+import { useStepConfig, StepConfigKey } from './useStepConfig';
 import StepConfigContextPane from './StepConfigContextPane.vue';
 import StepConfigConfigPane from './StepConfigConfigPane.vue';
 import StepConfigOutputPane from './StepConfigOutputPane.vue';
@@ -20,7 +19,6 @@ interface Props {
   isOpen: boolean;
   canEdit?: boolean;
   stepType?: StepType | null;
-  credentialOptions?: CredentialOption[];
   execution?: Execution | null;
   stepExecutions?: StepExecution[];
   expressionPreviews?: Record<string, unknown>;
@@ -43,7 +41,7 @@ const emit = defineEmits([
 ]);
 
 const state = useStepConfig(props, emit);
-
+provide(StepConfigKey, state);
 </script>
 
 <template>
@@ -114,69 +112,14 @@ const state = useStepConfig(props, emit);
 
       <!-- Main content 3-pane layout -->
       <div class="bg-base-200/20 flex flex-1 overflow-hidden">
-        <!-- Pane 1: Context/Variable Explorer -->
-        <StepConfigContextPane
-          class="shrink-0"
-          :searchQuery="state.searchQuery.value"
-          @update:searchQuery="val => state.searchQuery.value = val"
-          :explorerData="state.explorerData.value"
-          :expandedSections="state.expandedSections.value"
-          @toggleSection="state.toggleSection"
-          :currentInputState="state.currentInputState.value"
-          :currentInputEmptyState="state.currentInputEmptyState.value"
-          :runInputLabel="state.runInputLabel.value"
-          :canEdit="state.canEdit.value"
-          @runInput="state.runInput"
-          @copyExpression="state.copyExpression"
-          @formatSectionKey="state.formatSectionKey"
-          @getExpressionFor="state.getExpressionFor"
-        />
+        <StepConfigContextPane class="shrink-0" />
 
-        <!-- Pane 2: Config -->
         <div class="flex-1 custom-scrollbar overflow-y-auto border-r border-base-200 p-8">
-          <StepConfigConfigPane
-            :canEdit="state.canEdit.value"
-            :isWebhookTrigger="state.isWebhookTrigger.value"
-            :webhookMode="state.webhookMode.value"
-            @update:webhookMode="val => state.webhookMode.value = val"
-            :webhookMethod="state.webhookMethod.value"
-            :webhookUrl="state.webhookUrl.value"
-            @copyWebhookUrl="state.copyWebhookUrl"
-            :isWebhookListening="state.isWebhookListening.value"
-            :isWebhookListeningElsewhere="state.isWebhookListeningElsewhere.value"
-            @toggleWebhookListening="state.toggleWebhookListening"
-            :fields="state.fields.value"
-            :fieldModes="state.fieldModes.value"
-            @setFieldMode="state.setFieldMode"
-            :fieldValues="state.fieldValues.value"
-            @handleFieldValueUpdate="state.handleFieldValueUpdate"
-            :subnodeSlotRows="state.subnodeSlotRows.value"
-            :nodeId="node?.id"
-            :previewIsError="state.previewIsError"
-            :previewValueFor="state.previewValueFor"
-            :hasPreviewFor="state.hasPreviewFor"
-            :previewToText="state.previewToText"
-          />
+          <StepConfigConfigPane />
         </div>
 
-        <!-- Pane 3: Output -->
         <div class="w-[400px] xl:w-[500px] shrink-0 bg-base-100/30 overflow-hidden">
-          <StepConfigOutputPane
-            :activeStepExecution="state.activeStepExecution.value"
-            :hasPinnedOutput="state.hasPinnedOutput.value"
-            :pinnedOutput="state.pinnedOutput.value"
-            :isMultiItemStep="state.isMultiItemStep.value"
-            :itemStats="state.itemStats.value"
-            :selectedItemIndex="state.selectedItemIndex.value"
-            @update:selectedItemIndex="val => state.selectedItemIndex.value = val"
-            :stepExecutionsForStep="state.stepExecutionsForStep.value"
-            :canEdit="state.canEdit.value"
-            :canPinOutput="state.canPinOutput.value"
-            :nodeId="node?.id"
-            @copyExpression="state.copyExpression"
-            @pinOutput="state.pinOutput"
-            @unpinOutput="state.unpinOutput"
-          />
+          <StepConfigOutputPane />
         </div>
       </div>
 

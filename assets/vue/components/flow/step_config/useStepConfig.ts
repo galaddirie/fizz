@@ -1,8 +1,7 @@
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, type InjectionKey } from 'vue';
 import { watchDebounced } from '@vueuse/core';
 import type { Node } from '@vue-flow/core';
 import type {
-    CredentialOption,
     EditorState,
     Execution,
     StepExecution,
@@ -33,7 +32,6 @@ export interface UseStepConfigProps {
     isOpen: boolean;
     canEdit?: boolean;
     stepType?: StepType | null;
-    credentialOptions?: CredentialOption[];
     execution?: Execution | null;
     stepExecutions?: StepExecution[];
     expressionPreviews?: Record<string, unknown>;
@@ -45,7 +43,6 @@ export interface UseStepConfigProps {
 }
 
 export function useStepConfig(props: UseStepConfigProps, emit: any) {
-    const activeTab = ref<'config' | 'output'>('config');
     const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
     const fieldValues = ref<Record<string, unknown>>({});
     const searchQuery = ref('');
@@ -127,7 +124,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
             Object.entries(newValues).forEach(([key, value]) => {
                 if (
                     fieldModes.value[key] === 'expression' &&
-                    fieldSupportsExpression(key) &&
                     typeof value === 'string' &&
                     props.node
                 ) {
@@ -178,7 +174,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
 
     const setFieldMode = (field: string, mode: 'literal' | 'expression') => {
         if (!canEdit.value) return;
-        if (!fieldSupportsExpression(field)) return;
         fieldModes.value[field] = mode;
     };
 
@@ -224,14 +219,9 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
         }, {});
     });
 
-    const fieldSupportsExpression = (fieldKey: string) => {
-        return true;
-    };
-
     const handleFieldValueUpdate = (fieldKey: string, value: unknown) => {
         fieldValues.value[fieldKey] = value;
 
-        if (!fieldSupportsExpression(fieldKey)) return;
         const field = fieldByKey.value[fieldKey];
         const isSearchField = field?.ui?.component === 'search';
 
@@ -744,8 +734,9 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
         });
     };
 
+    const nodeId = computed(() => props.node?.id ?? '');
+
     return {
-        activeTab,
         fieldModes,
         fieldValues,
         searchQuery,
@@ -763,7 +754,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
         setFieldMode,
         fields,
         fieldByKey,
-        fieldSupportsExpression,
         handleFieldValueUpdate,
         expandedSections,
         toggleSection,
@@ -779,7 +769,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
         pinButtonLabel,
         pinOutput,
         unpinOutput,
-        toRecord,
         evaluatedConfig,
         isTriggerStep,
         directUpstreamStepIds,
@@ -807,10 +796,13 @@ export function useStepConfig(props: UseStepConfigProps, emit: any) {
         isWebhookListeningElsewhere,
         webhookUrl,
         copyWebhookUrl,
-        slugify,
         getExpressionFor,
         copyExpression,
         formatSectionKey,
         toggleWebhookListening,
+        nodeId,
     };
 }
+
+export type StepConfigState = ReturnType<typeof useStepConfig>;
+export const StepConfigKey: InjectionKey<StepConfigState> = Symbol('StepConfig');
