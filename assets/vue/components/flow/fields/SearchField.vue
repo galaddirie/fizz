@@ -90,8 +90,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, nextTick, inject } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { watchDebounced } from '@vueuse/core';
+import { useLiveVue } from 'live_vue';
 import { MagnifyingGlassIcon, XMarkIcon } from '@heroicons/vue/20/solid';
 
 import type { ConfigField } from '@/types/configSchema';
@@ -104,8 +105,7 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:modelValue']);
 
-// Injection from WorkflowEditor for liveview event pushing
-const pushEvent = inject('pushEvent') as (event: string, payload: any, callback?: (reply: any) => void) => void;
+const live = useLiveVue();
 
 interface MetaBadge {
   value: string;
@@ -218,26 +218,36 @@ const mapResults = (rawResults: any[]): MappedOption[] => {
 };
 
 const fetchOptions = (query: string) => {
-  if (!pushEvent || !uiConfig.value?.resolver) {
-    console.warn('SearchField: No resolver configured or pushEvent not available');
+  if (!uiConfig.value?.resolver) {
+    console.warn('SearchField: No resolver configured');
     return;
   }
 
   isLoading.value = true;
-  
-  pushEvent('resolve_field_options', {
-    node_id: props.nodeId,
-    field_key: props.field.key,
-    params: uiConfig.value.params || {},
-    q: query
-  }, (reply: any) => {
+
+  try {
+    live.pushEvent(
+      'resolve_field_options',
+      {
+        node_id: props.nodeId,
+        field_key: props.field.key,
+        params: uiConfig.value.params || {},
+        q: query
+      },
+      (reply: any) => {
+        isLoading.value = false;
+        if (reply?.options) {
+          options.value = mapResults(reply.options);
+        } else {
+          options.value = [];
+        }
+      }
+    );
+  } catch (error) {
     isLoading.value = false;
-    if (reply?.options) {
-      options.value = mapResults(reply.options);
-    } else {
-      options.value = [];
-    }
-  });
+    options.value = [];
+    console.error('SearchField: failed to resolve options', error);
+  }
 };
 
 watchDebounced(

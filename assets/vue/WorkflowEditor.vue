@@ -1,9 +1,6 @@
 <script setup lang="ts">
-import { computed, provide, reactive, ref } from 'vue';
-import { useLiveEvent, useLiveVue } from 'live_vue';
-
-const live = useLiveVue();
-provide('pushEvent', live.pushEvent);
+import { computed, reactive, ref } from 'vue';
+import { useLiveEvent } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';

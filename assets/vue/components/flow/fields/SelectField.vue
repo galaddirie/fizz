@@ -25,7 +25,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { useLiveVue } from 'live_vue';
 
 import type { ConfigField } from '@/types/configSchema';
 
@@ -37,7 +38,7 @@ const props = defineProps<{
 
 const emit = defineEmits(['update:modelValue']);
 
-const pushEvent = inject('pushEvent') as ((event: string, payload: any, callback?: (reply: any) => void) => void) | undefined;
+const live = useLiveVue();
 
 const resolvedOptions = ref<Array<{ label: string; value: unknown }>>([]);
 const isLoading = ref(false);
@@ -76,25 +77,43 @@ function handleSelect(jsonValue: string) {
 // Auto-fetch options from resolver on mount
 function fetchResolverOptions() {
   const resolver = props.field?.ui?.resolver;
-  if (!resolver || !pushEvent) return;
+  if (!resolver) return;
 
   isLoading.value = true;
   const params = props.field.ui?.params || {};
 
-  pushEvent('resolve_field_options', {
-    field_key: props.field.key,
-    node_id: props.nodeId,
-    params,
-    q: '',
-  }, (reply: any) => {
+  try {
+    live.pushEvent(
+      'resolve_field_options',
+      {
+        field_key: props.field.key,
+        node_id: props.nodeId,
+        params,
+        q: '',
+      },
+      (reply: any) => {
+        isLoading.value = false;
+        if (reply?.options) {
+          resolvedOptions.value = reply.options.map((opt: any) => {
+            const value = opt?.value ?? opt;
+            const label =
+              opt?.label ??
+              opt?.display_name ??
+              opt?.name ??
+              String(opt?.value ?? opt?.id ?? '');
+
+            return { label, value };
+          });
+        } else {
+          resolvedOptions.value = [];
+        }
+      }
+    );
+  } catch (error) {
     isLoading.value = false;
-    if (reply?.options) {
-      resolvedOptions.value = reply.options.map((opt: any) => ({
-        label: opt.label || opt.name || String(opt.value || opt.id),
-        value: opt.value || opt,
-      }));
-    }
-  });
+    resolvedOptions.value = [];
+    console.error('SelectField: failed to resolve options', error);
+  }
 }
 
 onMounted(() => {
@@ -103,8 +122,13 @@ onMounted(() => {
   }
 });
 
-// Re-fetch if field config changes
-watch(() => props.field?.ui?.resolver, (newResolver) => {
-  if (newResolver) fetchResolverOptions();
-});
+watch(
+  () => [props.nodeId, props.field?.key, props.field?.ui?.resolver, props.field?.ui?.params],
+  (_newValues) => {
+    if (props.field?.ui?.resolver) {
+      fetchResolverOptions();
+    }
+  },
+  { deep: true }
+);
 </script>
