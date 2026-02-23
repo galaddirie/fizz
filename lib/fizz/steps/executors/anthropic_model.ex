@@ -33,10 +33,13 @@ defmodule Fizz.Steps.Executors.AnthropicModel do
         "type" => "object",
         "title" => "Credential",
         "description" => "Select the Anthropic credential to use for execution",
-        "x-ui" => %{
-          "control" => "credential_select",
-          "provider_filter" => ["anthropic_api_key"],
-          "auth_types" => ["api_key"]
+        "ui" => %{
+          "component" => "select",
+          "resolver" => "credentials",
+          "params" => %{
+            "provider_filter" => ["anthropic_api_key"],
+            "auth_types" => ["api_key"]
+          }
         }
       },
       "model" => %{

@@ -53,7 +53,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
               :ok ->
                 step_types = Steps.list_types()
                 node_library_items = Steps.list_library_items()
-                credential_options = credential_options_for_editor(scope, workspace_id)
 
                 socket =
                   socket
@@ -69,7 +68,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
                   |> assign(:step_executions, [])
                   |> assign(:execution_id, nil)
                   |> assign(:expression_previews, %{})
-                  |> assign(:credential_options, credential_options)
                   |> assign(:webhook_execution_subscribed, false)
                   |> assign(:undo_state, nil)
                   |> assign(:debug_execution_id, nil)
@@ -256,7 +254,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
           undoState={@undo_state}
           v-on:editor_command={JS.push("editor_command")}
           expressionPreviews={@expression_previews}
-          credentialOptions={@credential_options}
           debugExecutionId={@debug_execution_id}
         />
       </div>
@@ -838,6 +835,39 @@ defmodule FizzWeb.WorkflowLive.Edit do
     new_previews = Map.put(previews, "#{step_id}:#{field_key}", result)
 
     {:noreply, assign(socket, :expression_previews, new_previews)}
+  end
+
+  @impl true
+  def handle_event(
+        "resolve_field_options",
+        %{"resolver" => resolver, "params" => params, "q" => q},
+        socket
+      ) do
+    # Add context from execution so resolvers can use upstream step output if needed
+    context = %{
+      execution: socket.assigns.execution,
+      step_executions: socket.assigns.step_executions,
+      workflow: socket.assigns.workflow,
+      current_scope: socket.assigns.current_scope
+    }
+
+    # Safe params map (keys might come as strings from JS)
+    safe_params = Map.new(params || %{}, fn {k, v} -> {to_string(k), v} end)
+
+    args = %{
+      q: q || "",
+      params: safe_params,
+      context: context
+    }
+
+    case Fizz.Steps.FieldResolver.resolve(resolver, args) do
+      {:ok, options} ->
+        {:reply, %{options: options}, socket}
+
+      {:error, reason} ->
+        Logger.error("Failed to resolve field options for #{resolver}: #{inspect(reason)}")
+        {:reply, %{options: []}, socket}
+    end
   end
 
   @impl true
@@ -1873,19 +1903,4 @@ defmodule FizzWeb.WorkflowLive.Edit do
   defp format_error_message(%{message: message}), do: message
   defp format_error_message(%{"message" => message}), do: message
   defp format_error_message(error), do: inspect(error)
-
-  defp credential_options_for_editor(scope, workspace_id) do
-    case Integrations.list_credential_options(scope, workspace_id) do
-      {:ok, options} ->
-        options
-
-      {:error, reason} ->
-        Logger.warning("Unable to list credential options for workflow editor",
-          workspace_id: workspace_id,
-          reason: inspect(reason)
-        )
-
-        []
-    end
-  end
 end

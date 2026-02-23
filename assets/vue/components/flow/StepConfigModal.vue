@@ -13,6 +13,12 @@ import type {
   StepSubnodeSlot,
   StepType,
 } from '@/types/workflow';
+import type { 
+  ConfigSchemaField, 
+  ConfigSchema, 
+  ConfigField,
+  ExtendedFieldType 
+} from '@/types/configSchema';
 
 interface ErrorPayload {
   type: 'parse_error' | 'render_error';
@@ -32,24 +38,7 @@ import {
   BookmarkIcon,
 } from '@heroicons/vue/24/outline';
 import { unwrapData, formatDataForDisplay } from '@/lib/dataUtils';
-
-type ConfigSchemaField = {
-  title?: string;
-  type?: string;
-  format?: string;
-  default?: unknown;
-  description?: string;
-  enum?: unknown[];
-  ['x-ui']?: {
-    control?: string;
-    provider_filter?: string[];
-    auth_types?: Array<'api_key' | 'oauth' | string>;
-  };
-};
-
-type ConfigSchema = {
-  properties?: Record<string, ConfigSchemaField>;
-};
+import FieldWrapper from './fields/FieldWrapper.vue';
 
 interface Props {
   node: Node<StepNodeData> | null;
@@ -64,20 +53,8 @@ interface Props {
   stepNameById?: Record<string, string>;
   incomingStepIds?: Record<string, string[]>;
   incomingConnectionsByTargetInput?: Record<string, Record<string, string[]>>;
-  upstreamStepIds?: Record<string, string[]>;
+    upstreamStepIds?: Record<string, string[]>;
 }
-
-type FieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json';
-type ExtendedFieldType = FieldType | 'credential';
-
-type ConfigField = {
-  key: string;
-  label: string;
-  type: ExtendedFieldType;
-  description?: string;
-  expressionCapable: boolean;
-  credentialOptions?: CredentialOption[];
-};
 
 const props = defineProps<Props>();
 const emit = defineEmits([
@@ -139,9 +116,9 @@ watch(
       allKeys.forEach(key => {
         const schemaField = schema[key] ?? {};
         const rawValue = config[key] ?? schemaField.default;
-        const fieldType = schemaField['x-ui']?.control === 'credential_select' ? 'credential' : 'literal';
+        const isSearchField = schemaField.ui?.component === 'search';
         const isExpr =
-          fieldType !== 'credential' &&
+          !isSearchField &&
           typeof rawValue === 'string' &&
           (rawValue.includes('{{') || rawValue.includes('{%'));
 
@@ -170,6 +147,17 @@ watchDebounced(
     if (!canEdit.value) return;
     if (!props.isOpen || !props.node) return;
 
+    // 2. Clear values mapping to fields that no longer exist
+    const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
+    const currentFieldKeys = Object.keys(schema);
+    const originalConfig = props.node?.data?.config || {};
+    const initialConfig: Record<string, unknown> = {};
+    Object.entries(originalConfig).forEach(([key, value]) => {
+      if (currentFieldKeys.includes(key)) {
+        initialConfig[key] = value;
+      }
+    });
+    
     Object.entries(newValues).forEach(([key, value]) => {
       if (
         fieldModes.value[key] === 'expression' &&
@@ -240,151 +228,40 @@ const fields = computed<ConfigField[]>(() => {
 
   return Array.from(allKeys).map(key => {
     const schemaField: ConfigSchemaField = schema[key] ?? {};
-    const type = inferFieldType(schemaField, config[key] ?? schemaField.default);
-    const expressionCapable = type !== 'credential';
-    const filteredCredentialOptions =
-      type === 'credential'
-        ? filterCredentialOptions(
-            normalizeProviderFilter(schemaField['x-ui']?.provider_filter),
-            normalizeAuthTypeFilter(schemaField['x-ui']?.auth_types)
-          )
-        : undefined;
+    
+    const uiComponent = (schemaField as any).ui?.component;
+    const format = schemaField.format;
+    const typeStr = schemaField.type;
+
+    let inferredType = 'text';
+    if (uiComponent === 'search') inferredType = 'search';
+    else if (uiComponent === 'select') inferredType = 'select';
+    else if (schemaField.enum && schemaField.enum.length > 0) inferredType = 'select';
+    else if (format === 'json') inferredType = 'json';
+    else if (typeStr === 'string' && format === 'textarea') inferredType = 'textarea';
+    else if (typeStr === 'number' || typeStr === 'integer') inferredType = 'number';
+    else if (typeStr === 'boolean') inferredType = 'boolean';
 
     return {
+      ...schemaField,
       key,
       label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
       description: schemaField.description,
-      type,
-      expressionCapable,
-      credentialOptions: filteredCredentialOptions,
+      type: inferredType as ExtendedFieldType,
+      expressionCapable: true,
     };
   });
 });
 
 const fieldByKey = computed(() => {
-  return fields.value.reduce<Record<string, ConfigField>>((acc, field) => {
+  return fields.value.reduce<Record<string, any>>((acc, field) => {
     acc[field.key] = field;
     return acc;
   }, {});
 });
 
 const fieldSupportsExpression = (fieldKey: string) => {
-  return fieldByKey.value[fieldKey]?.expressionCapable !== false;
-};
-
-const inferType = (val: unknown): FieldType => {
-  if (typeof val === 'boolean') return 'boolean';
-  if (typeof val === 'number') return 'number';
-  if (typeof val === 'string' && val.length > 50) return 'textarea';
-  return 'text';
-};
-
-const inferFieldType = (schemaField: ConfigSchemaField, value: unknown): ExtendedFieldType => {
-  if (schemaField['x-ui']?.control === 'credential_select') {
-    return 'credential';
-  }
-
-  if (schemaField.format === 'json') {
-    return 'json';
-  }
-
-  if (schemaField.type === 'string' && schemaField.format === 'textarea') {
-    return 'textarea';
-  }
-
-  return inferType(value);
-};
-
-const normalizeProviderFilter = (providerFilter: unknown): string[] => {
-  if (!Array.isArray(providerFilter)) return [];
-
-  return providerFilter
-    .filter((provider): provider is string => typeof provider === 'string' && provider.trim().length > 0)
-    .map(provider => provider.trim().toLowerCase());
-};
-
-const normalizeAuthTypeFilter = (
-  authTypes: unknown
-): Array<'api_key' | 'oauth'> => {
-  if (!Array.isArray(authTypes)) return ['api_key', 'oauth'];
-
-  const normalized = authTypes.reduce<Array<'api_key' | 'oauth'>>((acc, value) => {
-    if (value === 'api_key' || value === 'oauth') {
-      acc.push(value);
-    }
-
-    return acc;
-  }, []);
-
-  return normalized.length > 0 ? Array.from(new Set(normalized)) : ['api_key', 'oauth'];
-};
-
-const filterCredentialOptions = (
-  providerFilter: string[],
-  authTypeFilter: Array<'api_key' | 'oauth'>
-) => {
-  const options = props.credentialOptions ?? [];
-
-  return options.filter(option => {
-    const optionProvider = option.provider.toLowerCase();
-    const providerMatch = providerFilter.length === 0 || providerFilter.includes(optionProvider);
-    const authTypeMatch = authTypeFilter.includes(option.auth_type);
-    return providerMatch && authTypeMatch;
-  });
-};
-
-const credentialOptionKey = (option: CredentialOption) => {
-  return [option.auth_type, option.provider, option.owner_user_id, option.id].join(':');
-};
-
-const credentialSelectionValue = (fieldKey: string) => {
-  const value = fieldValues.value[fieldKey];
-
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return '';
-  }
-
-  const ref = value as Record<string, unknown>;
-  const id = typeof ref.id === 'string' ? ref.id : '';
-  const provider = typeof ref.provider === 'string' ? ref.provider : '';
-  const authType = typeof ref.auth_type === 'string' ? ref.auth_type : '';
-  const ownerUserId = typeof ref.owner_user_id === 'string' ? ref.owner_user_id : '';
-
-  if (id === '' || provider === '' || authType === '' || ownerUserId === '') {
-    return '';
-  }
-
-  return [authType, provider, ownerUserId, id].join(':');
-};
-
-const updateCredentialSelection = (fieldKey: string, selectedValue: string) => {
-  const field = fieldByKey.value[fieldKey];
-  const options = field?.credentialOptions || [];
-
-  if (selectedValue === '') {
-    fieldValues.value[fieldKey] = null;
-    return;
-  }
-
-  const selectedOption = options.find(option => credentialOptionKey(option) === selectedValue);
-
-  if (!selectedOption) {
-    fieldValues.value[fieldKey] = null;
-    return;
-  }
-
-  fieldValues.value[fieldKey] = {
-    id: selectedOption.id,
-    provider: selectedOption.provider,
-    auth_type: selectedOption.auth_type,
-    owner_user_id: selectedOption.owner_user_id,
-  };
-};
-
-const credentialOptionLabel = (option: CredentialOption) => {
-  const ownerName = option.owner_display_name || option.owner_user_id;
-  const status = option.status && option.status !== 'active' ? ` [${option.status}]` : '';
-  return `${option.provider_label} - ${ownerName} (${option.display_name})${status}`;
+  return true; // All fields support expressions with the new FieldWrapper
 };
 
 const expandedSections = ref<Record<string, boolean>>({
@@ -1354,153 +1231,11 @@ const toggleWebhookListening = () => {
                   </div>
 
                   <div class="p-5">
-                    <template v-if="fieldModes[field.key] === 'literal' || !field.expressionCapable">
-                      <div v-if="field.type === 'credential'" class="space-y-2">
-                        <select
-                          class="select select-bordered bg-base-200/20 border-base-300 focus:border-primary w-full rounded-xl text-sm font-medium"
-                          :disabled="!canEdit"
-                          :value="credentialSelectionValue(field.key)"
-                          @change="
-                            updateCredentialSelection(
-                              field.key,
-                              ($event.target as HTMLSelectElement).value
-                            )
-                          "
-                        >
-                          <option value="">Select credential</option>
-                          <option
-                            v-for="option in field.credentialOptions"
-                            :key="credentialOptionKey(option)"
-                            :value="credentialOptionKey(option)"
-                          >
-                            {{ credentialOptionLabel(option) }}
-                          </option>
-                        </select>
-                        <p class="text-base-content/50 text-xs">
-                          Only non-sensitive credential metadata is visible here.
-                        </p>
-                      </div>
-                      <textarea
-                        v-else-if="field.type === 'textarea' || field.type === 'json'"
-                        v-model="
-                          fieldValues[field.key] as
-                            | string
-                            | number
-                            | readonly string[]
-                            | null
-                            | undefined
-                        "
-                        :readonly="!canEdit"
-                        class="textarea textarea-bordered bg-base-200/10 border-base-300 focus:border-primary min-h-[100px] w-full rounded-xl font-mono text-xs"
-                        :placeholder="
-                          field.type === 'json'
-                            ? '{ \n  &quot;key&quot;: &quot;value&quot; \n}'
-                            : ''
-                        "
-                      ></textarea>
-                      <input
-                        v-else
-                        v-model="
-                          fieldValues[field.key] as
-                            | string
-                            | number
-                            | readonly string[]
-                            | null
-                            | undefined
-                        "
-                        :type="field.type === 'number' ? 'number' : 'text'"
-                        :readonly="!canEdit"
-                        class="input input-md bg-base-200/20 border-base-300 focus:border-primary w-full rounded-xl text-sm font-medium"
-                      />
-                    </template>
-                    <template v-else>
-                      <div class="space-y-3">
-                        <textarea
-                          v-model="
-                            fieldValues[field.key] as
-                              | string
-                              | number
-                              | readonly string[]
-                              | null
-                              | undefined
-                          "
-                          :readonly="!canEdit"
-                          class="textarea bg-base-100 border-secondary/10 focus:border-secondary/40 focus:ring-secondary/5 min-h-[80px] w-full rounded-xl border-2 font-mono text-[13px] focus:ring-4"
-                          placeholder="{{ steps.PreviousStep.json.field }}"
-                        ></textarea>
-
-                        <!-- Live Preview -->
-                        <div
-                          v-if="hasPreviewFor(field.key)"
-                          class="border-base-200/60 bg-base-200/20 overflow-hidden rounded-xl border"
-                        >
-                          <div
-                            class="border-base-200/40 bg-base-200/30 flex items-center justify-between border-b px-4 py-1.5"
-                          >
-                            <span
-                              class="text-base-content/30 text-[9px] font-bold tracking-widest uppercase"
-                              >Live Preview</span
-                            >
-                            <span class="text-success text-[9px] font-bold uppercase">Draft</span>
-                          </div>
-                          <div class="text-base-content/70 p-3 font-mono text-[11px]">
-                            <template
-                              v-if="
-                                typeof previewValueFor(field.key) === 'object' &&
-                                previewValueFor(field.key) !== null
-                              "
-                            >
-                              <ExpressionPreviewError
-                                :error="previewValueFor(field.key) as ErrorPayload"
-                              />
-                            </template>
-                            <template v-else>
-                              {{
-                                previewValueFor(field.key) || 'Run a test to see preview results'
-                              }}
-                            </template>
-                          </div>
-                        </div>
-
-                        <!-- Result from execution -->
-                        <div
-                          v-else-if="evaluatedConfig[field.key] !== undefined"
-                          class="border-secondary/20 bg-secondary/[0.03] overflow-hidden rounded-xl border"
-                        >
-                          <div
-                            class="border-secondary/10 bg-secondary/5 flex items-center justify-between border-b px-4 py-1.5"
-                          >
-                            <span
-                              class="text-secondary/60 text-[9px] font-bold tracking-widest uppercase"
-                              >Resolved Result</span
-                            >
-                            <span class="text-secondary text-[9px] font-bold uppercase">Value</span>
-                          </div>
-                          <div class="text-base-content/70 p-3 font-mono text-[11px]">
-                            {{ evaluatedConfig[field.key] }}
-                          </div>
-                        </div>
-
-                        <!-- Live Preview (Mock or fallback) -->
-                        <div
-                          v-else
-                          class="border-base-200/60 bg-base-200/20 overflow-hidden rounded-xl border"
-                        >
-                          <div
-                            class="border-base-200/40 bg-base-200/30 flex items-center justify-between border-b px-4 py-1.5"
-                          >
-                            <span
-                              class="text-base-content/30 text-[9px] font-bold tracking-widest uppercase"
-                              >Live Preview</span
-                            >
-                            <span class="text-success text-[9px] font-bold uppercase">Draft</span>
-                          </div>
-                          <div class="text-base-content/70 p-3 font-mono text-[11px]">
-                            {{ 'Run a test to see preview results' }}
-                          </div>
-                        </div>
-                      </div>
-                    </template>
+                    <FieldWrapper
+                      v-model="fieldValues[field.key]"
+                      :field="field"
+                      :nodeId="node?.id || ''"
+                    />
                   </div>
                 </div>
               </div>
