@@ -28,7 +28,6 @@ interface ErrorPayload {
   column?: number;
   text: string;
 }
-import {
   ArrowRightOnRectangleIcon,
   BoltIcon,
   CpuChipIcon,
@@ -36,8 +35,16 @@ import {
   GlobeAltIcon,
   PencilIcon,
   BookmarkIcon,
+  CubeIcon,
+  XMarkIcon,
+  MagnifyingGlassIcon,
+  ChevronRightIcon,
+  DocumentDuplicateIcon,
+  LinkIcon,
+  SignalIcon,
 } from '@heroicons/vue/24/outline';
 import { unwrapData, formatDataForDisplay } from '@/lib/dataUtils';
+import { colorMap, oklchToHex } from '@/lib/color';
 import FieldWrapper from './fields/FieldWrapper.vue';
 
 interface Props {
@@ -67,7 +74,7 @@ const emit = defineEmits([
   'run_node',
 ]);
 
-const activeTab = ref<'config' | 'output' | 'pinned'>('config');
+const activeTab = ref<'config' | 'output'>('config');
 const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
 const fieldValues = ref<Record<string, unknown>>({});
 const searchQuery = ref('');
@@ -782,20 +789,7 @@ const toggleWebhookListening = () => {
           <div
             class="bg-primary/10 text-primary flex h-12 w-12 items-center justify-center rounded-2xl shadow-inner"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-6 w-6"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-              />
-            </svg>
+            <CubeIcon class="h-6 w-6" />
           </div>
           <div>
             <div class="flex items-center gap-2">
@@ -836,7 +830,7 @@ const toggleWebhookListening = () => {
         <div class="flex items-center gap-2">
           <div class="bg-base-300/50 flex rounded-xl p-1">
             <button
-              v-for="tab in ['config', 'output', 'pinned'] as const"
+              v-for="tab in ['config', 'output'] as const"
               :key="tab"
               class="rounded-lg px-4 py-2 text-xs font-bold capitalize transition-all"
               :class="
@@ -846,7 +840,7 @@ const toggleWebhookListening = () => {
               "
               @click="activeTab = tab"
             >
-              {{ tab === 'config' ? 'Parameters' : tab }}
+              {{ tab === 'config' ? 'Parameters' : 'Output' }}
             </button>
           </div>
 
@@ -854,20 +848,7 @@ const toggleWebhookListening = () => {
             class="btn btn-ghost btn-sm btn-circle hover:bg-error/10 hover:text-error ml-4"
             @click="closeModal"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              class="h-5 w-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            <XMarkIcon class="h-5 w-5" />
           </button>
         </div>
       </div>
@@ -878,20 +859,7 @@ const toggleWebhookListening = () => {
         <div class="border-base-200 bg-base-100/50 flex w-80 flex-col overflow-hidden border-r">
           <div class="border-base-200 bg-base-200/10 border-b p-4">
             <div class="relative">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="text-base-content/40 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
+              <MagnifyingGlassIcon class="text-base-content/40 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
               <input
                 v-model="searchQuery"
                 type="text"
@@ -917,15 +885,10 @@ const toggleWebhookListening = () => {
                   </span>
                   {{ section.label }}
                 </div>
-                <svg
+                <ChevronRightIcon
                   :class="{ 'rotate-90': expandedSections[section.id] }"
                   class="h-3 w-3 opacity-40 transition-transform"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path d="M9 5l7 7-7 7" stroke-width="2" />
-                </svg>
+                />
               </button>
               <div
                 v-if="expandedSections[section.id]"
@@ -969,20 +932,7 @@ const toggleWebhookListening = () => {
                         class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
                         :title="'Copy expression: ' + getExpressionFor(section.id, String(key))"
                       >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          class="h-3 w-3"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                          />
-                        </svg>
+                        <DocumentDuplicateIcon class="h-3 w-3" />
                       </button>
                     </div>
                     <div class="text-base-content/40 mt-0.5 truncate text-[10px]">
@@ -1003,20 +953,7 @@ const toggleWebhookListening = () => {
                       class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
                       :title="'Copy expression: ' + getExpressionFor(section.id)"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-3 w-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                        />
-                      </svg>
+                      <DocumentDuplicateIcon class="h-3 w-3" />
                     </button>
                   </div>
                 </div>
@@ -1059,20 +996,7 @@ const toggleWebhookListening = () => {
             >
               <div class="flex items-center justify-between">
                 <h4 class="text-base-content flex items-center gap-2 text-sm font-bold">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="text-primary h-4 w-4"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-                    />
-                  </svg>
+                  <LinkIcon class="text-primary h-4 w-4" />
                   Webhook URLs
                 </h4>
                 <div class="join bg-base-200/50 rounded-lg p-1">
@@ -1110,20 +1034,7 @@ const toggleWebhookListening = () => {
                 />
                 <div class="absolute inset-y-0 right-0 flex items-center pr-1">
                   <button class="btn btn-xs btn-ghost btn-square" @click="copyWebhookUrl">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-4 w-4 opacity-50"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                      />
-                    </svg>
+                    <DocumentDuplicateIcon class="h-4 w-4 opacity-50" />
                   </button>
                 </div>
               </div>
@@ -1140,21 +1051,10 @@ const toggleWebhookListening = () => {
                     :disabled="isWebhookListeningElsewhere"
                     @click="toggleWebhookListening"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
+                    <SignalIcon
                       class="h-4 w-4"
                       :class="isWebhookListening ? '' : 'animate-pulse'"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z"
-                      />
-                    </svg>
+                    />
                     {{ isWebhookListening ? 'Stop listening' : 'Listen for test event' }}
                   </button>
                   <p class="text-base-content/50 flex-1 text-[10px] leading-tight">
@@ -1307,286 +1207,230 @@ const toggleWebhookListening = () => {
           </div>
 
           <div
-            v-else-if="activeTab === 'output'"
+            v-else
             class="custom-scrollbar mx-auto h-full max-w-4xl space-y-8 p-4"
           >
-            <div v-if="activeStepExecution" class="space-y-8 pb-20">
-              <!-- Multi-Item Summary Bar -->
-              <section v-if="isMultiItemStep && itemStats" class="bg-base-200/50 rounded-2xl p-4">
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-4">
-                    <span class="text-base-content/60 text-sm font-medium">
-                      {{ itemStats.itemsTotal }} items processed
-                    </span>
-                    <div class="flex items-center gap-2 text-xs">
-                      <span
-                        v-if="itemStats.completed > 0"
-                        class="text-success flex items-center gap-1"
-                      >
-                        <span class="bg-success inline-block size-2 rounded-full"></span>
-                        {{ itemStats.completed }} completed
+            <div v-if="activeStepExecution || hasPinnedOutput" class="space-y-8 pb-20">
+              <template v-if="activeStepExecution">
+                <!-- Multi-Item Summary Bar -->
+                <section v-if="isMultiItemStep && itemStats" class="bg-base-200/50 rounded-2xl p-4">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                      <span class="text-base-content/60 text-sm font-medium">
+                        {{ itemStats.itemsTotal }} items processed
                       </span>
-                      <span v-if="itemStats.failed > 0" class="text-error flex items-center gap-1">
-                        <span class="bg-error inline-block size-2 rounded-full"></span>
-                        {{ itemStats.failed }} failed
-                      </span>
-                      <span v-if="itemStats.running > 0" class="text-info flex items-center gap-1">
-                        <span class="bg-info inline-block size-2 rounded-full"></span>
-                        {{ itemStats.running }} running
-                      </span>
+                      <div class="flex items-center gap-2 text-xs">
+                        <span
+                          v-if="itemStats.completed > 0"
+                          class="text-success flex items-center gap-1"
+                        >
+                          <span class="bg-success inline-block size-2 rounded-full"></span>
+                          {{ itemStats.completed }} completed
+                        </span>
+                        <span v-if="itemStats.failed > 0" class="text-error flex items-center gap-1">
+                          <span class="bg-error inline-block size-2 rounded-full"></span>
+                          {{ itemStats.failed }} failed
+                        </span>
+                        <span v-if="itemStats.running > 0" class="text-info flex items-center gap-1">
+                          <span class="bg-info inline-block size-2 rounded-full"></span>
+                          {{ itemStats.running }} running
+                        </span>
+                      </div>
                     </div>
+                    <button
+                      v-if="selectedItemIndex !== null"
+                      @click="selectedItemIndex = null"
+                      class="btn btn-xs btn-ghost"
+                    >
+                      Show All
+                    </button>
                   </div>
-                  <button
-                    v-if="selectedItemIndex !== null"
-                    @click="selectedItemIndex = null"
-                    class="btn btn-xs btn-ghost"
-                  >
-                    Show All
-                  </button>
-                </div>
 
-                <!-- Item List -->
-                <div class="mt-4 flex flex-wrap gap-2">
-                  <button
-                    v-for="se in stepExecutionsForStep"
-                    :key="se.id"
-                    @click="selectedItemIndex = se.item_index ?? 0"
+                  <!-- Item List -->
+                  <div class="mt-4 flex flex-wrap gap-2">
+                    <button
+                      v-for="se in stepExecutionsForStep"
+                      :key="se.id"
+                      @click="selectedItemIndex = se.item_index ?? 0"
+                      :class="[
+                        'btn btn-xs gap-1',
+                        selectedItemIndex === se.item_index ? 'btn-primary' : 'btn-ghost',
+                        se.status === 'failed' ? 'border-error/50' : '',
+                        se.status === 'completed' ? 'border-success/30' : '',
+                      ]"
+                    >
+                      <span
+                        :class="[
+                          'inline-block size-2 rounded-full',
+                          se.status === 'completed' ? 'bg-success' : '',
+                          se.status === 'failed' ? 'bg-error' : '',
+                          se.status === 'running' ? 'bg-info animate-pulse' : '',
+                          se.status === 'skipped' ? 'bg-base-content/30' : '',
+                        ]"
+                      ></span>
+                      #{{ (se.item_index ?? 0) + 1 }}
+                    </button>
+                  </div>
+                </section>
+
+                <!-- Item Header (when viewing specific item) -->
+                <div
+                  v-if="isMultiItemStep && selectedItemIndex !== null"
+                  class="flex items-center gap-2 text-sm"
+                >
+                  <span class="text-base-content/60">Viewing item</span>
+                  <span class="font-bold">#{{ selectedItemIndex + 1 }}</span>
+                  <span class="text-base-content/40">of {{ itemStats?.itemsTotal }}</span>
+                  <span
                     :class="[
-                      'btn btn-xs gap-1',
-                      selectedItemIndex === se.item_index ? 'btn-primary' : 'btn-ghost',
-                      se.status === 'failed' ? 'border-error/50' : '',
-                      se.status === 'completed' ? 'border-success/30' : '',
+                      'badge badge-sm',
+                      activeStepExecution.status === 'completed' ? 'badge-success' : '',
+                      activeStepExecution.status === 'failed' ? 'badge-error' : '',
+                      activeStepExecution.status === 'running' ? 'badge-info' : '',
                     ]"
                   >
-                    <span
-                      :class="[
-                        'inline-block size-2 rounded-full',
-                        se.status === 'completed' ? 'bg-success' : '',
-                        se.status === 'failed' ? 'bg-error' : '',
-                        se.status === 'running' ? 'bg-info animate-pulse' : '',
-                        se.status === 'skipped' ? 'bg-base-content/30' : '',
-                      ]"
-                    ></span>
-                    #{{ (se.item_index ?? 0) + 1 }}
-                  </button>
+                    {{ activeStepExecution.status }}
+                  </span>
                 </div>
-              </section>
 
-              <!-- Item Header (when viewing specific item) -->
-              <div
-                v-if="isMultiItemStep && selectedItemIndex !== null"
-                class="flex items-center gap-2 text-sm"
-              >
-                <span class="text-base-content/60">Viewing item</span>
-                <span class="font-bold">#{{ selectedItemIndex + 1 }}</span>
-                <span class="text-base-content/40">of {{ itemStats?.itemsTotal }}</span>
-                <span
-                  :class="[
-                    'badge badge-sm',
-                    activeStepExecution.status === 'completed' ? 'badge-success' : '',
-                    activeStepExecution.status === 'failed' ? 'badge-error' : '',
-                    activeStepExecution.status === 'running' ? 'badge-info' : '',
-                  ]"
-                >
-                  {{ activeStepExecution.status }}
-                </span>
-              </div>
-
-              <section>
-                <div class="mb-3 flex items-center justify-between">
-                  <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
-                    Input Data
-                  </h4>
-                  <button
-                    @click.stop="copyExpression('json')"
-                    class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      class="h-3 w-3"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                      />
-                    </svg>
-                    Copy Expression
-                  </button>
-                </div>
-                <div
-                  class="bg-base-300/30 overflow-x-auto rounded-2xl p-4 font-mono text-xs whitespace-pre"
-                >
-                  {{ formatDataForDisplay(activeStepExecution.input_data) }}
-                </div>
-              </section>
-
-              <section>
-                <div class="mb-3 flex items-center justify-between">
-                  <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
-                    Output Data
-                  </h4>
-                  <div class="flex items-center gap-2">
+                <section>
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
+                      Input Data
+                    </h4>
                     <button
-                      v-if="canEdit"
-                      @click.stop="pinOutput"
-                      class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
-                      :disabled="!canPinOutput"
-                      :title="
-                        canPinOutput
-                          ? pinButtonLabel
-                          : 'Run the workflow to capture output before pinning'
-                      "
-                    >
-                      <BookmarkIcon class="h-3 w-3" />
-                      {{ pinButtonLabel }}
-                    </button>
-                    <button
-                      @click.stop="copyExpression('steps', node?.id)"
+                      @click.stop="copyExpression('json')"
                       class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
                     >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        class="h-3 w-3"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                      >
-                        <path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"
-                        />
-                      </svg>
+                      <DocumentDuplicateIcon class="h-3 w-3" />
                       Copy Expression
                     </button>
-                    <span v-if="hasPinnedOutput" class="badge badge-secondary badge-sm"
-                      >Pinned</span
-                    >
-                    <span
-                      v-if="activeStepExecution.status === 'completed'"
-                      class="badge badge-success badge-sm"
-                      >Success</span
-                    >
                   </div>
-                </div>
-                <div
-                  class="bg-base-300/30 border-success/10 overflow-x-auto rounded-2xl border-2 p-4 font-mono text-xs whitespace-pre"
-                >
-                  {{ formatDataForDisplay(activeStepExecution.output_data) }}
-                </div>
-              </section>
+                  <div
+                    class="bg-base-300/30 overflow-x-auto rounded-2xl p-4 font-mono text-xs whitespace-pre"
+                  >
+                    {{ formatDataForDisplay(activeStepExecution.input_data) }}
+                  </div>
+                </section>
 
-              <section v-if="activeStepExecution.error">
-                <h4 class="text-error/60 mb-3 text-xs font-bold tracking-widest uppercase">
-                  Error
-                </h4>
-                <div
-                  class="bg-error/5 border-error/20 text-error rounded-2xl border p-4 font-mono text-xs"
-                >
-                  {{ activeStepExecution.error }}
-                </div>
+                <section>
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
+                      Output Data
+                    </h4>
+                    <div class="flex items-center gap-2">
+                      <button
+                        v-if="canEdit && !hasPinnedOutput"
+                        @click.stop="pinOutput"
+                        class="btn btn-secondary btn-xs gap-1.5 text-[10px] capitalize shadow-sm transition-all shadow-secondary/20"
+                        :disabled="!canPinOutput"
+                        :title="
+                          canPinOutput
+                            ? 'Pin this output for previews'
+                            : 'Run the workflow to capture output before pinning'
+                        "
+                      >
+                        <BookmarkIcon class="h-3 w-3" />
+                        Pin Output
+                      </button>
+
+                      <button
+                        v-if="canEdit && hasPinnedOutput"
+                        @click.stop="unpinOutput"
+                        class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize text-error/60 hover:text-error hover:bg-error/10"
+                      >
+                        Unpin
+                      </button>
+
+                      <button
+                        @click.stop="copyExpression('steps', node?.id)"
+                        class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
+                      >
+                        <DocumentDuplicateIcon class="h-3 w-3" />
+                        Copy Expression
+                      </button>
+                      
+                      <span v-if="hasPinnedOutput" 
+                        class="badge badge-sm font-bold tracking-wider uppercase"
+                        :style="{ 
+                          backgroundColor: oklchToHex(colorMap.pinned), 
+                          borderColor: oklchToHex(colorMap.pinned),
+                          color: 'white'
+                        }"
+                      >Pinned</span>
+                      <span
+                        v-else-if="activeStepExecution?.status === 'completed'"
+                        class="badge badge-success badge-sm"
+                        >Success</span
+                      >
+                    </div>
+                  </div>
+                  <div
+                    class="overflow-x-auto rounded-2xl border-2 p-4 font-mono text-xs whitespace-pre transition-all duration-300"
+                    :class="hasPinnedOutput ? 'shadow-lg' : 'bg-base-300/30 border-success/10'"
+                    :style="hasPinnedOutput ? { 
+                      borderColor: oklchToHex(colorMap.pinned) + '66', // 40% opacity
+                      backgroundColor: oklchToHex(colorMap.pinned) + '08', // approx 3% opacity
+                      boxShadow: `0 10px 15px -3px ${oklchToHex(colorMap.pinned)}0D` // approx 5% opacity shadow
+                    } : {}"
+                  >
+                    {{ formatDataForDisplay(hasPinnedOutput ? pinnedOutput : activeStepExecution.output_data) }}
+                  </div>
+                </section>
+
+                <section v-if="activeStepExecution.error">
+                  <h4 class="text-error/60 mb-3 text-xs font-bold tracking-widest uppercase">
+                    Error
+                  </h4>
+                  <div
+                    class="bg-error/5 border-error/20 text-error rounded-2xl border p-4 font-mono text-xs"
+                  >
+                    {{ activeStepExecution.error }}
+                  </div>
+                </section>
+              </template>
+              
+              <!-- Case where no execution but has pinned output (show pinned only) -->
+              <section v-else-if="hasPinnedOutput">
+                 <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
+                      Pinned Output
+                    </h4>
+                    <div class="flex items-center gap-2">
+                      <button
+                        v-if="canEdit"
+                        @click.stop="unpinOutput"
+                        class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize text-error/60 hover:text-error hover:bg-error/10"
+                      >
+                        Unpin
+                      </button>
+                      <span v-if="hasPinnedOutput" 
+                        class="badge badge-sm font-bold tracking-wider uppercase"
+                        :style="{ 
+                          backgroundColor: oklchToHex(colorMap.pinned), 
+                          borderColor: oklchToHex(colorMap.pinned),
+                          color: 'white'
+                        }"
+                      >Pinned</span>
+                    </div>
+                  </div>
+                  <div
+                    class="overflow-x-auto rounded-2xl border-2 p-4 font-mono text-xs whitespace-pre shadow-lg transition-all duration-300"
+                    :style="{ 
+                      borderColor: oklchToHex(colorMap.pinned) + '66', 
+                      backgroundColor: oklchToHex(colorMap.pinned) + '08',
+                      boxShadow: `0 10px 15px -3px ${oklchToHex(colorMap.pinned)}0D`
+                    }"
+                  >
+                    {{ formatDataForDisplay(pinnedOutput) }}
+                  </div>
               </section>
             </div>
 
             <div v-else class="flex h-full flex-col items-center justify-center opacity-40">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="mb-4 h-16 w-16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
+              <BoltIcon class="mb-4 h-16 w-16" />
               <p class="text-sm font-bold">No execution data available</p>
               <p class="text-xs">Run the workflow to see inputs and outputs</p>
-            </div>
-          </div>
-
-          <div v-else class="custom-scrollbar mx-auto h-full max-w-4xl space-y-8 p-4">
-            <div v-if="hasPinnedOutput" class="space-y-6 pb-20">
-              <section class="space-y-3">
-                <div class="flex items-start justify-between gap-4">
-                  <div>
-                    <h4 class="text-base-content/40 text-xs font-bold tracking-widest uppercase">
-                      Pinned Output
-                    </h4>
-                    <p class="text-base-content/50 mt-1 text-xs font-medium">
-                      Pinned outputs are reused when running previews.
-                    </p>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      v-if="canEdit"
-                      @click.stop="pinOutput"
-                      class="btn btn-xs btn-ghost gap-1.5 text-[10px] capitalize opacity-60 hover:opacity-100"
-                      :disabled="!canPinOutput"
-                      :title="
-                        canPinOutput
-                          ? pinButtonLabel
-                          : 'Run the workflow to capture output before pinning'
-                      "
-                    >
-                      <BookmarkIcon class="h-3 w-3" />
-                      {{ pinButtonLabel }}
-                    </button>
-                    <button
-                      v-if="canEdit"
-                      class="btn btn-xs btn-ghost text-error/80 hover:text-error"
-                      @click.stop="unpinOutput"
-                    >
-                      Unpin
-                    </button>
-                  </div>
-                </div>
-                <div
-                  class="bg-base-300/30 overflow-x-auto rounded-2xl p-4 font-mono text-xs whitespace-pre"
-                >
-                  {{ formatDataForDisplay(pinnedOutput) }}
-                </div>
-              </section>
-            </div>
-
-            <div
-              v-else
-              class="flex h-full flex-col items-center justify-center gap-3 text-center opacity-40"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-16 w-16"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-                />
-              </svg>
-              <div>
-                <p class="text-sm font-bold">No pinned output</p>
-                <p class="text-xs">Pin an output to reuse it during previews.</p>
-              </div>
-              <button
-                v-if="canEdit && canPinOutput"
-                class="btn btn-xs btn-primary"
-                @click.stop="pinOutput"
-              >
-                Pin latest output
-              </button>
             </div>
           </div>
         </div>
