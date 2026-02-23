@@ -25,6 +25,14 @@ export function unwrapData(data: unknown): unknown {
 }
 
 /**
+ * Narrows an unknown value to a Record, returning null for non-objects/arrays.
+ */
+export function toRecord(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value as Record<string, unknown>;
+}
+
+/**
  * Formats data for display, ensuring it's unwrapped first.
  */
 export function formatDataForDisplay(data: unknown): string {

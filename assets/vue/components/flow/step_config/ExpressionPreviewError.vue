@@ -1,14 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-
-interface ErrorPayload {
-  type: 'parse_error' | 'render_error';
-  message?: string;
-  errors?: string[];
-  line?: number;
-  column?: number;
-  text: string;
-}
+import type { ErrorPayload } from './useExpressionPreviews';
 
 const props = defineProps<{
   error: ErrorPayload;
