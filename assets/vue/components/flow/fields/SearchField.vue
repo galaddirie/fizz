@@ -1,91 +1,105 @@
 <template>
-  <div class="form-control w-full relative">
-    <label v-if="showLabel && field.label" class="label">
-      <span class="label-text font-medium">{{ field.label }}</span>
+  <div class="relative">
+    <label v-if="showLabel && field.label" class="mb-1.5 block text-xs font-medium text-base-content/60">
+      {{ field.label }}
     </label>
-    
+
     <div class="relative">
-      <!-- Read-only view when a value is selected -->
-      <div v-if="modelValue && !isEditing" class="relative">
-        <div class="input input-bordered w-full font-mono text-sm flex items-center pr-10 cursor-pointer bg-base-100" @click="startEditing">
-          <span class="truncate">{{ displayLabel }}</span>
-        </div>
-        <button 
-          @click="clearSelection" 
-          class="absolute inset-y-0 right-0 px-3 flex items-center text-base-content/50 hover:text-base-content"
+      <!-- Selected value display -->
+      <div
+        v-if="modelValue && !isEditing"
+        class="group/selected flex w-full cursor-pointer items-center justify-between rounded-xl bg-base-200/30 px-3.5 py-2.5 ring-1 ring-base-content/[0.06] transition-all duration-200 hover:ring-base-content/10"
+        @click="startEditing"
+      >
+        <span class="truncate text-sm text-base-content">{{ displayLabel }}</span>
+        <button
+          @click.stop="clearSelection"
+          class="ml-2 shrink-0 rounded-lg p-0.5 text-base-content/20 transition-colors hover:bg-base-200/60 hover:text-base-content/60"
           title="Clear selection"
         >
-          <XMarkIcon class="w-5 h-5" />
+          <XMarkIcon class="h-3.5 w-3.5" />
         </button>
       </div>
 
-      <!-- Search Input when editing -->
+      <!-- Search input -->
       <div v-else class="relative">
-        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-          <MagnifyingGlassIcon class="w-4 h-4 text-base-content/50" />
+        <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+          <MagnifyingGlassIcon class="h-3.5 w-3.5 text-base-content/25" />
         </div>
-        <input 
+        <input
           ref="searchInput"
-          type="text" 
-          class="input input-bordered w-full font-mono text-sm pl-9 pr-10" 
+          type="text"
+          class="w-full rounded-xl bg-base-200/30 py-2.5 pl-9 pr-9 text-sm text-base-content outline-none ring-1 ring-base-content/[0.06] transition-all duration-200 placeholder:text-base-content/30 hover:ring-base-content/10 focus:bg-base-100 focus:ring-2 focus:ring-primary/25"
           v-model="searchQuery"
-          :placeholder="modelValue ? displayLabel : (field.placeholder || 'Search...')"
+          :placeholder="modelValue ? displayLabel : (field.placeholder || 'Search\u2026')"
           :disabled="field.disabled"
           :readonly="field.readOnly"
           @focus="isOpen = true"
           @blur="handleBlur"
         />
-        <div v-if="isLoading" class="absolute inset-y-0 right-0 pr-3 flex items-center">
-          <span class="loading loading-spinner loading-xs text-primary"></span>
+        <div class="absolute inset-y-0 right-0 flex items-center pr-3">
+          <span v-if="isLoading" class="loading loading-spinner loading-xs text-base-content/30"></span>
+          <button
+            v-else-if="searchQuery"
+            @click="searchQuery = ''"
+            class="rounded-md p-0.5 text-base-content/25 transition-colors hover:text-base-content/60"
+          >
+            <XMarkIcon class="h-3.5 w-3.5" />
+          </button>
         </div>
-        <button 
-          v-else-if="searchQuery" 
-          @click="searchQuery = ''" 
-          class="absolute inset-y-0 right-0 pr-3 flex items-center text-base-content/50 hover:text-base-content"
-        >
-          <XMarkIcon class="w-4 h-4" />
-        </button>
       </div>
-      
+
       <!-- Dropdown -->
-      <ul 
-        v-show="isOpen && !field.disabled && !field.readOnly" 
-        class="absolute z-50 w-full mt-1 bg-base-100 rounded-md shadow-xl max-h-60 overflow-auto border border-base-300 left-0"
-        @mousedown.prevent
+      <Transition
+        enter-active-class="transition duration-150 ease-out"
+        enter-from-class="scale-[0.98] opacity-0"
+        enter-to-class="scale-100 opacity-100"
+        leave-active-class="transition duration-100 ease-in"
+        leave-from-class="scale-100 opacity-100"
+        leave-to-class="scale-[0.98] opacity-0"
       >
-        <li v-if="isLoading && options.length === 0" class="p-4 text-sm text-center text-base-content/50">
-          Loading...
-        </li>
-        <li v-else-if="options.length === 0" class="p-4 text-sm text-center text-base-content/50">
-          No results found
-        </li>
-        <li 
-          v-for="opt in options" 
-          :key="opt.value" 
-          @click="selectOption(opt)"
-          class="px-4 py-2 hover:bg-base-200 cursor-pointer flex flex-col gap-1 border-b border-base-200 last:border-b-0"
+        <ul
+          v-show="isOpen && !field.disabled && !field.readOnly"
+          class="absolute z-50 mt-1.5 w-full overflow-auto rounded-xl bg-base-100 shadow-lg ring-1 ring-base-content/[0.08]"
+          style="max-height: 15rem"
+          @mousedown.prevent
         >
-          <div class="flex items-center justify-between">
-            <span class="font-medium text-sm">{{ opt.label }}</span>
-            <div v-if="opt.meta" class="flex gap-1">
-              <span 
-                v-for="(meta, idx) in opt.meta" 
-                :key="idx"
-                class="badge badge-sm"
-                :class="meta.color ? `badge-${meta.color}` : 'badge-ghost'"
-              >
-                {{ meta.value }}
-              </span>
+          <li v-if="isLoading && options.length === 0" class="flex items-center justify-center px-4 py-6">
+            <span class="loading loading-dots loading-sm text-base-content/20"></span>
+          </li>
+          <li v-else-if="options.length === 0" class="px-4 py-6 text-center text-xs text-base-content/30">
+            No results found
+          </li>
+          <li
+            v-for="(opt, idx) in options"
+            :key="String(opt.value)"
+            @click="selectOption(opt)"
+            class="cursor-pointer px-3.5 py-2.5 transition-colors hover:bg-primary/5"
+            :class="idx < options.length - 1 ? 'border-b border-base-content/[0.03]' : ''"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm font-medium text-base-content">{{ opt.label }}</span>
+              <div v-if="opt.meta" class="flex shrink-0 gap-1">
+                <span
+                  v-for="(meta, mIdx) in opt.meta"
+                  :key="mIdx"
+                  class="rounded-full bg-base-200/60 px-2 py-0.5 text-[9px] font-semibold text-base-content/45"
+                >
+                  {{ meta.value }}
+                </span>
+              </div>
             </div>
-          </div>
-          <span v-if="opt.description" class="text-xs text-base-content/70">{{ opt.description }}</span>
-        </li>
-      </ul>
+            <p v-if="opt.description" class="mt-0.5 text-[11px] leading-snug text-base-content/35">
+              {{ opt.description }}
+            </p>
+          </li>
+        </ul>
+      </Transition>
     </div>
-    
-    <label v-if="field.description" class="label">
-      <span class="label-text-alt text-base-content/70">{{ field.description }}</span>
-    </label>
+
+    <p v-if="field.description" class="mt-1.5 text-[11px] leading-relaxed text-base-content/40">
+      {{ field.description }}
+    </p>
   </div>
 </template>
 
@@ -137,7 +151,7 @@ const mappingConfig = computed(() => uiConfig.value?.responseConfig?.mapping || 
 // Extract label for current value (if object)
 const displayLabel = computed(() => {
   if (!props.modelValue) return '';
-  
+
   if (typeof props.modelValue === 'object') {
      // Try to find label in the same shape as mapping
      const labelPath = mappingConfig.value?.label || 'label';
@@ -182,7 +196,7 @@ const selectOption = (opt: MappedOption) => {
 
 const mapResults = (rawResults: any[]): MappedOption[] => {
   if (!Array.isArray(rawResults)) return [];
-  
+
   return rawResults.map(item => {
     try {
       // Evaluate JSONPaths for each configured field mapping
@@ -204,7 +218,7 @@ const mapResults = (rawResults: any[]): MappedOption[] => {
       const value = extract(mappingConfig.value.value || 'value');
       const label = extract(mappingConfig.value.label || 'label');
       const description = extract(mappingConfig.value.description);
-      
+
       const meta = (mappingConfig.value.meta || []).map((m: any) => ({
         key: m.key,
         value: String(extract(m.value) || ''),

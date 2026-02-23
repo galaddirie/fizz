@@ -25,34 +25,34 @@ const errorMarker = computed(() => {
 </script>
 
 <template>
-  <div class="bg-error/5 border-error/10 space-y-2 rounded-lg border p-3">
-    <div class="text-error flex items-center gap-2 text-[10px] font-bold tracking-wider uppercase">
-      <div class="bg-error h-1.5 w-1.5 animate-pulse rounded-full" />
+  <div class="space-y-2 rounded-xl bg-error/[0.04] p-3 ring-1 ring-error/10" role="alert">
+    <div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider text-error">
+      <div class="h-1.5 w-1.5 animate-pulse rounded-full bg-error" />
       Template Error
     </div>
 
     <div
-      class="bg-base-300/50 border-base-content/5 overflow-x-auto rounded border p-2 font-mono text-[11px] leading-relaxed whitespace-pre"
+      class="overflow-x-auto rounded-lg bg-base-300/40 p-2 font-mono text-[11px] leading-relaxed ring-1 ring-base-content/[0.04] whitespace-pre"
     >
       <template v-for="(line, idx) in lines" :key="idx">
         <div
           class="flex gap-3"
-          :class="{ 'bg-error/5': idx === (props.error.line ? props.error.line - 1 : 0) }"
+          :class="{ 'bg-error/[0.06]': idx === (props.error.line ? props.error.line - 1 : 0) }"
         >
-          <span class="text-base-content/30 w-4 text-right select-none">{{ 1 + idx }}</span>
-          <span class="text-base-content/90">{{ line }}</span>
+          <span class="w-4 text-right text-base-content/25 select-none">{{ 1 + idx }}</span>
+          <span class="text-base-content/80">{{ line }}</span>
         </div>
         <div
           v-if="idx === (props.error.line ? props.error.line - 1 : 0) && errorMarker"
           class="flex gap-3"
         >
           <span class="w-4" />
-          <span class="text-error leading-[0] font-bold">{{ errorMarker }}</span>
+          <span class="font-bold leading-[0] text-error">{{ errorMarker }}</span>
         </div>
       </template>
     </div>
 
-    <div class="text-error bg-error/10 rounded p-2 text-[11px] leading-normal whitespace-pre-wrap">
+    <div class="rounded-lg bg-error/8 p-2 text-[11px] leading-normal text-error whitespace-pre-wrap">
       {{ errorMessage }}
     </div>
   </div>

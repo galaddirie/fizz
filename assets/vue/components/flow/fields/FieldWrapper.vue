@@ -13,27 +13,27 @@
 
     <div v-else-if="mode === 'literal'">
       <textarea
-        class="textarea textarea-bordered w-full min-h-[100px] font-mono text-sm leading-relaxed"
+        class="w-full min-h-[100px] resize-y rounded-xl bg-base-200/30 px-3.5 py-2.5 font-mono text-sm leading-relaxed text-base-content outline-none ring-1 ring-base-content/[0.06] transition-all duration-200 placeholder:text-base-content/30 hover:ring-base-content/10 focus:bg-base-100 focus:ring-2 focus:ring-primary/25"
         :value="typeof modelValue === 'object' ? JSON.stringify(modelValue, null, 2) : String(modelValue || '')"
         @input="handleChange(($event.target as HTMLTextAreaElement).value)"
         :disabled="field.disabled"
         :readonly="field.readOnly"
       ></textarea>
-      <p v-if="field.description" class="text-base-content/70 mt-2 text-xs">
+      <p v-if="field.description" class="mt-1.5 text-[11px] leading-relaxed text-base-content/40">
         {{ field.description }}
       </p>
     </div>
 
     <div v-else class="space-y-2">
       <textarea
-        class="textarea textarea-bordered w-full min-h-[100px] font-mono text-sm leading-relaxed"
+        class="w-full min-h-[100px] resize-y rounded-xl bg-base-200/30 px-3.5 py-2.5 font-mono text-sm leading-relaxed text-base-content outline-none ring-1 ring-base-content/[0.06] transition-all duration-200 placeholder:text-base-content/30 hover:ring-base-content/10 focus:bg-base-100 focus:ring-2 focus:ring-primary/25"
         :value="String(modelValue ?? '')"
         @input="handleChange(($event.target as HTMLTextAreaElement).value)"
         placeholder="{{ '{{' }} expression {{ '}}' }}"
         :disabled="field.disabled"
         :readonly="field.readOnly"
       ></textarea>
-      <p v-if="field.description" class="text-base-content/70 text-xs">
+      <p v-if="field.description" class="text-[11px] leading-relaxed text-base-content/40">
         {{ field.description }}
       </p>
     </div>

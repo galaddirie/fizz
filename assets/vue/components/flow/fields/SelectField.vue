@@ -1,32 +1,40 @@
 <template>
-  <div class="form-control w-full">
-    <label v-if="showLabel && field.label" class="label">
-      <span class="label-text font-medium">{{ field.label }}</span>
+  <div>
+    <label v-if="showLabel && field.label" class="mb-1.5 block text-xs font-medium text-base-content/60">
+      {{ field.label }}
     </label>
-    
-    <select 
-      class="select select-bordered w-full font-mono text-sm" 
-      :value="selectedValue"
-      @change="handleSelect(($event.target as HTMLSelectElement).value)"
-      :disabled="field.disabled || isLoading"
-    >
-      <option disabled value="">
-        {{ isLoading ? 'Loading...' : 'Select an option...' }}
-      </option>
-      <option v-for="opt in options" :key="String(opt.value)" :value="JSON.stringify(opt.value)">
-        {{ opt.label || opt.value }}
-      </option>
-    </select>
-    
-    <label v-if="field.description" class="label">
-      <span class="label-text-alt text-base-content/70">{{ field.description }}</span>
-    </label>
+
+    <div class="relative">
+      <select
+        class="w-full appearance-none rounded-xl bg-base-200/30 px-3.5 py-2.5 pr-10 text-sm text-base-content outline-none ring-1 ring-base-content/[0.06] transition-all duration-200 hover:ring-base-content/10 focus:bg-base-100 focus:ring-2 focus:ring-primary/25 disabled:pointer-events-none disabled:opacity-40"
+        :value="selectedValue"
+        @change="handleSelect(($event.target as HTMLSelectElement).value)"
+        :disabled="field.disabled || isLoading"
+      >
+        <option disabled value="" class="text-base-content/30">
+          {{ isLoading ? 'Loading\u2026' : 'Select an option\u2026' }}
+        </option>
+        <option v-for="opt in options" :key="String(opt.value)" :value="JSON.stringify(opt.value)">
+          {{ opt.label || opt.value }}
+        </option>
+      </select>
+
+      <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+        <span v-if="isLoading" class="loading loading-spinner loading-xs text-base-content/30"></span>
+        <ChevronUpDownIcon v-else class="h-4 w-4 text-base-content/25" />
+      </div>
+    </div>
+
+    <p v-if="field.description" class="mt-1.5 text-[11px] leading-relaxed text-base-content/40">
+      {{ field.description }}
+    </p>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useLiveVue } from 'live_vue';
+import { ChevronUpDownIcon } from '@heroicons/vue/20/solid';
 
 import type { ConfigField } from '@/types/configSchema';
 
