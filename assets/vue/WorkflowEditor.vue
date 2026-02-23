@@ -5,7 +5,7 @@ import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
 import PublishModal from '@/components/flow/PublishModal.vue';
-import StepConfigModal from '@/components/flow/StepConfigModal.vue';
+import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
 import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';

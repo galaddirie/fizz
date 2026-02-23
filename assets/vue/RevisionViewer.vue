@@ -3,7 +3,7 @@ import { reactive } from 'vue';
 import type { Connection, Edge, GraphNode, NodeMouseEvent } from '@vue-flow/core';
 
 import RevisionToolbar from '@/components/flow/RevisionToolbar.vue';
-import StepConfigModal from '@/components/flow/StepConfigModal.vue';
+import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import { useRevisionViewer } from '@/composables/workflow/useRevisionViewer';
 import type { RevisionViewerEmits, RevisionViewerProps } from '@/types/revisionViewer';
