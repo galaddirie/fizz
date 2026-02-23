@@ -51,6 +51,7 @@ defmodule Fizz.Steps.ResolverTest do
       resolver =
         get_in(openai_type.config_schema, ["properties", "credential_ref", "ui", "resolver"])
 
+      Code.ensure_loaded!(resolver)
       assert function_exported?(resolver, :resolve, 1)
     end
   end
