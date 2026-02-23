@@ -33,7 +33,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
         "description" => "Select the OpenAI credential to use for execution",
         "ui" => %{
           "component" => "select",
-          "resolver" => "credentials",
+          "resolver" => Fizz.Integrations.CredentialsResolver,
           "params" => %{
             "provider_filter" => ["openai_api_key"],
             "auth_types" => ["api_key"]

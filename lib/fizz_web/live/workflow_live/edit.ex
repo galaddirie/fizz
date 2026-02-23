@@ -6,7 +6,6 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   alias Fizz.Accounts
   alias Fizz.Workflows
-  alias Fizz.Integrations
   alias Fizz.Repo
   alias Fizz.Steps
   alias Fizz.Steps.Registry, as: StepRegistry
@@ -840,32 +839,39 @@ defmodule FizzWeb.WorkflowLive.Edit do
   @impl true
   def handle_event(
         "resolve_field_options",
-        %{"resolver" => resolver, "params" => params, "q" => q},
+        %{"node_id" => node_id, "field_key" => field_key, "params" => params, "q" => q},
         socket
       ) do
-    # Add context from execution so resolvers can use upstream step output if needed
-    context = %{
-      execution: socket.assigns.execution,
-      step_executions: socket.assigns.step_executions,
-      workflow: socket.assigns.workflow,
-      current_scope: socket.assigns.current_scope
-    }
+    with {:ok, resolver_module} <- lookup_resolver(socket, node_id, field_key) do
+      context = %{
+        execution: socket.assigns.execution,
+        step_executions: socket.assigns.step_executions,
+        workflow: socket.assigns.workflow,
+        current_scope: socket.assigns.current_scope
+      }
 
-    # Safe params map (keys might come as strings from JS)
-    safe_params = Map.new(params || %{}, fn {k, v} -> {to_string(k), v} end)
+      safe_params = Map.new(params || %{}, fn {k, v} -> {to_string(k), v} end)
 
-    args = %{
-      q: q || "",
-      params: safe_params,
-      context: context
-    }
+      args = %{
+        q: q || "",
+        params: safe_params,
+        context: context
+      }
 
-    case Fizz.Steps.FieldResolver.resolve(resolver, args) do
-      {:ok, options} ->
-        {:reply, %{options: options}, socket}
+      case resolver_module.resolve(args) do
+        {:ok, options} ->
+          {:reply, %{options: options}, socket}
 
+        {:error, reason} ->
+          Logger.error(
+            "Resolver #{inspect(resolver_module)} failed for #{node_id}/#{field_key}: #{inspect(reason)}"
+          )
+
+          {:reply, %{options: []}, socket}
+      end
+    else
       {:error, reason} ->
-        Logger.error("Failed to resolve field options for #{resolver}: #{inspect(reason)}")
+        Logger.error("Could not find resolver for #{node_id}/#{field_key}: #{inspect(reason)}")
         {:reply, %{options: []}, socket}
     end
   end
@@ -1835,6 +1841,31 @@ defmodule FizzWeb.WorkflowLive.Edit do
   end
 
   defp timestamp_from(_value), do: nil
+
+  defp lookup_resolver(socket, node_id, field_key) do
+    steps = socket.assigns.workflow.draft.steps || []
+
+    with {:ok, step} <- find_step(steps, node_id),
+         {:ok, type} <- StepRegistry.get(step.type_id),
+         {:ok, resolver} <- extract_resolver(type.config_schema, field_key) do
+      {:ok, resolver}
+    end
+  end
+
+  defp find_step(steps, node_id) do
+    case Enum.find(steps, &(&1.id == node_id)) do
+      nil -> {:error, :step_not_found}
+      step -> {:ok, step}
+    end
+  end
+
+  defp extract_resolver(config_schema, field_key) do
+    case get_in(config_schema, ["properties", field_key, "ui", "resolver"]) do
+      nil -> {:error, :no_resolver}
+      module when is_atom(module) -> {:ok, module}
+      _other -> {:error, :invalid_resolver}
+    end
+  end
 
   defp format_test_webhook_error(:webhook_not_found), do: "webhook trigger not found"
   defp format_test_webhook_error(:not_found), do: "edit session not running"

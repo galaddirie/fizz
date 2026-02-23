@@ -1,31 +1,31 @@
 defmodule Fizz.Integrations.CredentialsResolver do
   @moduledoc """
-  Resolves credential options for workflow steps via the FieldResolver pattern.
+  Resolves credential options for workflow step config fields.
+
+  Implements `Fizz.Steps.Resolver` so step executors can reference this module
+  directly in their config schema.
   """
+
+  @behaviour Fizz.Steps.Resolver
+
   import Ecto.Query
 
   alias Fizz.Repo
   alias Fizz.Integrations.Credential
 
-  def search(query \\ "", params \\ %{}, _context \\ %{}) do
+  @impl true
+  def resolve(%{q: query, params: params, context: _context}) do
     provider = Map.get(params, "provider") || Map.get(params, :provider)
     auth_type = Map.get(params, "auth_type") || Map.get(params, :auth_type)
 
-    base_query = Credential
-
-    # Apply filters
-    filtered_query =
-      base_query
+    options =
+      Credential
       |> apply_filter(:provider, provider)
       |> apply_filter(:auth_type, auth_type)
       |> apply_search(query)
       |> limit(50)
-
-    results = Repo.all(filtered_query)
-
-    # Format for generic frontend consumption
-    options =
-      Enum.map(results, fn cred ->
+      |> Repo.all()
+      |> Enum.map(fn cred ->
         %{
           "id" => cred.id,
           "provider" => cred.provider,
@@ -63,7 +63,6 @@ defmodule Fizz.Integrations.CredentialsResolver do
   end
 
   defp provider_label(cred) do
-    # Ideally fetch from provider module, but as fallback:
     cred.provider |> to_string() |> String.replace("_", " ") |> String.capitalize()
   end
 end

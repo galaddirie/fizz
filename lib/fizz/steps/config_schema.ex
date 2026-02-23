@@ -11,7 +11,7 @@ defmodule Fizz.Steps.ConfigSchema do
   The `"ui"` key on a property can contain:
 
     * `"component"` — which Vue component to render (`"select"`, `"search"`, etc.)
-    * `"resolver"` — name of a `Fizz.Steps.FieldResolver` resolver for dynamic options
+    * `"resolver"` — module implementing `Fizz.Steps.Resolver` for dynamic options
     * `"params"` — parameters forwarded to the resolver (e.g. provider_filter)
     * `"options"` — static list of `%{"label" => ..., "value" => ...}` (alternative to resolver)
     * `"responseConfig"` — mapping config for shaping search results
@@ -31,7 +31,7 @@ defmodule Fizz.Steps.ConfigSchema do
         "title" => "Credential",
         "ui" => %{
           "component" => "select",
-          "resolver" => "credentials",
+          "resolver" => Fizz.Integrations.CredentialsResolver,
           "params" => %{"provider_filter" => ["openai_api_key"]}
         }
       }
@@ -42,7 +42,7 @@ defmodule Fizz.Steps.ConfigSchema do
         "title" => "Item",
         "ui" => %{
           "component" => "search",
-          "resolver" => "my_resolver",
+          "resolver" => MyApp.MyResolver,
           "params" => %{},
           "responseConfig" => %{
             "mapping" => %{"value" => "id", "label" => "name"}
@@ -51,32 +51,9 @@ defmodule Fizz.Steps.ConfigSchema do
       }
   """
 
-  @type ui_component :: String.t()
+  @type ui_config :: %{optional(String.t()) => term()}
 
-  @type ui_config :: %{
-          optional(String.t()) => term(),
-          optional("component") => ui_component(),
-          optional("resolver") => String.t(),
-          optional("params") => map(),
-          optional("options") => [%{String.t() => term()}],
-          optional("responseConfig") => %{optional(String.t()) => term()}
-        }
+  @type schema_property :: %{optional(String.t()) => term()}
 
-  @type schema_property :: %{
-          optional(String.t()) => term(),
-          optional("type") => String.t(),
-          optional("title") => String.t(),
-          optional("description") => String.t(),
-          optional("default") => term(),
-          optional("format") => String.t(),
-          optional("enum") => [term()],
-          optional("ui") => ui_config()
-        }
-
-  @type config_schema :: %{
-          optional(String.t()) => term(),
-          optional("type") => String.t(),
-          optional("required") => [String.t()],
-          optional("properties") => %{String.t() => schema_property()}
-        }
+  @type config_schema :: %{optional(String.t()) => term()}
 end

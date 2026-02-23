@@ -82,7 +82,6 @@ function fetchResolverOptions() {
   const params = props.field.ui?.params || {};
 
   pushEvent('resolve_field_options', {
-    resolver,
     field_key: props.field.key,
     node_id: props.nodeId,
     params,

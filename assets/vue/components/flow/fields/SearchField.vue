@@ -226,7 +226,8 @@ const fetchOptions = (query: string) => {
   isLoading.value = true;
   
   pushEvent('resolve_field_options', {
-    resolver: uiConfig.value.resolver,
+    node_id: props.nodeId,
+    field_key: props.field.key,
     params: uiConfig.value.params || {},
     q: query
   }, (reply: any) => {
