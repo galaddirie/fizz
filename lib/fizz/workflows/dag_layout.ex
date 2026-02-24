@@ -61,8 +61,17 @@ defmodule Fizz.Workflows.DagLayout do
   def compute(steps, connections, opts) do
     opts = Keyword.merge(@default_opts, opts)
 
-    # Build graph using the unified Graph module
-    graph = Graph.from_workflow!(steps, connections, validate: false)
+    # Separate subnode connections from main flow
+    {subnode_connections, main_connections} =
+      Enum.split_with(connections, &subnode_connection?/1)
+
+    subnode_ids = Enum.map(subnode_connections, & &1.source_step_id) |> MapSet.new()
+
+    # Main layout only includes non-subnodes
+    main_steps = Enum.reject(steps, &MapSet.member?(subnode_ids, &1.id))
+
+    # Build graph for main steps only
+    graph = Graph.from_workflow!(main_steps, main_connections, validate: false)
 
     # Assign layers via longest-path layering
     layers = assign_layers(graph)
@@ -70,11 +79,55 @@ defmodule Fizz.Workflows.DagLayout do
     # Group steps by layer
     steps_by_layer = group_by_layer(layers)
 
-    # Order steps within layers (simple: by number of connections)
+    # Order steps within layers
     ordered_layers = order_within_layers(steps_by_layer, graph)
 
-    # Compute final positions
-    compute_positions(ordered_layers, opts)
+    # Compute main positions
+    layout = compute_positions(ordered_layers, opts)
+
+    # Post-process to position subnodes
+    position_subnodes(layout, subnode_connections, opts)
+  end
+
+  defp subnode_connection?(conn) do
+    target_input = Map.get(conn, :target_input) || Map.get(conn, "target_input")
+    target_input not in [nil, "main", :main, ""]
+  end
+
+  defp position_subnodes(layout, subnode_connections, opts) do
+    vertical_gap = opts[:vertical_gap]
+    step_height = opts[:step_height]
+
+    # Group subnodes by parent
+    subnodes_by_parent =
+      Enum.group_by(subnode_connections, fn conn -> conn.target_step_id end)
+
+    Enum.reduce(subnodes_by_parent, layout, fn {parent_id, conns}, acc ->
+      case Map.get(acc, parent_id) do
+        nil ->
+          acc
+
+        parent_pos ->
+          # For now, we position subnodes in a column below the parent
+          conns
+          |> Enum.with_index()
+          |> Enum.reduce(acc, fn {conn, idx}, inner_acc ->
+            subnode_id = conn.source_step_id
+
+            # Simple vertical offset
+            x = parent_pos.x
+            y = parent_pos.y + step_height + vertical_gap + idx * (step_height + vertical_gap)
+
+            Map.put(inner_acc, subnode_id, %{
+              x: x,
+              y: y,
+              layer: parent_pos.layer + 1,
+              index: parent_pos.index,
+              is_subnode: true
+            })
+          end)
+      end
+    end)
   end
 
   @doc """
@@ -123,13 +176,19 @@ defmodule Fizz.Workflows.DagLayout do
       target_pos = Map.get(layout, conn.target_step_id)
 
       if source_pos && target_pos do
-        # Start from bottom center of source
-        x1 = source_pos.x + step_width / 2
-        y1 = source_pos.y + step_height
+        is_subnode_conn = subnode_connection?(conn)
 
-        # End at top center of target
-        x2 = target_pos.x + step_width / 2
-        y2 = target_pos.y
+        {x1, y1, x2, y2} =
+          if is_subnode_conn do
+            # Subnode to Parent: Start from TOP of source, end at BOTTOM of target
+            {source_pos.x + step_width / 2, source_pos.y, target_pos.x + step_width / 2,
+             target_pos.y + step_height}
+          else
+            # Main Flow: Start from bottom center of source, end at top center of target
+            # (Assuming vertical DAG flavor here as per original code)
+            {source_pos.x + step_width / 2, source_pos.y + step_height,
+             target_pos.x + step_width / 2, target_pos.y}
+          end
 
         # Create smooth bezier curve
         mid_y = (y1 + y2) / 2
