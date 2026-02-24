@@ -22,6 +22,7 @@ import {
   DocumentTextIcon,
   ArrowsRightLeftIcon,
   ListBulletIcon,
+  ChatBubbleLeftRightIcon,
   ArrowsPointingOutIcon,
   ArrowsPointingInIcon,
   CheckIcon,
@@ -79,6 +80,7 @@ const iconComponents = {
   'hero-bolt': BoltIcon,
   'hero-circle-stack': CircleStackIcon,
   'hero-variable': VariableIcon,
+  'hero-chat-bubble-left-right': ChatBubbleLeftRightIcon,
 } as const;
 
 type IconName = keyof typeof iconComponents;

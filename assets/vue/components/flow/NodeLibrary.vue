@@ -23,6 +23,7 @@ import {
   CalculatorIcon,
   DocumentTextIcon,
   ArrowDownTrayIcon,
+  ChatBubbleLeftRightIcon,
   ChevronRightIcon,
 } from '@heroicons/vue/24/outline';
 
@@ -82,6 +83,7 @@ const iconMap: Record<string, typeof CursorArrowRaysIcon> = {
   'hero-calculator': CalculatorIcon,
   'hero-document-text': DocumentTextIcon,
   'hero-arrow-down-tray': ArrowDownTrayIcon,
+  'hero-chat-bubble-left-right': ChatBubbleLeftRightIcon,
 };
 
 const allStepTypes = computed(() => {

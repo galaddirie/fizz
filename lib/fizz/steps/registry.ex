@@ -238,6 +238,7 @@ defmodule Fizz.Steps.Registry do
   defp builtin_executor_modules do
     [
       Fizz.Steps.Executors.ManualInput,
+      Fizz.Steps.Executors.OnChatTrigger,
       Fizz.Steps.Executors.HttpRequest,
       Fizz.Steps.Executors.JsonParser,
       Fizz.Steps.Executors.DataFilter,
