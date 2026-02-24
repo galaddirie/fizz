@@ -237,6 +237,7 @@ defmodule Fizz.Steps.Registry do
   # Add new executor modules here as they are created.
   defp builtin_executor_modules do
     [
+      # -- Core / Built-in --
       Fizz.Steps.Executors.ManualInput,
       Fizz.Steps.Executors.OnChatTrigger,
       Fizz.Steps.Executors.HttpRequest,
@@ -257,11 +258,88 @@ defmodule Fizz.Steps.Registry do
       Fizz.Steps.Executors.ScheduleTrigger,
       Fizz.Steps.Executors.RespondToWebhook,
       Fizz.Steps.Executors.Wait,
+
+      # -- AI --
       Fizz.Steps.Executors.AIAgent,
       Fizz.Steps.Executors.OpenAIModel,
       Fizz.Steps.Executors.AnthropicModel,
       Fizz.Steps.Executors.AIPromptTemplate,
-      Fizz.Steps.Executors.AIToolHttp
+      Fizz.Steps.Executors.AIToolHttp,
+      # TODO: implement
+      Fizz.Steps.Executors.OpenAIImageGeneration,
+      Fizz.Steps.Executors.OpenAIStructuredOutput,
+      Fizz.Steps.Executors.AnthropicVisionAnalysis,
+
+      # -- Gmail --
+      # TODO: implement
+      Fizz.Steps.Executors.GmailTrigger,
+      Fizz.Steps.Executors.GmailSendEmail,
+      Fizz.Steps.Executors.GmailReplyEmail,
+
+      # -- Slack --
+      # TODO: implement
+      Fizz.Steps.Executors.SlackTrigger,
+      Fizz.Steps.Executors.SlackSendMessage,
+      Fizz.Steps.Executors.SlackCreateChannel,
+
+      # -- Google Docs --
+      # TODO: implement
+      Fizz.Steps.Executors.GoogleDocsTrigger,
+      Fizz.Steps.Executors.GoogleDocsCreateDoc,
+      Fizz.Steps.Executors.GoogleDocsAppendText,
+
+      # -- Google Sheets --
+      # TODO: implement
+      Fizz.Steps.Executors.GoogleSheetsTrigger,
+      Fizz.Steps.Executors.GoogleSheetsAppendRow,
+      Fizz.Steps.Executors.GoogleSheetsReadRows,
+
+      # -- Google Slides --
+      # TODO: implement
+      Fizz.Steps.Executors.GoogleSlidesCreatePresentation,
+      Fizz.Steps.Executors.GoogleSlidesAddSlide,
+
+      # -- Google Drive --
+      # TODO: implement
+      Fizz.Steps.Executors.GoogleDriveUploadFile,
+
+      # -- Notion --
+      # TODO: implement
+      Fizz.Steps.Executors.NotionTrigger,
+      Fizz.Steps.Executors.NotionCreatePage,
+      Fizz.Steps.Executors.NotionUpdatePage,
+
+      # -- GitHub --
+      # TODO: implement
+      Fizz.Steps.Executors.GitHubTrigger,
+      Fizz.Steps.Executors.GitHubCreateIssue,
+      Fizz.Steps.Executors.GitHubCreatePR,
+
+      # -- Microsoft Outlook --
+      # TODO: implement
+      Fizz.Steps.Executors.OutlookTrigger,
+      Fizz.Steps.Executors.OutlookSendEmail,
+
+      # -- Microsoft Teams --
+      # TODO: implement
+      Fizz.Steps.Executors.TeamsTrigger,
+      Fizz.Steps.Executors.TeamsSendMessage,
+
+      # -- Microsoft SharePoint --
+      # TODO: implement
+      Fizz.Steps.Executors.SharePointUploadFile,
+
+      # -- Microsoft OneDrive --
+      # TODO: implement
+      Fizz.Steps.Executors.OneDriveUploadFile,
+
+      # -- Microsoft PowerPoint --
+      # TODO: implement
+      Fizz.Steps.Executors.PowerPointCreatePresentation,
+
+      # -- Box --
+      # TODO: implement
+      Fizz.Steps.Executors.BoxUploadFile
     ]
   end
 

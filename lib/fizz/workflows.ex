@@ -627,8 +627,11 @@ defmodule Fizz.Workflows do
   def to_step_id(name) when is_binary(name) do
     name
     |> String.downcase()
-    |> String.replace(~r/[^\w\s]/, "")
-    |> String.replace(~r/[\s]+/, "_")
+    # Use the `u` flag so the regex treats full Unicode codepoints (not raw bytes).
+    # Without `u`, multi-byte chars like — (U+2014, 0xE2 0x80 0x94) are matched only
+    # by their first byte, leaving orphaned bytes that corrupt the resulting string.
+    |> String.replace(~r/[^\w\s]/u, "")
+    |> String.replace(~r/[\s]+/u, "_")
     |> String.replace(~r/_+/, "_")
     |> String.trim("_")
   end
