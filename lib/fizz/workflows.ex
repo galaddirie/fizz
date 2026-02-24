@@ -210,7 +210,7 @@ defmodule Fizz.Workflows do
   def get_workflow_with_draft(scope, id), do: do_get_workflow_with_draft(id, scope)
 
   defp do_get_workflow_with_draft(id, scope) do
-    case Repo.get(Workflow, id) |> Repo.preload(:draft) do
+    case Repo.get(Workflow, id) |> Repo.preload([:draft, :workspace]) do
       nil ->
         {:error, :not_found}
 

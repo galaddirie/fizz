@@ -163,35 +163,25 @@ const getIcon = (iconName?: string) =>
 
 <template>
   <aside class="bg-base-100 flex h-full w-72 shrink-0 flex-col overflow-hidden">
-    <!-- Header: Workflow Info -->
-    <div class="border-base-200 shrink-0 border-b px-4 py-5 z-20">
-      <div class="mb-5 flex items-start gap-3">
+    <!-- Header: Workspace Info -->
+    <div class="border-base-200 shrink-0 border-b px-5 py-6 z-20 hover:bg-base-200/20 transition-colors">
+      <a href="/workspaces" class="flex items-center gap-3 w-full group">
         <!-- Logo -->
-        <div class="bg-primary/10 text-primary mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-inner">
-          <BoltIcon class="h-6 w-6" />
+        <div class="bg-base-100 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-sm border border-base-300 group-hover:border-primary/30 group-hover:shadow-md transition-all duration-300">
+          <svg class="h-5 w-5 text-base-content" viewBox="0 0 1080 700" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M1041.6,218.5h0c0-101.3-82.1-183.4-183.4-183.4h-332.6c-27.2,0-49.2,22-49.2,49.2v26.5c0,9.9,2,19.6,5.9,28.7l54.4,127.3c25.2,59.2,33.1,125.2-6.5,176.8l-40.9,53.3c-8.4,10.9-12.9,24.3-12.9,38v80.7c0,27.2,22,49.2,49.2,49.2h437.2c43.5,0,78.7-35.2,78.7-78.7v-6.8c0-14.2,7.9-137.2-13.2-174.9-21.1-37.7-95.8,8.6-115.4,8.6s-19.3-46.6-19.3-46.6c81.7,0,147.9-66.2,147.9-147.9ZM830.2,193.9c-1.3-41.1,32.3-74.7,73.4-73.4,37.2,1.2,67.6,31.5,68.8,68.8,1.3,41.1-32.3,74.7-73.4,73.4-37.2-1.2-67.6-31.5-68.8-68.8Z"/>
+            <path d="M472.3,443.6l-40.4,52.7c-8.7,11.3-13.4,25.2-13.4,39.5v87.5c0,23-18.6,41.6-41.6,41.6H112.6c-41.8,0-75.7-33.9-75.7-75.7,0,0,99.5-554,187-554h153c23,0,35.6,47.3,43.2,72.4,67.5,225.1,130.8,262,52.2,336Z"/>
+          </svg>
         </div>
 
         <!-- Info -->
-        <div class="min-w-0">
-          <h1 class="text-base-content/90 truncate text-sm font-semibold" :title="props.workflowName">
-            {{ props.workflowName }}
-          </h1>
-          <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span :class="['badge badge-sm h-4 gap-1 text-[10px] font-bold opacity-80', statusBadge.class]">
-              <span class="h-1 w-1 rounded-full bg-current"></span>
-              {{ statusBadge.label }}
-            </span>
-            <span v-if="props.hasUnsavedChanges" class="badge badge-ghost badge-sm h-4 text-[10px]">Unsaved</span>
-          </div>
-          <p class="text-base-content/40 mt-1.5 text-[10px] font-semibold tracking-tight">
-            <span v-if="props.isSaving" class="flex items-center gap-1">
-              <ArrowPathIcon class="h-3 w-3 animate-spin" />
-              Saving...
-            </span>
-            <span v-else> Last saved: {{ props.lastSaved }} </span>
-          </p>
+        <div class="min-w-0 flex flex-col justify-center">
+          <span class="text-base-content font-black text-xl tracking-tight">
+            Fizz
+          </span>
         </div>
-      </div>
+      </a>
+    </div>
 
       <div class="mb-3 flex items-center justify-between">
         <h2 class="text-base-content/70 text-xs font-bold tracking-wider uppercase">Step Library</h2>
@@ -212,8 +202,6 @@ const getIcon = (iconName?: string) =>
           class="bg-base-200/30 focus:border-primary/20 focus:bg-base-100 focus:ring-primary/5 placeholder:text-base-content/30 w-full rounded-xl border border-transparent py-2.5 pr-4 pl-9 text-sm font-medium transition-all duration-200 outline-none focus:ring-4"
         />
       </div>
-    </div>
-
     <!-- Step List -->
     <div class="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-3">
       <div v-for="[category, items] in categorizedTypes" :key="category" class="mb-2">

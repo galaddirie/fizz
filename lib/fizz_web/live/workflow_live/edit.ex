@@ -701,7 +701,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       {:ok, {updated_workflow, _version}} ->
         socket =
           socket
-          |> assign(:workflow, Repo.preload(updated_workflow, :draft, force: true))
+          |> assign(:workflow, Repo.preload(updated_workflow, [:draft, :workspace], force: true))
           |> push_event("workflow:publish_result", %{success: true})
           |> put_flash(:info, "Workflow published as version #{version_tag}")
 

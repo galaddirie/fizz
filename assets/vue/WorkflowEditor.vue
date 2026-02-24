@@ -15,7 +15,7 @@ import type {
   WorkflowEditorLiveEmits,
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
-import { BugAntIcon } from '@heroicons/vue/24/outline';
+import { BugAntIcon, SlashIcon, ArrowPathIcon } from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   stepTypes: () => [],
@@ -70,6 +70,29 @@ function handlePublish(payload: { version_tag: string; changelog: string }) {
 }
 
 const isDebugMode = computed(() => !!props.debugExecutionId);
+
+const lastSaved = computed(() => {
+  const dateStr = editor.workflow?.updated_at;
+  if (!dateStr) return 'Just now';
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return 'Just now';
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+});
+
+const statusBadge = computed(() => {
+  const status = editor.workflow?.status ?? 'draft';
+  const configs = {
+    draft: { class: 'badge-warning', label: 'Draft' },
+    active: { class: 'badge-success', label: 'Active' },
+    archived: { class: 'badge-ghost', label: 'Archived' },
+  };
+  return configs[status as keyof typeof configs] || configs.draft;
+});
 const debugExecutionShortId = computed(() => {
   const id = props.debugExecutionId ?? props.execution?.id ?? '';
   return id ? id.slice(0, 8) : '';
@@ -148,6 +171,31 @@ useLiveEvent<{ success: boolean; error?: string }>(
 
       <!-- Main Sunken Canvas Area -->
       <div class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner">
+        <!-- Floating Workflow Info -->
+        <div class="pointer-events-none absolute left-6 top-5 z-30 flex flex-col items-start">
+          <div class="pointer-events-auto flex items-center gap-2">
+            <a :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`" class="text-base-content/60 hover:text-base-content transition-colors text-sm font-semibold tracking-wide">
+              {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
+            </a>
+            <SlashIcon class="text-base-content/30 h-4 w-4" stroke-width="2.5" />
+            <span class="text-base-content/90 text-sm font-bold tracking-wide">
+              {{ editor.workflow?.name ?? 'Untitled Workflow' }}
+            </span>
+            <div class="ml-2 flex items-center gap-1.5">
+              <span :class="['badge badge-sm h-4 gap-1 text-[10px] font-bold opacity-80', statusBadge.class]">
+                <span class="h-1 w-1 rounded-full bg-current"></span>
+                {{ statusBadge.label }}
+              </span>
+            </div>
+          </div>
+          <button 
+            class="pointer-events-auto text-base-content/40 hover:text-base-content/70 mt-0.5 ml-0.5 flex items-center gap-1 text-[10px] font-semibold tracking-tight transition-colors"
+            @click="emit('save_workflow')"
+          >
+            Last saved: {{ lastSaved }}
+          </button>
+        </div>
+
         <div class="relative flex min-w-0 flex-1 flex-col">
           <div
             v-if="isDebugMode"

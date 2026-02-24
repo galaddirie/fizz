@@ -187,11 +187,10 @@ const hexToRgba = (hex: string, alpha: number) => {
 const hasBottomSlots = computed(() => subnodeInputHandles.value.length > 0);
 
 const nodeClasses = computed(() => [
-  'group relative flex items-start transition-shadow',
+  'group relative flex flex-col transition-shadow',
   isSubnode.value
-    ? 'gap-2.5 rounded-xl border border-dashed border-base-300 bg-base-200/20 p-3 shadow-sm'
+    ? 'gap-2 rounded-xl border border-dashed border-base-300 bg-base-200/20 p-3 shadow-sm'
     : 'gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md',
-  // Extra bottom padding when subnode slots are present
   hasBottomSlots.value ? 'pb-6' : '',
   // Different styling for trigger nodes
   props.data.step_kind === 'trigger' && !isSubnode.value ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
@@ -373,26 +372,28 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       <Handle id="main" type="target" :position="Position.Left" />
     </div>
 
-    <!-- Subnode Slot Handles (bottom edge, inset from bottom) -->
+    <!-- Subnode Slot Handles (bottom edge, flush on the edge) -->
     <template v-if="subnodeInputHandles.length > 0">
       <div
         v-for="(slot, idx) in subnodeInputHandles"
         :key="slot.id"
-        class="absolute bottom-3 z-10 flex translate-y-1/2 flex-col items-center"
+        class="absolute bottom-0 z-10 flex flex-col items-center"
         :style="{
           left: `${((idx + 1) / (subnodeInputHandles.length + 1)) * 100}%`,
+          transform: 'translateX(-50%) translateY(0%)'
         }"
       >
-        <Handle :id="slot.id" type="target" :position="Position.Bottom" />
-        <span class="mt-2.5 whitespace-nowrap text-[9px] font-medium text-base-content/45">
+        <span class="pointer-events-none mb-1 whitespace-nowrap text-[9px] font-medium text-base-content/50">
           {{ slot.title || slot.id }}
         </span>
+        <Handle :id="slot.id" type="target" :position="Position.Bottom" />
       </div>
     </template>
 
     <!-- Node Card -->
     <div :class="nodeClasses" :style="nodeStyle">
-      <!-- Icon Container -->
+      <div class="flex w-full items-start gap-3">
+        <!-- Icon Container -->
       <div
         :class="[
           'flex shrink-0 items-center justify-center',
@@ -533,6 +534,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
           <span v-else-if="!showStats" class="invisible">—</span>
         </div>
       </div>
+      </div> <!-- Closing top section container -->
 
       <!-- Status Bubble -->
       <div v-if="hasStatusStyle" class="pointer-events-none absolute -top-4 -right-4">

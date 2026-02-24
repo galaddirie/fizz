@@ -159,16 +159,16 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 <template>
   <div class="subnode-wrapper group flex flex-col items-center">
     <!-- Output Handle (top) — subnode sends data up to parent -->
-    <div class="absolute -top-[1px] left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+    <div class="absolute top-0 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
       <Handle id="main" type="source" :position="Position.Top" />
     </div>
 
-    <!-- Circle -->
+    <!-- Squarcle -->
     <div
       :class="[
-        'relative flex size-12 items-center justify-center rounded-full border bg-base-100 transition-all duration-150',
-        hasStatusStyle ? '' : 'border-base-300/60',
-        props.dragging ? 'cursor-grabbing scale-105' : canEdit ? 'cursor-grab hover:scale-105 hover:shadow-md' : 'cursor-default',
+        'relative flex size-16 items-center justify-center rounded-2xl border bg-base-100 shadow-md transition-all duration-150',
+        hasStatusStyle ? '' : 'border-base-300/60 shadow-[0_4px_10px_rgba(0,0,0,0.08)]',
+        props.dragging ? 'cursor-grabbing scale-105 shadow-xl' : canEdit ? 'cursor-grab hover:-translate-y-0.5 hover:shadow-lg' : 'cursor-default',
         data.disabled ? 'opacity-50' : '',
       ]"
       :style="circleStyle"
@@ -177,15 +177,15 @@ const handleNameKeydown = (event: KeyboardEvent) => {
         v-if="isImageIcon(data.icon)"
         :src="data.icon"
         alt=""
-        class="size-5 object-contain"
+        class="size-7 object-contain"
       />
-      <component v-else :is="IconComponent" class="text-base-content/70 size-5" />
+      <component v-else :is="IconComponent" class="text-base-content/80 size-7" />
 
       <!-- Status dot -->
       <div
         v-if="hasStatusStyle"
         :class="[
-          'absolute -right-0.5 -top-0.5 size-2.5 rounded-full border border-base-100',
+          'absolute -right-1 -top-1 size-3.5 rounded-full border-2 border-base-100',
           isRunning ? 'animate-pulse' : '',
         ]"
         :style="{ backgroundColor: statusDotColor }"
@@ -193,12 +193,12 @@ const handleNameKeydown = (event: KeyboardEvent) => {
     </div>
 
     <!-- Name label -->
-    <div class="mt-1.5 flex max-w-20 items-center justify-center">
+    <div class="mt-2.5 flex max-w-28 items-center justify-center">
       <input
         v-if="isEditing && canEdit"
         ref="nameInputRef"
         v-model="nameDraft"
-        class="nodrag w-full rounded bg-base-200 px-1 py-0.5 text-center text-[10px] font-medium text-base-content/80 outline-none ring-1 ring-base-300"
+        class="nodrag w-full rounded-md bg-base-200 px-1.5 py-1 text-center text-xs font-semibold text-base-content/90 outline-none ring-2 ring-base-300 transition-shadow"
         type="text"
         @keydown="handleNameKeydown"
         @blur="commitName"
@@ -206,7 +206,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       />
       <span
         v-else
-        class="text-base-content/55 max-w-20 truncate text-center text-[10px] font-medium leading-tight"
+        class="text-base-content/80 max-w-28 truncate text-center text-xs font-semibold tracking-wide drop-shadow-sm transition-colors hover:text-base-content"
         :title="canEdit ? 'Double click to rename' : data.name"
         @dblclick.stop="canEdit && startEditing()"
       >

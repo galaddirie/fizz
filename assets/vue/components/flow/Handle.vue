@@ -27,12 +27,12 @@ const isVertical = computed(
     :connectable-start="true"
     :connectable-end="true"
     :class="[
-      'border-base-300! bg-primary! rounded-full! border-2 p-0',
-      isVertical ? 'size-3!' : 'h-6! w-2.5!',
+      'border-base-300! bg-primary! border-2 p-0',
+      isVertical ? 'w-7! h-2.5! rounded-full!' : 'h-6! w-2.5! rounded-full!',
     ]"
     :style="{
       boxShadow: isVertical
-        ? '0 1px 3px -1px color-mix(in oklab, var(--color-primary) 40%, #0000)'
+        ? 'inset 0px 2px 2px 0px rgba(255, 255, 255, 0.25), 0 3px 2px -2px color-mix(in oklab, var(--color-primary) calc(30%), #0000), 0 4px 3px -2px color-mix(in oklab, var(--color-primary) calc(30%), #0000)'
         : 'inset 0px 2px 2px 0px rgba(255, 255, 255, 0.25), 0 3px 2px -2px color-mix(in oklab, var(--color-primary) calc(30%), #0000), 0 4px 3px -2px color-mix(in oklab, var(--color-primary) calc(30%), #0000)',
     }"
   />

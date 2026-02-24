@@ -16,6 +16,29 @@ defmodule Fizz.Accounts.Workspace do
 
   alias Fizz.Accounts.WorkspaceMembership
 
+  @derive {Jason.Encoder,
+           only: [
+             :id,
+             :name,
+             :slug,
+             :description,
+             :metadata,
+             :workos_organization_id,
+             :inserted_at,
+             :updated_at
+           ]}
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :name,
+             :slug,
+             :description,
+             :metadata,
+             :workos_organization_id,
+             :inserted_at,
+             :updated_at
+           ]}
+
   schema "workspaces" do
     field :name, :string
     field :slug, :string
