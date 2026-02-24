@@ -165,31 +165,24 @@ const getIcon = (iconName?: string) =>
 
 <template>
   <aside class="bg-base-100 flex h-full w-72 shrink-0 flex-col overflow-hidden">
-    <!-- Header: Workspace Info -->
-    <div class="border-base-200 shrink-0 border-b px-5 py-6 z-20 hover:bg-base-200/20 transition-colors">
-      <a href="/workspaces" class="flex items-center gap-3 w-full group">
-        <!-- Logo -->
-        <div class="bg-base-100 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl shadow-sm border border-base-300 group-hover:border-primary/30 group-hover:shadow-md transition-all duration-300">
-          <svg class="h-5 w-5 text-base-content" viewBox="0 0 1080 700" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+    <!-- Header -->
+    <div class="shrink-0 border-b border-base-200 px-4 py-3.5">
+      <a href="/workspaces" class="group flex items-center gap-2.5">
+        <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 transition-colors duration-200 group-hover:bg-primary/15">
+          <svg class="h-4.5 w-4.5 text-primary" viewBox="0 0 1080 700" fill="currentColor">
             <path d="M1041.6,218.5h0c0-101.3-82.1-183.4-183.4-183.4h-332.6c-27.2,0-49.2,22-49.2,49.2v26.5c0,9.9,2,19.6,5.9,28.7l54.4,127.3c25.2,59.2,33.1,125.2-6.5,176.8l-40.9,53.3c-8.4,10.9-12.9,24.3-12.9,38v80.7c0,27.2,22,49.2,49.2,49.2h437.2c43.5,0,78.7-35.2,78.7-78.7v-6.8c0-14.2,7.9-137.2-13.2-174.9-21.1-37.7-95.8,8.6-115.4,8.6s-19.3-46.6-19.3-46.6c81.7,0,147.9-66.2,147.9-147.9ZM830.2,193.9c-1.3-41.1,32.3-74.7,73.4-73.4,37.2,1.2,67.6,31.5,68.8,68.8,1.3,41.1-32.3,74.7-73.4,73.4-37.2-1.2-67.6-31.5-68.8-68.8Z"/>
             <path d="M472.3,443.6l-40.4,52.7c-8.7,11.3-13.4,25.2-13.4,39.5v87.5c0,23-18.6,41.6-41.6,41.6H112.6c-41.8,0-75.7-33.9-75.7-75.7,0,0,99.5-554,187-554h153c23,0,35.6,47.3,43.2,72.4,67.5,225.1,130.8,262,52.2,336Z"/>
           </svg>
         </div>
-
-        <!-- Info -->
-        <div class="min-w-0 flex flex-col justify-center">
-          <span class="text-base-content font-black text-xl tracking-tight">
-            Fizz
-          </span>
-        </div>
+        <span class="text-base-content text-lg font-bold tracking-tight transition-colors duration-200 group-hover:text-primary">Fizz</span>
       </a>
     </div>
 
-      <div class="mb-3 flex items-center justify-between">
-        <h2 class="text-base-content/70 text-xs font-bold tracking-wider uppercase">Step Library</h2>
-        <span class="badge badge-ghost badge-xs font-mono">
-          {{ allStepTypes.length }}
-        </span>
+    <!-- Step Library Header & Search -->
+    <div class="shrink-0 space-y-2.5 px-4 pt-4 pb-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-base-content/50 text-[11px] font-semibold tracking-wider uppercase">Step Library</h2>
+        <span class="text-base-content/30 text-[11px] font-medium tabular-nums">{{ allStepTypes.length }}</span>
       </div>
 
       <!-- Search -->
@@ -201,9 +194,10 @@ const getIcon = (iconName?: string) =>
           v-model="searchQuery"
           type="text"
           placeholder="Search steps..."
-          class="bg-base-200/30 focus:border-primary/20 focus:bg-base-100 focus:ring-primary/5 placeholder:text-base-content/30 w-full rounded-xl border border-transparent py-2.5 pr-4 pl-9 text-sm font-medium transition-all duration-200 outline-none focus:ring-4"
+          class="bg-base-200/40 focus:border-primary/20 focus:bg-base-100 focus:ring-primary/5 placeholder:text-base-content/30 w-full rounded-lg border border-transparent py-2 pr-4 pl-9 text-sm transition-all duration-200 outline-none focus:ring-4"
         />
       </div>
+    </div>
     <!-- Step List -->
     <div class="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-3">
       <div v-for="[category, items] in categorizedTypes" :key="category" class="mb-2">
