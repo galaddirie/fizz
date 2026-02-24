@@ -19,11 +19,7 @@ import {
 // =============================================================================
 
 interface Props {
-  workflowName?: string;
-  workflowStatus?: 'draft' | 'active' | 'archived';
-  lastSaved?: string;
   isSaving?: boolean;
-  hasUnsavedChanges?: boolean;
   canUndo?: boolean;
   canRedo?: boolean;
   undoTooltip?: string;
@@ -34,11 +30,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  workflowName: 'Untitled Workflow',
-  workflowStatus: 'draft',
-  lastSaved: 'Just now',
   isSaving: false,
-  hasUnsavedChanges: false,
   canUndo: false,
   canRedo: false,
   undoTooltip: 'Undo (⌘Z)',
@@ -66,56 +58,22 @@ const emit = defineEmits<{
 // Computed
 // =============================================================================
 
-const statusBadge = computed(() => {
-  const configs = {
-    draft: { class: 'badge-warning', label: 'Draft' },
-    active: { class: 'badge-success', label: 'Active' },
-    archived: { class: 'badge-ghost', label: 'Archived' },
-  };
-  return configs[props.workflowStatus];
-});
 
 const hasErrors = computed(() => props.validationErrors.length > 0);
 </script>
 
 <template>
-  <header
-    class="bg-base-100/80 border-base-200 z-30 flex h-16 shrink-0 items-center justify-between border-b px-6 shadow-sm backdrop-blur-md"
-  >
-    <!-- Left Section: Logo & Title -->
-    <div class="flex items-center gap-5">
-      <!-- Logo -->
-      <div
-        class="bg-primary/10 text-primary flex h-11 w-11 items-center justify-center rounded-2xl shadow-inner"
-      >
-        <BoltIcon class="h-7 w-7" />
-      </div>
-
-      <!-- Workflow Info -->
-      <div>
-        <div class="flex items-center gap-2.5">
-          <h1 class="text-base-content/90 text-sm font-semibold">
-            {{ workflowName }}
-          </h1>
-          <span :class="['badge badge-sm h-5 gap-1.5 font-bold opacity-80', statusBadge.class]">
-            <span class="h-1 w-1 rounded-full bg-current"></span>
-            {{ statusBadge.label }}
-          </span>
-
-          <!-- Unsaved indicator -->
-          <span v-if="hasUnsavedChanges" class="badge badge-ghost badge-xs"> Unsaved </span>
-        </div>
-
-        <p class="text-base-content/40 mt-0.5 text-xs font-semibold tracking-tight">
-          <span v-if="isSaving" class="flex items-center gap-1">
-            <ArrowPathIcon class="h-3 w-3 animate-spin" />
-            Saving...
-          </span>
-          <span v-else> Last saved: {{ lastSaved }} </span>
-        </p>
-      </div>
+  <div class="pointer-events-none relative flex h-[35px] items-start [filter:drop-shadow(0_10px_8px_rgba(0,0,0,0.02))] sm:[filter:drop-shadow(0_4px_3px_rgba(0,0,0,0.03))]">
+    <div class="pointer-events-none absolute -left-[20px] top-0 h-[20px] w-[20px] text-base-100">
+      <svg class="absolute inset-0 h-full w-full" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 20V0H0C11.0457 0 20 8.9543 20 20Z" fill="currentColor" />
+        <path d="M0 0C11.0457 0 20 8.9543 20 20" stroke="var(--fallback-b3,oklch(var(--b3)))" stroke-width="1.5" />
+      </svg>
     </div>
 
+    <header class="pointer-events-auto bg-base-100 relative flex h-full items-center gap-4 rounded-bl-[20px] border-b border-l border-base-300 pl-4 pr-6 pb-3.5">
+      <!-- Border Mask for seamless curve transition -->
+      <div class="absolute -left-[1.5px] top-0 h-[20px] w-[3px] bg-base-100"></div>
     <!-- Center Section: Undo/Redo Tools -->
     <div class="bg-base-200/50 border-base-300/30 flex items-center gap-1 rounded-2xl border p-1.5">
       <button
@@ -141,7 +99,7 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
     <!-- Right Section: Collaboration + Actions -->
     <div class="flex items-center gap-4">
       <!-- Collaborators -->
-      <Avatar :presences="presences" />
+      <!-- <Avatar :presences="presences" /> -->
 
       <!-- Validation Errors Indicator -->
       <div
@@ -154,17 +112,13 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
         </button>
       </div>
 
-      <!-- Theme Selector -->
-      <div class="bg-base-200/50 border-base-300/30 rounded-full border p-1">
-        <ThemeSelector />
-      </div>
+
 
       <button
         class="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200 text-base-content/70 flex gap-2 rounded-xl border px-4 text-sm font-semibold transition-all"
         @click="emit('open-revisions')"
       >
         <ClockIcon class="h-5 w-5" />
-        Revisions
       </button>
 
       <!-- Save Button -->
@@ -187,7 +141,8 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
         Publish
       </button>
     </div>
-  </header>
+    </header>
+  </div>
 </template>
 
 <style scoped>

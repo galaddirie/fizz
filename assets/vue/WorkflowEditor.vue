@@ -96,12 +96,14 @@ const debugStatusBadge = computed(() => {
   return debugStatusConfig[key] ?? debugStatusConfig.pending;
 });
 const debugExecutionLink = computed(() => {
-  if (!props.workflow?.id || !props.workflow?.workspace_id || !props.debugExecutionId) return null;
-  return `/workspaces/${props.workflow.workspace_id}/workflows/${props.workflow.id}/execution/${props.debugExecutionId}`;
+  const workflow = editor.workflow as any;
+  if (!workflow?.id || !workflow?.workspace_id || !props.debugExecutionId) return null;
+  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/execution/${props.debugExecutionId}`;
 });
 const debugExitLink = computed(() => {
-  if (!props.workflow?.id || !props.workflow?.workspace_id) return null;
-  return `/workspaces/${props.workflow.workspace_id}/workflows/${props.workflow.id}/edit`;
+  const workflow = editor.workflow as any;
+  if (!workflow?.id || !workflow?.workspace_id) return null;
+  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/edit`;
 });
 
 useLiveEvent<{ success: boolean; error?: string }>(
@@ -118,120 +120,128 @@ useLiveEvent<{ success: boolean; error?: string }>(
 </script>
 
 <template>
-  <div class="bg-base-300 text-base-content flex h-screen flex-col overflow-hidden font-sans">
-    <EditorToolbar
+  <div class="bg-base-100 text-base-content flex h-screen overflow-hidden font-sans">
+    <NodeLibrary
+      :library-items="editor.nodeLibraryItems"
       :workflow-name="editor.workflow?.name ?? 'Untitled Workflow'"
-      :is-saving="false"
-      :presences="editor.presences"
-      :can-undo="editor.undoStore.canUndo"
-      :can-redo="editor.undoStore.canRedo"
-      :undo-tooltip="editor.undoStore.undoTooltip"
-      :redo-tooltip="editor.undoStore.redoTooltip"
-      :is-undo-pending="editor.undoStore.isPending"
-      @save="editor.handleSave"
-      @undo="editor.handleUndo"
-      @redo="editor.handleRedo"
-      @run-test="editor.handleRunTest"
-      @open-revisions="emit('navigate_revisions')"
-      @publish="openPublishModal"
+      :workflow-status="editor.workflow?.status ?? 'draft'"
+      class="z-20 shrink-0 relative"
     />
 
-    <div
-      v-if="isDebugMode"
-      class="border-base-200 bg-warning/5 text-base-content/80 border-b px-6 py-3 text-xs shadow-sm"
-    >
-      <div class="flex flex-wrap items-center justify-between gap-4">
-        <div class="flex items-center gap-3">
-          <div
-            class="bg-warning/15 text-warning flex h-10 w-10 items-center justify-center rounded-2xl"
-          >
-            <BugAntIcon class="h-5 w-5" />
-          </div>
-          <div class="space-y-1">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-warning/80 text-[10px] font-semibold tracking-[0.3em] uppercase">
-                Debug Mode
-              </span>
-              <span
-                class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                :class="debugStatusBadge.class"
-              >
-                {{ debugStatusBadge.label }}
-              </span>
-            </div>
-            <p class="text-base-content/60 text-[11px]">
-              Using execution {{ debugExecutionShortId }}
-              <span v-if="debugExecutionTimestamp">- {{ debugExecutionTimestamp }}</span>
-              - Pin outputs on nodes to reuse this data in previews.
-            </p>
-          </div>
-        </div>
-        <div class="flex items-center gap-2">
-          <a
-            v-if="debugExecutionLink"
-            :href="debugExecutionLink"
-            class="btn btn-xs btn-ghost border-base-300 bg-base-100/80 text-base-content/70 hover:bg-base-200"
-          >
-            View execution
-          </a>
-          <a
-            v-if="debugExitLink"
-            :href="debugExitLink"
-            class="btn btn-xs btn-primary text-primary-content shadow-primary/20 shadow-sm"
-          >
-            Exit debug
-          </a>
-        </div>
-      </div>
-    </div>
-
-    <div class="relative flex flex-1 overflow-hidden">
-      <NodeLibrary :library-items="editor.nodeLibraryItems" class="shrink-0" />
-
-      <div class="relative flex min-w-0 flex-1 flex-col">
-        <WorkflowCanvas
-          :nodes="editor.nodes"
-          :edges="editor.edges"
-          :node-types="editor.nodeTypes"
-          :edge-types="editor.edgeTypes"
-          :can-edit="editor.canEdit"
-          :is-revision-preview-active="false"
-          preview-label=""
-          :is-mounted="editor.isMounted"
-          :other-user-presences="editor.otherUserPresences"
-          :current-user-id="editor.currentUserId"
-          :viewport="editor.viewport"
-          :mini-map-node-color="editor.miniMapNodeColor"
-          :set-canvas-ref="editor.setCanvasRef"
-          :set-vue-flow-ref="editor.setVueFlowRef"
-          :handle-pane-mouse-move="editor.handlePaneMouseMove"
-          :handle-node-click="editor.handleNodeClick"
-          :handle-node-double-click="editor.handleNodeDoubleClick"
-          :handle-node-context-menu="editor.handleNodeContextMenu"
-          :handle-selection-change="editor.handleSelectionChange"
-          :handle-selection-context-menu="editor.handleSelectionContextMenu"
-          :handle-pane-context-menu="editor.handlePaneContextMenu"
-          :handle-edge-update="editor.handleEdgeUpdate"
-          :handle-drag-over="editor.handleDragOver"
-          :handle-drop="editor.handleDrop"
-          :is-execution-failed="editor.isExecutionFailed"
-          :is-execution-running="editor.isExecutionRunning"
-          :on-run-test="editor.handleRunTest"
-          :on-cancel-execution="editor.handleCancelExecution"
-        />
-
-        <ExecutionTracePanel
-          :execution="editor.execution"
-          :step-executions="editor.stepExecutions"
-          :step-name-by-id="editor.stepNameById"
-          :selected-step-id="editor.store.selectedNodeId"
-          :is-expanded="editor.store.isTracePanelExpanded"
-          @toggle="editor.store.toggleTracePanel"
-          @close="editor.store.isTracePanelExpanded = false"
-          @select-step="editor.selectTraceStep"
+    <div class="relative flex min-w-0 flex-1 flex-col pt-3.5">
+      <div class="absolute right-0 top-[14px] z-30 flex items-start">
+        <EditorToolbar
+          :presences="editor.presences"
+          :can-undo="editor.undoStore.canUndo"
+          :can-redo="editor.undoStore.canRedo"
+          :undo-tooltip="editor.undoStore.undoTooltip"
+          :redo-tooltip="editor.undoStore.redoTooltip"
+          :is-undo-pending="editor.undoStore.isPending"
+          @save="editor.handleSave"
+          @undo="editor.handleUndo"
+          @redo="editor.handleRedo"
           @run-test="editor.handleRunTest"
-          @cancel="editor.handleCancelExecution"
+          @open-revisions="emit('navigate_revisions')"
+          @publish="openPublishModal"
         />
+      </div>
+
+      <!-- Main Sunken Canvas Area -->
+      <div class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner">
+        <div class="relative flex min-w-0 flex-1 flex-col">
+          <div
+            v-if="isDebugMode"
+            class="border-base-200 bg-warning/5 text-base-content/80 relative z-10 border-b px-6 pt-5 pb-3 text-xs shadow-sm"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-4">
+              <div class="flex items-center gap-3">
+                <div class="bg-warning/15 text-warning flex h-10 w-10 items-center justify-center rounded-2xl">
+                  <BugAntIcon class="h-5 w-5" />
+                </div>
+                <div class="space-y-1">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <span class="text-warning/80 text-[10px] font-semibold tracking-[0.3em] uppercase">
+                      Debug Mode
+                    </span>
+                    <span
+                      class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                      :class="debugStatusBadge.class"
+                    >
+                      {{ debugStatusBadge.label }}
+                    </span>
+                  </div>
+                  <p class="text-base-content/60 text-[11px]">
+                    Using execution {{ debugExecutionShortId }}
+                    <span v-if="debugExecutionTimestamp">- {{ debugExecutionTimestamp }}</span>
+                    - Pin outputs on nodes to reuse this data in previews.
+                  </p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <a
+                  v-if="debugExecutionLink"
+                  :href="debugExecutionLink"
+                  class="btn btn-xs btn-ghost border-base-300 bg-base-100/80 text-base-content/70 hover:bg-base-200"
+                >
+                  View execution
+                </a>
+                <a
+                  v-if="debugExitLink"
+                  :href="debugExitLink"
+                  class="btn btn-xs btn-primary text-primary-content shadow-primary/20 shadow-sm"
+                >
+                  Exit debug
+                </a>
+              </div>
+            </div>
+          </div>
+
+          <div class="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+            <WorkflowCanvas
+              :nodes="editor.nodes"
+              :edges="editor.edges"
+              :node-types="editor.nodeTypes"
+              :edge-types="editor.edgeTypes"
+              :can-edit="editor.canEdit"
+              :is-revision-preview-active="false"
+              preview-label=""
+              :is-mounted="editor.isMounted"
+              :other-user-presences="editor.otherUserPresences"
+              :current-user-id="editor.currentUserId"
+              :viewport="editor.viewport"
+              :mini-map-node-color="editor.miniMapNodeColor"
+              :set-canvas-ref="editor.setCanvasRef"
+              :set-vue-flow-ref="editor.setVueFlowRef"
+              :handle-pane-mouse-move="editor.handlePaneMouseMove"
+              :handle-node-click="editor.handleNodeClick"
+              :handle-node-double-click="editor.handleNodeDoubleClick"
+              :handle-node-context-menu="editor.handleNodeContextMenu"
+              :handle-selection-change="editor.handleSelectionChange"
+              :handle-selection-context-menu="editor.handleSelectionContextMenu"
+              :handle-pane-context-menu="editor.handlePaneContextMenu"
+              :handle-edge-update="editor.handleEdgeUpdate"
+              :handle-drag-over="editor.handleDragOver"
+              :handle-drop="editor.handleDrop"
+              :is-execution-failed="editor.isExecutionFailed"
+              :is-execution-running="editor.isExecutionRunning"
+              :on-run-test="editor.handleRunTest"
+              :on-cancel-execution="editor.handleCancelExecution"
+            />
+
+            <ExecutionTracePanel
+              :execution="editor.execution"
+              :step-executions="editor.stepExecutions"
+              :step-name-by-id="editor.stepNameById"
+              :selected-step-id="editor.store.selectedNodeId"
+              :is-expanded="editor.store.isTracePanelExpanded"
+              @toggle="editor.store.toggleTracePanel"
+              @close="editor.store.isTracePanelExpanded = false"
+              @select-step="editor.selectTraceStep"
+              @run-test="editor.handleRunTest"
+              @cancel="editor.handleCancelExecution"
+            />
+          </div>
+        </div>
       </div>
 
       <StepConfigModal
@@ -241,7 +251,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
         :execution="editor.execution"
         :step-executions="editor.stepExecutions"
         :expression-previews="editor.expressionPreviews"
-        :credential-options="props.credentialOptions"
+        :credential-options="credentialOptions"
         :editor-state="editor.editorState"
         :step-name-by-id="editor.stepNameById"
         :incoming-step-ids="editor.incomingStepIdsByStepId"

@@ -26,13 +26,32 @@ import {
   ChevronRightIcon,
 } from '@heroicons/vue/24/outline';
 
-// Props - will receive library items from LiveView
+// Props
 interface Props {
   libraryItems?: NodeLibraryItem[];
+  workflowName?: string;
+  workflowStatus?: 'draft' | 'active' | 'archived';
+  lastSaved?: string;
+  isSaving?: boolean;
+  hasUnsavedChanges?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   libraryItems: () => [],
+  workflowName: 'Untitled Workflow',
+  workflowStatus: 'draft',
+  lastSaved: 'Just now',
+  isSaving: false,
+  hasUnsavedChanges: false,
+});
+
+const statusBadge = computed(() => {
+  const configs = {
+    draft: { class: 'badge-warning', label: 'Draft' },
+    active: { class: 'badge-success', label: 'Active' },
+    archived: { class: 'badge-ghost', label: 'Archived' },
+  };
+  return configs[props.workflowStatus];
 });
 
 const emit = defineEmits<{
@@ -143,12 +162,40 @@ const getIcon = (iconName?: string) =>
 </script>
 
 <template>
-  <aside class="bg-base-100 border-base-200 flex h-full w-72 flex-col overflow-hidden border-r">
-    <!-- Header -->
-    <div class="border-base-200 shrink-0 border-b px-5 py-5">
-      <div class="mb-4 flex items-center justify-between">
-        <h2 class="text-base-content/90 text-sm font-semibold tracking-tight">Step Library</h2>
-        <span class="badge badge-ghost badge-sm font-mono">
+  <aside class="bg-base-100 flex h-full w-72 shrink-0 flex-col overflow-hidden">
+    <!-- Header: Workflow Info -->
+    <div class="border-base-200 shrink-0 border-b px-4 py-5 z-20">
+      <div class="mb-5 flex items-start gap-3">
+        <!-- Logo -->
+        <div class="bg-primary/10 text-primary mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl shadow-inner">
+          <BoltIcon class="h-6 w-6" />
+        </div>
+
+        <!-- Info -->
+        <div class="min-w-0">
+          <h1 class="text-base-content/90 truncate text-sm font-semibold" :title="props.workflowName">
+            {{ props.workflowName }}
+          </h1>
+          <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span :class="['badge badge-sm h-4 gap-1 text-[10px] font-bold opacity-80', statusBadge.class]">
+              <span class="h-1 w-1 rounded-full bg-current"></span>
+              {{ statusBadge.label }}
+            </span>
+            <span v-if="props.hasUnsavedChanges" class="badge badge-ghost badge-sm h-4 text-[10px]">Unsaved</span>
+          </div>
+          <p class="text-base-content/40 mt-1.5 text-[10px] font-semibold tracking-tight">
+            <span v-if="props.isSaving" class="flex items-center gap-1">
+              <ArrowPathIcon class="h-3 w-3 animate-spin" />
+              Saving...
+            </span>
+            <span v-else> Last saved: {{ props.lastSaved }} </span>
+          </p>
+        </div>
+      </div>
+
+      <div class="mb-3 flex items-center justify-between">
+        <h2 class="text-base-content/70 text-xs font-bold tracking-wider uppercase">Step Library</h2>
+        <span class="badge badge-ghost badge-xs font-mono">
           {{ allStepTypes.length }}
         </span>
       </div>
