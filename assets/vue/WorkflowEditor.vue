@@ -175,25 +175,31 @@ useLiveEvent<{ success: boolean; error?: string }>(
       <!-- Main Sunken Canvas Area -->
       <div class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner">
         <!-- Floating Workflow Info -->
-        <div class="pointer-events-none absolute left-6 top-5 z-30 flex flex-col items-start">
-          <div class="pointer-events-auto flex items-center gap-2">
-            <a :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`" class="text-base-content/60 hover:text-base-content transition-colors text-sm font-semibold tracking-wide">
-              {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
-            </a>
-            <SlashIcon class="text-base-content/30 h-4 w-4" stroke-width="2.5" />
-            <span class="text-base-content/90 text-sm font-bold tracking-wide">
-              {{ editor.workflow?.name ?? 'Untitled Workflow' }}
-            </span>
-            <div class="ml-2 flex items-center gap-4">
-              <span :class="['badge badge-sm h-4 gap-1 text-[10px] font-bold opacity-80', statusBadge.class]">
-                <span class="h-1 w-1 rounded-full bg-current"></span>
-                {{ statusBadge.label }}
+        <div class="pointer-events-none absolute left-6 top-5 z-30 flex flex-col items-start gap-1">
+          <div class="pointer-events-auto rounded-xl border border-base-300/45 bg-base-100/65 px-2.5 py-1.5 shadow-sm backdrop-blur-sm">
+            <div class="flex items-center gap-2">
+              <a
+                :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`"
+                class="text-base-content/65 hover:text-base-content/80 text-xs font-semibold tracking-wide transition-colors"
+              >
+                {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
+              </a>
+              <SlashIcon class="text-base-content/35 h-3.5 w-3.5" stroke-width="2.5" />
+              <span class="text-base-content/90 text-xs font-bold tracking-wide">
+                {{ editor.workflow?.name ?? 'Untitled Workflow' }}
               </span>
-              <Avatar :presences="editor.presences" class="ml-1" />
+              <div class="ml-1.5 flex items-center gap-2.5">
+                <span :class="['badge badge-xs h-4 gap-1 text-[9px] font-bold opacity-75', statusBadge.class]">
+                  <span class="h-1 w-1 rounded-full bg-current"></span>
+                  {{ statusBadge.label }}
+                </span>
+                <Avatar :presences="editor.presences" class="scale-95" />
+              </div>
             </div>
           </div>
-          <button 
-            class="pointer-events-auto text-base-content/40 hover:text-base-content/70 mt-0.5 ml-0.5 flex items-center gap-1 text-[10px] font-semibold tracking-tight transition-colors"
+
+          <button
+            class="pointer-events-auto ml-1 inline-flex items-center gap-1 rounded-full bg-base-100/45 px-2 py-0.5 text-[9px] font-semibold tracking-tight text-base-content/50 transition-colors hover:text-base-content/70"
             @click="emit('save_workflow')"
           >
             Last saved: {{ lastSaved }}
