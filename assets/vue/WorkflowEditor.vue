@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
@@ -16,7 +16,12 @@ import type {
   WorkflowEditorLiveEmits,
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
-import { BugAntIcon, SlashIcon, ArrowPathIcon } from '@heroicons/vue/24/outline';
+import {
+  BugAntIcon,
+  SlashIcon,
+  ArrowPathIcon,
+  ChevronDoubleRightIcon,
+} from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   stepTypes: () => [],
@@ -47,6 +52,156 @@ const emit = ((event: WorkflowEditorCommandType, payload?: unknown) => {
 }) as WorkflowEditorEmits;
 
 const editor = reactive(useWorkflowEditor(props, emit));
+
+const NODE_LIBRARY_DEFAULT_WIDTH = 288;
+const NODE_LIBRARY_MIN_WIDTH = 240;
+const NODE_LIBRARY_MAX_WIDTH = 460;
+const CANVAS_MIN_WIDTH = 640;
+const NODE_LIBRARY_COLLAPSE_THRESHOLD = 20;
+const NODE_LIBRARY_WIDTH_STORAGE_KEY = 'fizz.workflow_editor.node_library_width';
+const NODE_LIBRARY_COLLAPSED_STORAGE_KEY = 'fizz.workflow_editor.node_library_collapsed';
+
+const nodeLibraryWidth = ref(NODE_LIBRARY_DEFAULT_WIDTH);
+const isResizingNodeLibrary = ref(false);
+const isNodeLibraryCollapsed = ref(false);
+const resizeOrigin = ref<{
+  x: number;
+  width: number;
+  startedCollapsed: boolean;
+} | null>(null);
+
+const clampNodeLibraryWidth = (rawWidth: number) => {
+  const viewportLimit =
+    typeof window === 'undefined'
+      ? NODE_LIBRARY_MAX_WIDTH
+      : Math.max(
+          NODE_LIBRARY_MIN_WIDTH,
+          Math.min(NODE_LIBRARY_MAX_WIDTH, Math.floor(window.innerWidth - CANVAS_MIN_WIDTH))
+        );
+
+  return Math.min(viewportLimit, Math.max(NODE_LIBRARY_MIN_WIDTH, rawWidth));
+};
+
+const saveNodeLibraryWidth = (width: number) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(
+    NODE_LIBRARY_WIDTH_STORAGE_KEY,
+    String(clampNodeLibraryWidth(width))
+  );
+};
+
+const saveNodeLibraryCollapsed = (collapsed: boolean) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(
+    NODE_LIBRARY_COLLAPSED_STORAGE_KEY,
+    collapsed ? '1' : '0'
+  );
+};
+
+const setNodeLibraryCollapsed = (collapsed: boolean) => {
+  isNodeLibraryCollapsed.value = collapsed;
+  saveNodeLibraryCollapsed(collapsed);
+};
+
+const toggleNodeLibraryCollapsed = () => {
+  setNodeLibraryCollapsed(!isNodeLibraryCollapsed.value);
+};
+
+const stopNodeLibraryResize = () => {
+  const wasResizing = isResizingNodeLibrary.value;
+
+  isResizingNodeLibrary.value = false;
+  resizeOrigin.value = null;
+
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pointermove', handleNodeLibraryResizeMove);
+    window.removeEventListener('pointerup', stopNodeLibraryResize);
+    window.removeEventListener('pointercancel', stopNodeLibraryResize);
+  }
+
+  if (typeof document !== 'undefined') {
+    document.body.classList.remove('cursor-col-resize', 'select-none');
+  }
+
+  if (wasResizing) {
+    saveNodeLibraryWidth(nodeLibraryWidth.value);
+    saveNodeLibraryCollapsed(isNodeLibraryCollapsed.value);
+  }
+};
+
+const handleNodeLibraryResizeMove = (event: PointerEvent) => {
+  const origin = resizeOrigin.value;
+  if (!origin) return;
+
+  const deltaX = event.clientX - origin.x;
+  const candidateWidth = origin.width + deltaX;
+
+  if (origin.startedCollapsed) {
+    if (candidateWidth >= NODE_LIBRARY_MIN_WIDTH + NODE_LIBRARY_COLLAPSE_THRESHOLD) {
+      isNodeLibraryCollapsed.value = false;
+      nodeLibraryWidth.value = clampNodeLibraryWidth(candidateWidth);
+    } else {
+      isNodeLibraryCollapsed.value = true;
+    }
+    return;
+  }
+
+  if (candidateWidth < NODE_LIBRARY_MIN_WIDTH - NODE_LIBRARY_COLLAPSE_THRESHOLD) {
+    isNodeLibraryCollapsed.value = true;
+    return;
+  }
+
+  isNodeLibraryCollapsed.value = false;
+  nodeLibraryWidth.value = clampNodeLibraryWidth(candidateWidth);
+};
+
+const handleNodeLibraryResizeStart = (event: PointerEvent, fromCollapsed = false) => {
+  if (event.button !== 0) return;
+
+  event.preventDefault();
+  resizeOrigin.value = {
+    x: event.clientX,
+    width: fromCollapsed ? NODE_LIBRARY_MIN_WIDTH : nodeLibraryWidth.value,
+    startedCollapsed: fromCollapsed,
+  };
+  isResizingNodeLibrary.value = true;
+  if (typeof document !== 'undefined') {
+    document.body.classList.add('cursor-col-resize', 'select-none');
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('pointermove', handleNodeLibraryResizeMove);
+    window.addEventListener('pointerup', stopNodeLibraryResize);
+    window.addEventListener('pointercancel', stopNodeLibraryResize);
+  }
+};
+
+const handleEditorResize = () => {
+  nodeLibraryWidth.value = clampNodeLibraryWidth(nodeLibraryWidth.value);
+};
+
+onMounted(() => {
+  if (typeof window === 'undefined') return;
+
+  const storedWidth = Number(window.localStorage.getItem(NODE_LIBRARY_WIDTH_STORAGE_KEY));
+  const storedCollapsed =
+    window.localStorage.getItem(NODE_LIBRARY_COLLAPSED_STORAGE_KEY) === '1';
+  if (Number.isFinite(storedWidth) && storedWidth > 0) {
+    nodeLibraryWidth.value = clampNodeLibraryWidth(storedWidth);
+  } else {
+    nodeLibraryWidth.value = clampNodeLibraryWidth(nodeLibraryWidth.value);
+  }
+  isNodeLibraryCollapsed.value = storedCollapsed;
+
+  window.addEventListener('resize', handleEditorResize);
+});
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('resize', handleEditorResize);
+  }
+  stopNodeLibraryResize();
+});
 
 // Publish modal state
 const isPublishModalOpen = ref(false);
@@ -87,15 +242,6 @@ const lastSaved = computed(() => {
   });
 });
 
-const statusBadge = computed(() => {
-  const status = editor.workflow?.status ?? 'draft';
-  const configs = {
-    draft: { class: 'badge-warning', label: 'Draft' },
-    active: { class: 'badge-success', label: 'Active' },
-    archived: { class: 'badge-ghost', label: 'Archived' },
-  };
-  return configs[status as keyof typeof configs] || configs.draft;
-});
 const debugExecutionShortId = computed(() => {
   const id = props.debugExecutionId ?? props.execution?.id ?? '';
   return id ? id.slice(0, 8) : '';
@@ -148,11 +294,37 @@ useLiveEvent<{ success: boolean; error?: string }>(
 <template>
   <div class="bg-base-100 text-base-content flex h-screen overflow-hidden font-sans">
     <NodeLibrary
+      v-if="!isNodeLibraryCollapsed"
       :library-items="editor.nodeLibraryItems"
       :workflow-name="editor.workflow?.name ?? 'Untitled Workflow'"
       :workflow-status="editor.workflow?.status ?? 'draft'"
+      :style="{ width: `${nodeLibraryWidth}px` }"
       class="z-20 shrink-0 relative"
+      @resize-start="handleNodeLibraryResizeStart"
+      @toggle-collapse="toggleNodeLibraryCollapsed"
     />
+    <div
+      v-else
+      class="z-20 relative flex h-full w-11 shrink-0 items-start justify-center bg-base-100/90 px-2 pt-3.5"
+    >
+      <button
+        type="button"
+        class="btn btn-ghost btn-sm h-9 w-7 p-0 text-base-content/45 hover:bg-base-200/70 hover:text-base-content/80"
+        aria-label="Expand node library panel"
+        title="Expand panel"
+        @click="toggleNodeLibraryCollapsed"
+      >
+        <ChevronDoubleRightIcon class="h-4 w-4" />
+      </button>
+
+      <div
+        class="absolute inset-y-0 right-0 w-3 cursor-col-resize touch-none"
+        role="separator"
+        aria-label="Resize node library panel"
+        aria-orientation="vertical"
+        @pointerdown.stop="handleNodeLibraryResizeStart($event, true)"
+      />
+    </div>
 
     <div class="relative flex min-w-0 flex-1 flex-col pt-3.5">
       <div class="absolute right-0 top-[14px] z-30 flex items-start">
@@ -175,31 +347,27 @@ useLiveEvent<{ success: boolean; error?: string }>(
       <!-- Main Sunken Canvas Area -->
       <div class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner">
         <!-- Floating Workflow Info -->
-        <div class="pointer-events-none absolute left-6 top-5 z-30 flex flex-col items-start gap-1">
-          <div class="pointer-events-auto rounded-xl border border-base-300/45 bg-base-100/65 px-2.5 py-1.5 shadow-sm backdrop-blur-sm">
+        <div class="pointer-events-none absolute left-6 top-5 z-30 flex flex-col items-start gap-0.5">
+          <div class="pointer-events-auto px-1.5 py-0.5">
             <div class="flex items-center gap-2">
               <a
                 :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`"
-                class="text-base-content/65 hover:text-base-content/80 text-xs font-semibold tracking-wide transition-colors"
+                class="text-base-content/60 hover:text-base-content/80 text-xs font-medium transition-colors"
               >
                 {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
               </a>
-              <SlashIcon class="text-base-content/35 h-3.5 w-3.5" stroke-width="2.5" />
-              <span class="text-base-content/90 text-xs font-bold tracking-wide">
+              <SlashIcon class="text-base-content/30 h-3.5 w-3.5" stroke-width="2.5" />
+              <span class="text-base-content/90 text-xs font-semibold">
                 {{ editor.workflow?.name ?? 'Untitled Workflow' }}
               </span>
-              <div class="ml-1.5 flex items-center gap-2.5">
-                <span :class="['badge badge-xs h-4 gap-1 text-[9px] font-bold opacity-75', statusBadge.class]">
-                  <span class="h-1 w-1 rounded-full bg-current"></span>
-                  {{ statusBadge.label }}
-                </span>
+              <div class="ml-1 flex items-center">
                 <Avatar :presences="editor.presences" class="scale-95" />
               </div>
             </div>
           </div>
 
           <button
-            class="pointer-events-auto ml-1 inline-flex items-center gap-1 rounded-full bg-base-100/45 px-2 py-0.5 text-[9px] font-semibold tracking-tight text-base-content/50 transition-colors hover:text-base-content/70"
+            class="pointer-events-auto ml-1 inline-flex items-center gap-1 px-0.5 py-0 text-[10px] font-medium text-base-content/45 transition-colors hover:text-base-content/70"
             @click="emit('save_workflow')"
           >
             Last saved: {{ lastSaved }}

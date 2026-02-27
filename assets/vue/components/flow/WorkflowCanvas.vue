@@ -55,7 +55,7 @@ defineProps<Props>();
 </script>
 
 <template>
-  <div :ref="setCanvasRef" class="relative flex-1 overflow-hidden" @mousemove="handlePaneMouseMove">
+  <div :ref="setCanvasRef" class="relative min-w-0 flex-1 overflow-hidden" @mousemove="handlePaneMouseMove">
     <VueFlow
       :ref="setVueFlowRef"
       :nodes="nodes"
