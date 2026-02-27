@@ -69,6 +69,7 @@ defineProps<Props>();
       :nodes-connectable="canEdit"
       :nodes-draggable="canEdit"
       :edges-updatable="canEdit"
+      :multi-selection-key-code="['Shift', 'Meta', 'Control']"
       :snap-to-grid="effectiveSnapToGrid"
       :snap-grid="[gridSize, gridSize]"
       :apply-default="false"

@@ -33,6 +33,11 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
   const pendingNodeRemovalIds = new Set<string>();
   const pendingGroupRemovalIds = new Set<string>();
 
+  const hasMultiSelectModifier = (event: NodeMouseEvent['event']) => {
+    if (!(event instanceof MouseEvent)) return false;
+    return event.shiftKey || event.metaKey || event.ctrlKey;
+  };
+
   const findStepNodeById = (nodeId: string) => {
     const node = options.nodes().find(n => n.id === nodeId);
     return node && isStepNode(node) ? node : null;
@@ -46,6 +51,9 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
       clearTimeout(clickTimer.value);
       clickTimer.value = null;
     }
+
+    // Let Vue Flow keep additive selection when a multi-select modifier is held.
+    if (hasMultiSelectModifier(event.event)) return;
 
     clickTimer.value = setTimeout(() => {
       if (isStepNode(node)) {

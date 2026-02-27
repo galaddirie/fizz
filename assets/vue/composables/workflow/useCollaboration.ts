@@ -54,15 +54,18 @@ export function useCollaboration(options: UseCollaborationOptions) {
       if (!options.canEdit()) return;
       if (isUpdatingSelection.value) return;
 
+      // Keep Vue Flow's current selection state (including multi-select) when
+      // the store intentionally tracks no single active node.
+      if (!newSelectedId) {
+        lastSelectionKey.value = '';
+        return;
+      }
+
       const nodes = options.getNodes().map(node => ({
         ...node,
         selected: node.id === newSelectedId,
       }));
       options.setNodes(nodes);
-
-      if (!newSelectedId) {
-        lastSelectionKey.value = '';
-      }
     }
   );
 
