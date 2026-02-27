@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { provide } from 'vue';
+import { onBeforeUnmount, onMounted, provide } from 'vue';
 import type { Node } from '@vue-flow/core';
 import type {
   EditorState,
@@ -43,13 +43,28 @@ const emit = defineEmits([
 
 const state = useStepConfig(props, emit);
 provide(StepConfigKey, state);
+
+const handleEscape = (event: KeyboardEvent) => {
+  if (!props.isOpen) return;
+  if (event.key !== 'Escape') return;
+
+  event.preventDefault();
+  state.closeModal();
+};
+
+onMounted(() => {
+  window.addEventListener('keydown', handleEscape);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleEscape);
+});
 </script>
 
 <template>
   <div
     v-if="isOpen"
     class="fixed inset-0 z-[1100] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm sm:p-6"
-    @keydown.esc="state.closeModal()"
   >
     <div
       class="bg-base-100 border-base-300 animate-in fade-in zoom-in flex h-[90vh] w-full max-w-[1600px] flex-col overflow-hidden rounded-3xl border shadow-2xl duration-300"

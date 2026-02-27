@@ -68,9 +68,8 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
       </svg>
     </div>
 
-    <header class="pointer-events-auto bg-base-100 relative flex h-full items-center gap-4 rounded-bl-[20px] border-b border-l border-base-300 pl-4 pr-6 pb-3.5">
+    <header class="pointer-events-auto bg-base-100 relative flex h-full items-center gap-4 rounded-bl-[20px] border-b border-l-0 border-base-300 pl-4 pr-6 pb-3.5">
       <!-- Border Mask for seamless curve transition -->
-      <div class="absolute -left-[1.5px] top-0 h-[20px] w-[3px] bg-base-100 rounded-full"></div>
     <!-- Center Section: Undo/Redo Tools -->
     <div class="bg-base-200/50 border-base-300/30 flex items-center gap-1 rounded-2xl border p-1.5">
       <button
