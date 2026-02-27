@@ -33,6 +33,7 @@ import {
   PauseIcon,
   BookmarkIcon,
   LockClosedIcon,
+  EyeIcon,
   EyeSlashIcon,
   BoltIcon,
   CircleStackIcon,
@@ -40,7 +41,7 @@ import {
   PencilIcon,
   XCircleIcon,
 } from '@heroicons/vue/24/outline';
-import { PlayIcon, PowerIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroicons/vue/24/solid';
+import { PlayIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroicons/vue/24/solid';
 
 const props = defineProps<NodeProps<StepNodeData>>();
 const themeStore = useThemeStore();
@@ -319,6 +320,16 @@ const handleTogglePin = () => {
   props.data.onTogglePin?.(props.id, !!props.data.pinned);
 };
 
+const handleRunNode = () => {
+  if (!canEdit.value || props.data.disabled) return;
+  props.data.onRunNode?.(props.id);
+};
+
+const handleToggleDisabled = () => {
+  if (!canEdit.value) return;
+  props.data.onToggleDisabled?.(props.id, !!props.data.disabled);
+};
+
 const handleNameKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter') {
     event.preventDefault();
@@ -335,23 +346,31 @@ const handleNameKeydown = (event: KeyboardEvent) => {
     <!-- Run Node Icon -->
     <PlayIcon
       v-if="canEdit && !isSubnode"
-      class="absolute -top-7 left-3 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content disabled:cursor-not-allowed disabled:opacity-50 group-hover:opacity-70"
+      class="absolute -top-7 left-3 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
       :class="{
-        'pointer-events-none opacity-50': data.disabled,
-        'opacity-70': props.selected
+        'opacity-70': props.selected,
+        'cursor-not-allowed hover:-translate-y-0 hover:text-base-content/70': data.disabled
       }"
       aria-label="Run node"
       title="Run node"
-      @click.stop="data.onRunNode?.(props.id)"
+      @click.stop="handleRunNode"
+      @dblclick.stop
     />
 
-    <!-- Power Icon -->
-    <PowerIcon
+    <!-- Disable/Enable Icon -->
+    <component
       v-if="canEdit && !isSubnode"
-      class="absolute -top-7 left-12 z-20 size-6 cursor-pointer text-base-content/70 opacity-0 transition hover:-translate-y-0.5 hover:text-base-content group-hover:opacity-70"
-      :class="{ 'opacity-70': props.selected }"
-      aria-label="Power"
-      title="Power"
+      :is="data.disabled ? EyeSlashIcon : EyeIcon"
+      class="absolute -top-7 left-12 z-20 size-6 cursor-pointer opacity-0 transition hover:-translate-y-0.5 group-hover:opacity-70"
+      :class="{
+        'opacity-70': props.selected,
+        'text-error hover:text-error': data.disabled,
+        'text-base-content/70 hover:text-base-content': !data.disabled
+      }"
+      :aria-label="data.disabled ? 'Enable step' : 'Disable step'"
+      :title="data.disabled ? 'Enable step' : 'Disable step'"
+      @click.stop="handleToggleDisabled"
+      @dblclick.stop
     />
 
     <!-- Pin Output Icon -->
@@ -364,6 +383,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       :aria-label="data.pinned ? 'Unpin output' : 'Pin output'"
       :title="data.pinned ? 'Unpin output' : 'Pin output'"
       @click.stop="handleTogglePin"
+      @dblclick.stop
     />
 
     <!-- Input Handle (left side — main flow) -->
@@ -458,17 +478,13 @@ const handleNameKeydown = (event: KeyboardEvent) => {
               <LockClosedIcon class="text-warning size-4" />
             </div>
 
-            <!-- Disabled indicator -->
-            <div v-if="data.disabled" class="tooltip tooltip-left" data-tip="Step disabled">
-              <EyeSlashIcon class="text-base-content/40 size-4" />
-            </div>
-
             <!-- Edit button -->
             <button
               v-if="canEdit"
               class="btn btn-ghost btn-xs opacity-0 transition-opacity group-hover:opacity-100"
               aria-label="Edit step name"
               @click.stop="startEditing"
+              @dblclick.stop
             >
               <PencilIcon class="text-base-content/60 size-4" />
             </button>

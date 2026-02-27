@@ -98,6 +98,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     onUpdateGroup: nodeActions.handleUpdateGroup,
     onUpdateStep: nodeActions.handleUpdateStep,
     onMoveSteps: nodeActions.handleMoveSteps,
+    onToggleDisabled: nodeActions.handleToggleDisabled,
     onTogglePin: pins.handleTogglePin,
     groupingPreview: () => grouping.groupingPreview.value,
   });
@@ -266,13 +267,13 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     removeGroup: grouping.removeGroup,
     handleLayout: layoutEngine.handleLayout,
     handleRunNode: nodeActions.handleRunNode,
+    handleToggleDisabled: nodeActions.handleToggleDisabled,
     handleDuplicateSteps: clipboard.handleDuplicateSteps,
     handleCopySteps: clipboard.handleCopySteps,
     handleCutSteps: clipboard.handleCutSteps,
     handlePasteSteps: clipboard.handlePasteSteps,
     requestNodeRemoval: nodeInteraction.requestNodeRemoval,
     handleTogglePin: pins.handleTogglePin,
-    emit,
   });
   const keyboard = useKeyboardShortcuts({
     canEdit: () => canEdit.value,

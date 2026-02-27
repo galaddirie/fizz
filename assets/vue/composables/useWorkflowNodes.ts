@@ -33,6 +33,7 @@ interface UseWorkflowNodesOptions {
   ) => void;
   onUpdateStep?: (stepId: string, changes: { name?: string }) => void;
   onMoveSteps?: (stepPositions: Record<string, XYPosition>) => void;
+  onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
   groupingPreview?: () => { groupId?: string | null; stepIds?: string[]; color?: string | null };
 }
@@ -287,6 +288,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           groupingColor: isGroupingCandidate ? groupingColor : undefined,
           onRunNode: canEdit ? onRunNode : undefined,
           onUpdate: canEdit ? options.onUpdateStep : undefined,
+          onToggleDisabled: canEdit ? options.onToggleDisabled : undefined,
           onTogglePin: canEdit ? options.onTogglePin : undefined,
           canEdit,
         } satisfies StepNodeData,

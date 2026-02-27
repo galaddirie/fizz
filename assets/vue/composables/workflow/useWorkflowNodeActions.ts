@@ -14,6 +14,17 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
     options.emit('run_node', { step_id: stepId });
   };
 
+  const handleToggleDisabled = (stepId: string, isDisabled: boolean) => {
+    if (!options.canEdit()) return;
+
+    if (isDisabled) {
+      options.emit('enable_step', { step_id: stepId });
+      return;
+    }
+
+    options.emit('disable_step', { step_id: stepId, mode: 'skip' });
+  };
+
   const handleMoveSteps = (stepPositions: Record<string, XYPosition>) => {
     const entries = Object.entries(stepPositions);
     if (entries.length === 0) return;
@@ -46,6 +57,7 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
 
   return {
     handleRunNode,
+    handleToggleDisabled,
     handleMoveSteps,
     handleUpdateStep,
     handleUpdateGroup,

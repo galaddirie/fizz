@@ -1,7 +1,6 @@
 import { computed } from 'vue';
 
 import type { MenuItem } from '@/components/ui/ContextMenu.vue';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 import type { useClientStore } from '@/stores/clientStore';
 import type { StepNodeData } from '@/types/workflow';
 import type { Node } from '@vue-flow/core';
@@ -36,13 +35,13 @@ interface UseContextMenuOptions {
   removeGroup: (id: string) => void;
   handleLayout: (options?: { groupId?: string }) => void;
   handleRunNode: (stepId: string) => void;
+  handleToggleDisabled: (stepId: string, isDisabled: boolean) => void;
   handleDuplicateSteps: (stepIds: string[]) => void;
   handleCopySteps: (stepIds: string[]) => void;
   handleCutSteps: (stepIds: string[]) => void;
   handlePasteSteps: () => void;
   requestNodeRemoval: (id: string) => void;
   handleTogglePin: (stepId: string, isPinned: boolean) => void;
-  emit: WorkflowEditorEmits;
 }
 
 export function useContextMenu(options: UseContextMenuOptions) {
@@ -178,11 +177,7 @@ export function useContextMenu(options: UseContextMenuOptions) {
         if (nodeId) {
           const stepNode = options.findStepNodeById(nodeId);
           if (!stepNode) break;
-          if (stepNode.data?.disabled) {
-            options.emit('enable_step', { step_id: nodeId });
-          } else {
-            options.emit('disable_step', { step_id: nodeId, mode: 'skip' });
-          }
+          options.handleToggleDisabled(nodeId, !!stepNode.data?.disabled);
         }
         break;
       case 'toggle-pin':

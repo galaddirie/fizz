@@ -175,6 +175,7 @@ export interface StepNodeData {
   groupingColor?: string;
   onRunNode?: (stepId: string) => void;
   onUpdate?: (stepId: string, changes: { name?: string }) => void;
+  onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
   canEdit?: boolean;
 }
