@@ -319,7 +319,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
       </button>
 
       <div
-        class="absolute inset-y-0 right-0 w-3 cursor-col-resize touch-none"
+        class="absolute inset-y-0 -right-4 w-8 cursor-col-resize touch-none"
         role="separator"
         aria-label="Resize node library panel"
         aria-orientation="vertical"
@@ -328,6 +328,15 @@ useLiveEvent<{ success: boolean; error?: string }>(
     </div>
 
     <div class="relative flex min-w-0 flex-1 flex-col pt-3.5">
+      <div
+        v-if="!isNodeLibraryCollapsed"
+        class="absolute inset-y-0 -left-4 z-40 w-12 cursor-col-resize touch-none"
+        role="separator"
+        aria-label="Resize node library panel"
+        aria-orientation="vertical"
+        @pointerdown.stop="handleNodeLibraryResizeStart"
+      />
+
       <div class="absolute right-0 top-[14px] z-30 flex items-start">
         <EditorToolbar
           :presences="editor.presences"

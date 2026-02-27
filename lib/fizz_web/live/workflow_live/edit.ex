@@ -287,7 +287,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
   def handle_event("add_step", %{"type_id" => type_id, "position" => pos} = params, socket) do
     step_type_name =
       case StepRegistry.get(type_id) do
-        {:ok, type} -> type.name
+        {:ok, type} -> Steps.default_step_name(type.name)
         _ -> "Step"
       end
 

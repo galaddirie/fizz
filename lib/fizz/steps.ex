@@ -108,6 +108,30 @@ defmodule Fizz.Steps do
   @spec list_library_items() :: [map()]
   defdelegate list_library_items, to: Registry, as: :library_items
 
+  @brand_action_separator ~r/\s+(?:--|—|–)\s+/u
+
+  @doc """
+  Returns the default node name used when adding a step to a workflow.
+
+  For branded names like `"Google Sheets — New Row"` or `"Slack -- Send Message"`,
+  this strips the brand prefix and keeps only the action portion.
+  """
+  @spec default_step_name(String.t()) :: String.t()
+  def default_step_name(type_name) when is_binary(type_name) do
+    cleaned_name = String.trim(type_name)
+
+    case Regex.split(@brand_action_separator, cleaned_name, parts: 2) do
+      [_brand, action] ->
+        case String.trim(action) do
+          "" -> cleaned_name
+          trimmed_action -> trimmed_action
+        end
+
+      _ ->
+        cleaned_name
+    end
+  end
+
   @doc """
   Validates that all step type IDs in a workflow exist.
 

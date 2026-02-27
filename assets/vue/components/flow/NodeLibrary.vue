@@ -122,7 +122,7 @@ const onDragStart = (event: DragEvent, typeId: string) => {
 </script>
 
 <template>
-  <aside class="bg-base-100 relative flex h-full w-72 shrink-0 flex-col overflow-hidden">
+  <aside class="bg-base-100 relative flex h-full w-72 shrink-0 flex-col overflow-x-visible overflow-y-hidden">
     <!-- Header -->
     <div class="shrink-0 border-b border-base-200 px-4 py-3.5">
       <div class="flex items-center justify-between gap-2">
@@ -246,7 +246,7 @@ const onDragStart = (event: DragEvent, typeId: string) => {
     </div>
 
     <div
-      class="absolute inset-y-0 right-0 z-30 w-3 cursor-col-resize touch-none"
+      class="absolute inset-y-0 -right-4 z-30 w-8 cursor-col-resize touch-none"
       role="separator"
       aria-label="Resize node library panel"
       aria-orientation="vertical"

@@ -62,17 +62,20 @@ type DragSession = {
   lastPositions: Map<string, XYPosition>;
   anchorMouse: XYPosition;
   axisLock: DragAxis | null;
+  lockAbsDelta: XYPosition | null;
   recentSamples: PointerSample[];
-  pendingAxis: DragAxis | null;
-  pendingSince: number | null;
 };
 
 const snapValue = (value: number, grid: number) => grid * Math.round(value / grid);
-const INTENT_WINDOW_MS = 140;
-const SWITCH_PERSIST_MS = 70;
-const AXIS_ACQUIRE_RATIO = 1.08;
-const AXIS_SWITCH_RATIO = 1.2;
-const AXIS_DOMINANCE_MARGIN = 3;
+const INTENT_WINDOW_MS = 110;
+const AXIS_ESTABLISH_DEADZONE = AXIS_LOCK_THRESHOLD;
+const AXIS_ESTABLISH_RECENT_MIN = 3;
+const AXIS_ESTABLISH_RECENT_RATIO = 1.2;
+const AXIS_ESTABLISH_OVERALL_RATIO = 1.1;
+const AXIS_SWITCH_RECENT_MIN = 3;
+const AXIS_SWITCH_RECENT_RATIO = 1.45;
+const AXIS_SWITCH_BASE_COUNTER = 8;
+const AXIS_SWITCH_COUNTER_SLOPE = 0.12;
 
 const getPointerEvent = (event: MouseEvent | TouchEvent) => {
   if ('clientX' in event) return event;
@@ -104,28 +107,36 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     return eventNodes.map(node => nodeById.get(node.id) ?? node);
   };
 
-  const dominantAxisFromDelta = (
-    delta: XYPosition,
+  const dominantAxisFromMagnitude = (
+    magnitude: XYPosition,
     ratioThreshold: number,
-    distanceThreshold: number
+    majorThreshold: number,
+    totalThreshold = 0
   ): DragAxis | null => {
-    const absX = Math.abs(delta.x);
-    const absY = Math.abs(delta.y);
-    if (Math.hypot(absX, absY) < distanceThreshold) return null;
+    const absX = Math.abs(magnitude.x);
+    const absY = Math.abs(magnitude.y);
+    if (Math.max(absX, absY) < majorThreshold) return null;
+    if (absX + absY < totalThreshold) return null;
 
     const major = Math.max(absX, absY);
     const minor = Math.min(absX, absY);
     const ratio = major / Math.max(1, minor);
     if (ratio < ratioThreshold) return null;
-    if (major - minor < AXIS_DOMINANCE_MARGIN) return null;
     return absX >= absY ? 'x' : 'y';
   };
+
+  const toAbsDelta = (from: XYPosition, to: XYPosition): XYPosition => ({
+    x: Math.abs(to.x - from.x),
+    y: Math.abs(to.y - from.y),
+  });
 
   const trackPointerSample = (session: DragSession, position: XYPosition) => {
     const now = Date.now();
     session.recentSamples.push({ timestamp: now, position });
     const cutoff = now - INTENT_WINDOW_MS;
-    session.recentSamples = session.recentSamples.filter(sample => sample.timestamp >= cutoff);
+    while (session.recentSamples.length > 0 && session.recentSamples[0].timestamp < cutoff) {
+      session.recentSamples.shift();
+    }
   };
 
   const getRecentDelta = (session: DragSession, currentPosition: XYPosition): XYPosition => {
@@ -146,54 +157,84 @@ export function useNodeDrag(options: UseNodeDragOptions) {
   const resolveAxisLock = (session: DragSession, shiftPressed: boolean, flowPosition: XYPosition) => {
     if (!shiftPressed) {
       session.axisLock = null;
-      session.pendingAxis = null;
-      session.pendingSince = null;
+      session.lockAbsDelta = null;
       session.recentSamples = [];
       return null;
     }
 
     trackPointerSample(session, flowPosition);
 
-    const overallDelta = {
-      x: flowPosition.x - session.anchorMouse.x,
-      y: flowPosition.y - session.anchorMouse.y,
-    };
+    const overallAbs = toAbsDelta(session.anchorMouse, flowPosition);
     const recentDelta = getRecentDelta(session, flowPosition);
-    const overallAxis = dominantAxisFromDelta(
-      overallDelta,
-      AXIS_ACQUIRE_RATIO,
-      AXIS_LOCK_THRESHOLD
+    const recentAbs = {
+      x: Math.abs(recentDelta.x),
+      y: Math.abs(recentDelta.y),
+    };
+
+    const overallAxis = dominantAxisFromMagnitude(
+      overallAbs,
+      AXIS_ESTABLISH_OVERALL_RATIO,
+      AXIS_LOCK_THRESHOLD,
+      AXIS_ESTABLISH_DEADZONE
     );
-    const recentAxis = dominantAxisFromDelta(recentDelta, AXIS_SWITCH_RATIO, 2);
+    const recentAxis = dominantAxisFromMagnitude(
+      recentAbs,
+      AXIS_ESTABLISH_RECENT_RATIO,
+      AXIS_ESTABLISH_RECENT_MIN,
+      AXIS_ESTABLISH_RECENT_MIN
+    );
 
     if (!session.axisLock) {
-      session.axisLock = overallAxis ?? recentAxis;
+      if (overallAbs.x + overallAbs.y < AXIS_ESTABLISH_DEADZONE) {
+        return null;
+      }
+
+      const canEstablishFromBoth =
+        overallAxis !== null && recentAxis !== null && overallAxis === recentAxis;
+      const overallLeadAxis: DragAxis = overallAbs.x >= overallAbs.y ? 'x' : 'y';
+      const canEstablishFromRecentOnly =
+        recentAxis !== null && overallAxis === null && recentAxis === overallLeadAxis;
+      const canEstablishFromOverallOnly =
+        overallAxis !== null &&
+        recentAxis === null &&
+        Math.max(recentAbs.x, recentAbs.y) < AXIS_ESTABLISH_RECENT_MIN;
+
+      if (canEstablishFromBoth || canEstablishFromRecentOnly || canEstablishFromOverallOnly) {
+        session.axisLock = (overallAxis ?? recentAxis) as DragAxis;
+        session.lockAbsDelta = { ...overallAbs };
+      }
+
       return session.axisLock;
     }
 
     const currentAxis = session.axisLock;
     const oppositeAxis: DragAxis = currentAxis === 'x' ? 'y' : 'x';
-    const recentWantsOpposite = recentAxis === oppositeAxis;
-    if (!recentWantsOpposite) {
-      session.pendingAxis = null;
-      session.pendingSince = null;
+    const recentSwitchAxis = dominantAxisFromMagnitude(
+      recentAbs,
+      AXIS_SWITCH_RECENT_RATIO,
+      AXIS_SWITCH_RECENT_MIN,
+      AXIS_SWITCH_RECENT_MIN
+    );
+    if (recentSwitchAxis !== oppositeAxis) {
       return session.axisLock;
     }
 
-    const now = Date.now();
-    if (session.pendingAxis !== oppositeAxis) {
-      session.pendingAxis = oppositeAxis;
-      session.pendingSince = now;
-      return session.axisLock;
-    }
+    const lockAbs = session.lockAbsDelta ?? overallAbs;
+    const primaryCommit =
+      currentAxis === 'x'
+        ? Math.max(0, overallAbs.x - lockAbs.x)
+        : Math.max(0, overallAbs.y - lockAbs.y);
+    const counterMovement =
+      currentAxis === 'x'
+        ? Math.max(0, overallAbs.y - lockAbs.y)
+        : Math.max(0, overallAbs.x - lockAbs.x);
+    // Hysteresis: the farther we commit on one axis, the more opposite movement is required to switch.
+    const requiredCounterMovement =
+      AXIS_SWITCH_BASE_COUNTER + AXIS_SWITCH_COUNTER_SLOPE * primaryCommit;
 
-    const elapsed = now - (session.pendingSince ?? now);
-    const overallWantsOpposite = overallAxis === oppositeAxis;
-    const requiredDuration = overallWantsOpposite ? 0 : SWITCH_PERSIST_MS;
-    if (elapsed >= requiredDuration) {
+    if (counterMovement >= requiredCounterMovement) {
       session.axisLock = oppositeAxis;
-      session.pendingAxis = null;
-      session.pendingSince = null;
+      session.lockAbsDelta = { ...overallAbs };
     }
 
     return session.axisLock;
@@ -248,9 +289,8 @@ export function useNodeDrag(options: UseNodeDragOptions) {
         lastPositions: new Map(event.nodes.map(node => [node.id, { ...node.position }])),
         anchorMouse: flowPosition,
         axisLock: null,
+        lockAbsDelta: null,
         recentSamples: [],
-        pendingAxis: null,
-        pendingSince: null,
       };
     }
 
@@ -390,11 +430,10 @@ export function useNodeDrag(options: UseNodeDragOptions) {
       lastPositions: new Map(event.nodes.map(node => [node.id, { ...node.position }])),
       anchorMouse: flowPosition ?? { x: 0, y: 0 },
       axisLock: null,
+      lockAbsDelta: null,
       recentSamples: flowPosition
         ? [{ timestamp: Date.now(), position: flowPosition }]
         : [],
-      pendingAxis: null,
-      pendingSince: null,
     };
   };
 
