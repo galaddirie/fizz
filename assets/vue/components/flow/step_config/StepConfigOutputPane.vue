@@ -223,7 +223,7 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
           </div>
 
           <!-- Error (inline in output tab) -->
-          <div v-if="state.activeStepExecution.value?.error" class="mt-2">
+          <div v-if="state.activeStepExecution.value?.error && state.activeStepExecution.value.error !== 'nil'" class="mt-2">
             <h4 class="text-error/40 mb-2 text-[10px] font-semibold tracking-widest uppercase">
               Error
             </h4>

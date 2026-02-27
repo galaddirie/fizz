@@ -7,6 +7,7 @@ import NodeLibrary from '@/components/flow/NodeLibrary.vue';
 import PublishModal from '@/components/flow/PublishModal.vue';
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
+import Avatar from '@/components/ui/Avatar.vue';
 import ContextMenu from '@/components/ui/ContextMenu.vue';
 import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
 import type {
@@ -72,7 +73,9 @@ function handlePublish(payload: { version_tag: string; changelog: string }) {
 const isDebugMode = computed(() => !!props.debugExecutionId);
 
 const lastSaved = computed(() => {
-  const dateStr = editor.workflow?.updated_at;
+  // Use draft.updated_at (last persist) for "Last saved"; workflow.updated_at only changes on publish/rename
+  const dateStr =
+    editor.workflow?.draft?.updated_at ?? editor.workflow?.updated_at;
   if (!dateStr) return 'Just now';
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return 'Just now';
@@ -181,11 +184,12 @@ useLiveEvent<{ success: boolean; error?: string }>(
             <span class="text-base-content/90 text-sm font-bold tracking-wide">
               {{ editor.workflow?.name ?? 'Untitled Workflow' }}
             </span>
-            <div class="ml-2 flex items-center gap-1.5">
+            <div class="ml-2 flex items-center gap-4">
               <span :class="['badge badge-sm h-4 gap-1 text-[10px] font-bold opacity-80', statusBadge.class]">
                 <span class="h-1 w-1 rounded-full bg-current"></span>
                 {{ statusBadge.label }}
               </span>
+              <Avatar :presences="editor.presences" class="ml-1" />
             </div>
           </div>
           <button 

@@ -26,6 +26,8 @@ export interface WorkflowDraft {
   groups: NodeGroup[];
   triggers: Trigger[];
   settings: Record<string, unknown>;
+  inserted_at?: string;
+  updated_at?: string;
 }
 
 export interface Step {
