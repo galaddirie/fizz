@@ -2,28 +2,10 @@
 import { ref, computed } from 'vue';
 import { useThemeStore } from '@/stores/theme';
 import type { NodeLibraryItem } from '@/types/workflow';
+import { getStepIcon, isImageIcon } from '@/lib/stepIcons';
 import {
   MagnifyingGlassIcon,
   CursorArrowRaysIcon,
-  BoltIcon,
-  ClockIcon,
-  GlobeAltIcon,
-  EnvelopeIcon,
-  CircleStackIcon,
-  CodeBracketIcon,
-  ArrowPathIcon,
-  VariableIcon,
-  FunnelIcon,
-  AdjustmentsHorizontalIcon,
-  ArrowsPointingOutIcon,
-  ArrowsPointingInIcon,
-  ArrowsRightLeftIcon,
-  ListBulletIcon,
-  BugAntIcon,
-  CalculatorIcon,
-  DocumentTextIcon,
-  ArrowDownTrayIcon,
-  ChatBubbleLeftRightIcon,
   ChevronRightIcon,
   ChevronDoubleLeftIcon,
 } from '@heroicons/vue/24/outline';
@@ -65,29 +47,7 @@ const emit = defineEmits<{
 const searchQuery = ref('');
 const expandedCategories = ref<Set<string>>(new Set(['Triggers', 'Integrations']));
 
-// Icon mapping for step types
-const iconMap: Record<string, typeof CursorArrowRaysIcon> = {
-  'hero-cursor-arrow-rays': CursorArrowRaysIcon,
-  'hero-bolt': BoltIcon,
-  'hero-clock': ClockIcon,
-  'hero-globe-alt': GlobeAltIcon,
-  'hero-envelope': EnvelopeIcon,
-  'hero-circle-stack': CircleStackIcon,
-  'hero-code-bracket': CodeBracketIcon,
-  'hero-arrow-path': ArrowPathIcon,
-  'hero-variable': VariableIcon,
-  'hero-funnel': FunnelIcon,
-  'hero-adjustments-horizontal': AdjustmentsHorizontalIcon,
-  'hero-arrows-pointing-out': ArrowsPointingOutIcon,
-  'hero-arrows-pointing-in': ArrowsPointingInIcon,
-  'hero-arrows-right-left': ArrowsRightLeftIcon,
-  'hero-list-bullet': ListBulletIcon,
-  'hero-bug-ant': BugAntIcon,
-  'hero-calculator': CalculatorIcon,
-  'hero-document-text': DocumentTextIcon,
-  'hero-arrow-down-tray': ArrowDownTrayIcon,
-  'hero-chat-bubble-left-right': ChatBubbleLeftRightIcon,
-};
+// Icon mapping for step types (shared)
 
 const allStepTypes = computed(() => {
   return props.libraryItems;
@@ -158,12 +118,7 @@ const onDragStart = (event: DragEvent, typeId: string) => {
   emit('dragStart', typeId, event);
 };
 
-const isImageIcon = (iconName?: string) =>
-  !!iconName &&
-  (iconName.startsWith('/') || /\.(svg|png|jpe?g|webp)$/i.test(iconName));
-
-const getIcon = (iconName?: string) =>
-  iconName ? iconMap[iconName] || CodeBracketIcon : CodeBracketIcon;
+// isImageIcon and getStepIcon imported from @/lib/stepIcons
 </script>
 
 <template>
@@ -251,7 +206,7 @@ const getIcon = (iconName?: string) =>
                 alt=""
                 class="h-4.5 w-4.5 object-contain"
               />
-              <component v-else :is="getIcon(item.icon)" class="h-4.5 w-4.5" />
+              <component v-else :is="getStepIcon(item.icon)" class="h-4.5 w-4.5" />
             </div>
 
             <!-- Content -->

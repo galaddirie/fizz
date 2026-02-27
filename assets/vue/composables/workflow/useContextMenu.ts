@@ -26,6 +26,7 @@ interface UseContextMenuOptions {
   canEdit: () => boolean;
   tidyLabel: () => string;
   canPaste: () => boolean;
+  openAddStepPicker: (screenPoint: { x: number; y: number }) => void;
   canGroupSelection: () => boolean;
   canUngroupSelection: () => boolean;
   findStepNodeById: (id: string) => Node<StepNodeData> | null;
@@ -192,7 +193,10 @@ export function useContextMenu(options: UseContextMenuOptions) {
         }
         break;
       case 'add-step':
-        options.store.isLibraryOpen = true;
+        options.openAddStepPicker({
+          x: options.store.contextMenu.x,
+          y: options.store.contextMenu.y,
+        });
         break;
       case 'tidy-layout':
         options.handleLayout();

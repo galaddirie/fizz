@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
+import AddStepPicker from '@/components/flow/AddStepPicker.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
 import PublishModal from '@/components/flow/PublishModal.vue';
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
@@ -501,6 +502,15 @@ useLiveEvent<{ success: boolean; error?: string }>(
         :items="editor.contextMenuItems"
         @select="editor.handleContextMenuSelect"
         @close="editor.closeContextMenu"
+      />
+
+      <AddStepPicker
+        :show="editor.isAddStepPickerOpen"
+        :x="editor.addStepPickerX"
+        :y="editor.addStepPickerY"
+        :items="editor.nodeLibraryItems"
+        @select="editor.handleAddStepPickerSelect"
+        @close="editor.closeAddStepPicker"
       />
 
       <PublishModal

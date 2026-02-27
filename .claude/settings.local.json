@@ -12,7 +12,8 @@
       "WebSearch",
       "Bash(npx tsc:*)",
       "Bash(mix assets.build:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(npx vue-tsc:*)"
     ]
   }
 }

@@ -29,6 +29,7 @@ import { useWorkflowExecutionState } from '@/composables/workflow/useWorkflowExe
 import { useWorkflowNodeActions } from '@/composables/workflow/useWorkflowNodeActions';
 import { useWorkflowPins } from '@/composables/workflow/useWorkflowPins';
 import { useWorkflowSelection } from '@/composables/workflow/useWorkflowSelection';
+import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
 import type { StepType, Workflow, WorkflowDraft } from '@/types/workflow';
 import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
@@ -204,11 +205,51 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
   syncResetRef.value = () => { nodeInteraction.resetPendingNodeRemovals(); edgeInteraction.resetPendingEdgeRemovals(); };
+  const isAddStepPickerOpen = ref(false);
+  const addStepPickerX = ref(0);
+  const addStepPickerY = ref(0);
+  const openAddStepPicker = (screenPoint: { x: number; y: number }) => {
+    addStepPickerX.value = screenPoint.x;
+    addStepPickerY.value = screenPoint.y;
+    isAddStepPickerOpen.value = true;
+  };
+  const closeAddStepPicker = () => {
+    isAddStepPickerOpen.value = false;
+  };
+  const handleAddStepPickerSelect = (typeId: string) => {
+    const position = canvas.getFlowPositionFromEvent({
+      clientX: addStepPickerX.value,
+      clientY: addStepPickerY.value,
+    });
+
+    if (!position) {
+      closeAddStepPicker();
+      return;
+    }
+
+    const targetGroup = findGroupAtPoint(position, getNodes.value);
+    if (targetGroup) {
+      const groupPosition = getAbsoluteNodePosition(targetGroup);
+      emit('add_step', {
+        type_id: typeId,
+        position: {
+          x: position.x - groupPosition.x,
+          y: position.y - groupPosition.y,
+        },
+        group_id: targetGroup.id,
+      });
+    } else {
+      emit('add_step', { type_id: typeId, position });
+    }
+
+    closeAddStepPicker();
+  };
   const contextMenu = useContextMenu({
     store,
     canEdit: () => canEdit.value,
     tidyLabel: () => (getSelectedNodes.value.length > 1 ? 'Tidy Up Selection' : 'Tidy Up Workflow'),
     canPaste: () => clipboard.canPaste.value,
+    openAddStepPicker,
     canGroupSelection: () => grouping.canGroupSelection.value,
     canUngroupSelection: () => grouping.canUngroupSelection.value,
     findStepNodeById: nodeInteraction.findStepNodeById,
@@ -259,7 +300,10 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     keyboard.registerShortcuts();
   });
   onBeforeUnmount(() => keyboard.unregisterShortcuts());
-  onPaneClick(() => store.hideContextMenu());
+  onPaneClick(() => {
+    store.hideContextMenu();
+    closeAddStepPicker();
+  });
   return {
     store,
     undoStore,
@@ -296,6 +340,11 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     contextMenuItems: contextMenu.contextMenuItems,
     handleContextMenuSelect: contextMenu.handleContextMenuSelect,
     closeContextMenu,
+    isAddStepPickerOpen,
+    addStepPickerX,
+    addStepPickerY,
+    closeAddStepPicker,
+    handleAddStepPickerSelect,
     handleRunTest: actions.handleRunTest,
     handleCancelExecution: actions.handleCancelExecution,
     handleRunNode: nodeActions.handleRunNode,
