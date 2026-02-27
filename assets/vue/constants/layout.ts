@@ -1,6 +1,8 @@
 export const DEFAULT_VIEWPORT = { zoom: 1.2, x: 100, y: 50 };
 export const DOUBLE_CLICK_DELAY_MS = 250;
 export const CURSOR_THROTTLE_MS = 50;
+export const GRID_SIZE = 24;
+export const AXIS_LOCK_THRESHOLD = 4;
 
 export const DEFAULT_NODE_DIMENSIONS = { width: 150, height: 50 };
 export const DEFAULT_GROUP_DIMENSIONS = { width: 360, height: 240 };

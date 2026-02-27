@@ -1,10 +1,26 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 
+const SNAP_ENABLED_STORAGE_KEY = 'fizz.workflow_editor.snap_enabled';
+
+const readStorageBoolean = (key: string, fallback: boolean) => {
+  if (typeof window === 'undefined') return fallback;
+
+  const value = window.localStorage.getItem(key);
+  if (value === null) return fallback;
+  return value === '1';
+};
+
+const writeStorageBoolean = (key: string, value: boolean) => {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(key, value ? '1' : '0');
+};
+
 export const useClientStore = defineStore('client', () => {
   // Panel state
   const isLibraryOpen = ref(true);
   const isTracePanelExpanded = ref(true);
+  const snapEnabled = ref(readStorageBoolean(SNAP_ENABLED_STORAGE_KEY, false));
 
   // Selection state
   const selectedNodeId = ref<string | null>(null);
@@ -26,6 +42,15 @@ export const useClientStore = defineStore('client', () => {
 
   const toggleTracePanel = () => {
     isTracePanelExpanded.value = !isTracePanelExpanded.value;
+  };
+
+  const setSnapEnabled = (enabled: boolean) => {
+    snapEnabled.value = enabled;
+    writeStorageBoolean(SNAP_ENABLED_STORAGE_KEY, enabled);
+  };
+
+  const toggleSnap = () => {
+    setSnapEnabled(!snapEnabled.value);
   };
 
   const openConfigModal = (nodeId: string) => {
@@ -63,11 +88,14 @@ export const useClientStore = defineStore('client', () => {
   return {
     isLibraryOpen,
     isTracePanelExpanded,
+    snapEnabled,
     selectedNodeId,
     isConfigModalOpen,
     contextMenu,
     toggleLibrary,
     toggleTracePanel,
+    setSnapEnabled,
+    toggleSnap,
     openConfigModal,
     closeConfigModal,
     selectNode,

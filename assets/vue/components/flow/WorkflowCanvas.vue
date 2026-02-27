@@ -25,6 +25,9 @@ interface Props {
   edges: Edge<EdgeData>[];
   nodeTypes: NodeTypesObject;
   edgeTypes: EdgeTypesObject;
+  snapEnabled: boolean;
+  gridSize: number;
+  effectiveSnapToGrid: boolean;
   canEdit: boolean;
   isRevisionPreviewActive: boolean;
   previewLabel: string;
@@ -49,6 +52,7 @@ interface Props {
   isExecutionRunning: boolean;
   onRunTest: () => void;
   onCancelExecution: () => void;
+  onToggleSnap: () => void;
 }
 
 defineProps<Props>();
@@ -65,6 +69,8 @@ defineProps<Props>();
       :nodes-connectable="canEdit"
       :nodes-draggable="canEdit"
       :edges-updatable="canEdit"
+      :snap-to-grid="effectiveSnapToGrid"
+      :snap-grid="[gridSize, gridSize]"
       :apply-default="false"
       :default-viewport="DEFAULT_VIEWPORT"
       fit-view-on-init
@@ -78,10 +84,51 @@ defineProps<Props>();
       @dragover="handleDragOver"
       @drop="handleDrop"
     >
-      <Background :pattern-color="oklchToHex('oklch(50% 0.05 260)')" :gap="24" />
+      <Background
+        :pattern-color="oklchToHex('oklch(50% 0.05 260)')"
+        :gap="gridSize"
+      />
       <Controls position="bottom-right" />
       <MiniMap position="bottom-left" :node-color="miniMapNodeColor" />
     </VueFlow>
+
+    <button
+      v-if="canEdit"
+      type="button"
+      class="absolute bottom-[15px] right-[130px] z-[1100] flex h-7 w-7 items-center justify-center rounded-md border border-white bg-white text-slate-700 shadow-sm transition-all duration-150 hover:scale-105 hover:shadow-md"
+      :class="snapEnabled ? 'ring-2 ring-primary/60 text-primary' : ''"
+      title="Toggle snap (Cmd/Ctrl while dragging)"
+      @click="onToggleSnap"
+    >
+      <svg
+        class="h-4 w-4"
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="m12 15 4 4"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke="currentColor"
+        />
+        <path
+          d="M2.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.029-6.029a1 1 0 1 1 3 3l-6.029 6.029a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.365-6.367A1 1 0 0 0 8.716 4.282z"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke="currentColor"
+        />
+        <path
+          d="m5 8 4 4"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke="currentColor"
+        />
+      </svg>
+    </button>
 
     <div
       v-if="isRevisionPreviewActive"

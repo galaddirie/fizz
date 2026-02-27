@@ -6,6 +6,7 @@ import RevisionToolbar from '@/components/flow/RevisionToolbar.vue';
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import { useRevisionViewer } from '@/composables/workflow/useRevisionViewer';
+import { GRID_SIZE } from '@/constants/layout';
 import type { RevisionViewerEmits, RevisionViewerProps } from '@/types/revisionViewer';
 import type { EdgeData, WorkflowNodeData } from '@/types/workflow';
 
@@ -43,6 +44,9 @@ const noop = () => {};
           :edges="viewer.edges"
           :node-types="viewer.nodeTypes"
           :edge-types="viewer.edgeTypes"
+          :snap-enabled="false"
+          :grid-size="GRID_SIZE"
+          :effective-snap-to-grid="false"
           :can-edit="false"
           :is-revision-preview-active="true"
           :preview-label="viewer.revisionLabel"
@@ -66,6 +70,7 @@ const noop = () => {};
           :is-execution-running="false"
           :on-run-test="noop"
           :on-cancel-execution="noop"
+          :on-toggle-snap="noop"
         />
       </div>
 

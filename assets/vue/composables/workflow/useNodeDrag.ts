@@ -1,11 +1,10 @@
 import { ref } from 'vue';
 import type { GraphNode, XYPosition } from '@vue-flow/core';
 
-import { DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
+import { AXIS_LOCK_THRESHOLD, DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
 import type { GroupNodeData, WorkflowNodeData } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 import {
-  buildAbsolutePositions,
   buildRelativePositions,
   findGroupAtPoint,
 } from '@/lib/workflowGeometry';
@@ -29,6 +28,8 @@ type NodeDragStopEvent = {
 
 interface UseNodeDragOptions {
   canEdit: () => boolean;
+  gridSize: () => number;
+  snapEnabled: () => boolean;
   getNodes: () => GraphNode<WorkflowNodeData>[];
   groupByStepId: () => Map<string, string>;
   updateNode: (id: string, changes: Partial<GraphNode<WorkflowNodeData>>) => void;
@@ -40,8 +41,7 @@ interface UseNodeDragOptions {
   ) => void;
   updateGroupingPreview: (
     nodes: GraphNode<WorkflowNodeData>[],
-    position: XYPosition | null,
-    shiftKey: boolean
+    position: XYPosition | null
   ) => void;
   clearGroupingPreview: () => void;
   getFlowPositionFromEvent: (point: { clientX: number; clientY: number }) => XYPosition | null;
@@ -50,8 +50,37 @@ interface UseNodeDragOptions {
   onNodeDragStop: (handler: (event: NodeDragStopEvent) => void) => void;
 }
 
+type DragAxis = 'x' | 'y';
+
+type PointerSample = {
+  timestamp: number;
+  position: XYPosition;
+};
+
+type DragSession = {
+  startPositions: Map<string, XYPosition>;
+  lastPositions: Map<string, XYPosition>;
+  anchorMouse: XYPosition;
+  axisLock: DragAxis | null;
+  recentSamples: PointerSample[];
+  pendingAxis: DragAxis | null;
+  pendingSince: number | null;
+};
+
+const snapValue = (value: number, grid: number) => grid * Math.round(value / grid);
+const INTENT_WINDOW_MS = 140;
+const SWITCH_PERSIST_MS = 70;
+const AXIS_ACQUIRE_RATIO = 1.08;
+const AXIS_SWITCH_RATIO = 1.2;
+const AXIS_DOMINANCE_MARGIN = 3;
+
+const getPointerEvent = (event: MouseEvent | TouchEvent) => {
+  if ('clientX' in event) return event;
+  return event.touches[0] ?? event.changedTouches?.[0] ?? null;
+};
+
 export function useNodeDrag(options: UseNodeDragOptions) {
-  const ungroupDragStepIds = ref<string[] | null>(null);
+  const dragSession = ref<DragSession | null>(null);
 
   const emitGroupPositionUpdate = (groupNode: GraphNode<GroupNodeData>) => {
     const width = groupNode.dimensions.width || DEFAULT_GROUP_DIMENSIONS.width;
@@ -70,45 +99,220 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     });
   };
 
-  const handleNodeDrag = (event: NodeDragEvent) => {
-    if (!options.canEdit()) return;
-    const mouseEvent = 'clientX' in event.event ? event.event : event.event.touches[0];
-    const flowPosition = options.getFlowPositionFromEvent(mouseEvent);
-    if (!flowPosition) return;
-
-    const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
-    const draggedStepNodes = event.nodes.filter(isStepNode);
-
-    const dragging_steps: Record<string, XYPosition> = {};
-    event.nodes.forEach(node => {
-      if (!isStepNode(node)) return;
-      dragging_steps[node.id] = node.position;
-    });
-
-    const hasDraggingSteps = Object.keys(dragging_steps).length > 0;
-    options.emitInteraction(flowPosition.x, flowPosition.y, hasDraggingSteps ? dragging_steps : null);
-    options.updateGroupingPreview(draggedStepNodes, flowPosition, shiftKey);
+  const getCurrentDraggedNodes = (eventNodes: GraphNode<WorkflowNodeData>[]) => {
+    const nodeById = new Map(options.getNodes().map(node => [node.id, node]));
+    return eventNodes.map(node => nodeById.get(node.id) ?? node);
   };
 
-  const restoreExpandParent = () => {
-    if (!ungroupDragStepIds.value) return;
-    const stepIds = ungroupDragStepIds.value;
-    ungroupDragStepIds.value = null;
+  const dominantAxisFromDelta = (
+    delta: XYPosition,
+    ratioThreshold: number,
+    distanceThreshold: number
+  ): DragAxis | null => {
+    const absX = Math.abs(delta.x);
+    const absY = Math.abs(delta.y);
+    if (Math.hypot(absX, absY) < distanceThreshold) return null;
 
-    stepIds.forEach(stepId => {
-      const node = options.getNodes().find(item => item.id === stepId);
-      options.updateNode(stepId, { expandParent: node?.parentNode ? true : undefined });
+    const major = Math.max(absX, absY);
+    const minor = Math.min(absX, absY);
+    const ratio = major / Math.max(1, minor);
+    if (ratio < ratioThreshold) return null;
+    if (major - minor < AXIS_DOMINANCE_MARGIN) return null;
+    return absX >= absY ? 'x' : 'y';
+  };
+
+  const trackPointerSample = (session: DragSession, position: XYPosition) => {
+    const now = Date.now();
+    session.recentSamples.push({ timestamp: now, position });
+    const cutoff = now - INTENT_WINDOW_MS;
+    session.recentSamples = session.recentSamples.filter(sample => sample.timestamp >= cutoff);
+  };
+
+  const getRecentDelta = (session: DragSession, currentPosition: XYPosition): XYPosition => {
+    const oldest = session.recentSamples[0];
+    if (!oldest) {
+      return {
+        x: currentPosition.x - session.anchorMouse.x,
+        y: currentPosition.y - session.anchorMouse.y,
+      };
+    }
+
+    return {
+      x: currentPosition.x - oldest.position.x,
+      y: currentPosition.y - oldest.position.y,
+    };
+  };
+
+  const resolveAxisLock = (session: DragSession, shiftPressed: boolean, flowPosition: XYPosition) => {
+    if (!shiftPressed) {
+      session.axisLock = null;
+      session.pendingAxis = null;
+      session.pendingSince = null;
+      session.recentSamples = [];
+      return null;
+    }
+
+    trackPointerSample(session, flowPosition);
+
+    const overallDelta = {
+      x: flowPosition.x - session.anchorMouse.x,
+      y: flowPosition.y - session.anchorMouse.y,
+    };
+    const recentDelta = getRecentDelta(session, flowPosition);
+    const overallAxis = dominantAxisFromDelta(
+      overallDelta,
+      AXIS_ACQUIRE_RATIO,
+      AXIS_LOCK_THRESHOLD
+    );
+    const recentAxis = dominantAxisFromDelta(recentDelta, AXIS_SWITCH_RATIO, 2);
+
+    if (!session.axisLock) {
+      session.axisLock = overallAxis ?? recentAxis;
+      return session.axisLock;
+    }
+
+    const currentAxis = session.axisLock;
+    const oppositeAxis: DragAxis = currentAxis === 'x' ? 'y' : 'x';
+    const recentWantsOpposite = recentAxis === oppositeAxis;
+    if (!recentWantsOpposite) {
+      session.pendingAxis = null;
+      session.pendingSince = null;
+      return session.axisLock;
+    }
+
+    const now = Date.now();
+    if (session.pendingAxis !== oppositeAxis) {
+      session.pendingAxis = oppositeAxis;
+      session.pendingSince = now;
+      return session.axisLock;
+    }
+
+    const elapsed = now - (session.pendingSince ?? now);
+    const overallWantsOpposite = overallAxis === oppositeAxis;
+    const requiredDuration = overallWantsOpposite ? 0 : SWITCH_PERSIST_MS;
+    if (elapsed >= requiredDuration) {
+      session.axisLock = oppositeAxis;
+      session.pendingAxis = null;
+      session.pendingSince = null;
+    }
+
+    return session.axisLock;
+  };
+
+  const constrainPosition = (
+    anchorNode: XYPosition,
+    anchorMouse: XYPosition,
+    mouse: XYPosition,
+    axisLock: DragAxis | null,
+    shouldSnap: boolean
+  ) => {
+    const raw = {
+      x: anchorNode.x + (mouse.x - anchorMouse.x),
+      y: anchorNode.y + (mouse.y - anchorMouse.y),
+    };
+
+    const gridSize = Math.max(1, options.gridSize());
+    let x = raw.x;
+    let y = raw.y;
+
+    if (axisLock === 'x') {
+      y = anchorNode.y;
+    } else if (axisLock === 'y') {
+      x = anchorNode.x;
+    }
+
+    if (shouldSnap) {
+      if (axisLock === 'x') {
+        x = snapValue(x, gridSize);
+      } else if (axisLock === 'y') {
+        y = snapValue(y, gridSize);
+      } else {
+        x = snapValue(x, gridSize);
+        y = snapValue(y, gridSize);
+      }
+    }
+
+    return { x, y };
+  };
+
+  const handleNodeDrag = (event: NodeDragEvent) => {
+    if (!options.canEdit()) return;
+    const pointerEvent = getPointerEvent(event.event);
+    if (!pointerEvent) return;
+    const flowPosition = options.getFlowPositionFromEvent(pointerEvent);
+    if (!flowPosition) return;
+
+    if (!dragSession.value) {
+      dragSession.value = {
+        startPositions: new Map(event.nodes.map(node => [node.id, { ...node.position }])),
+        lastPositions: new Map(event.nodes.map(node => [node.id, { ...node.position }])),
+        anchorMouse: flowPosition,
+        axisLock: null,
+        recentSamples: [],
+        pendingAxis: null,
+        pendingSince: null,
+      };
+    }
+
+    const shiftPressed = 'shiftKey' in event.event ? !!event.event.shiftKey : false;
+    const cmdCtrlPressed =
+      'metaKey' in event.event ? !!(event.event.metaKey || event.event.ctrlKey) : false;
+    const shouldSnap = options.snapEnabled() || cmdCtrlPressed;
+    const session = dragSession.value;
+    if (!session) return;
+    const axisLock = resolveAxisLock(session, shiftPressed, flowPosition);
+
+    const draggingStepPositions: Record<string, XYPosition> = {};
+    event.nodes.forEach(node => {
+      const start = session.startPositions.get(node.id) ?? node.position;
+      const constrained = constrainPosition(
+        start,
+        session.anchorMouse,
+        flowPosition,
+        axisLock,
+        shouldSnap
+      );
+      if (constrained.x !== node.position.x || constrained.y !== node.position.y) {
+        options.updateNode(node.id, { position: constrained });
+      }
+      session.lastPositions.set(node.id, constrained);
+
+      if (isStepNode(node)) {
+        draggingStepPositions[node.id] = constrained;
+      }
     });
+    const hasDraggingSteps = Object.keys(draggingStepPositions).length > 0;
+    options.emitInteraction(
+      flowPosition.x,
+      flowPosition.y,
+      hasDraggingSteps ? draggingStepPositions : null
+    );
+
+    const constrainedDraggedNodes = getCurrentDraggedNodes(event.nodes);
+    const constrainedDraggedStepNodes = constrainedDraggedNodes.filter(isStepNode);
+    options.updateGroupingPreview(constrainedDraggedStepNodes, flowPosition);
   };
 
   const handleNodeDragStop = (event: NodeDragStopEvent) => {
     if (!options.canEdit()) return;
     options.emitInteraction(0, 0, null);
     options.clearGroupingPreview();
-    restoreExpandParent();
 
-    const draggedStepNodes = event.nodes.filter(isStepNode);
-    const draggedGroupNodes = event.nodes.filter(isGroupNode);
+    const session = dragSession.value;
+    if (session) {
+      event.nodes.forEach(node => {
+        const finalPosition =
+          session.lastPositions.get(node.id) ?? session.startPositions.get(node.id) ?? node.position;
+        if (finalPosition.x !== node.position.x || finalPosition.y !== node.position.y) {
+          options.updateNode(node.id, { position: finalPosition });
+        }
+      });
+    }
+
+    const constrainedDraggedNodes = getCurrentDraggedNodes(event.nodes);
+
+    const draggedStepNodes = constrainedDraggedNodes.filter(isStepNode);
+    const draggedGroupNodes = constrainedDraggedNodes.filter(isGroupNode);
 
     draggedGroupNodes.forEach(groupNode => {
       emitGroupPositionUpdate(groupNode as GraphNode<GroupNodeData>);
@@ -118,25 +322,9 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     let targetGroupId: string | null = null;
 
     if (draggedStepNodes.length > 0) {
-      const pointerEvent =
-        'clientX' in event.event
-          ? event.event
-          : event.event.changedTouches?.[0] ?? event.event.touches?.[0] ?? null;
-      const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
+      const pointerEvent = getPointerEvent(event.event);
 
-      if (shiftKey) {
-        const stepIds = draggedStepNodes.map(node => node.id);
-        const hasGroupedSteps = stepIds.some(stepId => options.groupByStepId().has(stepId));
-
-        if (hasGroupedSteps) {
-          options.emit('set_group_membership', {
-            group_id: null,
-            step_ids: stepIds,
-            step_positions: buildAbsolutePositions(draggedStepNodes),
-          });
-          handledStepIds = new Set(stepIds);
-        }
-      } else if (pointerEvent) {
+      if (pointerEvent) {
         const flowPosition = options.getFlowPositionFromEvent(pointerEvent);
         const targetGroup = flowPosition ? findGroupAtPoint(flowPosition, options.getNodes()) : null;
 
@@ -179,22 +367,26 @@ export function useNodeDrag(options: UseNodeDragOptions) {
         emitGroupPositionUpdate(groupNode as GraphNode<GroupNodeData>);
       }
     });
+
+    dragSession.value = null;
   };
 
   const handleNodeDragStart = (event: NodeDragStartEvent) => {
     if (!options.canEdit()) return;
-    const shiftKey = 'shiftKey' in event.event ? event.event.shiftKey : false;
-    const draggedStepNodes = event.nodes.filter(isStepNode);
-    const hasGroupedSteps = draggedStepNodes.some(node => options.groupByStepId().has(node.id));
+    const pointerEvent = getPointerEvent(event.event);
+    const flowPosition = pointerEvent ? options.getFlowPositionFromEvent(pointerEvent) : null;
 
-    if (shiftKey && hasGroupedSteps) {
-      ungroupDragStepIds.value = draggedStepNodes.map(node => node.id);
-      draggedStepNodes.forEach(node => {
-        options.updateNode(node.id, { expandParent: false });
-      });
-    } else {
-      ungroupDragStepIds.value = null;
-    }
+    dragSession.value = {
+      startPositions: new Map(event.nodes.map(node => [node.id, { ...node.position }])),
+      lastPositions: new Map(event.nodes.map(node => [node.id, { ...node.position }])),
+      anchorMouse: flowPosition ?? { x: 0, y: 0 },
+      axisLock: null,
+      recentSamples: flowPosition
+        ? [{ timestamp: Date.now(), position: flowPosition }]
+        : [],
+      pendingAxis: null,
+      pendingSince: null,
+    };
   };
 
   options.onNodeDrag(handleNodeDrag);

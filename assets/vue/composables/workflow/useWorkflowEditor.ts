@@ -29,6 +29,7 @@ import { useWorkflowExecutionState } from '@/composables/workflow/useWorkflowExe
 import { useWorkflowNodeActions } from '@/composables/workflow/useWorkflowNodeActions';
 import { useWorkflowPins } from '@/composables/workflow/useWorkflowPins';
 import { useWorkflowSelection } from '@/composables/workflow/useWorkflowSelection';
+import { GRID_SIZE } from '@/constants/layout';
 import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
 import type { StepType, Workflow, WorkflowDraft } from '@/types/workflow';
 import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
@@ -52,6 +53,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     onNodeDragStart,
     onNodeDragStop,
     onNodeDrag,
+    onMoveStart,
     project,
     getNodes,
     getEdges,
@@ -69,6 +71,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
   const syncResetRef = ref<() => void>(() => { });
   const canEdit = computed(() => true);
+  const gridSize = GRID_SIZE;
+  const isSnapModifierPressed = ref(false);
+  const effectiveSnapToGrid = computed(() => store.snapEnabled || isSnapModifierPressed.value);
   const activeWorkflow = computed<Workflow>(() => props.workflow);
   const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
   const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, emit });
@@ -147,6 +152,8 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   };
   useNodeDrag({
     canEdit: () => canEdit.value,
+    gridSize: () => gridSize,
+    snapEnabled: () => store.snapEnabled,
     getNodes: () => getNodes.value,
     groupByStepId: () => grouping.groupByStepId.value,
     updateNode,
@@ -296,11 +303,35 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   useLiveEvent('workflow:redo_applied', () => undoStore.handleRedoApplied());
   useLiveEvent('workflow:redo_conflict', () => undoStore.handleRedoConflict());
 
+  const syncSnapModifierState = (event: KeyboardEvent) => {
+    isSnapModifierPressed.value = event.metaKey || event.ctrlKey;
+  };
+
+  const resetSnapModifierState = () => {
+    isSnapModifierPressed.value = false;
+  };
+
   onMounted(() => {
     keyboard.registerShortcuts();
+    window.addEventListener('keydown', syncSnapModifierState);
+    window.addEventListener('keyup', syncSnapModifierState);
+    window.addEventListener('blur', resetSnapModifierState);
   });
-  onBeforeUnmount(() => keyboard.unregisterShortcuts());
+  onBeforeUnmount(() => {
+    keyboard.unregisterShortcuts();
+    window.removeEventListener('keydown', syncSnapModifierState);
+    window.removeEventListener('keyup', syncSnapModifierState);
+    window.removeEventListener('blur', resetSnapModifierState);
+  });
   onPaneClick(() => {
+    store.hideContextMenu();
+    closeAddStepPicker();
+  });
+  onMoveStart(() => {
+    store.hideContextMenu();
+    closeAddStepPicker();
+  });
+  onNodeDragStart(() => {
     store.hideContextMenu();
     closeAddStepPicker();
   });
@@ -311,6 +342,8 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     edges,
     nodeTypes,
     edgeTypes,
+    gridSize,
+    effectiveSnapToGrid,
     viewport,
     setCanvasRef,
     setVueFlowRef,

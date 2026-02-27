@@ -17,8 +17,7 @@ interface UseCanvasInteractionOptions {
   ) => void;
   updateGroupingPreview: (
     nodes: GraphNode<WorkflowNodeData>[],
-    position: XYPosition | null,
-    shiftKey: boolean
+    position: XYPosition | null
   ) => void;
   onAddStep: (payload: {
     type_id: string;
@@ -49,7 +48,7 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
       options.emitInteraction(flowPosition.x, flowPosition.y);
     } else {
       const draggingStepNodes = options.getNodes().filter(node => node.dragging).filter(isStepNode);
-      options.updateGroupingPreview(draggingStepNodes, flowPosition, event.shiftKey);
+      options.updateGroupingPreview(draggingStepNodes, flowPosition);
     }
   };
 

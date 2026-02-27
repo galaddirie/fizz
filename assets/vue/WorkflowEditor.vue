@@ -429,6 +429,9 @@ useLiveEvent<{ success: boolean; error?: string }>(
               :edges="editor.edges"
               :node-types="editor.nodeTypes"
               :edge-types="editor.edgeTypes"
+              :snap-enabled="editor.store.snapEnabled"
+              :grid-size="editor.gridSize"
+              :effective-snap-to-grid="editor.effectiveSnapToGrid"
               :can-edit="editor.canEdit"
               :is-revision-preview-active="false"
               preview-label=""
@@ -453,6 +456,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
               :is-execution-running="editor.isExecutionRunning"
               :on-run-test="editor.handleRunTest"
               :on-cancel-execution="editor.handleCancelExecution"
+              :on-toggle-snap="editor.store.toggleSnap"
             />
 
             <ExecutionTracePanel

@@ -98,10 +98,9 @@ export function useGrouping(options: UseGroupingOptions) {
 
   const updateGroupingPreview = (
     draggedStepNodes: GraphNode<WorkflowNodeData>[],
-    flowPosition: XYPosition | null,
-    shiftKey: boolean
+    flowPosition: XYPosition | null
   ) => {
-    if (shiftKey || draggedStepNodes.length === 0) {
+    if (draggedStepNodes.length === 0) {
       clearGroupingPreview();
       return;
     }

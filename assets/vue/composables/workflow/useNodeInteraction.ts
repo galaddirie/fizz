@@ -137,6 +137,13 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
     const nextChanges: NodeChange[] = [];
 
     for (const change of normalizedChanges) {
+      if (change.type === 'position') {
+        // We drive node movement via useNodeDrag/updateNode.
+        // Applying Vue Flow's raw position changes here can cause
+        // transient incorrect coordinates on multi-node drop.
+        continue;
+      }
+
       if (change.type === 'remove') {
         const removedNode = options.getNodes().find(node => node.id === change.id);
         if (removedNode && isGroupNode(removedNode)) {
