@@ -45,6 +45,9 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       :update_step_position ->
         validate_update_step(draft, operation.payload)
 
+      :update_step_positions ->
+        validate_update_step_positions(draft, operation.payload)
+
       :update_step_metadata ->
         validate_update_step(draft, operation.payload)
 
@@ -139,6 +142,23 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       :ok
     else
       {:error, {:step_not_found, step_id}}
+    end
+  end
+
+  defp validate_update_step_positions(draft, payload) do
+    step_positions = field(payload, :step_positions)
+
+    if is_map(step_positions) do
+      step_ids = Map.keys(step_positions)
+      missing = Enum.reject(step_ids, &step_exists?(draft, &1))
+
+      if missing == [] do
+        :ok
+      else
+        {:error, {:steps_not_found, missing}}
+      end
+    else
+      {:error, :invalid_step_positions}
     end
   end
 
@@ -340,6 +360,11 @@ defmodule Fizz.Collaboration.EditSession.Operations do
     update_step(draft, step_id, fn step ->
       %{step | position: position}
     end)
+  end
+
+  defp do_apply(draft, :update_step_positions, payload) do
+    step_positions = field(payload, :step_positions) || %{}
+    {:ok, update_step_positions(draft, step_positions)}
   end
 
   defp do_apply(draft, :update_step_metadata, payload) do

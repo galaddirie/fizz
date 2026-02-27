@@ -758,6 +758,13 @@ defmodule Fizz.Collaboration.EditSession.Server do
         step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
         "Move Step: #{lookup_step_name(draft, step_id)}"
 
+      :update_step_positions ->
+        step_positions =
+          Map.get(payload, :step_positions) || Map.get(payload, "step_positions") || %{}
+
+        count = map_size(step_positions)
+        "Move #{count} Step#{if(count == 1, do: "", else: "s")}"
+
       :update_step_metadata ->
         step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
         "Update Step: #{lookup_step_name(draft, step_id)}"
@@ -833,6 +840,7 @@ defmodule Fizz.Collaboration.EditSession.Server do
              :remove_step,
              :update_step_config,
              :update_step_position,
+             :update_step_positions,
              :update_step_metadata,
              :add_connection,
              :remove_connection,

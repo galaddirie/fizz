@@ -347,9 +347,18 @@ export function useNodeDrag(options: UseNodeDragOptions) {
       }
     }
 
+    const movedStepPositions: Record<string, XYPosition> = {};
     for (const node of draggedStepNodes) {
       if (handledStepIds.has(node.id)) continue;
-      options.emit('move_step', { step_id: node.id, position: node.position });
+      movedStepPositions[node.id] = { x: node.position.x, y: node.position.y };
+    }
+
+    const movedStepEntries = Object.entries(movedStepPositions);
+    if (movedStepEntries.length === 1) {
+      const [stepId, position] = movedStepEntries[0];
+      options.emit('move_step', { step_id: stepId, position });
+    } else if (movedStepEntries.length > 1) {
+      options.emit('move_steps', { step_positions: movedStepPositions });
     }
 
     const affectedGroupIds = new Set<string>();

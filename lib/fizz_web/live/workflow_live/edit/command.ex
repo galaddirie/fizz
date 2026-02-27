@@ -5,6 +5,7 @@ defmodule FizzWeb.WorkflowLive.Edit.Command do
               "add_step",
               "duplicate_steps",
               "move_step",
+              "move_steps",
               "tidy_layout",
               "update_step",
               "remove_step",

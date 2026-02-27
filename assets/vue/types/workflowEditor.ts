@@ -40,6 +40,7 @@ export type WorkflowEditorCommandType =
   | 'update_step'
   | 'remove_step'
   | 'move_step'
+  | 'move_steps'
   | 'add_connection'
   | 'remove_connection'
   | 'pin_output'
@@ -117,6 +118,7 @@ export type WorkflowEditorEmits = {
   (e: 'update_step', payload: { step_id: string; changes: Partial<Step> }): void;
   (e: 'remove_step', payload: { step_id: string }): void;
   (e: 'move_step', payload: { step_id: string; position: { x: number; y: number } }): void;
+  (e: 'move_steps', payload: { step_positions: Record<string, XYPosition> }): void;
   (
     e: 'add_connection',
     payload: {

@@ -80,6 +80,23 @@ defmodule Fizz.Collaboration.EditSession.Inversion do
              ]}
         end
 
+      :update_step_positions ->
+        step_positions = field(payload, :step_positions) || %{}
+        step_ids = Map.keys(step_positions)
+        missing_ids = Enum.filter(step_ids, &is_nil(find_step(draft, &1)))
+
+        if missing_ids == [] do
+          {:ok,
+           [
+             %{
+               type: :update_step_positions,
+               payload: %{step_positions: capture_step_positions(draft, step_ids)}
+             }
+           ]}
+        else
+          {:error, {:steps_not_found, missing_ids}}
+        end
+
       :update_step_metadata ->
         step_id = field(payload, :step_id)
         changes = field(payload, :changes) || %{}

@@ -386,6 +386,24 @@ defmodule FizzWeb.WorkflowLive.Edit do
   end
 
   @impl true
+  def handle_event("move_steps", %{"step_positions" => step_positions}, socket)
+      when is_map(step_positions) do
+    normalized_positions =
+      Enum.reduce(step_positions, %{}, fn {step_id, position}, acc ->
+        Map.put(acc, step_id, normalize_position(position || %{}))
+      end)
+
+    if map_size(normalized_positions) == 0 do
+      {:noreply, socket}
+    else
+      apply_operation(socket, :update_step_positions, %{step_positions: normalized_positions})
+    end
+  end
+
+  @impl true
+  def handle_event("move_steps", _params, socket), do: {:noreply, socket}
+
+  @impl true
   def handle_event("tidy_layout", params, socket) do
     steps = params |> Map.get("steps", []) |> List.wrap()
     groups = params |> Map.get("groups", []) |> List.wrap()

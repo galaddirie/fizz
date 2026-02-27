@@ -15,9 +15,16 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
   };
 
   const handleMoveSteps = (stepPositions: Record<string, XYPosition>) => {
-    Object.entries(stepPositions).forEach(([stepId, position]) => {
+    const entries = Object.entries(stepPositions);
+    if (entries.length === 0) return;
+
+    if (entries.length === 1) {
+      const [stepId, position] = entries[0];
       options.emit('move_step', { step_id: stepId, position });
-    });
+      return;
+    }
+
+    options.emit('move_steps', { step_positions: stepPositions });
   };
 
   const handleUpdateStep = (stepId: string, changes: Partial<Step>) => {

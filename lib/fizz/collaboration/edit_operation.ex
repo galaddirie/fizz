@@ -9,6 +9,7 @@ defmodule Fizz.Collaboration.EditOperation do
           | :remove_step
           | :update_step_config
           | :update_step_position
+          | :update_step_positions
           | :update_step_metadata
           | :add_connection
           | :remove_connection
@@ -32,6 +33,7 @@ defmodule Fizz.Collaboration.EditOperation do
         :remove_step,
         :update_step_config,
         :update_step_position,
+        :update_step_positions,
         :update_step_metadata,
         :add_connection,
         :remove_connection,
