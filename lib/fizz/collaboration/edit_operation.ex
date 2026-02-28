@@ -17,6 +17,7 @@ defmodule Fizz.Collaboration.EditOperation do
           | :update_group
           | :remove_group
           | :set_group_membership
+          | :commit_drag_layout
           | :pin_step_output
           | :unpin_step_output
           | :disable_step
@@ -41,6 +42,7 @@ defmodule Fizz.Collaboration.EditOperation do
         :update_group,
         :remove_group,
         :set_group_membership,
+        :commit_drag_layout,
         :pin_step_output,
         :unpin_step_output,
         :disable_step,

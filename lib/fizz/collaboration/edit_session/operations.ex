@@ -69,6 +69,9 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       :set_group_membership ->
         validate_set_group_membership(draft, operation.payload)
 
+      :commit_drag_layout ->
+        validate_commit_drag_layout(draft, operation.payload)
+
       # Editor operations don't need draft validation
       type when type in [:pin_step_output, :unpin_step_output, :disable_step, :enable_step] ->
         :ok
@@ -281,6 +284,73 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       true ->
         {:error, {:group_not_found, group_id}}
     end
+  end
+
+  defp validate_commit_drag_layout(draft, payload) do
+    groups = List.wrap(field(payload, :groups) || [])
+    step_positions = field(payload, :step_positions) || %{}
+    group_id_by_step_id = field(payload, :group_id_by_step_id) || %{}
+
+    cond do
+      not is_map(step_positions) ->
+        {:error, :invalid_step_positions}
+
+      not is_map(group_id_by_step_id) ->
+        {:error, :invalid_group_membership_map}
+
+      true ->
+        validate_commit_drag_layout_references(draft, groups, step_positions, group_id_by_step_id)
+    end
+  end
+
+  defp validate_commit_drag_layout_references(draft, groups, step_positions, group_id_by_step_id) do
+    group_ids =
+      groups
+      |> Enum.map(&field(&1, :group_id))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    missing_groups =
+      group_ids
+      |> Enum.reject(&group_exists?(draft, &1))
+      |> Kernel.++(missing_group_membership_targets(draft, group_id_by_step_id))
+      |> Enum.uniq()
+
+    step_ids =
+      step_positions
+      |> Map.keys()
+      |> Kernel.++(Map.keys(group_id_by_step_id))
+      |> Enum.uniq()
+
+    missing_steps = Enum.reject(step_ids, &step_exists?(draft, &1))
+
+    cond do
+      missing_groups != [] ->
+        {:error, {:groups_not_found, missing_groups}}
+
+      missing_steps != [] ->
+        {:error, {:steps_not_found, missing_steps}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp missing_group_membership_targets(draft, group_id_by_step_id) do
+    group_id_by_step_id
+    |> Enum.reduce([], fn {_step_id, group_id}, acc ->
+      normalized_group_id =
+        case group_id do
+          "" -> nil
+          value -> value
+        end
+
+      if is_nil(normalized_group_id) or group_exists?(draft, normalized_group_id) do
+        acc
+      else
+        [normalized_group_id | acc]
+      end
+    end)
   end
 
   # ============================================================================
@@ -501,6 +571,25 @@ defmodule Fizz.Collaboration.EditSession.Operations do
     {:ok, draft}
   end
 
+  defp do_apply(draft, :commit_drag_layout, payload) do
+    groups = List.wrap(field(payload, :groups) || [])
+    step_positions = field(payload, :step_positions) || %{}
+    group_id_by_step_id = field(payload, :group_id_by_step_id) || %{}
+    membership_step_ids = Map.keys(group_id_by_step_id)
+
+    groups_after_membership =
+      draft.groups
+      |> List.wrap()
+      |> remove_steps_from_groups(membership_step_ids)
+      |> apply_group_membership_map(group_id_by_step_id)
+      |> normalize_groups()
+
+    groups_with_positions = apply_group_positions(groups_after_membership, groups)
+    draft = %{draft | groups: groups_with_positions}
+    draft = update_step_positions(draft, step_positions)
+    {:ok, draft}
+  end
+
   defp do_apply(draft, type, _payload)
        when type in [:pin_step_output, :unpin_step_output, :disable_step, :enable_step] do
     {:ok, draft}
@@ -602,6 +691,36 @@ defmodule Fizz.Collaboration.EditSession.Operations do
 
   defp maybe_add_steps_to_group(groups, group_id, step_ids),
     do: add_steps_to_group(groups, group_id, step_ids)
+
+  defp apply_group_membership_map(groups, group_id_by_step_id) do
+    Enum.reduce(group_id_by_step_id, groups, fn {step_id, group_id}, acc ->
+      normalized_group_id =
+        case group_id do
+          "" -> nil
+          value -> value
+        end
+
+      case normalized_group_id do
+        nil -> acc
+        value -> add_steps_to_group(acc, value, [step_id])
+      end
+    end)
+  end
+
+  defp apply_group_positions(groups, group_changes) do
+    Enum.reduce(group_changes, groups, fn change, acc ->
+      group_id = field(change, :group_id)
+      position = field(change, :position) || %{}
+
+      Enum.map(acc, fn group ->
+        if field(group, :id) == group_id do
+          update_group_fields(group, %{position: position})
+        else
+          group
+        end
+      end)
+    end)
+  end
 
   defp normalize_groups(groups) do
     groups

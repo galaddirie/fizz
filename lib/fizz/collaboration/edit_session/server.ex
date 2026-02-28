@@ -457,6 +457,8 @@ defmodule Fizz.Collaboration.EditSession.Server do
           "Broadcasting operation #{op_record.operation_id} (type: #{op_record.type}) to topic #{PubSub.session_topic(state.workflow_id)}"
         )
 
+        log_layout_operation_summary(op_record)
+
         PubSub.broadcast_operation(state.workflow_id, op_record)
 
         # If editor state changed, broadcast that too
@@ -790,6 +792,9 @@ defmodule Fizz.Collaboration.EditSession.Server do
       :set_group_membership ->
         "Update Group Members"
 
+      :commit_drag_layout ->
+        "Commit Drag Layout"
+
       :pin_step_output ->
         step_id = Map.get(payload, :step_id) || Map.get(payload, "step_id")
         "Pin Output: #{lookup_step_name(draft, step_id)}"
@@ -847,7 +852,8 @@ defmodule Fizz.Collaboration.EditSession.Server do
              :add_group,
              :update_group,
              :remove_group,
-             :set_group_membership
+             :set_group_membership,
+             :commit_drag_layout
            ] ->
         case Operations.apply(draft, operation) do
           {:ok, new_draft} ->
@@ -1204,6 +1210,39 @@ defmodule Fizz.Collaboration.EditSession.Server do
     idle_timer = Process.send_after(self(), :idle_timeout, @idle_timeout)
     %{state | idle_timer: idle_timer}
   end
+
+  defp log_layout_operation_summary(%EditOperation{type: :commit_drag_layout} = operation) do
+    payload = operation.payload || %{}
+    groups = payload[:groups] || payload["groups"] || []
+
+    step_positions =
+      case payload[:step_positions] || payload["step_positions"] do
+        value when is_map(value) -> value
+        _ -> %{}
+      end
+
+    group_membership =
+      case payload[:group_id_by_step_id] || payload["group_id_by_step_id"] do
+        value when is_map(value) -> value
+        _ -> %{}
+      end
+
+    txn_id = payload[:txn_id] || payload["txn_id"]
+    base_seq = payload[:base_seq] || payload["base_seq"]
+
+    Logger.debug(
+      "commit_drag_layout applied",
+      operation_id: operation.operation_id,
+      seq: operation.seq,
+      txn_id: txn_id,
+      base_seq: base_seq,
+      group_count: length(List.wrap(groups)),
+      step_position_count: map_size(step_positions),
+      membership_count: map_size(group_membership)
+    )
+  end
+
+  defp log_layout_operation_summary(_operation), do: :ok
 
   defp persist_state(state) do
     if state.dirty do

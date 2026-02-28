@@ -10,7 +10,11 @@ import {
 } from '@/constants/layout';
 import type { EdgeData, GroupNodeData, StepNodeData, WorkflowNodeData } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
-import { buildGroupBoundsFromPositions, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
+import {
+  GROUP_CONTENT_INSETS,
+  buildGroupBoundsFromPositions,
+  getAbsoluteNodePosition,
+} from '@/lib/workflowGeometry';
 import { isGroupNode, isStepNode } from '@/lib/workflowGuards';
 
 type LayoutNode = {
@@ -204,7 +208,11 @@ export function useLayoutEngine(options: UseLayoutEngineOptions) {
       const groupNode = groupNodeById.get(groupId);
       if (!groupNode) return;
       const groupSteps = stepNodes.filter(node => node.parentNode === groupId);
-      const bounds = buildGroupBoundsFromPositions(groupSteps, desiredAbsolutePositions);
+      const bounds = buildGroupBoundsFromPositions(
+        groupSteps,
+        desiredAbsolutePositions,
+        GROUP_CONTENT_INSETS
+      );
       if (!bounds) return;
       groupBoundsById.set(groupId, bounds);
 

@@ -10,6 +10,7 @@ import type {
 } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 import {
+  GROUP_CONTENT_INSETS,
   buildAbsolutePositions,
   buildGroupBounds,
   buildRelativePositions,
@@ -156,7 +157,7 @@ export function useGrouping(options: UseGroupingOptions) {
     const selectedNodes = selectedStepNodes.value;
     if (selectedNodes.length === 0) return;
 
-    const bounds = buildGroupBounds(selectedNodes);
+    const bounds = buildGroupBounds(selectedNodes, GROUP_CONTENT_INSETS);
     if (!bounds) return;
 
     const stepIds = selectedNodes.map(node => node.id);

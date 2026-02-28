@@ -32,6 +32,7 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   editorState: undefined,
   presences: () => [],
   currentUserId: undefined,
+  collabSeq: 0,
   expressionPreviews: () => ({}),
   credentialOptions: () => [],
   debugExecutionId: null,

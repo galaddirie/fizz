@@ -202,6 +202,57 @@ defmodule Fizz.Collaboration.EditSession.Inversion do
 
         {:ok, inverse_ops}
 
+      :commit_drag_layout ->
+        groups = List.wrap(field(payload, :groups) || [])
+        step_positions = field(payload, :step_positions) || %{}
+        group_id_by_step_id = field(payload, :group_id_by_step_id) || %{}
+
+        group_ids =
+          groups
+          |> Enum.map(&field(&1, :group_id))
+          |> Enum.reject(&is_nil/1)
+          |> Enum.uniq()
+
+        inverse_group_changes =
+          Enum.map(group_ids, fn group_id ->
+            group = find_group(draft, group_id)
+
+            %{
+              group_id: group_id,
+              position:
+                case group do
+                  nil -> %{}
+                  current_group -> field(current_group, :position) || %{}
+                end
+            }
+          end)
+
+        inverse_step_positions =
+          capture_step_positions(
+            draft,
+            Map.keys(step_positions)
+          )
+
+        inverse_group_membership =
+          capture_group_membership(
+            draft,
+            Map.keys(group_id_by_step_id)
+          )
+
+        {:ok,
+         [
+           %{
+             type: :commit_drag_layout,
+             payload: %{
+               txn_id: field(payload, :txn_id),
+               base_seq: field(payload, :base_seq),
+               groups: inverse_group_changes,
+               step_positions: inverse_step_positions,
+               group_id_by_step_id: inverse_group_membership
+             }
+           }
+         ]}
+
       :pin_step_output ->
         step_id = field(payload, :step_id)
         {:ok, [%{type: :unpin_step_output, payload: %{step_id: step_id}}]}
@@ -285,6 +336,12 @@ defmodule Fizz.Collaboration.EditSession.Inversion do
       else
         acc
       end
+    end)
+  end
+
+  defp capture_group_membership(%WorkflowDraft{} = draft, step_ids) do
+    Enum.reduce(step_ids, %{}, fn step_id, acc ->
+      Map.put(acc, step_id, find_group_for_step(draft, step_id))
     end)
   end
 

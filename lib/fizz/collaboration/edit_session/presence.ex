@@ -35,6 +35,17 @@ defmodule Fizz.Collaboration.EditSession.Presence do
   @type presence_meta :: %{
           user: %{id: String.t(), email: String.t(), name: String.t() | nil},
           cursor: cursor() | nil,
+          dragging_steps: %{optional(String.t()) => %{x: number(), y: number()}} | nil,
+          dragging_groups:
+            %{
+              optional(String.t()) => %{
+                x: number(),
+                y: number(),
+                width: number(),
+                height: number()
+              }
+            }
+            | nil,
           selected_steps: [String.t()],
           focused_step: String.t() | nil,
           joined_at: DateTime.t()
@@ -98,7 +109,7 @@ defmodule Fizz.Collaboration.EditSession.Presence do
   This broadcasts a presence_diff with the updated metadata.
   """
   def update_cursor(workflow_id, user_id, %{x: _, y: _} = position) do
-    update_interaction(workflow_id, user_id, position, nil)
+    update_interaction(workflow_id, user_id, position, nil, nil)
   end
 
   def update_cursor(_workflow_id, _user_id, nil), do: :ok
@@ -106,13 +117,20 @@ defmodule Fizz.Collaboration.EditSession.Presence do
   @doc """
   Update user's interaction state (cursor and dragging nodes).
   """
-  def update_interaction(workflow_id, user_id, cursor, dragging_steps) do
+  def update_interaction(workflow_id, user_id, cursor, dragging_steps, dragging_groups \\ nil) do
     topic = topic(workflow_id)
 
     case update(self(), topic, user_id, fn meta ->
+           meta =
+             if is_map(cursor) do
+               Map.put(meta, :cursor, cursor)
+             else
+               meta
+             end
+
            meta
-           |> Map.put(:cursor, cursor)
            |> Map.put(:dragging_steps, dragging_steps)
+           |> Map.put(:dragging_groups, dragging_groups)
          end) do
       {:ok, _ref} ->
         :ok
@@ -222,6 +240,7 @@ defmodule Fizz.Collaboration.EditSession.Presence do
       },
       cursor: nil,
       dragging_steps: nil,
+      dragging_groups: nil,
       selected_steps: [],
       focused_step: nil,
       joined_at: DateTime.utc_now()

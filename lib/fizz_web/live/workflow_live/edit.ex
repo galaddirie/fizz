@@ -69,6 +69,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
                   |> assign(:expression_previews, %{})
                   |> assign(:webhook_execution_subscribed, false)
                   |> assign(:undo_state, nil)
+                  |> assign(:collab_seq, 0)
                   |> assign(:debug_execution_id, nil)
 
                 # Only set up collaboration when WebSocket is connected
@@ -157,13 +158,13 @@ defmodule FizzWeb.WorkflowLive.Edit do
     # Get initial presence list
     presences = PresenceFormatter.format(Presence.list_users(workflow_id))
 
-    {draft, editor_state} =
+    {draft, editor_state, collab_seq} =
       case Server.get_sync_state(workflow_id) do
-        {:ok, %{type: :full_sync, draft: draft, editor_state: sync_editor_state}} ->
-          {draft, deserialize_editor_state(sync_editor_state, workflow_id)}
+        {:ok, %{type: :full_sync, draft: draft, editor_state: sync_editor_state, seq: seq}} ->
+          {draft, deserialize_editor_state(sync_editor_state, workflow_id), seq}
 
         _ ->
-          {socket.assigns.workflow.draft, editor_state}
+          {socket.assigns.workflow.draft, editor_state, 0}
       end
 
     # Get latest execution
@@ -192,6 +193,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
       |> assign(:execution_id, if(execution, do: execution.id, else: nil))
       |> assign(:step_executions, step_executions)
       |> assign(:undo_state, fetch_undo_state(workflow_id, user.id))
+      |> assign(:collab_seq, collab_seq)
       |> maybe_toggle_webhook_subscription(editor_state)
 
     push_undo_state(socket)
@@ -251,6 +253,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
           execution={@execution}
           stepExecutions={@step_executions}
           undoState={@undo_state}
+          collabSeq={@collab_seq}
           v-on:editor_command={JS.push("editor_command")}
           expressionPreviews={@expression_previews}
           debugExecutionId={@debug_execution_id}
@@ -526,6 +529,17 @@ defmodule FizzWeb.WorkflowLive.Edit do
   end
 
   @impl true
+  def handle_event("commit_drag_layout", params, socket) do
+    payload = normalize_commit_drag_layout_payload(params)
+
+    if commit_drag_layout_empty?(payload) do
+      {:noreply, socket}
+    else
+      apply_operation(socket, :commit_drag_layout, payload)
+    end
+  end
+
+  @impl true
   def handle_event("add_connection", params, socket) do
     connection = %{
       id: UUID.generate(),
@@ -659,12 +673,21 @@ defmodule FizzWeb.WorkflowLive.Edit do
     x = params["x"]
     y = params["y"]
     dragging_steps = params["dragging_steps"]
+    dragging_groups = params["dragging_groups"]
+
+    cursor =
+      if is_number(x) and is_number(y) do
+        %{x: x, y: y}
+      else
+        nil
+      end
 
     Presence.update_interaction(
       socket.assigns.workflow.id,
       socket.assigns.current_user_id,
-      if(x && y, do: %{x: x, y: y}, else: nil),
-      dragging_steps
+      cursor,
+      dragging_steps,
+      dragging_groups
     )
 
     {:noreply, socket}
@@ -912,33 +935,51 @@ defmodule FizzWeb.WorkflowLive.Edit do
   # Handle operation broadcasts from the edit session server
   @impl true
   def handle_info({:operation_applied, operation}, socket) do
-    case Operations.apply(socket.assigns.workflow.draft, operation) do
-      {:ok, new_draft} ->
-        updated_workflow = %{socket.assigns.workflow | draft: new_draft}
+    seq = parse_optional_non_negative_integer(fetch_payload_value(operation, :seq))
 
-        socket =
-          socket
-          |> assign(:workflow, updated_workflow)
-          |> maybe_push_undo_state_for_operation(operation)
+    socket = push_operation_ack(socket, operation, seq)
 
-        {:noreply, socket}
+    if stale_seq?(seq, socket.assigns.collab_seq) do
+      {:noreply, socket}
+    else
+      case Operations.apply(socket.assigns.workflow.draft, operation) do
+        {:ok, new_draft} ->
+          updated_workflow = %{socket.assigns.workflow | draft: new_draft}
 
-      {:error, reason} ->
-        Logger.error(
-          "edit.ex: Failed to apply operation #{inspect(operation.type)}: #{inspect(reason)}. Reloading..."
-        )
+          socket =
+            socket
+            |> assign(:workflow, updated_workflow)
+            |> maybe_assign_collab_seq(seq)
+            |> maybe_push_undo_state_for_operation(operation)
 
-        # Fallback: reload from database
-        case Workflows.get_workflow_with_draft(
-               socket.assigns.current_scope,
-               socket.assigns.workflow.id
-             ) do
-          {:ok, workflow} ->
-            {:noreply, assign(socket, :workflow, workflow)}
+          {:noreply, socket}
 
-          {:error, _} ->
-            {:noreply, socket}
-        end
+        {:error, reason} ->
+          Logger.error(
+            "edit.ex: Failed to apply operation #{inspect(fetch_payload_value(operation, :type))}: #{inspect(reason)}. Reloading..."
+          )
+
+          case Server.get_sync_state(socket.assigns.workflow.id) do
+            {:ok, %{type: :full_sync, draft: draft, editor_state: editor_state, seq: sync_seq}} ->
+              deserialized_editor_state =
+                deserialize_editor_state(editor_state, socket.assigns.workflow.id)
+
+              sync_seq = parse_optional_non_negative_integer(sync_seq)
+
+              socket =
+                socket
+                |> assign(:workflow, %{socket.assigns.workflow | draft: draft})
+                |> assign(:editor_state, deserialized_editor_state)
+                |> maybe_toggle_webhook_subscription(deserialized_editor_state)
+                |> maybe_assign_collab_seq(sync_seq)
+                |> push_undo_state()
+
+              {:noreply, socket}
+
+            _ ->
+              {:noreply, socket}
+          end
+      end
     end
   end
 
@@ -989,16 +1030,26 @@ defmodule FizzWeb.WorkflowLive.Edit do
   # Handle sync state (for reconnection)
   @impl true
   def handle_info({:sync_state, state}, socket) do
-    editor_state = deserialize_editor_state(state.editor_state, socket.assigns.workflow.id)
+    incoming_seq =
+      state
+      |> fetch_payload_value(:seq)
+      |> parse_optional_non_negative_integer()
 
-    socket =
-      socket
-      |> assign(:workflow, %{socket.assigns.workflow | draft: state.draft})
-      |> assign(:editor_state, editor_state)
-      |> maybe_toggle_webhook_subscription(editor_state)
-      |> push_undo_state()
+    if stale_seq?(incoming_seq, socket.assigns.collab_seq) do
+      {:noreply, socket}
+    else
+      editor_state = deserialize_editor_state(state.editor_state, socket.assigns.workflow.id)
 
-    {:noreply, socket}
+      socket =
+        socket
+        |> assign(:workflow, %{socket.assigns.workflow | draft: state.draft})
+        |> assign(:editor_state, editor_state)
+        |> maybe_toggle_webhook_subscription(editor_state)
+        |> maybe_assign_collab_seq(incoming_seq)
+        |> push_undo_state()
+
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -1222,6 +1273,108 @@ defmodule FizzWeb.WorkflowLive.Edit do
 
   defp normalize_group_changes(_changes), do: %{}
 
+  defp normalize_commit_drag_layout_payload(params) do
+    txn_id =
+      case fetch_payload_value(params, :txn_id) do
+        value when is_binary(value) and value != "" -> value
+        _ -> UUID.generate()
+      end
+
+    base_seq =
+      params
+      |> fetch_payload_value(:base_seq)
+      |> parse_optional_non_negative_integer()
+
+    groups =
+      params
+      |> fetch_payload_value(:groups)
+      |> List.wrap()
+      |> Enum.reduce([], fn group, acc ->
+        group_id = fetch_payload_value(group, :group_id)
+        position = normalize_group_position(fetch_payload_value(group, :position) || %{})
+
+        if is_binary(group_id) and group_id != "" do
+          [%{group_id: group_id, position: position} | acc]
+        else
+          acc
+        end
+      end)
+      |> Enum.reverse()
+
+    step_positions =
+      case fetch_payload_value(params, :step_positions) do
+        positions when is_map(positions) ->
+          Enum.reduce(positions, %{}, fn {step_id, position}, acc ->
+            normalized_step_id = to_string(step_id)
+
+            if normalized_step_id == "" do
+              acc
+            else
+              Map.put(acc, normalized_step_id, normalize_position(position || %{}))
+            end
+          end)
+
+        _ ->
+          %{}
+      end
+
+    group_id_by_step_id =
+      case fetch_payload_value(params, :group_id_by_step_id) do
+        memberships when is_map(memberships) ->
+          Enum.reduce(memberships, %{}, fn {step_id, group_id}, acc ->
+            normalized_step_id = to_string(step_id)
+
+            if normalized_step_id == "" do
+              acc
+            else
+              normalized_group_id =
+                case group_id do
+                  nil -> nil
+                  "" -> nil
+                  value when is_binary(value) -> value
+                  value -> to_string(value)
+                end
+
+              Map.put(acc, normalized_step_id, normalized_group_id)
+            end
+          end)
+
+        _ ->
+          %{}
+      end
+
+    payload = %{
+      txn_id: txn_id,
+      groups: groups,
+      step_positions: step_positions,
+      group_id_by_step_id: group_id_by_step_id
+    }
+
+    if is_integer(base_seq) do
+      Map.put(payload, :base_seq, base_seq)
+    else
+      payload
+    end
+  end
+
+  defp commit_drag_layout_empty?(payload) do
+    groups = fetch_payload_value(payload, :groups) |> List.wrap()
+
+    step_positions =
+      case fetch_payload_value(payload, :step_positions) do
+        value when is_map(value) -> value
+        _ -> %{}
+      end
+
+    group_id_by_step_id =
+      case fetch_payload_value(payload, :group_id_by_step_id) do
+        value when is_map(value) -> value
+        _ -> %{}
+      end
+
+    groups == [] and map_size(step_positions) == 0 and map_size(group_id_by_step_id) == 0
+  end
+
   defp offset_position(position) do
     normalized = normalize_position(position || %{})
     %{x: normalized.x + 50, y: normalized.y + 50}
@@ -1263,6 +1416,49 @@ defmodule FizzWeb.WorkflowLive.Edit do
   end
 
   defp parse_count(_count), do: 1
+
+  defp parse_optional_non_negative_integer(value) when is_integer(value) and value >= 0, do: value
+
+  defp parse_optional_non_negative_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {parsed, ""} when parsed >= 0 -> parsed
+      _ -> nil
+    end
+  end
+
+  defp parse_optional_non_negative_integer(_value), do: nil
+
+  defp stale_seq?(nil, _current_seq), do: false
+  defp stale_seq?(incoming_seq, current_seq) when incoming_seq <= current_seq, do: true
+  defp stale_seq?(_incoming_seq, _current_seq), do: false
+
+  defp maybe_assign_collab_seq(socket, nil), do: socket
+
+  defp maybe_assign_collab_seq(socket, seq) when is_integer(seq) do
+    assign(socket, :collab_seq, max(socket.assigns.collab_seq, seq))
+  end
+
+  defp push_operation_ack(socket, operation, seq) do
+    payload = fetch_payload_value(operation, :payload) || %{}
+    raw_type = fetch_payload_value(operation, :type)
+
+    type =
+      case raw_type do
+        value when is_atom(value) -> Atom.to_string(value)
+        value -> value
+      end
+
+    push_event(socket, "workflow:operation_ack", %{
+      seq: seq,
+      operation_id: fetch_payload_value(operation, :operation_id),
+      type: type,
+      txn_id: fetch_payload_value(payload, :txn_id),
+      base_seq:
+        payload
+        |> fetch_payload_value(:base_seq)
+        |> parse_optional_non_negative_integer()
+    })
+  end
 
   defp push_undo_state(socket) do
     case Server.get_undo_state(socket.assigns.workflow.id, socket.assigns.current_user_id) do

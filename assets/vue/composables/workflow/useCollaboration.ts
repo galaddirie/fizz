@@ -27,8 +27,34 @@ export function useCollaboration(options: UseCollaborationOptions) {
   });
 
   const emitInteraction = useThrottleFn(
-    (x: number, y: number, dragging_steps?: Record<string, { x: number; y: number }> | null) => {
-      options.emit('mouse_move', { x, y, dragging_steps });
+    (
+      x?: number | null,
+      y?: number | null,
+      dragging_steps?: Record<string, { x: number; y: number }> | null,
+      dragging_groups?: Record<
+        string,
+        { x: number; y: number; width: number; height: number }
+      > | null
+    ) => {
+      const payload: {
+        x?: number;
+        y?: number;
+        dragging_steps?: Record<string, { x: number; y: number }> | null;
+        dragging_groups?: Record<
+          string,
+          { x: number; y: number; width: number; height: number }
+        > | null;
+      } = {
+        dragging_steps: dragging_steps ?? null,
+        dragging_groups: dragging_groups ?? null,
+      };
+
+      if (typeof x === 'number' && typeof y === 'number') {
+        payload.x = x;
+        payload.y = y;
+      }
+
+      options.emit('mouse_move', payload);
     },
     CURSOR_THROTTLE_MS
   );

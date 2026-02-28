@@ -33,6 +33,25 @@ interface UseWorkflowNodesOptions {
   ) => void;
   onUpdateStep?: (stepId: string, changes: { name?: string }) => void;
   onMoveSteps?: (stepPositions: Record<string, XYPosition>) => void;
+  onEmitInteraction?: (
+    cursor?: XYPosition | null,
+    dragging_steps?: Record<string, XYPosition> | null,
+    dragging_groups?: Record<
+      string,
+      { x: number; y: number; width: number; height: number }
+    > | null
+  ) => void;
+  onCommitDragLayout?: (payload: {
+    txn_id: string;
+    base_seq?: number;
+    groups: Array<{
+      group_id: string;
+      position: { x: number; y: number; width: number; height: number };
+    }>;
+    step_positions: Record<string, XYPosition>;
+    group_id_by_step_id: Record<string, string | null>;
+  }) => void;
+  collabSeq?: () => number | undefined;
   onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
   groupingPreview?: () => { groupId?: string | null; stepIds?: string[]; color?: string | null };
@@ -125,6 +144,25 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return positions;
   });
 
+  const transientGroupBounds = computed<
+    Record<string, { x: number; y: number; width: number; height: number }>
+  >(() => {
+    const boundsByGroupId: Record<
+      string,
+      { x: number; y: number; width: number; height: number }
+    > = {};
+    const currentUserId = options.currentUserId();
+
+    for (const presence of options.presences()) {
+      if (presence.user.id === currentUserId || !presence.dragging_groups) continue;
+      for (const [groupId, bounds] of Object.entries(presence.dragging_groups)) {
+        boundsByGroupId[groupId] = bounds;
+      }
+    }
+
+    return boundsByGroupId;
+  });
+
   const nodes = computed<Node<WorkflowNodeData>[]>(() => {
     const steps = options.workflow().draft?.steps || [];
     const groups = options.workflow().draft?.groups || [];
@@ -140,16 +178,26 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const groupingStepIds = new Set(groupingPreview.stepIds || []);
     const groupingTargetId = groupingPreview.groupId ?? null;
     const groupingColor = groupingPreview.color ?? undefined;
+    const previewGroupBoundsById = transientGroupBounds.value;
 
     const groupByStepId = new Map<string, string>();
     const groupNodes = groups.map(group => {
       const position = group.position || {};
+      const previewBounds = previewGroupBoundsById[group.id];
+      const previewX = previewBounds?.x;
+      const previewY = previewBounds?.y;
+      const previewWidth = previewBounds?.width;
+      const previewHeight = previewBounds?.height;
       const width =
-        typeof position.width === 'number' && position.width > 0
+        typeof previewWidth === 'number' && previewWidth > 0
+          ? previewWidth
+          : typeof position.width === 'number' && position.width > 0
           ? position.width
           : DEFAULT_GROUP_DIMENSIONS.width;
       const height =
-        typeof position.height === 'number' && position.height > 0
+        typeof previewHeight === 'number' && previewHeight > 0
+          ? previewHeight
+          : typeof position.height === 'number' && position.height > 0
           ? position.height
           : DEFAULT_GROUP_DIMENSIONS.height;
       const color = group.color || DEFAULT_GROUP_COLOR;
@@ -162,8 +210,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         id: group.id,
         type: 'group',
         position: {
-          x: typeof position.x === 'number' ? position.x : 0,
-          y: typeof position.y === 'number' ? position.y : 0,
+          x: typeof previewX === 'number' ? previewX : typeof position.x === 'number' ? position.x : 0,
+          y: typeof previewY === 'number' ? previewY : typeof position.y === 'number' ? position.y : 0,
         },
         data: {
           id: group.id,
@@ -174,7 +222,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           isGroupingTarget: groupingTargetId === group.id,
           groupingColor,
           onUpdate: canEdit ? options.onUpdateGroup : undefined,
+          onCommitDragLayout: canEdit ? options.onCommitDragLayout : undefined,
           onMoveSteps: canEdit ? options.onMoveSteps : undefined,
+          onEmitInteraction: canEdit ? options.onEmitInteraction : undefined,
+          collabSeq: options.collabSeq?.(),
           canEdit,
         },
         style: {
@@ -259,7 +310,6 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         type: isSubnode ? 'subnode' : 'step',
         position: transientPositions.value[step.id] || step.position,
         parentNode: parentGroupId,
-        expandParent: parentGroupId ? true : undefined,
         zIndex: parentGroupId ? 20 : 10,
         data: {
           id: step.id,

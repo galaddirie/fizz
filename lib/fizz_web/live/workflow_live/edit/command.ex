@@ -13,6 +13,7 @@ defmodule FizzWeb.WorkflowLive.Edit.Command do
               "update_group",
               "remove_group",
               "set_group_membership",
+              "commit_drag_layout",
               "add_connection",
               "remove_connection",
               "undo",

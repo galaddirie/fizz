@@ -14,6 +14,7 @@ defmodule FizzWeb.WorkflowLive.Edit.PresenceFormatter do
         },
         cursor: meta[:cursor],
         dragging_steps: meta[:dragging_steps],
+        dragging_groups: meta[:dragging_groups],
         selected_steps: meta[:selected_steps] || [],
         focused_step: meta[:focused_step]
       }

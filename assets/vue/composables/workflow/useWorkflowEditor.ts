@@ -1,4 +1,4 @@
-import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { VNodeRef } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
@@ -31,6 +31,7 @@ import { useWorkflowPins } from '@/composables/workflow/useWorkflowPins';
 import { useWorkflowSelection } from '@/composables/workflow/useWorkflowSelection';
 import { GRID_SIZE } from '@/constants/layout';
 import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
+import { workflowTrace } from '@/lib/workflowTrace';
 import type { StepType, Workflow, WorkflowDraft } from '@/types/workflow';
 import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
@@ -67,6 +68,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     setNodes,
     setEdges,
     viewport,
+    nodesSelectionActive,
   } = useVueFlow();
   const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
   const syncResetRef = ref<() => void>(() => { });
@@ -76,6 +78,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const effectiveSnapToGrid = computed(() => store.snapEnabled || isSnapModifierPressed.value);
   const activeWorkflow = computed<Workflow>(() => props.workflow);
   const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
+  const collabSeq = computed(() => props.collabSeq ?? 0);
   const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, emit });
   const pins = useWorkflowPins({ stepExecutions: () => props.stepExecutions ?? [], emit });
   const grouping = useGrouping({
@@ -98,6 +101,10 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     onUpdateGroup: nodeActions.handleUpdateGroup,
     onUpdateStep: nodeActions.handleUpdateStep,
     onMoveSteps: nodeActions.handleMoveSteps,
+    onEmitInteraction: (cursor, dragging_steps, dragging_groups) =>
+      collaboration.emitInteraction(cursor?.x, cursor?.y, dragging_steps, dragging_groups),
+    onCommitDragLayout: payload => emit('commit_drag_layout', payload),
+    collabSeq: () => collabSeq.value,
     onToggleDisabled: nodeActions.handleToggleDisabled,
     onTogglePin: pins.handleTogglePin,
     groupingPreview: () => grouping.groupingPreview.value,
@@ -106,7 +113,15 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     workflow: () => activeWorkflow.value,
     stepExecutions: () => props.stepExecutions ?? [],
   });
-  const draftSync = useDraftSync({ activeDraft: () => activeDraft.value, nodes: () => nodes.value, edges: () => edges.value, setNodes, setEdges, onSyncComplete: () => syncResetRef.value() });
+  const draftSync = useDraftSync({
+    activeDraft: () => activeDraft.value,
+    collabSeq: () => collabSeq.value,
+    nodes: () => nodes.value,
+    edges: () => edges.value,
+    setNodes,
+    setEdges,
+    onSyncComplete: () => syncResetRef.value(),
+  });
   const {
     stepNameById,
     incomingStepIdsByStepId,
@@ -124,6 +139,15 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     emit,
     store,
   });
+  const handleSelectionChange = (
+    event: Parameters<typeof collaboration.handleSelectionChange>[0]
+  ) => {
+    collaboration.handleSelectionChange(event);
+
+    // Vue Flow clears the multi-selection box on node clicks.
+    // Re-enable it for multi-node selections so shift-click matches shift-drag.
+    nodesSelectionActive.value = event.nodes.length > 1;
+  };
   const canvas = useCanvasInteraction({
     canEdit: () => canEdit.value,
     project,
@@ -155,6 +179,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     canEdit: () => canEdit.value,
     gridSize: () => gridSize,
     snapEnabled: () => store.snapEnabled,
+    getCollabSeq: () => collabSeq.value,
     getNodes: () => getNodes.value,
     groupByStepId: () => grouping.groupByStepId.value,
     updateNode,
@@ -182,6 +207,21 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     emit,
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
+  const handleNodeClick = (
+    event: Parameters<typeof nodeInteraction.handleNodeClick>[0]
+  ) => {
+    nodeInteraction.handleNodeClick(event);
+
+    const nativeEvent = event.event;
+    if (!(nativeEvent instanceof MouseEvent)) return;
+    if (!nativeEvent.shiftKey && !nativeEvent.metaKey && !nativeEvent.ctrlKey) return;
+
+    // Vue Flow clears nodesSelectionActive on node clicks.
+    // Re-sync it after modifier-based additive selection updates are applied.
+    nextTick(() => {
+      nodesSelectionActive.value = getSelectedNodes.value.length > 1;
+    });
+  };
   const clipboard = useClipboard({
     getNodes: () => getNodes.value,
     getSelectedNodes: () => getSelectedNodes.value,
@@ -303,6 +343,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   useLiveEvent('workflow:undo_conflict', () => undoStore.handleUndoConflict());
   useLiveEvent('workflow:redo_applied', () => undoStore.handleRedoApplied());
   useLiveEvent('workflow:redo_conflict', () => undoStore.handleRedoConflict());
+  useLiveEvent<any>('workflow:operation_ack', payload => {
+    workflowTrace('server_ack', payload ?? {});
+  });
 
   const syncSnapModifierState = (event: KeyboardEvent) => {
     isSnapModifierPressed.value = event.metaKey || event.ctrlKey;
@@ -364,10 +407,10 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     handlePaneMouseMove: canvas.handlePaneMouseMove,
     handleDragOver: canvas.handleDragOver,
     handleDrop: canvas.handleDrop,
-    handleNodeClick: nodeInteraction.handleNodeClick,
+    handleNodeClick,
     handleNodeDoubleClick: nodeInteraction.handleNodeDoubleClick,
     handleNodeContextMenu: nodeInteraction.handleNodeContextMenu,
-    handleSelectionChange: collaboration.handleSelectionChange,
+    handleSelectionChange,
     handleSelectionContextMenu: nodeInteraction.handleSelectionContextMenu,
     handlePaneContextMenu: nodeInteraction.handlePaneContextMenu,
     handleEdgeUpdate: edgeInteraction.handleEdgeUpdate,

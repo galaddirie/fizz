@@ -25,6 +25,7 @@ export interface WorkflowEditorProps {
   undoState?: UndoState;
   presences?: UserPresence[];
   currentUserId?: string;
+  collabSeq?: number;
   expressionPreviews?: Record<string, unknown>;
   credentialOptions?: CredentialOption[];
   debugExecutionId?: string | null;
@@ -36,6 +37,7 @@ export type WorkflowEditorCommandType =
   | 'update_group'
   | 'remove_group'
   | 'set_group_membership'
+  | 'commit_drag_layout'
   | 'duplicate_steps'
   | 'update_step'
   | 'remove_step'
@@ -108,6 +110,19 @@ export type WorkflowEditorEmits = {
     }
   ): void;
   (
+    e: 'commit_drag_layout',
+    payload: {
+      txn_id: string;
+      base_seq?: number;
+      groups: Array<{
+        group_id: string;
+        position: { x: number; y: number; width: number; height: number };
+      }>;
+      step_positions: Record<string, XYPosition>;
+      group_id_by_step_id: Record<string, string | null>;
+    }
+  ): void;
+  (
     e: 'duplicate_steps',
     payload: {
       step_ids: string[];
@@ -153,7 +168,15 @@ export type WorkflowEditorEmits = {
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
   (
     e: 'mouse_move',
-    payload: { x: number; y: number; dragging_steps?: Record<string, XYPosition> | null }
+    payload: {
+      x?: number;
+      y?: number;
+      dragging_steps?: Record<string, XYPosition> | null;
+      dragging_groups?: Record<
+        string,
+        { x: number; y: number; width: number; height: number }
+      > | null;
+    }
   ): void;
   (e: 'selection_changed', payload: { step_ids: string[] }): void;
   (

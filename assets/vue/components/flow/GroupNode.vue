@@ -4,7 +4,11 @@ import { useVueFlow } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
 import type { GroupNodeData } from '@/types/workflow';
 import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS, DEFAULT_NODE_DIMENSIONS } from '@/constants/layout';
-import { DEFAULT_GROUP_PADDING } from '@/lib/workflowGeometry';
+import {
+  GROUP_CONTENT_INSETS,
+  getGroupContentRect,
+} from '@/lib/workflowGeometry';
+import { workflowTrace } from '@/lib/workflowTrace';
 import { isStepNode } from '@/lib/workflowGuards';
 import { useThemeStore } from '@/stores/theme';
 import { PencilIcon, Squares2X2Icon } from '@heroicons/vue/24/outline';
@@ -22,7 +26,7 @@ function debounce<T extends (...args: any[]) => any>(
 }
 
 const props = defineProps<NodeProps<GroupNodeData>>();
-const { getNodes, updateNode } = useVueFlow();
+const { getNodes, updateNode, project } = useVueFlow();
 const themeStore = useThemeStore();
 const canEdit = computed(() => props.data.canEdit ?? true);
 
@@ -89,6 +93,13 @@ const groupingHaloColor = computed(() =>
 const groupingOutlineStyle = computed(() => ({
   borderColor: groupingRingColor.value,
   boxShadow: `0 0 0 10px ${groupingHaloColor.value}`,
+}));
+
+const contentGuideStyle = computed(() => ({
+  left: `${GROUP_CONTENT_INSETS.left}px`,
+  right: `${GROUP_CONTENT_INSETS.right}px`,
+  top: `${GROUP_CONTENT_INSETS.top}px`,
+  bottom: `${GROUP_CONTENT_INSETS.bottom}px`,
 }));
 
 
@@ -176,6 +187,9 @@ const updateGroupBounds = (bounds: { x: number; y: number; width: number; height
   });
 };
 
+const createTxnId = () =>
+  `txn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+
 const applyStepPositions = (stepPositions: ResizeState['stepPositions']) => {
   Object.entries(stepPositions).forEach(([stepId, position]) => {
     updateNode(stepId, {
@@ -184,6 +198,19 @@ const applyStepPositions = (stepPositions: ResizeState['stepPositions']) => {
         y: position.y,
       },
     });
+  });
+};
+
+const getFlowPositionFromPointer = (event: PointerEvent) => {
+  if (typeof document === 'undefined') return null;
+
+  const rootElement = document.querySelector('.vue-flow') as HTMLElement | null;
+  if (!rootElement || typeof project !== 'function') return null;
+
+  const { left, top } = rootElement.getBoundingClientRect();
+  return project({
+    x: event.clientX - left,
+    y: event.clientY - top,
   });
 };
 
@@ -233,14 +260,13 @@ const buildAdjustedStepPositions = (
 
   if (!isFinite(minX) || !isFinite(minY)) return basePositions;
 
-  const paddingX = Math.min(DEFAULT_GROUP_PADDING, bounds.width / 2);
-  const paddingY = Math.min(DEFAULT_GROUP_PADDING, bounds.height / 2);
-  const innerLeft = paddingX;
-  const innerTop = paddingY;
-  const innerRight = bounds.width - paddingX;
-  const innerBottom = bounds.height - paddingY;
-  const innerWidth = innerRight - innerLeft;
-  const innerHeight = innerBottom - innerTop;
+  const contentRect = getGroupContentRect(bounds, GROUP_CONTENT_INSETS);
+  const innerLeft = contentRect.x;
+  const innerTop = contentRect.y;
+  const innerRight = contentRect.x + contentRect.width;
+  const innerBottom = contentRect.y + contentRect.height;
+  const innerWidth = contentRect.width;
+  const innerHeight = contentRect.height;
 
   const shouldAdjustX = bounds.width < state.startSize.width;
   const shouldAdjustY = bounds.height < state.startSize.height;
@@ -374,11 +400,11 @@ const handleResizeMove = (event: PointerEvent) => {
   const stepBounds = getStepBounds(baseStepPositions, state.stepSizes);
   if (stepBounds) {
     const minWidth = Math.max(
-      stepBounds.maxX - stepBounds.minX + DEFAULT_GROUP_PADDING * 2,
+      stepBounds.maxX - stepBounds.minX + GROUP_CONTENT_INSETS.left + GROUP_CONTENT_INSETS.right,
       MIN_GROUP_WIDTH
     );
     const minHeight = Math.max(
-      stepBounds.maxY - stepBounds.minY + DEFAULT_GROUP_PADDING * 2,
+      stepBounds.maxY - stepBounds.minY + GROUP_CONTENT_INSETS.top + GROUP_CONTENT_INSETS.bottom,
       MIN_GROUP_HEIGHT
     );
 
@@ -409,6 +435,13 @@ const handleResizeMove = (event: PointerEvent) => {
   const nextStepPositions = buildAdjustedStepPositions(state, adjustedDelta, bounds);
   updateGroupBounds(bounds);
   applyStepPositions(nextStepPositions);
+  props.data.onEmitInteraction?.(
+    getFlowPositionFromPointer(event),
+    Object.keys(nextStepPositions).length > 0 ? nextStepPositions : null,
+    {
+      [props.id]: bounds,
+    }
+  );
 
   resizeState.value = { ...state, lastBounds: bounds, lastStepPositions: nextStepPositions };
 };
@@ -424,36 +457,78 @@ const stopResize = () => {
   const bounds = state.lastBounds;
   const lastStepPositions = state.lastStepPositions;
   if (bounds) {
-    props.data.onUpdate?.(props.id, {
-      position: {
-        x: bounds.x,
-        y: bounds.y,
-        width: bounds.width,
-        height: bounds.height,
-      },
-    });
-    if (lastStepPositions) {
-      if (hasStepPositionChanges(lastStepPositions, state.stepPositions)) {
-        props.data.onMoveSteps?.(lastStepPositions);
-      }
-    } else {
+    let stepPositionsForCommit: Record<string, { x: number; y: number }> = {};
+
+    if (lastStepPositions && hasStepPositionChanges(lastStepPositions, state.stepPositions)) {
+      stepPositionsForCommit = lastStepPositions;
+    } else if (!lastStepPositions) {
       const delta = {
         x: bounds.x - state.startPosition.x,
         y: bounds.y - state.startPosition.y,
       };
 
       if (delta.x !== 0 || delta.y !== 0) {
-        const stepPositions: Record<string, { x: number; y: number }> = {};
+        stepPositionsForCommit = {};
         Object.entries(state.stepPositions).forEach(([stepId, position]) => {
-          stepPositions[stepId] = {
+          stepPositionsForCommit[stepId] = {
             x: position.x - delta.x,
             y: position.y - delta.y,
           };
         });
-        props.data.onMoveSteps?.(stepPositions);
+      }
+    }
+
+    const groupIdByStepId = Object.keys(stepPositionsForCommit).reduce<Record<string, string>>(
+      (acc, stepId) => {
+        acc[stepId] = props.id;
+        return acc;
+      },
+      {}
+    );
+
+    const commitPayload = {
+      txn_id: createTxnId(),
+      base_seq: props.data.collabSeq,
+      groups: [
+        {
+          group_id: props.id,
+          position: {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          },
+        },
+      ],
+      step_positions: stepPositionsForCommit,
+      group_id_by_step_id: groupIdByStepId,
+    };
+
+    workflowTrace('drop_commit_payload', {
+      source: 'group_resize',
+      txn_id: commitPayload.txn_id,
+      base_seq: commitPayload.base_seq,
+      payload: commitPayload,
+    });
+
+    if (props.data.onCommitDragLayout) {
+      props.data.onCommitDragLayout(commitPayload);
+    } else {
+      props.data.onUpdate?.(props.id, {
+        position: {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+        },
+      });
+      if (Object.keys(stepPositionsForCommit).length > 0) {
+        props.data.onMoveSteps?.(stepPositionsForCommit);
       }
     }
   }
+
+  props.data.onEmitInteraction?.(null, null, null);
 
   resizeState.value = null;
   isResizing.value = false;
@@ -553,6 +628,10 @@ const handleColorInput = (event: Event) => {
       class="pointer-events-none absolute inset-0 rounded-3xl border border-dashed"
       :style="outlineStyle"
     ></div>
+    <div
+      class="pointer-events-none absolute rounded-2xl border border-dashed border-base-content/10"
+      :style="contentGuideStyle"
+    ></div>
 
     <div class="relative flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-center gap-3">
@@ -619,10 +698,15 @@ const handleColorInput = (event: Event) => {
     </div>
 
     <div
-      class="absolute bottom-3 right-3 text-sm font-medium transition-colors"
+      class="absolute bottom-3 right-3 text-right transition-colors"
       :class="isGroupingTarget ? 'text-base-content/70' : 'text-base-content/40'"
     >
-      {{ isGroupingTarget ? 'Release to add to group' : 'Drag nodes here to add them' }}
+      <div class="text-sm font-medium">
+        {{ isGroupingTarget ? 'Release to add to group' : 'Drag nodes here to add them' }}
+      </div>
+      <div class="mt-0.5 text-[11px] font-medium opacity-80">
+        Hold Alt/Option while dragging to ungroup
+      </div>
     </div>
 
     <template v-if="canEdit">

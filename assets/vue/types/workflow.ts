@@ -192,6 +192,7 @@ export interface GroupNodeData {
   color?: string;
   isGroupingTarget?: boolean;
   groupingColor?: string;
+  collabSeq?: number;
   onUpdate?: (
     groupId: string,
     changes: {
@@ -199,6 +200,21 @@ export interface GroupNodeData {
       color?: string;
       position?: { x?: number; y?: number; width?: number; height?: number };
     }
+  ) => void;
+  onCommitDragLayout?: (payload: {
+    txn_id: string;
+    base_seq?: number;
+    groups: Array<{ group_id: string; position: { x: number; y: number; width: number; height: number } }>;
+    step_positions: Record<string, { x: number; y: number }>;
+    group_id_by_step_id: Record<string, string | null>;
+  }) => void;
+  onEmitInteraction?: (
+    cursor?: { x: number; y: number } | null,
+    dragging_steps?: Record<string, { x: number; y: number }> | null,
+    dragging_groups?: Record<
+      string,
+      { x: number; y: number; width: number; height: number }
+    > | null
   ) => void;
   onMoveSteps?: (stepPositions: Record<string, { x: number; y: number }>) => void;
   canEdit?: boolean;
@@ -321,6 +337,10 @@ export interface UserPresence {
   selected_steps?: string[];
   focused_step?: string | null;
   dragging_steps?: Record<string, { x: number; y: number }> | null;
+  dragging_groups?: Record<
+    string,
+    { x: number; y: number; width: number; height: number }
+  > | null;
 }
 
 export interface EditorState {

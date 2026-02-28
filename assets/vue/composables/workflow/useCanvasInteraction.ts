@@ -11,9 +11,13 @@ interface UseCanvasInteractionOptions {
   getNodes: () => GraphNode<WorkflowNodeData>[];
   getSelectedNodes: () => GraphNode<WorkflowNodeData>[];
   emitInteraction: (
-    x: number,
-    y: number,
-    dragging_steps?: Record<string, XYPosition> | null
+    x?: number | null,
+    y?: number | null,
+    dragging_steps?: Record<string, XYPosition> | null,
+    dragging_groups?: Record<
+      string,
+      { x: number; y: number; width: number; height: number }
+    > | null
   ) => void;
   updateGroupingPreview: (
     nodes: GraphNode<WorkflowNodeData>[],

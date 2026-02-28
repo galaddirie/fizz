@@ -6,7 +6,19 @@ import { isGroupNode, isStepNode } from '@/lib/workflowGuards';
 
 export type NodeRect = { x: number; y: number; width: number; height: number };
 
-export const DEFAULT_GROUP_PADDING = 25;
+export type GroupContentInsets = {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+};
+
+export const GROUP_CONTENT_INSETS: GroupContentInsets = {
+  left: 24,
+  right: 24,
+  top: 64,
+  bottom: 52,
+};
 
 export const getAbsoluteNodePosition = (node: GraphNode<WorkflowNodeData>) => {
   return node.computedPosition ?? node.position;
@@ -101,7 +113,7 @@ export const findGroupByIntersection = (
 
 export const buildGroupBounds = (
   groupNodes: GraphNode<WorkflowNodeData>[],
-  padding = DEFAULT_GROUP_PADDING
+  insets: GroupContentInsets = GROUP_CONTENT_INSETS
 ) => {
   let minX = Infinity;
   let minY = Infinity;
@@ -122,12 +134,12 @@ export const buildGroupBounds = (
 
   if (!isFinite(minX) || !isFinite(minY)) return null;
 
-  const paddedWidth = maxX - minX + padding * 2;
-  const paddedHeight = maxY - minY + padding * 2;
+  const paddedWidth = maxX - minX + insets.left + insets.right;
+  const paddedHeight = maxY - minY + insets.top + insets.bottom;
 
   return {
-    x: minX - padding,
-    y: minY - padding,
+    x: minX - insets.left,
+    y: minY - insets.top,
     width: Math.max(paddedWidth, DEFAULT_GROUP_DIMENSIONS.width),
     height: Math.max(paddedHeight, DEFAULT_GROUP_DIMENSIONS.height),
   };
@@ -136,7 +148,7 @@ export const buildGroupBounds = (
 export const buildGroupBoundsFromPositions = (
   groupNodes: GraphNode<WorkflowNodeData>[],
   positions: Map<string, XYPosition>,
-  padding = DEFAULT_GROUP_PADDING
+  insets: GroupContentInsets = GROUP_CONTENT_INSETS
 ) => {
   let minX = Infinity;
   let minY = Infinity;
@@ -157,14 +169,59 @@ export const buildGroupBoundsFromPositions = (
 
   if (!isFinite(minX) || !isFinite(minY)) return null;
 
-  const paddedWidth = maxX - minX + padding * 2;
-  const paddedHeight = maxY - minY + padding * 2;
+  const paddedWidth = maxX - minX + insets.left + insets.right;
+  const paddedHeight = maxY - minY + insets.top + insets.bottom;
 
   return {
-    x: minX - padding,
-    y: minY - padding,
+    x: minX - insets.left,
+    y: minY - insets.top,
     width: Math.max(paddedWidth, DEFAULT_GROUP_DIMENSIONS.width),
     height: Math.max(paddedHeight, DEFAULT_GROUP_DIMENSIONS.height),
+  };
+};
+
+export const resolveGroupContentInsets = (
+  bounds: { width: number; height: number },
+  insets: GroupContentInsets = GROUP_CONTENT_INSETS
+): GroupContentInsets => {
+  const safeWidth = Math.max(0, bounds.width);
+  const safeHeight = Math.max(0, bounds.height);
+  const horizontalTotal = insets.left + insets.right;
+  const verticalTotal = insets.top + insets.bottom;
+
+  const horizontalScale =
+    horizontalTotal > safeWidth && horizontalTotal > 0
+      ? safeWidth / horizontalTotal
+      : 1;
+  const verticalScale =
+    verticalTotal > safeHeight && verticalTotal > 0
+      ? safeHeight / verticalTotal
+      : 1;
+
+  return {
+    left: insets.left * horizontalScale,
+    right: insets.right * horizontalScale,
+    top: insets.top * verticalScale,
+    bottom: insets.bottom * verticalScale,
+  };
+};
+
+export const getGroupContentRect = (
+  bounds: { width: number; height: number },
+  insets: GroupContentInsets = GROUP_CONTENT_INSETS
+) => {
+  const resolvedInsets = resolveGroupContentInsets(bounds, insets);
+  const innerLeft = resolvedInsets.left;
+  const innerTop = resolvedInsets.top;
+  const innerRight = Math.max(innerLeft, bounds.width - resolvedInsets.right);
+  const innerBottom = Math.max(innerTop, bounds.height - resolvedInsets.bottom);
+
+  return {
+    x: innerLeft,
+    y: innerTop,
+    width: Math.max(0, innerRight - innerLeft),
+    height: Math.max(0, innerBottom - innerTop),
+    insets: resolvedInsets,
   };
 };
 
