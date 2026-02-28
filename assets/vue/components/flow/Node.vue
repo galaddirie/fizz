@@ -187,14 +187,11 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 // Node classes
-const hasBottomSlots = computed(() => subnodeInputHandles.value.length > 0);
-
 const nodeClasses = computed(() => [
   'group relative flex flex-col transition-shadow',
   isSubnode.value
     ? 'gap-2 rounded-xl border border-dashed border-base-300 bg-base-200/20 p-3 shadow-sm'
     : 'gap-3 rounded-2xl border border-base-300/50 bg-base-100 p-4 shadow-md',
-  hasBottomSlots.value ? 'pb-6' : '',
   // Different styling for trigger nodes
   props.data.step_kind === 'trigger' && !isSubnode.value ? 'rounded-[50px_0.5rem_0.5rem_10px]' : '',
   props.dragging
@@ -441,7 +438,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
         class="absolute bottom-0 z-10 flex flex-col items-center"
         :style="{
           left: `${((idx + 1) / (subnodeInputHandles.length + 1)) * 100}%`,
-          transform: 'translateX(-50%) translateY(0%)'
+          transform: 'translateX(-50%) translateY(calc(40% - 8px))'
         }"
       >
         <span class="pointer-events-none mb-1 whitespace-nowrap text-[9px] font-medium text-base-content/50">
@@ -567,7 +564,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 
         <!-- Stats -->
         <div
-          class="text-base-content/60 mt-1.5 flex min-h-[16px] shrink-0 items-center gap-1 font-mono text-[11px]"
+          class="text-base-content/60  my-1 flex min-h-[16px] shrink-0 items-center gap-1 font-mono text-[11px]"
         >
           <template v-if="showStats">
             <ClockIcon class="size-3.5" />
