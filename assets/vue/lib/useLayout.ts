@@ -45,9 +45,8 @@ export function useLayout() {
 
     previousDirection.value = normalizedDirection;
 
-    // Filter nodes and edges. Subnodes are handled separately.
+    // Filter nodes and edges. Only connected subnodes are handled in the dedicated subtree pass.
     const subnodeIds = new Set(nodes.filter(n => n.type === 'subnode').map(n => n.id));
-    const mainNodes = nodes.filter(n => !subnodeIds.has(n.id));
 
     // A subnode connection is one where the target handle is not "main"
     const isSubnodeConn = (
@@ -73,6 +72,8 @@ export function useLayout() {
       if (!subnodeIds.has(edge.source)) return;
       subnodeConnections.push(edge);
     });
+    const connectedSubnodeIds = new Set(subnodeConnections.map(edge => edge.source));
+    const mainNodes = nodes.filter(n => !connectedSubnodeIds.has(n.id));
 
     const parentEdgeBySubnodeId = new Map<string, SubnodeConnection>(
       subnodeConnections.map(edge => [edge.source, edge])
@@ -168,7 +169,10 @@ export function useLayout() {
     });
 
     const mainEdges = edges.filter(
-      edge => !subnodeIds.has(edge.source) && !subnodeIds.has(edge.target) && !isSubnodeConn(edge)
+      edge =>
+        !connectedSubnodeIds.has(edge.source) &&
+        !connectedSubnodeIds.has(edge.target) &&
+        !isSubnodeConn(edge)
     );
 
     for (const node of mainNodes) {
@@ -206,8 +210,10 @@ export function useLayout() {
 
       return {
         ...node,
-        targetPosition: isHorizontal ? Position.Left : Position.Top,
-        sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
+        targetPosition:
+          node.type === 'subnode' ? Position.Top : isHorizontal ? Position.Left : Position.Top,
+        sourcePosition:
+          node.type === 'subnode' ? Position.Top : isHorizontal ? Position.Right : Position.Bottom,
         position,
       };
     });
@@ -356,7 +362,7 @@ export function useLayout() {
     Array.from(childrenByParentSlot.keys()).forEach(placeSubtree);
 
     const positionedSubNodes = nodes
-      .filter(n => subnodeIds.has(n.id))
+      .filter(n => connectedSubnodeIds.has(n.id))
       .map(node => {
         const position = positionedSubnodePositions.get(node.id) ?? node.position;
 

@@ -13,6 +13,8 @@ export type GroupContentInsets = {
   bottom: number;
 };
 
+const SUBNODE_FALLBACK_DIMENSIONS = { width: 112, height: 96 };
+
 export const GROUP_CONTENT_INSETS: GroupContentInsets = {
   left: 24,
   right: 24,
@@ -45,7 +47,9 @@ export const getNodeSize = (node: GraphNode<WorkflowNodeData>) => {
     return { width: styleWidth, height: styleHeight };
   }
 
-  return node.type === 'group' ? DEFAULT_GROUP_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
+  if (node.type === 'group') return DEFAULT_GROUP_DIMENSIONS;
+  if (node.type === 'subnode') return SUBNODE_FALLBACK_DIMENSIONS;
+  return DEFAULT_NODE_DIMENSIONS;
 };
 
 export const getNodeRect = (node: GraphNode<WorkflowNodeData>): NodeRect => {
@@ -123,8 +127,7 @@ export const buildGroupBounds = (
   for (const node of groupNodes) {
     if (!isStepNode(node)) continue;
     const position = getAbsoluteNodePosition(node);
-    const width = node.dimensions.width || DEFAULT_NODE_DIMENSIONS.width;
-    const height = node.dimensions.height || DEFAULT_NODE_DIMENSIONS.height;
+    const { width, height } = getNodeSize(node);
 
     minX = Math.min(minX, position.x);
     minY = Math.min(minY, position.y);
@@ -158,8 +161,7 @@ export const buildGroupBoundsFromPositions = (
   for (const node of groupNodes) {
     if (!isStepNode(node)) continue;
     const position = positions.get(node.id) ?? getAbsoluteNodePosition(node);
-    const width = node.dimensions.width || DEFAULT_NODE_DIMENSIONS.width;
-    const height = node.dimensions.height || DEFAULT_NODE_DIMENSIONS.height;
+    const { width, height } = getNodeSize(node);
 
     minX = Math.min(minX, position.x);
     minY = Math.min(minY, position.y);
