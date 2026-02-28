@@ -61,3 +61,8 @@ lib/fizz_web/live/workflow_live/edit.ex (2135 LoC), lib/fizz/collaboration/edit_
 1. WorkflowEditorLive as transport layer only (mount/render/dispatch).
 2. EditorSession command API (apply_command, apply_batch, undo/redo).
 3. Is Runtime.Events planned as a migration layer, or should it replace Executions.PubSub entirely?
+
+
+when adding subnodes through the quick add buttons, the position is not correct.
+
+when laying out nodes, nodes should be aware of near by group nodes to avoid overlapping.
