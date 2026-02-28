@@ -603,7 +603,14 @@ export function useNodeDrag(options: UseNodeDragOptions) {
 
   const handleNodeDragStop = (event: NodeDragStopEvent) => {
     if (!options.canEdit()) return;
-    options.emitInteraction(0, 0, null, null);
+    const pointerEvent = getPointerEvent(event.event);
+    const flowPosition = pointerEvent ? options.getFlowPositionFromEvent(pointerEvent) : null;
+
+    if (flowPosition) {
+      options.emitInteraction(flowPosition.x, flowPosition.y, null, null);
+    } else {
+      options.emitInteraction(undefined, undefined, null, null);
+    }
     options.clearGroupingPreview();
 
     const session = dragSession.value;
@@ -625,7 +632,6 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     const membershipOverrides = new Map<string, string | null>();
 
     if (draggedStepNodes.length > 0) {
-      const pointerEvent = getPointerEvent(event.event);
       const ungroupModifierPressed = 'altKey' in event.event ? !!event.event.altKey : false;
 
       if (ungroupModifierPressed) {
@@ -634,8 +640,7 @@ export function useNodeDrag(options: UseNodeDragOptions) {
             membershipOverrides.set(node.id, null);
           }
         });
-      } else if (pointerEvent) {
-        const flowPosition = options.getFlowPositionFromEvent(pointerEvent);
+      } else if (flowPosition) {
         const targetGroup = flowPosition ? findGroupAtPoint(flowPosition, options.getNodes()) : null;
 
         if (targetGroup) {
