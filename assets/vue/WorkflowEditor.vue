@@ -358,27 +358,27 @@ useLiveEvent<{ success: boolean; error?: string }>(
       <!-- Main Sunken Canvas Area -->
       <div class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner">
         <!-- Floating Workflow Info -->
-        <div class="pointer-events-none absolute left-6 top-5 z-30 flex flex-col items-start gap-0.5">
-          <div class="pointer-events-auto px-1.5 py-0.5">
+        <div class="pointer-events-none absolute left-6 top-5 z-30 flex select-none flex-col items-start gap-0.5">
+          <div class="px-1.5 py-0.5">
             <div class="flex items-center gap-2">
               <a
                 :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`"
-                class="text-base-content/60 hover:text-base-content/80 text-xs font-medium transition-colors"
+                class="pointer-events-auto select-none text-base-content/60 hover:text-base-content/80 text-xs font-medium transition-colors"
               >
                 {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
               </a>
-              <SlashIcon class="text-base-content/30 h-3.5 w-3.5" stroke-width="2.5" />
-              <span class="text-base-content/90 text-xs font-semibold">
+              <SlashIcon class="pointer-events-none text-base-content/30 h-3.5 w-3.5" stroke-width="2.5" />
+              <span class="pointer-events-none text-base-content/90 text-xs font-semibold">
                 {{ editor.workflow?.name ?? 'Untitled Workflow' }}
               </span>
-              <div class="ml-1 flex items-center">
+              <div class="pointer-events-none ml-1 flex items-center">
                 <Avatar :presences="editor.presences" class="scale-95" />
               </div>
             </div>
           </div>
 
           <button
-            class="pointer-events-auto ml-1 inline-flex items-center gap-1 px-0.5 py-0 text-[10px] font-medium text-base-content/45 transition-colors hover:text-base-content/70"
+            class="pointer-events-auto ml-1 inline-flex select-none items-center gap-1 px-0.5 py-0 text-[10px] font-medium text-base-content/45 transition-colors hover:text-base-content/70"
             @click="emit('save_workflow')"
           >
             Last saved: {{ lastSaved }}
