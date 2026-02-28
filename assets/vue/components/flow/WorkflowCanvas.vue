@@ -13,6 +13,7 @@ import { VueFlow } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
 import { MiniMap } from '@vue-flow/minimap';
+import '@vue-flow/controls/dist/style.css';
 
 import CollaborativeCursors from '@/components/flow/CollaborativeCursors.vue';
 import ExecutionOverlay from '@/components/flow/ExecutionOverlay.vue';
@@ -89,47 +90,28 @@ defineProps<Props>();
         :pattern-color="oklchToHex('oklch(50% 0.05 260)')"
         :gap="gridSize"
       />
-      <Controls position="bottom-right" />
+      <Controls
+        position="bottom-right"
+        class="workflow-controls-panel bg-base-100 p-1 rounded-lg"
+        :show-interactive="canEdit"
+      >
+        <template v-if="canEdit" #top>
+          <button
+            type="button"
+            class="vue-flow__controls-button"
+            :class="snapEnabled ? '!bg-primary/12 !text-primary' : ''"
+            title="Toggle snap (Cmd/Ctrl while dragging)"
+            aria-label="Toggle snap to grid"
+            @click="onToggleSnap"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4! w-4!"><path d="m12 15 4 4"/><path d="M2.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.029-6.029a1 1 0 1 1 3 3l-6.029 6.029a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.365-6.367A1 1 0 0 0 8.716 4.282z"/><path d="m5 8 4 4"/></svg>
+          </button>
+        </template>
+      </Controls>
       <MiniMap position="bottom-left" :node-color="miniMapNodeColor" />
     </VueFlow>
 
-    <button
-      v-if="canEdit"
-      type="button"
-      class="absolute bottom-[15px] right-[130px] z-[1100] flex h-7 w-7 items-center justify-center rounded-md border border-white bg-white text-slate-700 shadow-sm transition-all duration-150 hover:scale-105 hover:shadow-md"
-      :class="snapEnabled ? 'ring-2 ring-primary/60 text-primary' : ''"
-      title="Toggle snap (Cmd/Ctrl while dragging)"
-      @click="onToggleSnap"
-    >
-      <svg
-        class="h-4 w-4"
-        viewBox="0 0 24 24"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <path
-          d="m12 15 4 4"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke="currentColor"
-        />
-        <path
-          d="M2.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.029-6.029a1 1 0 1 1 3 3l-6.029 6.029a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.365-6.367A1 1 0 0 0 8.716 4.282z"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke="currentColor"
-        />
-        <path
-          d="m5 8 4 4"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke="currentColor"
-        />
-      </svg>
-    </button>
+
 
     <div
       v-if="isRevisionPreviewActive"
@@ -165,44 +147,54 @@ defineProps<Props>();
 </template>
 
 <style>
+/* vue-flow library overrides — can't add Tailwind classes to library-rendered elements */
 .vue-flow__panel {
   margin: 15px;
 }
 
-.vue-flow__controls {
+.workflow-controls-panel .vue-flow__controls {
   display: flex;
-  flex-direction: row !important;
+  align-items: center;
   gap: 2px;
   background-color: var(--color-base-100);
-  border: 1px solid var(--color-base-300);
+  border: none;
   padding: 3px;
-  border-radius: 10px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  border-radius: 12px;
+  box-shadow: none;
 }
 
-.vue-flow__controls-button {
-  background-color: var(--color-base-200);
+.workflow-controls-panel .vue-flow__controls-button {
+  background: none;
   color: var(--color-base-content);
-  border: none !important;
-  border-radius: 6px !important;
-  width: 20px !important;
-  height: 20px !important;
+  border: none;
+  border-radius: 8px;
+  width: 30px;
+  height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease-in-out;
+  padding: 0;
   cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s;
 }
 
-.vue-flow__controls-button:hover {
-  background-color: var(--color-base-300);
-  transform: scale(1.05);
+.workflow-controls-panel .vue-flow__controls-button:hover {
+  opacity: 1;
+  background-color: var(--color-base-200);
 }
 
-.vue-flow__controls-button svg {
-  width: 12px !important;
-  height: 12px !important;
-  stroke-width: 2.5 !important;
+.workflow-controls-panel .vue-flow__controls-button:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.workflow-controls-panel .vue-flow__controls-button svg {
+  width: 12px;
+  height: 12px;
+  max-width: none;
+  max-height: none;
+  fill: currentColor;
 }
 
 .vue-flow__node-group {
