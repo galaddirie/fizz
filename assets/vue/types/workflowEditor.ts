@@ -90,6 +90,7 @@ export type WorkflowEditorEmits = {
       name?: string;
       step_ids: string[];
       color?: string;
+      font_size?: number;
       position: { x: number; y: number; width: number; height: number };
       step_positions?: Record<string, XYPosition>;
     }
@@ -104,6 +105,7 @@ export type WorkflowEditorEmits = {
         collapsed?: boolean;
         output_step_id?: string;
         color?: string;
+        font_size?: number;
       };
     }
   ): void;

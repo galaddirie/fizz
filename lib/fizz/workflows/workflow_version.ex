@@ -100,7 +100,7 @@ defmodule Fizz.Workflows.WorkflowVersion do
         Map.take(conn, [:id, :source_step_id, :source_output, :target_step_id, :target_input])
 
       %NodeGroup{} = group ->
-        Map.take(group, [:id, :name, :step_ids, :output_step_id, :color, :collapsed])
+        Map.take(group, [:id, :name, :step_ids, :output_step_id, :color, :font_size, :collapsed])
 
       item when is_map(item) ->
         Map.drop(item, [:position, :__struct__, :__meta__])

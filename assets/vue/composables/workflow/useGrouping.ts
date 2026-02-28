@@ -1,7 +1,11 @@
 import { computed, ref } from 'vue';
 import type { GraphNode, XYPosition } from '@vue-flow/core';
 
-import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
+import {
+  DEFAULT_GROUP_COLOR,
+  DEFAULT_GROUP_DIMENSIONS,
+  DEFAULT_GROUP_NAME_FONT_SIZE,
+} from '@/constants/layout';
 import type {
   Workflow,
   WorkflowDraft,
@@ -187,6 +191,7 @@ export function useGrouping(options: UseGroupingOptions) {
       name: buildGroupName(),
       step_ids: stepIds,
       color: DEFAULT_GROUP_COLOR,
+      font_size: DEFAULT_GROUP_NAME_FONT_SIZE,
       position: bounds,
       step_positions: stepPositions,
     });

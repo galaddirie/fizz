@@ -50,6 +50,7 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
       collapsed?: boolean;
       output_step_id?: string;
       color?: string;
+      font_size?: number;
     }
   ) => {
     options.emit('update_group', { group_id: groupId, changes });

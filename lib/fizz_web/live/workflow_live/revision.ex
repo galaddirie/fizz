@@ -9,6 +9,10 @@ defmodule FizzWeb.WorkflowLive.Revision do
   alias FizzWeb.WorkflowLive.Paths
   require Logger
 
+  @group_name_font_size_default 14
+  @group_name_font_size_min 10
+  @group_name_font_size_max 32
+
   @impl true
   def mount(%{"workspace_id" => workspace_id, "id" => workflow_id}, _session, socket) do
     with {:ok, scope} <-
@@ -377,6 +381,7 @@ defmodule FizzWeb.WorkflowLive.Revision do
       output_step_id: fetch_field(group, :output_step_id),
       position: normalize_group_position(fetch_field(group, :position) || %{}),
       color: fetch_field(group, :color),
+      font_size: normalize_group_font_size(fetch_field(group, :font_size)),
       collapsed: fetch_field(group, :collapsed) || false
     }
   end
@@ -417,6 +422,21 @@ defmodule FizzWeb.WorkflowLive.Revision do
   end
 
   defp normalize_group_position(_position), do: %{}
+
+  defp normalize_group_font_size(font_size) when is_integer(font_size) do
+    font_size
+    |> max(@group_name_font_size_min)
+    |> min(@group_name_font_size_max)
+  end
+
+  defp normalize_group_font_size(font_size) when is_binary(font_size) do
+    case Integer.parse(font_size) do
+      {parsed, ""} -> normalize_group_font_size(parsed)
+      _ -> @group_name_font_size_default
+    end
+  end
+
+  defp normalize_group_font_size(_font_size), do: @group_name_font_size_default
 
   defp fetch_field(map, key) when is_map(map) do
     Map.get(map, key) || Map.get(map, to_string(key))

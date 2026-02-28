@@ -2,7 +2,11 @@ import { computed } from 'vue';
 import type { Node, XYPosition } from '@vue-flow/core';
 
 import { generateColor } from '@/lib/color';
-import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS } from '@/constants/layout';
+import {
+  DEFAULT_GROUP_COLOR,
+  DEFAULT_GROUP_DIMENSIONS,
+  DEFAULT_GROUP_NAME_FONT_SIZE,
+} from '@/constants/layout';
 import type {
   Workflow,
   StepType,
@@ -29,6 +33,7 @@ interface UseWorkflowNodesOptions {
     changes: {
       name?: string;
       color?: string;
+      font_size?: number;
       position?: { x?: number; y?: number; width?: number; height?: number };
     }
   ) => void;
@@ -203,6 +208,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           ? position.height
           : DEFAULT_GROUP_DIMENSIONS.height;
       const color = group.color || DEFAULT_GROUP_COLOR;
+      const fontSize =
+        typeof group.font_size === 'number' && Number.isFinite(group.font_size)
+          ? group.font_size
+          : DEFAULT_GROUP_NAME_FONT_SIZE;
 
       for (const stepId of group.step_ids || []) {
         groupByStepId.set(stepId, group.id);
@@ -221,6 +230,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           step_ids: group.step_ids || [],
           collapsed: !!group.collapsed,
           color,
+          font_size: fontSize,
           isGroupingTarget: groupingTargetId === group.id,
           groupingColor,
           onUpdate: canEdit ? options.onUpdateGroup : undefined,

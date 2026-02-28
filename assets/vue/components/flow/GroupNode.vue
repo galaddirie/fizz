@@ -3,7 +3,14 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useVueFlow } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
 import type { GroupNodeData } from '@/types/workflow';
-import { DEFAULT_GROUP_COLOR, DEFAULT_GROUP_DIMENSIONS, DEFAULT_NODE_DIMENSIONS } from '@/constants/layout';
+import {
+  DEFAULT_GROUP_COLOR,
+  DEFAULT_GROUP_DIMENSIONS,
+  DEFAULT_GROUP_NAME_FONT_SIZE,
+  DEFAULT_NODE_DIMENSIONS,
+  GROUP_NAME_FONT_SIZE_MAX,
+  GROUP_NAME_FONT_SIZE_MIN,
+} from '@/constants/layout';
 import {
   GROUP_CONTENT_INSETS,
   getGroupContentRect,
@@ -11,7 +18,7 @@ import {
 import { workflowTrace } from '@/lib/workflowTrace';
 import { isStepNode } from '@/lib/workflowGuards';
 import { useThemeStore } from '@/stores/theme';
-import { PencilIcon, Squares2X2Icon } from '@heroicons/vue/24/outline';
+import { PencilIcon } from '@heroicons/vue/24/outline';
 
 // Simple debounce utility
 function debounce<T extends (...args: any[]) => any>(
@@ -94,14 +101,6 @@ const groupingOutlineStyle = computed(() => ({
   borderColor: groupingRingColor.value,
   boxShadow: `0 0 0 10px ${groupingHaloColor.value}`,
 }));
-
-const contentGuideStyle = computed(() => ({
-  left: `${GROUP_CONTENT_INSETS.left}px`,
-  right: `${GROUP_CONTENT_INSETS.right}px`,
-  top: `${GROUP_CONTENT_INSETS.top}px`,
-  bottom: `${GROUP_CONTENT_INSETS.bottom}px`,
-}));
-
 
 const handleStyle = computed(() => ({
   backgroundColor: accentColor.value,
@@ -614,6 +613,30 @@ const handleColorInput = (event: Event) => {
   if (!target?.value) return;
   debouncedUpdateColor(target.value);
 };
+
+const clampGroupNameFontSize = (value: number) =>
+  Math.min(GROUP_NAME_FONT_SIZE_MAX, Math.max(GROUP_NAME_FONT_SIZE_MIN, Math.round(value)));
+
+const groupNameFontSize = computed(() => {
+  const fontSize = props.data.font_size;
+  if (typeof fontSize !== 'number' || !Number.isFinite(fontSize)) {
+    return DEFAULT_GROUP_NAME_FONT_SIZE;
+  }
+
+  return clampGroupNameFontSize(fontSize);
+});
+
+const setGroupNameFontSize = (nextSize: number) => {
+  if (!canEdit.value) return;
+
+  const normalizedSize = clampGroupNameFontSize(nextSize);
+  if (normalizedSize === groupNameFontSize.value) return;
+  props.data.onUpdate?.(props.id, { font_size: normalizedSize });
+};
+
+const adjustGroupNameFontSize = (delta: number) => {
+  setGroupNameFontSize(groupNameFontSize.value + delta);
+};
 </script>
 
 <template>
@@ -628,18 +651,9 @@ const handleColorInput = (event: Event) => {
       class="pointer-events-none absolute inset-0 rounded-3xl border border-dashed"
       :style="outlineStyle"
     ></div>
-    <div
-      class="pointer-events-none absolute rounded-2xl border border-dashed border-base-content/10"
-      :style="contentGuideStyle"
-    ></div>
 
     <div class="relative flex items-start justify-between gap-3">
-      <div class="flex min-w-0 items-center gap-3">
-        <div
-          class="bg-base-100/80 border-base-200 text-base-content/70 flex h-9 w-9 items-center justify-center rounded-2xl border shadow-sm"
-        >
-          <Squares2X2Icon class="h-4.5 w-4.5" />
-        </div>
+      <div class="flex min-w-0 items-center gap-2.5">
         <div class="min-w-0">
 
           <div class="flex items-center gap-2">
@@ -649,13 +663,15 @@ const handleColorInput = (event: Event) => {
               v-model="nameDraft"
               class="input input-xs nodrag bg-base-100/90 text-base-content/80 h-6 w-36 rounded-lg text-xs font-semibold"
               type="text"
+              :style="{ fontSize: `${groupNameFontSize}px` }"
               @keydown="handleNameKeydown"
               @blur="commitName"
               @mousedown.stop
             />
             <h3
               v-else
-              class="text-base-content truncate text-sm font-semibold"
+              class="text-base-content truncate font-semibold"
+              :style="{ fontSize: `${groupNameFontSize}px`, lineHeight: '1.2' }"
               :title="canEdit ? 'Double click to rename' : ''"
               @dblclick.stop="canEdit && startEditing()"
             >
@@ -676,6 +692,35 @@ const handleColorInput = (event: Event) => {
       </div>
 
       <div class="flex items-center gap-2">
+        <div
+          v-if="canEdit"
+          class="nodrag bg-base-100/90 border-base-200 text-base-content/60 flex items-center gap-1 rounded-lg border px-1 py-0.5 shadow-sm"
+          @mousedown.stop
+        >
+          <button
+            class="h-5 w-5 rounded text-[10px] font-semibold transition hover:bg-base-200 disabled:opacity-35"
+            type="button"
+            title="Decrease group name font size"
+            :disabled="groupNameFontSize <= GROUP_NAME_FONT_SIZE_MIN"
+            @click.stop="adjustGroupNameFontSize(-1)"
+            @mousedown.stop
+          >
+            A-
+          </button>
+          <span class="w-7 text-center text-[10px] font-semibold">
+            {{ groupNameFontSize }}
+          </span>
+          <button
+            class="h-5 w-5 rounded text-[10px] font-semibold transition hover:bg-base-200 disabled:opacity-35"
+            type="button"
+            title="Increase group name font size"
+            :disabled="groupNameFontSize >= GROUP_NAME_FONT_SIZE_MAX"
+            @click.stop="adjustGroupNameFontSize(1)"
+            @mousedown.stop
+          >
+            A+
+          </button>
+        </div>
         <button
           v-if="canEdit"
           class="nodrag h-6 w-6 rounded-full border border-base-200 bg-base-100/90 shadow-sm"
@@ -698,15 +743,10 @@ const handleColorInput = (event: Event) => {
     </div>
 
     <div
-      class="absolute bottom-3 right-3 text-right transition-colors"
+      class="absolute bottom-2 right-2 text-right text-[11px] font-medium transition-colors"
       :class="isGroupingTarget ? 'text-base-content/70' : 'text-base-content/40'"
     >
-      <div class="text-sm font-medium">
-        {{ isGroupingTarget ? 'Release to add to group' : 'Drag nodes here to add them' }}
-      </div>
-      <div class="mt-0.5 text-[11px] font-medium opacity-80">
-        Hold Alt/Option while dragging to ungroup
-      </div>
+      {{ isGroupingTarget ? 'Release to group' : 'Drop nodes to group' }}
     </div>
 
     <template v-if="canEdit">

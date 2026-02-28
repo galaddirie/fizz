@@ -13,12 +13,16 @@ defmodule Fizz.Workflows.Embeds.NodeGroup do
              :output_step_id,
              :position,
              :color,
+             :font_size,
              :collapsed
            ]}
   use Ecto.Schema
   import Ecto.Changeset
 
   @primary_key {:id, :string, autogenerate: false}
+  @default_font_size 14
+  @min_font_size 10
+  @max_font_size 32
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -27,6 +31,7 @@ defmodule Fizz.Workflows.Embeds.NodeGroup do
           output_step_id: String.t(),
           position: map(),
           color: String.t() | nil,
+          font_size: integer(),
           collapsed: boolean()
         }
 
@@ -36,13 +41,27 @@ defmodule Fizz.Workflows.Embeds.NodeGroup do
     field :output_step_id, :string
     field :position, :map, default: %{}
     field :color, :string
+    field :font_size, :integer, default: @default_font_size
     field :collapsed, :boolean, default: false
   end
 
   def changeset(group, attrs) do
     group
-    |> cast(attrs, [:id, :name, :step_ids, :output_step_id, :position, :color, :collapsed])
+    |> cast(attrs, [
+      :id,
+      :name,
+      :step_ids,
+      :output_step_id,
+      :position,
+      :color,
+      :font_size,
+      :collapsed
+    ])
     |> validate_required([:id, :name, :step_ids, :output_step_id])
+    |> validate_number(:font_size,
+      greater_than_or_equal_to: @min_font_size,
+      less_than_or_equal_to: @max_font_size
+    )
     |> validate_output_step_in_group()
   end
 

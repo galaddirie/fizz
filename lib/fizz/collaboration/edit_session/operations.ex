@@ -14,6 +14,9 @@ defmodule Fizz.Collaboration.EditSession.Operations do
   @default_group_width 360
   @default_group_height 240
   @group_content_insets %{right: 24, bottom: 52}
+  @default_group_font_size 14
+  @min_group_font_size 10
+  @max_group_font_size 32
 
   @doc """
   Normalizes an operation payload by ensuring keys are atoms or strings consistently.
@@ -213,6 +216,7 @@ defmodule Fizz.Collaboration.EditSession.Operations do
     group_id = field(group_data, :id)
     step_ids = List.wrap(field(group_data, :step_ids) || [])
     missing_steps = Enum.reject(step_ids, &step_exists?(draft, &1))
+    font_size = field(group_data, :font_size)
 
     cond do
       is_nil(group_id) ->
@@ -228,31 +232,22 @@ defmodule Fizz.Collaboration.EditSession.Operations do
         {:error, {:group_steps_not_found, missing_steps}}
 
       true ->
-        :ok
+        validate_group_font_size(font_size)
     end
   end
 
   defp validate_update_group(draft, payload) do
     group_id = field(payload, :group_id)
     changes = field(payload, :changes) || %{}
+    font_size = field(changes, :font_size)
 
     if group_exists?(draft, group_id) do
-      case Map.get(changes, "output_step_id") || Map.get(changes, :output_step_id) do
-        nil ->
-          :ok
+      case validate_group_output_step_change(draft, group_id, changes) do
+        :ok ->
+          validate_group_font_size(font_size)
 
-        output_step_id ->
-          case find_group(draft, group_id) do
-            nil ->
-              {:error, {:group_not_found, group_id}}
-
-            group ->
-              if output_step_id in (field(group, :step_ids) || []) do
-                :ok
-              else
-                {:error, {:invalid_group_output, output_step_id}}
-              end
-          end
+        {:error, _reason} = error ->
+          error
       end
     else
       {:error, {:group_not_found, group_id}}
@@ -511,6 +506,7 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       |> maybe_update(:name, changes)
       |> maybe_update(:position, changes)
       |> maybe_update(:color, changes)
+      |> maybe_update(:font_size, changes)
       |> maybe_update(:collapsed, changes)
       |> maybe_update(:output_step_id, changes)
     end)
@@ -835,9 +831,50 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       output_step_id: output_step_id,
       position: field(data, :position) || %{},
       color: field(data, :color),
+      font_size: normalize_group_font_size(field(data, :font_size)),
       collapsed: field(data, :collapsed) || false
     }
   end
+
+  defp validate_group_output_step_change(draft, group_id, changes) do
+    case Map.get(changes, "output_step_id") || Map.get(changes, :output_step_id) do
+      nil ->
+        :ok
+
+      output_step_id ->
+        case find_group(draft, group_id) do
+          nil ->
+            {:error, {:group_not_found, group_id}}
+
+          group ->
+            if output_step_id in (field(group, :step_ids) || []) do
+              :ok
+            else
+              {:error, {:invalid_group_output, output_step_id}}
+            end
+        end
+    end
+  end
+
+  defp validate_group_font_size(nil), do: :ok
+
+  defp validate_group_font_size(font_size) when is_integer(font_size) do
+    if font_size in @min_group_font_size..@max_group_font_size do
+      :ok
+    else
+      {:error, {:invalid_group_font_size, font_size}}
+    end
+  end
+
+  defp validate_group_font_size(_font_size), do: {:error, :invalid_group_font_size}
+
+  defp normalize_group_font_size(font_size) when is_integer(font_size) do
+    font_size
+    |> max(@min_group_font_size)
+    |> min(@max_group_font_size)
+  end
+
+  defp normalize_group_font_size(_font_size), do: @default_group_font_size
 
   defp resolve_group_output_step_id(data, step_ids, connections) do
     output_step_id = field(data, :output_step_id)

@@ -54,6 +54,7 @@ export interface NodeGroup {
   output_step_id: string;
   position: { x?: number; y?: number; width?: number; height?: number };
   color?: string | null;
+  font_size?: number | null;
   collapsed: boolean;
 }
 
@@ -209,6 +210,7 @@ export interface GroupNodeData {
   step_ids: string[];
   collapsed: boolean;
   color?: string;
+  font_size?: number;
   isGroupingTarget?: boolean;
   groupingColor?: string;
   collabSeq?: number;
@@ -217,6 +219,7 @@ export interface GroupNodeData {
     changes: {
       name?: string;
       color?: string;
+      font_size?: number;
       position?: { x?: number; y?: number; width?: number; height?: number };
     }
   ) => void;

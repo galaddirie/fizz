@@ -37,6 +37,9 @@ defmodule FizzWeb.WorkflowLive.Edit do
     :step_skipped,
     :step_cancelled
   ]
+  @group_name_font_size_default 14
+  @group_name_font_size_min 10
+  @group_name_font_size_max 32
 
   @impl true
   def mount(%{"workspace_id" => workspace_id, "id" => id} = params, _session, socket) do
@@ -515,6 +518,7 @@ defmodule FizzWeb.WorkflowLive.Edit do
         step_ids: step_ids,
         position: normalize_group_position(Map.get(params, "position", %{})),
         color: Map.get(params, "color"),
+        font_size: parse_group_font_size(Map.get(params, "font_size")),
         collapsed: Map.get(params, "collapsed", false)
       }
 
@@ -1306,6 +1310,8 @@ defmodule FizzWeb.WorkflowLive.Edit do
   defp normalize_group_position(_position), do: %{}
 
   defp normalize_group_changes(changes) when is_map(changes) do
+    changes = normalize_optional_group_font_size(changes)
+
     position =
       Map.get(changes, :position) ||
         Map.get(changes, "position")
@@ -1473,6 +1479,45 @@ defmodule FizzWeb.WorkflowLive.Edit do
   end
 
   defp parse_optional_non_negative_integer(_value), do: nil
+
+  defp normalize_optional_group_font_size(changes) when is_map(changes) do
+    case Map.get(changes, :font_size) || Map.get(changes, "font_size") do
+      nil ->
+        changes
+
+      font_size ->
+        case parse_optional_non_negative_integer(font_size) do
+          nil ->
+            changes
+            |> Map.delete(:font_size)
+            |> Map.delete("font_size")
+
+          parsed ->
+            changes
+            |> Map.delete("font_size")
+            |> Map.put(:font_size, parse_group_font_size(parsed))
+        end
+    end
+  end
+
+  defp parse_group_font_size(font_size) do
+    normalized =
+      case font_size do
+        value when is_integer(value) -> value
+        value when is_binary(value) -> parse_optional_non_negative_integer(value)
+        _ -> nil
+      end
+
+    case normalized do
+      value when is_integer(value) ->
+        value
+        |> max(@group_name_font_size_min)
+        |> min(@group_name_font_size_max)
+
+      _ ->
+        @group_name_font_size_default
+    end
+  end
 
   defp stale_seq?(nil, _current_seq), do: false
   defp stale_seq?(incoming_seq, current_seq) when incoming_seq <= current_seq, do: true
