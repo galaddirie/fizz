@@ -94,6 +94,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const grouping = useGrouping({
     workflow: () => props.workflow,
     activeDraft: () => activeDraft.value,
+    getCollabSeq: () => collabSeq.value,
     getNodes: () => getNodes.value,
     getSelectedNodes: () => getSelectedNodes.value,
     updateNodeData,
@@ -210,6 +211,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   });
   const nodeInteraction = useNodeInteraction({
     canEdit: () => canEdit.value,
+    getCollabSeq: () => collabSeq.value,
     store,
     nodes: () => nodes.value,
     getNodes: () => getNodes.value,
