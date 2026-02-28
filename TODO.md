@@ -1,10 +1,3 @@
-1. [High] Wrong argument order can crash the LiveView on operation-apply fallback.
-    lib/fizz_web/live/workflow_live/edit.ex:929 calls Workflows.get_workflow_with_draft/2 with
-    (workflow_id, scope) instead of (scope, workflow_id). The function spec is
-    get_workflow_with_draft(scope, id) in lib/fizz/workflows.ex:210.
-    Better pattern: keep context argument order consistent (scope first) and use a thin wrapper helper
-    in the LiveView to avoid repeating direct context calls.
-
 2. [High] Sensitive data exposure risk from evaluated config + verbose payload logging.
     lib/fizz/runtime/steps/step_runner.ex:145 stores full "evaluated_config" into step execution
     metadata. That metadata is encoded to the client in lib/fizz/executions/step_execution.ex:9.
@@ -53,14 +46,6 @@
     while most operation payload keys are snake_case.
     Better pattern: normalize at boundary once into typed internal structs/maps.
 
-
-
-
-10. [Low] Dev mock presences are mixed into real presence formatting.
-    lib/fizz_web/live/workflow_live/edit.ex:2024 appends fake users in :dev. This distorts behavior and
-    can hide real presence bugs.
-    Better pattern: keep test/demo presence injection behind explicit feature flags or fixtures, not in
-    core formatter.
 
 
 
