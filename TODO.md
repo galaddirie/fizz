@@ -1,10 +1,9 @@
-2. [High] Sensitive data exposure risk from evaluated config + verbose payload logging.
+2. [High] Sensitive data exposure from evaluated config + verbose payload logging.
     lib/fizz/runtime/steps/step_runner.ex:145 stores full "evaluated_config" into step execution
     metadata. That metadata is encoded to the client in lib/fizz/executions/step_execution.ex:9.
     Also, full operation payloads are logged at info/error in lib/fizz/collaboration/edit_session/
     operations.ex:84 and lib/fizz/collaboration/edit_session/operations.ex:96.
-    Better pattern: redact secrets before persistence/logging and avoid logging full payload maps in
-    hot paths.
+
 
 3. [High] Execution runs under workflow owner scope, not triggering user scope.
     lib/fizz/runtime/execution/server.ex:271 builds runtime scope from execution.workflow.user and
