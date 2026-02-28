@@ -522,7 +522,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
         :show="editor.isAddStepPickerOpen"
         :x="editor.addStepPickerX"
         :y="editor.addStepPickerY"
-        :items="editor.nodeLibraryItems"
+        :items="editor.addStepPickerItems"
         @select="editor.handleAddStepPickerSelect"
         @close="editor.closeAddStepPicker"
       />

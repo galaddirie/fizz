@@ -108,6 +108,24 @@ export interface StepSubnodeSlot {
   input_key?: string;
 }
 
+export interface AddStepAutoConnect {
+  source_step_id?: string;
+  source_output?: string;
+  target_step_id?: string;
+  target_input?: string;
+}
+
+export type HandleQuickAddFilterMode = 'output' | 'subnode_slot';
+
+export interface StepHandleQuickAddRequest {
+  screenPoint: { x: number; y: number };
+  autoConnect: AddStepAutoConnect;
+  filter: {
+    mode: HandleQuickAddFilterMode;
+    accepted_type_ids?: string[];
+  };
+}
+
 export interface StepType {
   id: string;
   name: string;
@@ -177,6 +195,7 @@ export interface StepNodeData {
   onUpdate?: (stepId: string, changes: { name?: string }) => void;
   onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
+  onHandleQuickAdd?: (request: StepHandleQuickAddRequest) => void;
   canEdit?: boolean;
 }
 

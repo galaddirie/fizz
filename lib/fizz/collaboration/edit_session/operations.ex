@@ -9,6 +9,12 @@ defmodule Fizz.Collaboration.EditSession.Operations do
   alias Fizz.Steps.Registry, as: StepRegistry
   require Logger
 
+  @default_node_width 150
+  @default_node_height 50
+  @default_group_width 360
+  @default_group_height 240
+  @group_content_insets %{right: 24, bottom: 52}
+
   @doc """
   Normalizes an operation payload by ensuring keys are atoms or strings consistently.
   """
@@ -362,6 +368,7 @@ defmodule Fizz.Collaboration.EditSession.Operations do
     step = build_step(step_data)
     new_steps = (draft.steps || []) ++ [step]
     group_id = field(payload, :group_id)
+    step_size = field(payload, :step_size) || %{}
 
     draft = %{draft | steps: new_steps}
 
@@ -369,9 +376,9 @@ defmodule Fizz.Collaboration.EditSession.Operations do
       if is_nil(group_id) do
         draft
       else
-        update_groups(draft, fn groups ->
-          add_steps_to_group(groups, group_id, [step.id])
-        end)
+        draft
+        |> update_groups(fn groups -> add_steps_to_group(groups, group_id, [step.id]) end)
+        |> maybe_expand_group_for_step(group_id, step, step_size)
       end
 
     {:ok, draft}
@@ -692,6 +699,58 @@ defmodule Fizz.Collaboration.EditSession.Operations do
   defp maybe_add_steps_to_group(groups, group_id, step_ids),
     do: add_steps_to_group(groups, group_id, step_ids)
 
+  defp maybe_expand_group_for_step(draft, nil, _step, _step_size), do: draft
+
+  defp maybe_expand_group_for_step(draft, group_id, step, step_size) do
+    step_position = field(step, :position) || %{}
+    step_rel_x = numeric_field(step_position, :x, 0)
+    step_rel_y = numeric_field(step_position, :y, 0)
+    step_width = max(numeric_field(step_size, :width, @default_node_width), 1)
+    step_height = max(numeric_field(step_size, :height, @default_node_height), 1)
+
+    update_groups(draft, fn groups ->
+      Enum.map(groups, fn group ->
+        if field(group, :id) == group_id do
+          maybe_expand_group_bounds(group, step_rel_x, step_rel_y, step_width, step_height)
+        else
+          group
+        end
+      end)
+    end)
+  end
+
+  defp maybe_expand_group_bounds(group, step_rel_x, step_rel_y, step_width, step_height) do
+    position = field(group, :position) || %{}
+    width = numeric_field(position, :width, @default_group_width)
+    height = numeric_field(position, :height, @default_group_height)
+
+    content_right = width - @group_content_insets.right
+    content_bottom = height - @group_content_insets.bottom
+    step_right = step_rel_x + step_width
+    step_bottom = step_rel_y + step_height
+
+    required_width =
+      if step_right > content_right, do: width + (step_right - content_right), else: width
+
+    required_height =
+      if step_bottom > content_bottom, do: height + (step_bottom - content_bottom), else: height
+
+    next_width = max(required_width, @default_group_width)
+    next_height = max(required_height, @default_group_height)
+
+    if next_width == width and next_height == height do
+      group
+    else
+      update_group_fields(group, %{
+        position:
+          Map.merge(position, %{
+            width: next_width,
+            height: next_height
+          })
+      })
+    end
+  end
+
   defp apply_group_membership_map(groups, group_id_by_step_id) do
     Enum.reduce(group_id_by_step_id, groups, fn {step_id, group_id}, acc ->
       normalized_group_id =
@@ -940,6 +999,22 @@ defmodule Fizz.Collaboration.EditSession.Operations do
 
   defp slot_field(slot, key) when is_map(slot) and is_atom(key) do
     Map.get(slot, key) || Map.get(slot, Atom.to_string(key))
+  end
+
+  defp numeric_field(map, key, default) when is_map(map) do
+    case field(map, key) do
+      value when is_integer(value) or is_float(value) ->
+        value
+
+      value when is_binary(value) ->
+        case Float.parse(value) do
+          {parsed, _rest} -> parsed
+          :error -> default
+        end
+
+      _ ->
+        default
+    end
   end
 
   defp normalize_target_input(target_input) when target_input in [nil, "", :main, "main"],

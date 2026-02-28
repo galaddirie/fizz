@@ -5,7 +5,7 @@ import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
-import type { StepNodeData, StepSubnodeSlot } from '@/types/workflow';
+import type { StepHandleQuickAddRequest, StepNodeData, StepSubnodeSlot } from '@/types/workflow';
 import {
   GlobeAltIcon,
   ServerIcon,
@@ -292,6 +292,45 @@ const subnodeInputHandles = computed<StepSubnodeSlot[]>(() => {
   return slots.filter(slot => slot.id && slot.id !== 'main');
 });
 
+const handleOutputQuickAdd = (screenPoint: { x: number; y: number }) => {
+  if (!canEdit.value) return;
+
+  const request: StepHandleQuickAddRequest = {
+    screenPoint,
+    autoConnect: {
+      source_step_id: props.id,
+      source_output: 'main',
+    },
+    filter: {
+      mode: 'output',
+    },
+  };
+
+  props.data.onHandleQuickAdd?.(request);
+};
+
+const handleSubnodeSlotQuickAdd = (
+  slot: StepSubnodeSlot,
+  screenPoint: { x: number; y: number }
+) => {
+  if (!canEdit.value) return;
+
+  const acceptedTypeIds = slot.accepts?.type_ids ?? [];
+  const request: StepHandleQuickAddRequest = {
+    screenPoint,
+    autoConnect: {
+      target_step_id: props.id,
+      target_input: slot.id,
+    },
+    filter: {
+      mode: 'subnode_slot',
+      accepted_type_ids: acceptedTypeIds.length > 0 ? acceptedTypeIds : undefined,
+    },
+  };
+
+  props.data.onHandleQuickAdd?.(request);
+};
+
 // Inline editing functions
 const startEditing = () => {
   if (!canEdit.value) return;
@@ -391,7 +430,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       v-if="showInputHandle"
       class="absolute top-1/2 left-0 z-10 -translate-x-1/2 -translate-y-1/2"
     >
-      <Handle id="main" type="target" :position="Position.Left" />
+      <Handle id="main" type="target" :position="Position.Left" :node-id="props.id" />
     </div>
 
     <!-- Subnode Slot Handles (bottom edge, flush on the edge) -->
@@ -408,7 +447,14 @@ const handleNameKeydown = (event: KeyboardEvent) => {
         <span class="pointer-events-none mb-1 whitespace-nowrap text-[9px] font-medium text-base-content/50">
           {{ slot.title || slot.id }}
         </span>
-        <Handle :id="slot.id" type="target" :position="Position.Bottom" />
+        <Handle
+          :id="slot.id"
+          type="target"
+          :position="Position.Bottom"
+          :node-id="props.id"
+          :show-add-button="canEdit"
+          @add-click="point => handleSubnodeSlotQuickAdd(slot, point)"
+        />
       </div>
     </template>
 
@@ -599,7 +645,14 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       v-if="showOutputHandle"
       class="absolute top-1/2 right-0 z-10 translate-x-1/2 -translate-y-1/2"
     >
-      <Handle id="main" type="source" :position="Position.Right" />
+      <Handle
+        id="main"
+        type="source"
+        :position="Position.Right"
+        :node-id="props.id"
+        :show-add-button="canEdit"
+        @add-click="handleOutputQuickAdd"
+      />
     </div>
   </div>
 </template>

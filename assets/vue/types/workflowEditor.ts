@@ -6,6 +6,7 @@ import type {
   StepType,
   CredentialOption,
   NodeLibraryItem,
+  AddStepAutoConnect,
   Execution,
   StepExecution,
   EditorState,
@@ -75,7 +76,13 @@ export type WorkflowEditorLiveEmits = {
 export type WorkflowEditorEmits = {
   (
     e: 'add_step',
-    payload: { type_id: string; position: { x: number; y: number }; group_id?: string | null }
+    payload: {
+      type_id: string;
+      position: { x: number; y: number };
+      group_id?: string | null;
+      auto_connect?: AddStepAutoConnect;
+      step_size?: { width: number; height: number };
+    }
   ): void;
   (
     e: 'add_group',

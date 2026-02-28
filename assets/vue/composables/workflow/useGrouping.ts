@@ -17,6 +17,7 @@ import {
   findGroupAtPoint,
   findGroupByIntersection,
   getAbsoluteNodePosition,
+  getNodeSize,
 } from '@/lib/workflowGeometry';
 import { isGroupNode, isStepNode } from '@/lib/workflowGuards';
 

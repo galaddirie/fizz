@@ -159,7 +159,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
 <template>
   <div class="subnode-wrapper group flex flex-col items-center">
     <!-- Output Handle (top) — subnode sends data up to parent -->
-    <div class="absolute top-0 left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
+    <div class="absolute -top-[3px] left-1/2 z-10 -translate-x-1/2 -translate-y-1/2">
       <Handle id="main" type="source" :position="Position.Top" />
     </div>
 

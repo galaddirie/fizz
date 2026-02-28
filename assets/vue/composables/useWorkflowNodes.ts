@@ -10,6 +10,7 @@ import type {
   EditorState,
   UserPresence,
   StepNodeData,
+  StepHandleQuickAddRequest,
   GroupNodeData,
   WorkflowNodeData,
 } from '@/types/workflow';
@@ -54,6 +55,7 @@ interface UseWorkflowNodesOptions {
   collabSeq?: () => number | undefined;
   onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
+  onHandleQuickAdd?: (request: StepHandleQuickAddRequest) => void;
   groupingPreview?: () => { groupId?: string | null; stepIds?: string[]; color?: string | null };
 }
 
@@ -340,6 +342,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           onUpdate: canEdit ? options.onUpdateStep : undefined,
           onToggleDisabled: canEdit ? options.onToggleDisabled : undefined,
           onTogglePin: canEdit ? options.onTogglePin : undefined,
+          onHandleQuickAdd: canEdit ? options.onHandleQuickAdd : undefined,
           canEdit,
         } satisfies StepNodeData,
       };

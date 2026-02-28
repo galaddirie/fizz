@@ -307,12 +307,58 @@ defmodule FizzWeb.WorkflowLive.Edit do
     }
 
     payload =
-      case Map.get(params, "group_id") do
-        nil -> %{step: step}
-        group_id -> %{step: step, group_id: group_id}
-      end
+      %{step: step}
+      |> maybe_put_group_id(Map.get(params, "group_id"))
+      |> maybe_put_step_size(parse_step_size(params))
 
-    apply_operation(socket, :add_step, payload)
+    case build_add_step_auto_connect_connection(params, step_id) do
+      nil ->
+        apply_operation(socket, :add_step, payload)
+
+      connection ->
+        undo_group_id = UUID.generate()
+        undo_label = "Add Step"
+
+        step_operation =
+          build_operation(socket, :add_step, payload, %{
+            undo_group_id: undo_group_id,
+            undo_label: undo_label
+          })
+
+        case Server.apply_operation(socket.assigns.workflow.id, step_operation) do
+          {:ok, _result} ->
+            connection_operation =
+              build_operation(socket, :add_connection, %{connection: connection}, %{
+                undo_group_id: undo_group_id,
+                undo_label: undo_label
+              })
+
+            case Server.apply_operation(socket.assigns.workflow.id, connection_operation) do
+              {:ok, _result} ->
+                {:noreply, push_undo_state(socket)}
+
+              {:error, reason} ->
+                Logger.warning("Auto-connect failed after add_step",
+                  reason: inspect(reason),
+                  step_id: step_id,
+                  workflow_id: socket.assigns.workflow.id
+                )
+
+                if step_exists_in_session_draft?(socket.assigns.workflow.id, step_id) do
+                  {:noreply,
+                   socket
+                   |> push_undo_state()
+                   |> put_flash(:error, "Step added but auto-connect failed")}
+                else
+                  {:noreply, put_flash(socket, :error, "Operation failed")}
+                end
+            end
+
+          {:error, reason} ->
+            Logger.warning("Operation failed: #{inspect(reason)}")
+            {:noreply, put_flash(socket, :error, "Operation failed")}
+        end
+    end
   end
 
   @impl true
@@ -1937,6 +1983,200 @@ defmodule FizzWeb.WorkflowLive.Edit do
       )
 
     assign(socket, :step_executions, step_executions)
+  end
+
+  defp maybe_put_group_id(payload, nil), do: payload
+
+  defp maybe_put_group_id(payload, group_id) when is_binary(group_id) do
+    Map.put(payload, :group_id, group_id)
+  end
+
+  defp maybe_put_group_id(payload, _group_id), do: payload
+
+  defp maybe_put_step_size(payload, nil), do: payload
+
+  defp maybe_put_step_size(payload, %{width: width, height: height} = step_size)
+       when (is_integer(width) or is_float(width)) and
+              (is_integer(height) or is_float(height)) do
+    Map.put(payload, :step_size, step_size)
+  end
+
+  defp maybe_put_step_size(payload, _step_size), do: payload
+
+  defp parse_step_size(params) when is_map(params) do
+    params
+    |> fetch_step_size_payload()
+    |> normalize_step_size()
+  end
+
+  defp parse_step_size(_params), do: nil
+
+  defp fetch_step_size_payload(params) do
+    Map.get(params, "step_size") ||
+      Map.get(params, :step_size) ||
+      Map.get(params, "stepSize") ||
+      Map.get(params, :stepSize)
+  end
+
+  defp normalize_step_size(%{} = size_payload) do
+    with {:ok, width} <- normalize_step_dimension(step_size_value(size_payload, :width)),
+         {:ok, height} <- normalize_step_dimension(step_size_value(size_payload, :height)) do
+      %{width: width, height: height}
+    else
+      _ -> nil
+    end
+  end
+
+  defp normalize_step_size(_size_payload), do: nil
+
+  defp step_size_value(payload, key) when is_map(payload) do
+    Map.get(payload, key) || Map.get(payload, Atom.to_string(key))
+  end
+
+  defp normalize_step_dimension(value) when is_integer(value) and value > 0, do: {:ok, value}
+  defp normalize_step_dimension(value) when is_float(value) and value > 0, do: {:ok, value}
+
+  defp normalize_step_dimension(value) when is_binary(value) do
+    case Float.parse(String.trim(value)) do
+      {parsed, _rest} when parsed > 0 -> {:ok, parsed}
+      _ -> :error
+    end
+  end
+
+  defp normalize_step_dimension(_value), do: :error
+
+  defp build_add_step_auto_connect_connection(params, new_step_id) do
+    auto_connect =
+      Map.get(params, "auto_connect") ||
+        Map.get(params, :auto_connect) ||
+        Map.get(params, "autoConnect") ||
+        Map.get(params, :autoConnect)
+
+    case auto_connect do
+      %{} = auto_connect ->
+        fixed_source_step_id =
+          auto_connect
+          |> auto_connect_value(:source_step_id)
+          |> normalize_non_empty_string()
+
+        fixed_target_step_id =
+          auto_connect
+          |> auto_connect_value(:target_step_id)
+          |> normalize_non_empty_string()
+
+        source_output =
+          auto_connect
+          |> auto_connect_value(:source_output)
+          |> normalize_connection_port("main")
+
+        target_input =
+          auto_connect
+          |> auto_connect_value(:target_input)
+          |> normalize_connection_port("main")
+
+        cond do
+          is_binary(fixed_source_step_id) and is_binary(fixed_target_step_id) ->
+            nil
+
+          is_binary(fixed_source_step_id) ->
+            %{
+              id: UUID.generate(),
+              source_step_id: fixed_source_step_id,
+              source_output: source_output,
+              target_step_id: new_step_id,
+              target_input: target_input
+            }
+
+          is_binary(fixed_target_step_id) ->
+            %{
+              id: UUID.generate(),
+              source_step_id: new_step_id,
+              source_output: source_output,
+              target_step_id: fixed_target_step_id,
+              target_input: target_input
+            }
+
+          true ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp auto_connect_value(map, :source_step_id) when is_map(map) do
+    Map.get(map, "source_step_id") ||
+      Map.get(map, :source_step_id) ||
+      Map.get(map, "sourceStepId") ||
+      Map.get(map, :sourceStepId)
+  end
+
+  defp auto_connect_value(map, :target_step_id) when is_map(map) do
+    Map.get(map, "target_step_id") ||
+      Map.get(map, :target_step_id) ||
+      Map.get(map, "targetStepId") ||
+      Map.get(map, :targetStepId)
+  end
+
+  defp auto_connect_value(map, :source_output) when is_map(map) do
+    Map.get(map, "source_output") ||
+      Map.get(map, :source_output) ||
+      Map.get(map, "sourceOutput") ||
+      Map.get(map, :sourceOutput)
+  end
+
+  defp auto_connect_value(map, :target_input) when is_map(map) do
+    Map.get(map, "target_input") ||
+      Map.get(map, :target_input) ||
+      Map.get(map, "targetInput") ||
+      Map.get(map, :targetInput)
+  end
+
+  defp normalize_non_empty_string(nil), do: nil
+
+  defp normalize_non_empty_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_non_empty_string(value) when is_atom(value) do
+    value
+    |> Atom.to_string()
+    |> normalize_non_empty_string()
+  end
+
+  defp normalize_non_empty_string(_value), do: nil
+
+  defp normalize_connection_port(value, fallback) when is_binary(value) do
+    case String.trim(value) do
+      "" -> fallback
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_connection_port(nil, fallback), do: fallback
+
+  defp normalize_connection_port(value, fallback) when is_atom(value) do
+    value
+    |> Atom.to_string()
+    |> normalize_connection_port(fallback)
+  end
+
+  defp normalize_connection_port(_value, fallback), do: fallback
+
+  defp step_exists_in_session_draft?(workflow_id, step_id) do
+    case Server.get_sync_state(workflow_id) do
+      {:ok, %{draft: draft}} ->
+        draft.steps
+        |> List.wrap()
+        |> Enum.any?(fn step -> fetch_field(step, :id) == step_id end)
+
+      _ ->
+        false
+    end
   end
 
   defp fetch_payload_value(payload, key) when is_map(payload) do

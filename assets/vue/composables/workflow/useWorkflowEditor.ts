@@ -29,11 +29,21 @@ import { useWorkflowExecutionState } from '@/composables/workflow/useWorkflowExe
 import { useWorkflowNodeActions } from '@/composables/workflow/useWorkflowNodeActions';
 import { useWorkflowPins } from '@/composables/workflow/useWorkflowPins';
 import { useWorkflowSelection } from '@/composables/workflow/useWorkflowSelection';
-import { GRID_SIZE } from '@/constants/layout';
+import { DEFAULT_NODE_DIMENSIONS, GRID_SIZE } from '@/constants/layout';
 import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
 import { workflowTrace } from '@/lib/workflowTrace';
-import type { StepType, Workflow, WorkflowDraft } from '@/types/workflow';
+import type {
+  NodeLibraryItem,
+  StepHandleQuickAddRequest,
+  StepType,
+  Workflow,
+  WorkflowDraft,
+} from '@/types/workflow';
 import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
+
+const SUBNODE_FALLBACK_DIMENSIONS = { width: 112, height: 96 };
+const QUICK_ADD_OUTPUT_X_OFFSET = GRID_SIZE * 3;
+
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
   const store = useClientStore();
   const undoStore = useUndoStore();
@@ -89,6 +99,11 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     updateNodeData,
     emit,
   });
+
+  function handleNodeHandleQuickAdd(request: StepHandleQuickAddRequest) {
+    openAddStepPicker(request.screenPoint, request);
+  }
+
   const { nodes } = useWorkflowNodes({
     workflow: () => activeWorkflow.value,
     stepTypes: () => props.stepTypes ?? [],
@@ -107,6 +122,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     collabSeq: () => collabSeq.value,
     onToggleDisabled: nodeActions.handleToggleDisabled,
     onTogglePin: pins.handleTogglePin,
+    onHandleQuickAdd: handleNodeHandleQuickAdd,
     groupingPreview: () => grouping.groupingPreview.value,
   });
   const { edges } = useWorkflowEdges({
@@ -253,16 +269,62 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
   syncResetRef.value = () => { nodeInteraction.resetPendingNodeRemovals(); edgeInteraction.resetPendingEdgeRemovals(); };
+  const nodeLibraryItems = computed<NodeLibraryItem[]>(() => props.nodeLibraryItems ?? []);
   const isAddStepPickerOpen = ref(false);
   const addStepPickerX = ref(0);
   const addStepPickerY = ref(0);
-  const openAddStepPicker = (screenPoint: { x: number; y: number }) => {
+  const pendingHandleQuickAdd = ref<StepHandleQuickAddRequest | null>(null);
+  const addStepPickerItems = computed<NodeLibraryItem[]>(() => {
+    const quickAddRequest = pendingHandleQuickAdd.value;
+    if (!quickAddRequest) return nodeLibraryItems.value;
+
+    if (quickAddRequest.filter.mode === 'output') {
+      return nodeLibraryItems.value.filter(item => {
+        const isRootNode = item.node_role !== 'subnode';
+        return isRootNode && item.step_kind !== 'trigger';
+      });
+    }
+
+    const acceptedTypeIds = quickAddRequest.filter.accepted_type_ids ?? [];
+
+    return nodeLibraryItems.value.filter(item => {
+      if (item.node_role !== 'subnode') return false;
+      if (acceptedTypeIds.length === 0) return true;
+      return acceptedTypeIds.includes(item.type_id);
+    });
+  });
+
+  const resolveAddStepSize = (typeId: string) => {
+    const selectedItem = nodeLibraryItems.value.find(item => item.type_id === typeId);
+    const isSubnode = selectedItem?.node_role === 'subnode';
+    const nodeType = isSubnode ? 'subnode' : 'step';
+
+    const measuredNode = getNodes.value.find(
+      node => node.type === nodeType && node.dimensions.width > 0 && node.dimensions.height > 0
+    );
+
+    if (measuredNode) {
+      return {
+        width: measuredNode.dimensions.width,
+        height: measuredNode.dimensions.height,
+      };
+    }
+
+    return isSubnode ? SUBNODE_FALLBACK_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
+  };
+
+  const openAddStepPicker = (
+    screenPoint: { x: number; y: number },
+    quickAddRequest: StepHandleQuickAddRequest | null = null
+  ) => {
     addStepPickerX.value = screenPoint.x;
     addStepPickerY.value = screenPoint.y;
+    pendingHandleQuickAdd.value = quickAddRequest;
     isAddStepPickerOpen.value = true;
   };
   const closeAddStepPicker = () => {
     isAddStepPickerOpen.value = false;
+    pendingHandleQuickAdd.value = null;
   };
   const handleAddStepPickerSelect = (typeId: string) => {
     const position = canvas.getFlowPositionFromEvent({
@@ -275,21 +337,60 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
       return;
     }
 
-    const targetGroup = findGroupAtPoint(position, getNodes.value);
-    if (targetGroup) {
-      const groupPosition = getAbsoluteNodePosition(targetGroup);
-      emit('add_step', {
-        type_id: typeId,
-        position: {
-          x: position.x - groupPosition.x,
-          y: position.y - groupPosition.y,
-        },
-        group_id: targetGroup.id,
-      });
-    } else {
-      emit('add_step', { type_id: typeId, position });
+    const quickAddRequest = pendingHandleQuickAdd.value;
+    const stepSize = resolveAddStepSize(typeId);
+    const resolvedPosition =
+      quickAddRequest?.filter.mode === 'output'
+        ? {
+          x: position.x + QUICK_ADD_OUTPUT_X_OFFSET,
+          y: position.y - stepSize.height / 2,
+        }
+        : position;
+
+    const addStepPayload: {
+      type_id: string;
+      position: { x: number; y: number };
+      group_id?: string;
+      auto_connect?: StepHandleQuickAddRequest['autoConnect'];
+      step_size?: { width: number; height: number };
+    } = {
+      type_id: typeId,
+      position: resolvedPosition,
+      step_size: stepSize,
+    };
+
+    const autoConnect = quickAddRequest?.autoConnect;
+    if (autoConnect) {
+      addStepPayload.auto_connect = autoConnect;
     }
 
+    let targetGroup = findGroupAtPoint(resolvedPosition, getNodes.value);
+
+    if (!targetGroup && quickAddRequest) {
+      const fixedStepId =
+        quickAddRequest.autoConnect.source_step_id ?? quickAddRequest.autoConnect.target_step_id;
+      const fixedGroupId = fixedStepId ? grouping.groupByStepId.value.get(fixedStepId) : undefined;
+
+      if (fixedGroupId) {
+        const matchingGroupNode = getNodes.value.find(
+          node => node.id === fixedGroupId && node.type === 'group'
+        );
+        if (matchingGroupNode) {
+          targetGroup = matchingGroupNode;
+        }
+      }
+    }
+
+    if (targetGroup) {
+      const groupPosition = getAbsoluteNodePosition(targetGroup);
+      addStepPayload.position = {
+        x: resolvedPosition.x - groupPosition.x,
+        y: resolvedPosition.y - groupPosition.y,
+      };
+      addStepPayload.group_id = targetGroup.id;
+    }
+
+    emit('add_step', addStepPayload);
     closeAddStepPicker();
   };
   const contextMenu = useContextMenu({
@@ -436,7 +537,8 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     handleUnpinOutput: pins.handleUnpinOutput,
     selectTraceStep: actions.selectTraceStep,
     expressionPreviews: props.expressionPreviews ?? {},
-    nodeLibraryItems: props.nodeLibraryItems ?? [],
+    nodeLibraryItems,
+    addStepPickerItems,
     execution: props.execution ?? null,
     stepExecutions: props.stepExecutions ?? [],
     editorState: props.editorState,
