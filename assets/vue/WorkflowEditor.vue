@@ -17,12 +17,7 @@ import type {
   WorkflowEditorLiveEmits,
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
-import {
-  BugAntIcon,
-  SlashIcon,
-  ArrowPathIcon,
-  ChevronDoubleRightIcon,
-} from '@heroicons/vue/24/outline';
+import { BugAntIcon, SlashIcon, ChevronDoubleRightIcon } from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   stepTypes: () => [],
@@ -274,6 +269,11 @@ const debugExecutionLink = computed(() => {
   if (!workflow?.id || !workflow?.workspace_id || !props.debugExecutionId) return null;
   return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/execution/${props.debugExecutionId}`;
 });
+const workflowExecutionsLink = computed(() => {
+  const workflow = editor.workflow as any;
+  if (!workflow?.id || !workflow?.workspace_id) return null;
+  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}`;
+});
 const debugExitLink = computed(() => {
   const workflow = editor.workflow as any;
   if (!workflow?.id || !workflow?.workspace_id) return null;
@@ -459,6 +459,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
               :handle-drop="editor.handleDrop"
               :is-execution-failed="editor.isExecutionFailed"
               :is-execution-running="editor.isExecutionRunning"
+              :workflow-executions-link="workflowExecutionsLink"
               :on-run-test="editor.handleRunTest"
               :on-cancel-execution="editor.handleCancelExecution"
               :on-toggle-snap="editor.store.toggleSnap"

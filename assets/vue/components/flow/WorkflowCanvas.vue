@@ -51,6 +51,7 @@ interface Props {
   handleDrop: (event: DragEvent) => void;
   isExecutionFailed: boolean;
   isExecutionRunning: boolean;
+  workflowExecutionsLink?: string | null;
   onRunTest: () => void;
   onCancelExecution: () => void;
   onToggleSnap: () => void;
@@ -140,6 +141,7 @@ defineProps<Props>();
       :is-execution-failed="isExecutionFailed"
       :is-execution-running="isExecutionRunning"
       :is-preview-active="isRevisionPreviewActive"
+      :workflow-executions-link="workflowExecutionsLink"
       @run="onRunTest"
       @cancel="onCancelExecution"
     />
