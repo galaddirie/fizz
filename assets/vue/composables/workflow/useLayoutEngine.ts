@@ -91,6 +91,37 @@ export function useLayoutEngine(options: UseLayoutEngineOptions) {
     return bounds;
   };
 
+  const getMedian = (values: number[]) => {
+    if (!values.length) return 0;
+
+    const sorted = [...values].sort((left, right) => left - right);
+    const middleIndex = Math.floor(sorted.length / 2);
+
+    if (sorted.length % 2 === 1) return sorted[middleIndex];
+    return (sorted[middleIndex - 1] + sorted[middleIndex]) / 2;
+  };
+
+  const getStableLayoutOffset = (originalNodes: LayoutNode[], layoutNodes: LayoutNode[]) => {
+    const originalNodeById = new Map(originalNodes.map(node => [node.id, node]));
+    const xOffsets: number[] = [];
+    const yOffsets: number[] = [];
+
+    layoutNodes.forEach(node => {
+      const originalNode = originalNodeById.get(node.id);
+      if (!originalNode) return;
+
+      xOffsets.push(originalNode.position.x - node.position.x);
+      yOffsets.push(originalNode.position.y - node.position.y);
+    });
+
+    if (!xOffsets.length || !yOffsets.length) return null;
+
+    return {
+      x: getMedian(xOffsets),
+      y: getMedian(yOffsets),
+    };
+  };
+
   const alignLayoutPositions = (
     originalNodes: LayoutNode[],
     layoutNodes: LayoutNode[],
@@ -99,16 +130,25 @@ export function useLayoutEngine(options: UseLayoutEngineOptions) {
   ): LayoutNode[] => {
     if (!originalNodes.length || !layoutNodes.length) return layoutNodes;
 
-    const originalBounds = getLayoutBounds(originalNodes, edges);
-    const layoutBounds = getLayoutBounds(layoutNodes, edges);
-    const offset = {
-      x: originalBounds.minX - layoutBounds.minX,
-      y: originalBounds.minY - layoutBounds.minY,
-    };
+    // Anchor the translated layout to the median node delta so a small local edit
+    // does not cause the whole workflow to drift when only a few nodes changed.
+    const stableOffset = getStableLayoutOffset(originalNodes, layoutNodes);
+    const offset =
+      stableOffset ??
+      (() => {
+        const originalBounds = getLayoutBounds(originalNodes, edges);
+        const layoutBounds = getLayoutBounds(layoutNodes, edges);
+        const fallbackOffset = {
+          x: originalBounds.minX - layoutBounds.minX,
+          y: originalBounds.minY - layoutBounds.minY,
+        };
 
-    if (direction === 'LR') {
-      offset.x = originalBounds.maxX - layoutBounds.maxX;
-    }
+        if (direction === 'LR') {
+          fallbackOffset.x = originalBounds.maxX - layoutBounds.maxX;
+        }
+
+        return fallbackOffset;
+      })();
 
     return layoutNodes.map(node => ({
       ...node,
