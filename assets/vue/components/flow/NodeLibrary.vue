@@ -9,6 +9,7 @@ import {
   ChevronRightIcon,
   ChevronDoubleLeftIcon,
 } from '@heroicons/vue/24/outline';
+import ThemeSelector from '@/ThemeSelector.vue';
 
 // Props
 interface Props {
@@ -237,11 +238,14 @@ const onDragStart = (event: DragEvent, typeId: string) => {
 
     <!-- Footer -->
     <div class="border-base-200 bg-base-200/10 shrink-0 border-t px-5 py-3">
-      <div
-        class="text-base-content/40 flex items-center justify-center gap-2 text-xs font-medium tracking-wide"
-      >
-        <CursorArrowRaysIcon class="h-3.5 w-3.5" />
-        <span>Drag to canvas to add</span>
+      <div class="flex items-center justify-between">
+        <div
+          class="text-base-content/40 flex items-center gap-2 text-xs font-medium tracking-wide"
+        >
+          <CursorArrowRaysIcon class="h-3.5 w-3.5" />
+          <span>Drag to canvas</span>
+        </div>
+        <ThemeSelector />
       </div>
     </div>
 
