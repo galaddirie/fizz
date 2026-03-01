@@ -220,6 +220,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const node = {
         id: group.id,
         type: 'group',
+        class: 'nopan',
         position: {
           x: typeof previewX === 'number' ? previewX : typeof position.x === 'number' ? position.x : 0,
           y: typeof previewY === 'number' ? previewY : typeof position.y === 'number' ? position.y : 0,
@@ -320,6 +321,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const node = {
         id: step.id,
         type: isSubnode ? 'subnode' : 'step',
+        class: 'nopan',
         position: transientPositions.value[step.id] || step.position,
         parentNode: parentGroupId,
         zIndex: parentGroupId ? 20 : 10,

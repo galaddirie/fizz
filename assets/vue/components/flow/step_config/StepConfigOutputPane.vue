@@ -83,65 +83,52 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
         v-if="state.activeStepExecution.value && state.isMultiItemStep.value && state.itemStats.value"
         class="border-base-200 shrink-0 border-b px-4 py-2"
       >
-        <div class="flex items-center justify-between text-xs">
-          <div v-if="state.selectedItemIndex.value !== null" class="flex items-center gap-1.5">
+        <div class="flex items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-1.5">
             <button
-              @click="state.selectedItemIndex.value = Math.max(0, state.selectedItemIndex.value - 1)"
-              :disabled="state.selectedItemIndex.value <= 0"
+              @click="state.selectedItemIndex.value = Math.max(0, (state.selectedItemIndex.value ?? 0) - 1)"
+              :disabled="(state.selectedItemIndex.value ?? 0) <= 0"
               class="text-base-content/40 rounded p-0.5 transition-colors hover:text-base-content/70 disabled:opacity-30"
             >
               <ChevronLeftIcon class="size-3.5" />
             </button>
             <span class="text-base-content/55">Item</span>
-            <span class="text-base-content font-semibold">#{{ state.selectedItemIndex.value + 1 }}</span>
+            <span class="text-base-content font-semibold">#{{ (state.selectedItemIndex.value ?? 0) + 1 }}</span>
             <span class="text-base-content/40">/ {{ state.itemStats.value.itemsTotal }}</span>
             <button
-              @click="state.selectedItemIndex.value = Math.min(state.itemStats.value.itemsTotal - 1, state.selectedItemIndex.value + 1)"
-              :disabled="state.selectedItemIndex.value >= state.itemStats.value.itemsTotal - 1"
+              @click="state.selectedItemIndex.value = Math.min(state.itemStats.value.itemsTotal - 1, (state.selectedItemIndex.value ?? 0) + 1)"
+              :disabled="(state.selectedItemIndex.value ?? 0) >= state.itemStats.value.itemsTotal - 1"
               class="text-base-content/40 rounded p-0.5 transition-colors hover:text-base-content/70 disabled:opacity-30"
             >
               <ChevronRightIcon class="size-3.5" />
             </button>
           </div>
-          <div v-else class="flex items-center gap-2">
-            <span class="text-base-content/60 font-medium">{{ state.itemStats.value.itemsTotal }} items</span>
-            <div class="flex items-center gap-1.5 text-[11px]">
-              <span
-                v-if="state.itemStats.value.completed > 0"
-                class="flex items-center gap-1"
-                :style="{ color: getStatusColor('completed') }"
-              >
-                <span class="inline-block size-1.5 rounded-full" :style="{ backgroundColor: getStatusColor('completed') }"></span>
-                {{ state.itemStats.value.completed }}
-              </span>
-              <span
-                v-if="state.itemStats.value.failed > 0"
-                class="flex items-center gap-1"
-                :style="{ color: getStatusColor('failed') }"
-              >
-                <span class="inline-block size-1.5 rounded-full" :style="{ backgroundColor: getStatusColor('failed') }"></span>
-                {{ state.itemStats.value.failed }}
-              </span>
-              <span
-                v-if="state.itemStats.value.running > 0"
-                class="flex items-center gap-1"
-                :style="{ color: getStatusColor('running') }"
-              >
-                <span class="inline-block size-1.5 rounded-full animate-pulse" :style="{ backgroundColor: getStatusColor('running') }"></span>
-                {{ state.itemStats.value.running }}
-              </span>
-            </div>
+          <div class="flex items-center gap-1.5 text-[11px]">
+            <span
+              v-if="state.itemStats.value.completed > 0"
+              class="flex items-center gap-1"
+              :style="{ color: getStatusColor('completed') }"
+            >
+              <span class="inline-block size-1.5 rounded-full" :style="{ backgroundColor: getStatusColor('completed') }"></span>
+              {{ state.itemStats.value.completed }}
+            </span>
+            <span
+              v-if="state.itemStats.value.failed > 0"
+              class="flex items-center gap-1"
+              :style="{ color: getStatusColor('failed') }"
+            >
+              <span class="inline-block size-1.5 rounded-full" :style="{ backgroundColor: getStatusColor('failed') }"></span>
+              {{ state.itemStats.value.failed }}
+            </span>
+            <span
+              v-if="state.itemStats.value.running > 0"
+              class="flex items-center gap-1"
+              :style="{ color: getStatusColor('running') }"
+            >
+              <span class="inline-block size-1.5 rounded-full animate-pulse" :style="{ backgroundColor: getStatusColor('running') }"></span>
+              {{ state.itemStats.value.running }}
+            </span>
           </div>
-          <button
-            v-if="state.selectedItemIndex.value !== null"
-            @click="state.selectedItemIndex.value = null"
-            class="text-base-content/50 text-[11px] font-medium transition-colors hover:text-base-content/70"
-          >Show All</button>
-          <button
-            v-else
-            @click="state.selectedItemIndex.value = 0"
-            class="text-base-content/50 text-[11px] font-medium transition-colors hover:text-base-content/70"
-          >Browse Items</button>
         </div>
       </div>
 
@@ -181,15 +168,6 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
                 class="text-error/50 flex items-center gap-1 text-[11px] transition-colors hover:text-error"
               >
                 Unpin
-              </button>
-
-              <button
-                v-if="state.activeStepExecution.value"
-                @click.stop="state.copyExpression('steps', state.nodeId.value)"
-                class="text-base-content/50 flex items-center gap-1 text-[11px] transition-colors hover:text-base-content/70"
-              >
-                <DocumentDuplicateIcon class="size-3.5" />
-                Copy
               </button>
             </template>
           </div>

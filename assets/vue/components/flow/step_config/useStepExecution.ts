@@ -36,13 +36,49 @@ export function useStepExecution({ node, stepExecutions }: UseStepExecutionOptio
         };
     });
 
+    const totalItems = computed(() => {
+        const stats = itemStats.value;
+        return stats?.itemsTotal ?? stepExecutionsForStep.value.length;
+    });
+
     const selectedItemIndex = ref<number | null>(null);
+
+    const syncSelectedItemIndex = () => {
+        if (!isMultiItemStep.value) {
+            selectedItemIndex.value = null;
+            return;
+        }
+
+        const maxIndex = totalItems.value - 1;
+
+        if (maxIndex < 0) {
+            selectedItemIndex.value = null;
+            return;
+        }
+
+        if (selectedItemIndex.value === null) {
+            selectedItemIndex.value = 0;
+            return;
+        }
+
+        selectedItemIndex.value = Math.min(Math.max(selectedItemIndex.value, 0), maxIndex);
+    };
 
     watch(
         () => node()?.id,
         () => {
             selectedItemIndex.value = null;
-        }
+            syncSelectedItemIndex();
+        },
+        { immediate: true }
+    );
+
+    watch(
+        [isMultiItemStep, totalItems, () => stepExecutionsForStep.value.length],
+        () => {
+            syncSelectedItemIndex();
+        },
+        { immediate: true }
     );
 
     const activeStepExecution = computed(() => {
