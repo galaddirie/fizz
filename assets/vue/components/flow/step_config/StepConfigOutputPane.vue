@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, inject, computed } from 'vue';
 import { BookmarkIcon, DocumentDuplicateIcon, BoltIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline';
-import { formatDataForDisplay } from '@/lib/dataUtils';
 import { colorMap, oklchToHex, statusLabels, type NodeStatus } from '@/lib/color';
+import { unwrapData } from '@/lib/dataUtils';
+import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 import { StepConfigKey } from './useStepConfig';
 
 const state = inject(StepConfigKey)!;
@@ -25,6 +26,8 @@ const statusColor = computed(() => {
 
 const getStatusColor = (status: string) => oklchToHex(colorMap[status as NodeStatus] || colorMap.pending);
 const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] || status;
+
+const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
 </script>
 
 <template>
@@ -40,7 +43,7 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
               'relative px-4 py-2.5 text-xs font-medium transition-colors',
               activeTab === 'input'
                 ? 'text-base-content'
-                : 'text-base-content/40 hover:text-base-content/60',
+                : 'text-base-content/50 hover:text-base-content/70',
             ]"
           >
             Input
@@ -55,16 +58,16 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
               'relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors',
               activeTab === 'output'
                 ? 'text-base-content'
-                : 'text-base-content/40 hover:text-base-content/60',
+                : 'text-base-content/50 hover:text-base-content/70',
             ]"
           >
             Output
             <span
               v-if="effectiveStatus"
-              class="inline-flex items-center rounded-full px-1.5 py-px text-[9px] font-semibold leading-tight"
+              class="inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-bold leading-tight"
               :style="{
-                backgroundColor: statusColor + '18',
-                color: statusColor,
+                backgroundColor: (statusColor ?? '') + '25',
+                color: statusColor ?? undefined,
               }"
             >{{ statusLabels[effectiveStatus] }}</span>
             <span
@@ -85,24 +88,24 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
             <button
               @click="state.selectedItemIndex.value = Math.max(0, state.selectedItemIndex.value - 1)"
               :disabled="state.selectedItemIndex.value <= 0"
-              class="text-base-content/30 rounded p-0.5 transition-colors hover:text-base-content/60 disabled:opacity-30"
+              class="text-base-content/40 rounded p-0.5 transition-colors hover:text-base-content/70 disabled:opacity-30"
             >
               <ChevronLeftIcon class="size-3.5" />
             </button>
-            <span class="text-base-content/40">Item</span>
+            <span class="text-base-content/55">Item</span>
             <span class="text-base-content font-semibold">#{{ state.selectedItemIndex.value + 1 }}</span>
-            <span class="text-base-content/30">/ {{ state.itemStats.value.itemsTotal }}</span>
+            <span class="text-base-content/40">/ {{ state.itemStats.value.itemsTotal }}</span>
             <button
               @click="state.selectedItemIndex.value = Math.min(state.itemStats.value.itemsTotal - 1, state.selectedItemIndex.value + 1)"
               :disabled="state.selectedItemIndex.value >= state.itemStats.value.itemsTotal - 1"
-              class="text-base-content/30 rounded p-0.5 transition-colors hover:text-base-content/60 disabled:opacity-30"
+              class="text-base-content/40 rounded p-0.5 transition-colors hover:text-base-content/70 disabled:opacity-30"
             >
               <ChevronRightIcon class="size-3.5" />
             </button>
           </div>
           <div v-else class="flex items-center gap-2">
-            <span class="text-base-content/50 font-medium">{{ state.itemStats.value.itemsTotal }} items</span>
-            <div class="flex items-center gap-1.5 text-[10px]">
+            <span class="text-base-content/60 font-medium">{{ state.itemStats.value.itemsTotal }} items</span>
+            <div class="flex items-center gap-1.5 text-[11px]">
               <span
                 v-if="state.itemStats.value.completed > 0"
                 class="flex items-center gap-1"
@@ -132,43 +135,31 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
           <button
             v-if="state.selectedItemIndex.value !== null"
             @click="state.selectedItemIndex.value = null"
-            class="text-base-content/30 text-[10px] font-medium transition-colors hover:text-base-content/60"
+            class="text-base-content/50 text-[11px] font-medium transition-colors hover:text-base-content/70"
           >Show All</button>
           <button
             v-else
             @click="state.selectedItemIndex.value = 0"
-            class="text-base-content/30 text-[10px] font-medium transition-colors hover:text-base-content/60"
+            class="text-base-content/50 text-[11px] font-medium transition-colors hover:text-base-content/70"
           >Browse Items</button>
         </div>
       </div>
 
       <!-- Tab Content -->
       <div class="custom-scrollbar flex-1 overflow-y-auto p-4">
-        <!-- INPUT TAB -->
-        <div v-if="activeTab === 'input' && state.activeStepExecution.value">
-          <div class="mb-3 flex items-center justify-between">
-            <h4 class="text-base-content/30 text-[10px] font-semibold tracking-widest uppercase">
-              Input Data
-            </h4>
-            <button
-              @click.stop="state.copyExpression('json')"
-              class="text-base-content/30 flex items-center gap-1 text-[10px] transition-colors hover:text-base-content/60"
-            >
-              <DocumentDuplicateIcon class="size-3" />
-              Copy
-            </button>
-          </div>
-          <div class="bg-base-200/40 overflow-x-auto rounded-xl p-4 font-mono text-xs leading-relaxed whitespace-pre text-base-content/70">{{ formatDataForDisplay(state.activeStepExecution.value.input_data) }}</div>
-        </div>
-
-        <!-- OUTPUT TAB -->
-        <div v-if="activeTab === 'output'" class="space-y-4">
-          <!-- Output actions -->
-          <div
-            v-if="state.canEdit.value && (state.hasPinnedOutput.value || state.activeStepExecution.value)"
-            class="flex items-center justify-end"
-          >
-            <div class="flex items-center gap-2">
+        <!-- Action bar (shared layout for both tabs) -->
+        <div class="mb-3 flex min-h-[24px] items-center justify-end">
+          <div class="flex items-center gap-2">
+            <template v-if="activeTab === 'input'">
+              <button
+                @click.stop="state.copyExpression('json')"
+                class="text-base-content/50 flex items-center gap-1 text-[11px] transition-colors hover:text-base-content/70"
+              >
+                <DocumentDuplicateIcon class="size-3.5" />
+                Copy
+              </button>
+            </template>
+            <template v-if="activeTab === 'output' && state.canEdit.value && (state.hasPinnedOutput.value || state.activeStepExecution.value)">
               <button
                 v-if="!state.hasPinnedOutput.value && state.activeStepExecution.value"
                 @click.stop="state.pinOutput()"
@@ -178,16 +169,16 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
                     ? 'Pin this output for previews'
                     : 'Run the workflow to capture output before pinning'
                 "
-                class="text-base-content/30 flex items-center gap-1 text-[10px] transition-colors hover:text-base-content/60 disabled:opacity-30"
+                class="text-base-content/50 flex items-center gap-1 text-[11px] transition-colors hover:text-base-content/70 disabled:opacity-30"
               >
-                <BookmarkIcon class="size-3" />
+                <BookmarkIcon class="size-3.5" />
                 Pin
               </button>
 
               <button
                 v-if="state.hasPinnedOutput.value"
                 @click.stop="state.unpinOutput()"
-                class="text-error/40 flex items-center gap-1 text-[10px] transition-colors hover:text-error"
+                class="text-error/50 flex items-center gap-1 text-[11px] transition-colors hover:text-error"
               >
                 Unpin
               </button>
@@ -195,36 +186,53 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
               <button
                 v-if="state.activeStepExecution.value"
                 @click.stop="state.copyExpression('steps', state.nodeId.value)"
-                class="text-base-content/30 flex items-center gap-1 text-[10px] transition-colors hover:text-base-content/60"
+                class="text-base-content/50 flex items-center gap-1 text-[11px] transition-colors hover:text-base-content/70"
               >
-                <DocumentDuplicateIcon class="size-3" />
+                <DocumentDuplicateIcon class="size-3.5" />
                 Copy
               </button>
-            </div>
+            </template>
           </div>
+        </div>
 
+        <!-- INPUT TAB -->
+        <div v-if="activeTab === 'input' && state.activeStepExecution.value">
+          <div class="overflow-hidden rounded-xl border border-base-200/60">
+            <DataViewer
+              :data="unwrapData(state.activeStepExecution.value.input_data)"
+              rootPath="json"
+              :onCopyPath="copyPath"
+            />
+          </div>
+        </div>
+
+        <!-- OUTPUT TAB -->
+        <div v-if="activeTab === 'output'">
           <!-- Output Data Block -->
           <div>
-            <h4 class="text-base-content/30 mb-3 text-[10px] font-semibold tracking-widest uppercase">
-              {{ !state.activeStepExecution.value && state.hasPinnedOutput.value ? 'Pinned Output' : 'Output Data' }}
-            </h4>
             <div
-              class="overflow-x-auto rounded-xl p-4 font-mono text-xs leading-relaxed whitespace-pre transition-all duration-200"
+              class="overflow-hidden rounded-xl border transition-all duration-200"
               :class="[
                 state.hasPinnedOutput.value
-                  ? ''
-                  : 'bg-base-200/40 text-base-content/70',
+                  ? 'border-transparent'
+                  : 'border-base-200/60',
               ]"
               :style="state.hasPinnedOutput.value ? {
                 backgroundColor: oklchToHex(colorMap.pinned) + '0A',
                 borderLeft: `3px solid ${oklchToHex(colorMap.pinned)}40`,
               } : {}"
-            >{{ formatDataForDisplay(state.hasPinnedOutput.value ? state.pinnedOutput.value : state.activeStepExecution.value?.output_data) }}</div>
+            >
+              <DataViewer
+                :data="unwrapData(state.hasPinnedOutput.value ? state.pinnedOutput.value : state.activeStepExecution.value?.output_data)"
+                :rootPath="`steps.${state.nodeId.value}`"
+                :onCopyPath="copyPath"
+              />
+            </div>
           </div>
 
           <!-- Error (inline in output tab) -->
-          <div v-if="state.activeStepExecution.value?.error && state.activeStepExecution.value.error !== 'nil'" class="mt-2">
-            <h4 class="text-error/40 mb-2 text-[10px] font-semibold tracking-widest uppercase">
+          <div v-if="state.activeStepExecution.value?.error && state.activeStepExecution.value.error !== 'nil'" class="mt-4">
+            <h4 class="text-error/60 mb-2 text-[11px] font-semibold tracking-widest uppercase">
               Error
             </h4>
             <div
@@ -237,9 +245,9 @@ const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] ||
 
     <!-- Empty State -->
     <div v-else class="flex h-full flex-col items-center justify-center">
-      <BoltIcon class="text-base-content/15 mb-3 size-12" />
-      <p class="text-base-content/30 text-sm font-medium">No output yet</p>
-      <p class="text-base-content/20 mt-1 text-xs">Run the workflow to see results</p>
+      <BoltIcon class="text-base-content/20 mb-3 size-12" />
+      <p class="text-base-content/45 text-sm font-medium">No output yet</p>
+      <p class="text-base-content/35 mt-1 text-xs">Run the workflow to see results</p>
     </div>
   </div>
 </template>

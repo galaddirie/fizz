@@ -10,7 +10,7 @@ import {
   GlobeAltIcon,
   VariableIcon
 } from '@heroicons/vue/24/outline';
-import { formatDataForDisplay } from '@/lib/dataUtils';
+import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 import { StepConfigKey } from './useStepConfig';
 
 const state = inject(StepConfigKey)!;
@@ -22,6 +22,8 @@ const iconMap: Record<string, any> = {
   VariableIcon,
   GlobeAltIcon,
 };
+
+const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
 </script>
 
 <template>
@@ -82,51 +84,18 @@ const iconMap: Record<string, any> = {
             </div>
           </template>
           <template
-            v-else-if="
-              section.data &&
-              typeof section.data === 'object' &&
-              Object.keys(section.data).length > 0
-            "
+            v-else-if="section.data !== undefined && section.data !== null"
           >
-            <div
-              v-for="(val, key) in section.data"
-              :key="key"
-              class="hover:bg-base-200 group cursor-pointer rounded-lg p-1.5 transition-all"
-            >
-              <div class="flex items-center justify-between">
-                <span class="text-base-content font-mono text-[11px]">
-                  {{ state.formatSectionKey(section.id, String(key)) }}
-                </span>
-                <button
-                  @click.stop="state.copyExpression(section.id, String(key))"
-                  class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
-                  title="Copy expression"
-                >
-                  <DocumentDuplicateIcon class="h-3 w-3" />
-                </button>
-              </div>
-              <div class="text-base-content/40 mt-0.5 truncate text-[10px]">
-                {{ JSON.stringify(val) }}
-              </div>
+            <div class="overflow-hidden rounded-lg">
+              <DataViewer
+                :data="section.data"
+                :rootPath="section.id"
+                :showViewToggle="false"
+                defaultView="tree"
+                :onCopyPath="copyPath"
+              />
             </div>
           </template>
-          <div
-            v-else-if="section.data !== undefined && section.data !== null"
-            class="bg-base-300/10 group rounded-lg p-1.5"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <div class="text-base-content/60 flex-1 truncate font-mono text-[10px]">
-                {{ formatDataForDisplay(section.data) }}
-              </div>
-              <button
-                @click.stop="state.copyExpression(section.id)"
-                class="btn btn-xs btn-ghost btn-square h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100"
-                title="Copy expression"
-              >
-                <DocumentDuplicateIcon class="h-3 w-3" />
-              </button>
-            </div>
-          </div>
           <div v-else class="text-base-content/40 p-2 text-[10px] italic">
             No variables available
           </div>

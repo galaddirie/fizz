@@ -13,6 +13,8 @@ import {
   ClockIcon,
   StopIcon,
 } from '@heroicons/vue/24/outline';
+import { unwrapData } from '@/lib/dataUtils';
+import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 
 // Props from LiveView
 interface Props {
@@ -517,11 +519,12 @@ const stepMetaLine = (trace: TraceEntry) => {
                 Iteration #{{ getIterationIndex(activeIterationId || selectedTraceEntry.iterations[0].id) + 1 }} — {{ activeTab }}
               </div>
 
-              <pre
-                class="rounded-lg border border-base-200 bg-base-100 p-3 font-mono text-xs text-base-content/75"
-              >{{
-                JSON.stringify(getIterationData(activeIterationId || selectedTraceEntry.iterations[0].id, activeTab), null, 2)
-              }}</pre>
+              <div class="overflow-hidden rounded-lg border border-base-200">
+                <DataViewer
+                  :data="unwrapData(getIterationData(activeIterationId || selectedTraceEntry.iterations[0].id, activeTab))"
+                  :rootPath="activeTab === 'input' ? 'json' : `steps.${selectedTraceEntry.step_name}`"
+                />
+              </div>
             </div>
 
             <div v-else class="rounded-lg border border-base-200 bg-base-100 p-4 text-sm text-base-content/55">
@@ -533,10 +536,11 @@ const stepMetaLine = (trace: TraceEntry) => {
           <div v-else class="space-y-3">
             <template v-if="localSelectedStepId">
               <template v-if="activeTab === 'input'">
-                <div v-if="selectedStepExecution?.input_data">
-                  <pre
-                    class="rounded-lg border border-base-200 bg-base-100 p-3 font-mono text-xs text-base-content/75"
-                  >{{ JSON.stringify(selectedStepExecution.input_data, null, 2) }}</pre>
+                <div v-if="selectedStepExecution?.input_data" class="overflow-hidden rounded-lg border border-base-200">
+                  <DataViewer
+                    :data="unwrapData(selectedStepExecution.input_data)"
+                    rootPath="json"
+                  />
                 </div>
                 <div v-else class="rounded-lg border border-base-200 bg-base-100 p-4 text-sm text-base-content/55">
                   No input available yet.
@@ -544,10 +548,11 @@ const stepMetaLine = (trace: TraceEntry) => {
               </template>
 
               <template v-else>
-                <div v-if="selectedStepExecution?.output_data">
-                  <pre
-                    class="rounded-lg border border-base-200 bg-base-100 p-3 font-mono text-xs text-base-content/75"
-                  >{{ JSON.stringify(selectedStepExecution.output_data, null, 2) }}</pre>
+                <div v-if="selectedStepExecution?.output_data" class="overflow-hidden rounded-lg border border-base-200">
+                  <DataViewer
+                    :data="unwrapData(selectedStepExecution.output_data)"
+                    :rootPath="`steps.${selectedTraceEntry?.step_name || localSelectedStepId}`"
+                  />
                 </div>
                 <div v-else class="rounded-lg border border-base-200 bg-base-100 p-4 text-sm text-base-content/55">
                   No output available yet.
