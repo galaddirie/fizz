@@ -89,6 +89,12 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const activeWorkflow = computed<Workflow>(() => props.workflow);
   const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
   const collabSeq = computed(() => props.collabSeq ?? 0);
+  const activeExpressionPreviews = computed(() => props.expressionPreviews ?? {});
+  const activeExecution = computed(() => props.execution ?? null);
+  const activeStepExecutions = computed(() => props.stepExecutions ?? []);
+  const activeEditorState = computed(() => props.editorState);
+  const activePresences = computed(() => props.presences ?? []);
+  const activeCurrentUserId = computed(() => props.currentUserId);
   const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, emit });
   const pins = useWorkflowPins({ stepExecutions: () => props.stepExecutions ?? [], emit });
   const grouping = useGrouping({
@@ -538,14 +544,14 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     handlePinOutput: pins.handlePinOutput,
     handleUnpinOutput: pins.handleUnpinOutput,
     selectTraceStep: actions.selectTraceStep,
-    expressionPreviews: props.expressionPreviews ?? {},
+    expressionPreviews: activeExpressionPreviews,
     nodeLibraryItems,
     addStepPickerItems,
-    execution: props.execution ?? null,
-    stepExecutions: props.stepExecutions ?? [],
-    editorState: props.editorState,
-    presences: props.presences ?? [],
-    currentUserId: props.currentUserId,
-    workflow: props.workflow,
+    execution: activeExecution,
+    stepExecutions: activeStepExecutions,
+    editorState: activeEditorState,
+    presences: activePresences,
+    currentUserId: activeCurrentUserId,
+    workflow: activeWorkflow,
   };
 }

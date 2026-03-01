@@ -87,7 +87,8 @@ const statsText = computed(() => {
     count === null ||
     count === 0 ||
     count === 'undefined' ||
-    count === 'null'
+    count === 'null' ||
+    count === 'nil'
   )
     return null;
   return `${count} ${count === 1 ? 'item' : 'items'}`;

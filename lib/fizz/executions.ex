@@ -386,11 +386,19 @@ defmodule Fizz.Executions do
     Task.start(fn ->
       Enum.each(active_steps, fn step ->
         payload = %{
+          id: step.id,
           execution_id: execution_id,
           step_id: step.step_id,
           status: :cancelled,
           completed_at: now,
-          step_type_id: step.step_type_id
+          step_type_id: step.step_type_id,
+          item_index: step.item_index,
+          items_total: step.items_total,
+          attempt: step.attempt,
+          retry_of_id: step.retry_of_id,
+          queued_at: step.queued_at,
+          started_at: step.started_at,
+          metadata: step.metadata
         }
 
         Fizz.Executions.PubSub.broadcast_step(:step_cancelled, execution_id, nil, payload)

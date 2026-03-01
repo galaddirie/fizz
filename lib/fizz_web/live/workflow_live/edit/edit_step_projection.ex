@@ -44,8 +44,14 @@ defmodule FizzWeb.WorkflowLive.Edit.EditStepProjection do
         attempt: attempt,
         retry_of_id: fetch_payload_value(payload, :retry_of_id),
         queued_at: fetch_payload_value(payload, :queued_at),
-        started_at: fetch_payload_value(payload, :started_at),
-        completed_at: fetch_payload_value(payload, :completed_at),
+        started_at:
+          payload
+          |> fetch_payload_value(:started_at)
+          |> normalize_timestamp(),
+        completed_at:
+          payload
+          |> fetch_payload_value(:completed_at)
+          |> normalize_timestamp(),
         duration_us: fetch_payload_value(payload, :duration_us),
         metadata: fetch_payload_value(payload, :metadata)
       }
@@ -62,6 +68,63 @@ defmodule FizzWeb.WorkflowLive.Edit.EditStepProjection do
   end
 
   defp parse_attempt(_attempt), do: 1
+
+  defp normalize_timestamp(nil), do: nil
+  defp normalize_timestamp(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp normalize_timestamp(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp normalize_timestamp(value) when is_binary(value), do: value
+  defp normalize_timestamp(value) when is_map(value), do: normalize_sanitized_datetime(value)
+  defp normalize_timestamp(_value), do: nil
+
+  defp normalize_sanitized_datetime(value) when is_map(value) do
+    with {:ok, year} <- fetch_integer(value, :year),
+         {:ok, month} <- fetch_integer(value, :month),
+         {:ok, day} <- fetch_integer(value, :day),
+         {:ok, hour} <- fetch_integer(value, :hour),
+         {:ok, minute} <- fetch_integer(value, :minute),
+         {:ok, second} <- fetch_integer(value, :second),
+         {:ok, date} <- Date.new(year, month, day),
+         {:ok, time} <- Time.new(hour, minute, second, normalize_microsecond(value)),
+         {:ok, naive_datetime} <- NaiveDateTime.new(date, time),
+         {:ok, datetime} <- DateTime.from_naive(naive_datetime, "Etc/UTC") do
+      value
+      |> total_offset_seconds()
+      |> then(&DateTime.add(datetime, -&1, :second))
+      |> DateTime.to_iso8601()
+    else
+      _ -> nil
+    end
+  end
+
+  defp fetch_integer(map, key) when is_map(map) do
+    case fetch_payload_value(map, key) do
+      value when is_integer(value) -> {:ok, value}
+      _ -> :error
+    end
+  end
+
+  defp normalize_microsecond(map) when is_map(map) do
+    case fetch_payload_value(map, :microsecond) do
+      [value, precision] when is_integer(value) and is_integer(precision) -> {value, precision}
+      {value, precision} when is_integer(value) and is_integer(precision) -> {value, precision}
+      value when is_integer(value) -> {value, 6}
+      _ -> {0, 0}
+    end
+  end
+
+  defp total_offset_seconds(map) when is_map(map) do
+    map
+    |> fetch_payload_value(:utc_offset)
+    |> normalize_offset_seconds()
+    |> Kernel.+(
+      map
+      |> fetch_payload_value(:std_offset)
+      |> normalize_offset_seconds()
+    )
+  end
+
+  defp normalize_offset_seconds(value) when is_integer(value), do: value
+  defp normalize_offset_seconds(_value), do: 0
 
   defp fetch_payload_value(payload, key) when is_map(payload) do
     string_key = Atom.to_string(key)
@@ -98,7 +161,9 @@ defmodule FizzWeb.WorkflowLive.Edit.EditStepProjection do
         step_executions
       else
         Enum.reject(step_executions, fn existing ->
-          Map.get(existing, :step_id) == step_id and is_nil(Map.get(existing, :item_index))
+          Map.get(existing, :step_id) == step_id and
+            is_nil(Map.get(existing, :item_index)) and
+            replaceable_summary_step_execution?(existing)
         end)
       end
 
@@ -142,20 +207,35 @@ defmodule FizzWeb.WorkflowLive.Edit.EditStepProjection do
     end
   end
 
+  defp replaceable_summary_step_execution?(step_execution) do
+    case Map.get(step_execution, :status) do
+      nil -> true
+      :pending -> true
+      "pending" -> true
+      :queued -> true
+      "queued" -> true
+      :running -> true
+      "running" -> true
+      _ -> false
+    end
+  end
+
   defp step_status_rank(status) do
     case status do
       :pending -> 0
       "pending" -> 0
-      :running -> 1
-      "running" -> 1
-      :completed -> 2
-      "completed" -> 2
-      :skipped -> 2
-      "skipped" -> 2
-      :failed -> 3
-      "failed" -> 3
-      :cancelled -> 3
-      "cancelled" -> 3
+      :queued -> 1
+      "queued" -> 1
+      :running -> 2
+      "running" -> 2
+      :completed -> 3
+      "completed" -> 3
+      :skipped -> 3
+      "skipped" -> 3
+      :cancelled -> 4
+      "cancelled" -> 4
+      :failed -> 5
+      "failed" -> 5
       _ -> -1
     end
   end

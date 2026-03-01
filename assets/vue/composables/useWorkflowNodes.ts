@@ -73,6 +73,66 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return map;
   });
 
+  const toTimestampMs = (value: unknown): number | null => {
+    if (value instanceof Date) {
+      return Number.isFinite(value.getTime()) ? value.getTime() : null;
+    }
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+
+    if (typeof value === 'string') {
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (!value || typeof value !== 'object') return null;
+
+    const record = value as Record<string, unknown>;
+    const year = record.year;
+    const month = record.month;
+    const day = record.day;
+    const hour = record.hour;
+    const minute = record.minute;
+    const second = record.second;
+
+    if (
+      ![year, month, day, hour, minute, second].every(
+        part => typeof part === 'number' && Number.isFinite(part)
+      )
+    ) {
+      return null;
+    }
+
+    const microsecond = record.microsecond;
+    let millisecond = 0;
+
+    if (Array.isArray(microsecond) && typeof microsecond[0] === 'number') {
+      millisecond = Math.floor(microsecond[0] / 1000);
+    } else if (typeof microsecond === 'number' && Number.isFinite(microsecond)) {
+      millisecond = Math.floor(microsecond / 1000);
+    }
+
+    const utcOffset = typeof record.utc_offset === 'number' ? record.utc_offset : 0;
+    const stdOffset = typeof record.std_offset === 'number' ? record.std_offset : 0;
+
+    return (
+      Date.UTC(year, month - 1, day, hour, minute, second, millisecond) -
+      (utcOffset + stdOffset) * 1000
+    );
+  };
+
+  const sumRecordedDurations = (executions: StepExecution[]): number | undefined => {
+    const durations = executions
+      .map(execution => execution.duration_us)
+      .filter((duration): duration is number => typeof duration === 'number' && Number.isFinite(duration));
+
+    return durations.length > 0
+      ? durations.reduce((total, duration) => total + duration, 0)
+      : undefined;
+  };
+
   // Group all step executions by step_id (for multi-item fan-out steps)
   const stepExecutionsByStepId = computed<Record<string, StepExecution[]>>(() => {
     const map: Record<string, StepExecution[]> = {};
@@ -280,8 +340,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       // For multi-item steps, determine overall status from item stats
       let displayStatus = stepExecution?.status;
       if (stepItemStats?.isMultiItem) {
-        if (stepItemStats.failed > 0 && stepItemStats.completed > 0) {
-          // Partial failure - some completed, some failed
+        if (stepItemStats.failed > 0) {
           displayStatus = 'failed';
         } else if (stepItemStats.running > 0) {
           displayStatus = 'running';
@@ -293,25 +352,31 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       // Calculate total duration for multi-item steps
       let totalDurationUs: number | undefined;
       if (allStepExecutions.length > 0) {
+        const fallbackDurationUs = sumRecordedDurations(allStepExecutions);
+
         if (allStepExecutions.length === 1) {
           // Single-item step - use the backend-calculated duration
-          totalDurationUs = allStepExecutions[0].duration_us;
+          totalDurationUs = fallbackDurationUs;
         } else {
           // Multi-item step - calculate total duration from earliest start to latest completion
           const startedAts = allStepExecutions
-            .map(exec => exec.started_at)
-            .filter(Boolean)
-            .map(start => new Date(start!));
+            .map(exec => toTimestampMs(exec.started_at))
+            .filter((value): value is number => value !== null);
 
           const completedAts = allStepExecutions
-            .map(exec => exec.completed_at)
-            .filter(Boolean)
-            .map(complete => new Date(complete!));
+            .map(exec => toTimestampMs(exec.completed_at))
+            .filter((value): value is number => value !== null);
 
           if (startedAts.length > 0 && completedAts.length > 0) {
-            const earliestStart = new Date(Math.min(...startedAts.map(d => d.getTime())));
-            const latestComplete = new Date(Math.max(...completedAts.map(d => d.getTime())));
-            totalDurationUs = (latestComplete.getTime() - earliestStart.getTime()) * 1000; // Convert to microseconds
+            const earliestStartMs = Math.min(...startedAts);
+            const latestCompleteMs = Math.max(...completedAts);
+
+            totalDurationUs =
+              latestCompleteMs >= earliestStartMs
+                ? (latestCompleteMs - earliestStartMs) * 1000
+                : fallbackDurationUs;
+          } else {
+            totalDurationUs = fallbackDurationUs;
           }
         }
       }

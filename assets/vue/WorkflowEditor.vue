@@ -191,11 +191,19 @@ onMounted(() => {
   isNodeLibraryCollapsed.value = storedCollapsed;
 
   window.addEventListener('resize', handleEditorResize);
+  lastSavedClock.value = Date.now();
+  lastSavedTimer = window.setInterval(() => {
+    lastSavedClock.value = Date.now();
+  }, 30_000);
 });
 
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', handleEditorResize);
+    if (lastSavedTimer !== null) {
+      window.clearInterval(lastSavedTimer);
+      lastSavedTimer = null;
+    }
   }
   stopNodeLibraryResize();
 });
@@ -224,19 +232,59 @@ function handlePublish(payload: { version_tag: string; changelog: string }) {
 
 const isDebugMode = computed(() => !!props.debugExecutionId);
 
-const lastSaved = computed(() => {
+const lastSavedClock = ref(Date.now());
+let lastSavedTimer: number | null = null;
+const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, {
+  numeric: 'auto',
+});
+const exactTimestampFormat: Intl.DateTimeFormatOptions = {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+};
+const RELATIVE_TIME_STEPS: Array<{
+  limit: number;
+  divisor: number;
+  unit: Intl.RelativeTimeFormatUnit;
+}> = [
+  { limit: 3600, divisor: 60, unit: 'minute' },
+  { limit: 86400, divisor: 3600, unit: 'hour' },
+  { limit: 604800, divisor: 86400, unit: 'day' },
+  { limit: 2592000, divisor: 604800, unit: 'week' },
+  { limit: 31536000, divisor: 2592000, unit: 'month' },
+  { limit: Number.POSITIVE_INFINITY, divisor: 31536000, unit: 'year' },
+];
+
+const lastSavedAt = computed(() => {
   // Use draft.updated_at (last persist) for "Last saved"; workflow.updated_at only changes on publish/rename
-  const dateStr =
-    editor.workflow?.draft?.updated_at ?? editor.workflow?.updated_at;
-  if (!dateStr) return 'Just now';
+  const dateStr = editor.workflow?.draft?.updated_at ?? editor.workflow?.updated_at;
+  if (!dateStr) return null;
   const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return 'Just now';
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  return Number.isNaN(date.getTime()) ? null : date;
+});
+
+const formatRelativeTimestamp = (date: Date, nowMs: number) => {
+  const diffSeconds = Math.floor((nowMs - date.getTime()) / 1000);
+  if (diffSeconds < 60) return 'just now';
+
+  const step =
+    RELATIVE_TIME_STEPS.find(({ limit }) => diffSeconds < limit) ??
+    RELATIVE_TIME_STEPS[RELATIVE_TIME_STEPS.length - 1];
+
+  return relativeTimeFormatter.format(-Math.floor(diffSeconds / step.divisor), step.unit);
+};
+
+const lastSaved = computed(() => {
+  const date = lastSavedAt.value;
+  if (!date) return 'just now';
+  return formatRelativeTimestamp(date, lastSavedClock.value);
+});
+
+const lastSavedExact = computed(() => {
+  const date = lastSavedAt.value;
+  if (!date) return 'Saved just now';
+  return `Saved ${date.toLocaleString(undefined, exactTimestampFormat)}`;
 });
 
 const debugExecutionShortId = computed(() => {
@@ -379,6 +427,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
 
           <button
             class="pointer-events-auto ml-1 inline-flex select-none items-center gap-1 px-0.5 py-0 text-[10px] font-medium text-base-content/45 transition-colors hover:text-base-content/70"
+            :title="lastSavedExact"
             @click="emit('save_workflow')"
           >
             Last saved: {{ lastSaved }}

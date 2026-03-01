@@ -129,8 +129,8 @@ const traces = computed<TraceEntry[]>(() => {
         const runningCount = executions.filter(se => se.status === 'running').length;
 
         let overallStatus: StepExecutionStatus = 'pending';
-        if (runningCount > 0) overallStatus = 'running';
-        else if (failedCount > 0) overallStatus = 'failed';
+        if (failedCount > 0) overallStatus = 'failed';
+        else if (runningCount > 0) overallStatus = 'running';
         else if (completedCount === executions.length) overallStatus = 'completed';
 
         const totalDuration = executions.reduce((sum, se) => sum + (se.duration_us || 0), 0);
@@ -251,7 +251,7 @@ const stepStatusClass = (status: StepExecutionStatus): string => {
 
 // Format duration
 const formatDuration = (us?: number): string => {
-  if (!us) return '';
+  if (typeof us !== 'number' || !Number.isFinite(us) || us <= 0) return '';
   if (us < 1000) return `${us}µs`;
   if (us < 1_000_000) return `${(us / 1000).toFixed(1)}ms`;
   return `${(us / 1_000_000).toFixed(2)}s`;

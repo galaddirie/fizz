@@ -258,7 +258,7 @@ const nodeStyle = computed(() => {
 
 // Format duration for display
 const formatDuration = (us?: number): string => {
-  if (us === undefined || us === null) return '—';
+  if (typeof us !== 'number' || !Number.isFinite(us)) return '—';
   if (us < 1000) return `${us}µs`;
   if (us < 1_000_000) return `${(us / 1000).toFixed(1)}ms`;
   return `${(us / 1_000_000).toFixed(2)}s`;
