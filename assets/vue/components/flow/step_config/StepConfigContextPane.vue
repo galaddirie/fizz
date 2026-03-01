@@ -3,79 +3,65 @@ import { inject } from 'vue';
 import {
   MagnifyingGlassIcon,
   ChevronRightIcon,
-  DocumentDuplicateIcon,
-  ArrowRightOnRectangleIcon,
-  BoltIcon,
-  CpuChipIcon,
-  GlobeAltIcon,
-  VariableIcon
 } from '@heroicons/vue/24/outline';
 import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 import { StepConfigKey } from './useStepConfig';
 
 const state = inject(StepConfigKey)!;
 
-const iconMap: Record<string, any> = {
-  ArrowRightOnRectangleIcon,
-  BoltIcon,
-  CpuChipIcon,
-  VariableIcon,
-  GlobeAltIcon,
-};
-
 const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
 </script>
 
 <template>
-  <div class="border-base-200 bg-base-100/50 flex w-80 flex-col overflow-hidden border-r">
-    <div class="border-base-200 bg-base-200/10 border-b p-4">
+  <div class="flex w-80 flex-col overflow-hidden border-r border-base-200/60">
+    <!-- Search -->
+    <div class="shrink-0 px-4 pt-4 pb-2">
       <div class="relative">
-        <MagnifyingGlassIcon class="text-base-content/40 absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2" />
+        <MagnifyingGlassIcon class="absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-base-content/35" />
         <input
           :value="state.searchQuery.value"
           @input="state.searchQuery.value = ($event.target as HTMLInputElement).value"
           type="text"
           placeholder="Search variables..."
-          class="input input-sm input-bordered bg-base-100 border-base-300 focus:border-primary w-full pl-9 text-xs font-medium"
+          class="w-full rounded-lg border border-base-200/60 bg-transparent py-2 pl-9 pr-3 text-xs font-medium text-base-content placeholder:text-base-content/30 outline-none transition-colors focus:border-base-content/20"
         />
       </div>
     </div>
-    <div class="custom-scrollbar flex-1 space-y-1 overflow-y-auto p-2">
-      <div v-for="section in state.explorerData.value" :key="section.id" class="overflow-hidden">
+
+    <!-- Sections -->
+    <div class="custom-scrollbar flex-1 overflow-y-auto px-2 py-1">
+      <div v-for="section in state.explorerData.value" :key="section.id">
         <button
-          class="hover:bg-primary/5 group flex w-full items-center justify-between rounded-xl p-2 text-xs font-bold transition-all"
+          class="group flex w-full items-center justify-between rounded-lg px-2 py-2 text-xs font-medium transition-colors"
           :class="
             state.expandedSections.value[section.id]
-              ? 'text-primary bg-primary/5'
-              : 'text-base-content/60'
+              ? 'text-base-content'
+              : 'text-base-content/50 hover:text-base-content/70'
           "
           @click="state.toggleSection(section.id)"
         >
-          <div class="flex items-center gap-2">
-            <span class="opacity-70 group-hover:opacity-100">
-              <component :is="iconMap[section.icon] || section.icon" class="h-4 w-4" />
-            </span>
-            {{ section.label }}
-          </div>
+          {{ section.label }}
           <ChevronRightIcon
             :class="{ 'rotate-90': state.expandedSections.value[section.id] }"
-            class="h-3 w-3 opacity-40 transition-transform"
+            class="h-3 w-3 opacity-35 transition-transform"
           />
         </button>
+
         <div
           v-if="state.expandedSections.value[section.id]"
-          class="border-base-200 mt-1 ml-4 space-y-1 border-l py-1 pl-2 text-wrap"
+          class="pb-2"
         >
+          <!-- Empty input state -->
           <template v-if="section.id === 'json' && state.currentInputState.value.status !== 'available'">
-            <div class="bg-base-300/20 space-y-2 rounded-xl p-3">
-              <div class="text-base-content text-[11px] font-semibold">
+            <div class="mx-2 space-y-2 border-t border-base-200/40 pt-3 pb-1">
+              <div class="text-[11px] font-medium text-base-content/70">
                 {{ state.currentInputEmptyState.value.title }}
               </div>
-              <p class="text-base-content/60 text-[10px] leading-relaxed">
+              <p class="text-[10px] leading-relaxed text-base-content/40">
                 {{ state.currentInputEmptyState.value.description }}
               </p>
               <button
-                class="btn btn-xs btn-primary w-full"
+                class="w-full rounded-lg bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-content transition-all hover:brightness-110"
                 :disabled="!state.canEdit.value"
                 @click.stop="state.runInput()"
               >
@@ -83,10 +69,12 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
               </button>
             </div>
           </template>
+
+          <!-- Data viewer -->
           <template
             v-else-if="section.data !== undefined && section.data !== null"
           >
-            <div class="overflow-hidden rounded-lg">
+            <div class="mx-1 overflow-hidden border-t border-base-200/40">
               <DataViewer
                 :data="section.data"
                 :rootPath="section.id"
@@ -96,19 +84,13 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
               />
             </div>
           </template>
-          <div v-else class="text-base-content/40 p-2 text-[10px] italic">
+
+          <!-- Empty -->
+          <div v-else class="mx-2 border-t border-base-200/40 pt-3 text-[11px] text-base-content/30">
             No variables available
           </div>
         </div>
       </div>
-    </div>
-    <div class="border-base-200 bg-base-200/5 border-t p-4">
-      <div class="text-base-content/40 mb-2 text-[10px] font-bold tracking-wider uppercase">
-        Expression Tip
-      </div>
-      <p class="text-base-content/60 text-[11px] leading-relaxed">
-        Click any variable to copy its Liquid expression to your clipboard.
-      </p>
     </div>
   </div>
 </template>
