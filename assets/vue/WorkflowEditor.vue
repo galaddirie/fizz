@@ -257,13 +257,13 @@ const debugExecutionTimestamp = computed(() => {
 });
 const debugExecutionStatus = computed(() => props.execution?.status ?? 'pending');
 const debugStatusConfig = {
-  pending: { class: 'bg-base-200 text-base-content/70', label: 'Pending' },
-  running: { class: 'bg-primary/15 text-primary', label: 'Running' },
-  paused: { class: 'bg-warning/15 text-warning', label: 'Paused' },
-  completed: { class: 'bg-success/15 text-success', label: 'Completed' },
-  failed: { class: 'bg-error/15 text-error', label: 'Failed' },
-  cancelled: { class: 'bg-base-200 text-base-content/70', label: 'Cancelled' },
-  timeout: { class: 'bg-warning/15 text-warning', label: 'Timeout' },
+  pending: { dotClass: 'bg-base-content/40', label: 'Pending' },
+  running: { dotClass: 'bg-primary', label: 'Running' },
+  paused: { dotClass: 'bg-warning', label: 'Paused' },
+  completed: { dotClass: 'bg-success', label: 'Completed' },
+  failed: { dotClass: 'bg-error', label: 'Failed' },
+  cancelled: { dotClass: 'bg-base-content/40', label: 'Cancelled' },
+  timeout: { dotClass: 'bg-warning', label: 'Timeout' },
 } as const;
 const debugStatusBadge = computed(() => {
   const key = debugExecutionStatus.value as keyof typeof debugStatusConfig;
@@ -383,56 +383,51 @@ useLiveEvent<{ success: boolean; error?: string }>(
           >
             Last saved: {{ lastSaved }}
           </button>
-        </div>
 
-        <div class="relative flex min-w-0 flex-1 flex-col">
+          <!-- Debug Mode Floating Pill -->
           <div
             v-if="isDebugMode"
-            class="border-base-200 bg-warning/5 text-base-content/80 relative z-10 border-b px-6 pt-5 pb-3 text-xs shadow-sm"
+            class="pointer-events-auto mt-2 flex flex-col gap-1.5 rounded-xl border border-base-300/50 bg-base-100/80 px-3 py-2.5 shadow-sm backdrop-blur-sm"
           >
-            <div class="flex flex-wrap items-center justify-between gap-4">
-              <div class="flex items-center gap-3">
-                <div class="bg-warning/15 text-warning flex h-10 w-10 items-center justify-center rounded-2xl">
-                  <BugAntIcon class="h-5 w-5" />
-                </div>
-                <div class="space-y-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="text-warning/80 text-[10px] font-semibold tracking-[0.3em] uppercase">
-                      Debug Mode
-                    </span>
-                    <span
-                      class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
-                      :class="debugStatusBadge.class"
-                    >
-                      {{ debugStatusBadge.label }}
-                    </span>
-                  </div>
-                  <p class="text-base-content/60 text-[11px]">
-                    Using execution {{ debugExecutionShortId }}
-                    <span v-if="debugExecutionTimestamp">- {{ debugExecutionTimestamp }}</span>
-                    - Pin outputs on nodes to reuse this data in previews.
-                  </p>
-                </div>
-              </div>
-              <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 text-[11px]">
+              <BugAntIcon class="h-3.5 w-3.5 text-base-content/50" />
+              <span class="font-semibold text-base-content/70">Debug</span>
+              <span class="text-base-content/30">&middot;</span>
+              <span class="flex items-center gap-1.5">
+                <span
+                  class="inline-block h-1.5 w-1.5 rounded-full"
+                  :class="debugStatusBadge.dotClass"
+                ></span>
+                <span class="font-medium text-base-content/60">{{ debugStatusBadge.label }}</span>
+              </span>
+              <span class="text-base-content/30">&middot;</span>
+              <span class="font-mono text-base-content/50">{{ debugExecutionShortId }}</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <p v-if="debugExecutionTimestamp" class="text-[10px] text-base-content/40">
+                {{ debugExecutionTimestamp }}
+              </p>
+              <div class="flex items-center gap-1.5">
                 <a
                   v-if="debugExecutionLink"
                   :href="debugExecutionLink"
-                  class="btn btn-xs btn-ghost border-base-300 bg-base-100/80 text-base-content/70 hover:bg-base-200"
+                  class="rounded-lg px-2 py-0.5 text-[10px] font-medium text-base-content/50 transition-colors hover:bg-base-200/80 hover:text-base-content/70"
                 >
                   View execution
                 </a>
                 <a
                   v-if="debugExitLink"
                   :href="debugExitLink"
-                  class="btn btn-xs btn-primary text-primary-content shadow-primary/20 shadow-sm"
+                  class="rounded-lg bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20"
                 >
                   Exit debug
                 </a>
               </div>
             </div>
           </div>
+        </div>
 
+        <div class="relative flex min-w-0 flex-1 flex-col">
           <div class="relative flex min-w-0 flex-1 flex-col overflow-hidden">
             <WorkflowCanvas
               :nodes="editor.nodes"
