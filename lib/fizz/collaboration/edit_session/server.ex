@@ -1247,9 +1247,9 @@ defmodule Fizz.Collaboration.EditSession.Server do
   defp persist_state(state) do
     if state.dirty do
       case Persistence.persist(state) do
-        :ok ->
+        {:ok, persisted_draft} ->
           Logger.debug("Persisted edit session state")
-          {:ok, %{state | dirty: false}}
+          {:ok, %{state | draft: persisted_draft, dirty: false}}
 
         {:error, reason} ->
           Logger.error("Failed to persist: #{inspect(reason)}")

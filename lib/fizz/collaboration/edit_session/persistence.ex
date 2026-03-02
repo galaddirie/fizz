@@ -32,7 +32,7 @@ defmodule Fizz.Collaboration.EditSession.Persistence do
   end
 
   @doc "Persist buffered operations and update draft."
-  @spec persist(map()) :: :ok | {:error, term()}
+  @spec persist(map()) :: {:ok, WorkflowDraft.t()} | {:error, term()}
   def persist(%{workflow_id: _workflow_id, draft: draft, op_buffer: ops, seq: seq} = state) do
     try do
       Repo.transaction(fn ->
@@ -79,9 +79,9 @@ defmodule Fizz.Collaboration.EditSession.Persistence do
         end
       end)
       |> case do
-        {:ok, _} ->
+        {:ok, persisted_draft} ->
           Logger.info("Persistence.persist: Successfully persisted ops and draft.")
-          :ok
+          {:ok, persisted_draft}
 
         {:error, reason} ->
           Logger.error("Persistence.persist: Transaction failed: #{inspect(reason)}")
@@ -98,7 +98,8 @@ defmodule Fizz.Collaboration.EditSession.Persistence do
   end
 
   @doc "Take a snapshot of current state for faster recovery."
-  @spec snapshot(String.t(), WorkflowDraft.t(), integer()) :: :ok | {:error, term()}
+  @spec snapshot(String.t(), WorkflowDraft.t(), integer()) ::
+          {:ok, WorkflowDraft.t()} | {:error, term()}
   def snapshot(workflow_id, draft, seq) do
     # Could store compressed binary snapshot for very large workflows
     # For now, the draft itself serves as the snapshot
