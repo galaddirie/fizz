@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { VNodeRef } from 'vue';
+import { onBeforeUnmount, onMounted, ref, type VNodeRef } from 'vue';
 import type {
   Connection,
   Edge,
@@ -58,10 +58,37 @@ interface Props {
 }
 
 defineProps<Props>();
+
+const isSelectionModifierPressed = ref(false);
+
+const syncSelectionModifierState = (event: KeyboardEvent) => {
+  isSelectionModifierPressed.value = event.shiftKey || event.metaKey || event.ctrlKey;
+};
+
+const resetSelectionModifierState = () => {
+  isSelectionModifierPressed.value = false;
+};
+
+onMounted(() => {
+  window.addEventListener('keydown', syncSelectionModifierState);
+  window.addEventListener('keyup', syncSelectionModifierState);
+  window.addEventListener('blur', resetSelectionModifierState);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', syncSelectionModifierState);
+  window.removeEventListener('keyup', syncSelectionModifierState);
+  window.removeEventListener('blur', resetSelectionModifierState);
+});
 </script>
 
 <template>
-  <div :ref="setCanvasRef" class="relative min-w-0 flex-1 overflow-hidden" @mousemove="handlePaneMouseMove">
+  <div
+    :ref="setCanvasRef"
+    class="relative min-w-0 flex-1 overflow-hidden"
+    :class="{ 'selection-modifier-active': isSelectionModifierPressed }"
+    @mousemove="handlePaneMouseMove"
+  >
     <VueFlow
       :ref="setVueFlowRef"
       :nodes="nodes"
@@ -214,6 +241,11 @@ defineProps<Props>();
 
 .vue-flow__edge {
   z-index: 15;
+}
+
+/* Let additive selection clicks reach nodes even when the group overlay sits above them. */
+.selection-modifier-active .vue-flow__nodesselection-rect {
+  pointer-events: none;
 }
 
 .vue-flow__minimap {

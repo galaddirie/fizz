@@ -1,4 +1,4 @@
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { VNodeRef } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
@@ -162,15 +162,26 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     emit,
     store,
   });
+  const syncSelectionState = () => {
+    const selectedNodes =
+      getSelectedNodes.value as Parameters<typeof collaboration.handleSelectionChange>[0]['nodes'];
+
+    collaboration.handleSelectionChange({ nodes: selectedNodes });
+    nodesSelectionActive.value = selectedNodes.length > 1;
+  };
   const handleSelectionChange = (
     event: Parameters<typeof collaboration.handleSelectionChange>[0]
   ) => {
     collaboration.handleSelectionChange(event);
-
-    // Vue Flow clears the multi-selection box on node clicks.
-    // Re-enable it for multi-node selections so shift-click matches shift-drag.
     nodesSelectionActive.value = event.nodes.length > 1;
   };
+  watch(
+    () => getSelectedNodes.value.map(node => node.id).sort().join(','),
+    () => {
+      syncSelectionState();
+    },
+    { flush: 'sync', immediate: true }
+  );
   const canvas = useCanvasInteraction({
     canEdit: () => canEdit.value,
     project,
@@ -243,7 +254,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     // Vue Flow clears nodesSelectionActive on node clicks.
     // Re-sync it after modifier-based additive selection updates are applied.
     nextTick(() => {
-      nodesSelectionActive.value = getSelectedNodes.value.length > 1;
+      syncSelectionState();
     });
   };
   const clipboard = useClipboard({
