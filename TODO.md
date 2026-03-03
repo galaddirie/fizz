@@ -83,3 +83,6 @@ An event-driven workflow engine where agents execute durable, observable work—
 
 
 I also want to capture the non technical audience to differentiate myself from other engines like n8n. I want to convey the power of my engine at the same time. our workflows are stateful, can be long lived, durable, reactive, living models ex. Imagine a workflow that can react and change its behaviors based on the state of previous executions, not just run once forget and fire workflows. ex. a workflow agent that updates a/b tests but changes based on the results of the previous workflow, or a workflow that is multi-week event planning that maintains the evolving plan (venue, budget, guest list, vendors), nudges owners before deadlines, reacts to changes/cancellations, and keeps a single “source of truth” until the event is done.
+
+
+workflow example like Coordinates interviews, keeps candidates warm, maintains scorecards, reduces drop-off over single execution that spans weeks
