@@ -66,3 +66,17 @@ lib/fizz_web/live/workflow_live/edit.ex (2135 LoC), lib/fizz/collaboration/edit_
 when adding subnodes through the quick add buttons, the position is not correct.
 
 when laying out nodes, nodes should be aware of near by group nodes to avoid overlapping.
+
+update debug and revision view to match the new seamless shell UI.
+
+
+
+WORKFLOW IDEAS
+
+Imagine stateful agent that runs every day checks the  performance of a website. the agent can run a/b tests and store the results in a statemachine. 
+
+meanign the agent can refine and update the website content based on the results of the a/b tests. 
+
+we can even have triggers aswell incombination with the schedule trigger - ex. a sales/converstion trigger where the a/b test is successful the agent can then react and update a/b test again 
+
+An event-driven workflow engine where agents execute durable, observable work—across apps, infra, and teams
