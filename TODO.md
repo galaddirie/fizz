@@ -86,3 +86,32 @@ I also want to capture the non technical audience to differentiate myself from o
 
 
 workflow example like Coordinates interviews, keeps candidates warm, maintains scorecards, reduces drop-off over single execution that spans weeks
+
+
+Imagine you trigger a workflow to optimize and monitor a site and or to run experiements and update code for a period of 6 months - this would be  a single execution. 
+
+
+
+Why does this product exisit 
+
+Agentic work is a unsolved problem.  and its largerly because getting the abstraction right is hard, getting right for both non technical and technical users is even harder.
+
+there are so many solutions out there trying to solve the same core problem but tacking only a subset
+
+You have n8n, openclaw, codex, claude code. 
+
+which one is correct - run once ridgid workflows like n8n, or forever running full anotonomous personal assistants like open claw, or stateful adhoc agents like codex, or claude code that does scoped work to completion.
+
+all of the soultions are technically correct in their own way, i personally belive the solution is some where in the middle of all of them.
+
+its primarily a design issue. 
+
+
+what we are trying to build is the bounded/scoped agentic work like codex, modeled and triggered by events and signals in a workflow ux like n8n, in stateful long running proccess like open claw.
+
+
+for the demo we will show a workflow that constantly adds + 1 to a number stored in a state machine. and every time it finds a prime number it will send a message overe whatsapp 
+
+simple email agent with human in the loop for deletion of emails 
+
+add a chat endpoint that can use natural language to determine which workflow to run based on the user's input. it will use workflow names, descriptions, and workspaces to determine the best workflow to run. could run multiple workflows - this is a ux feature
