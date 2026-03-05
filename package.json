@@ -1,4 +1,10 @@
 {
+  "scripts": {
+    "test:vue": "vitest run",
+    "test:vue:watch": "vitest",
+    "typecheck:vue": "vue-tsc --noEmit -p tsconfig.json",
+    "quality:vue": "npm run typecheck:vue && npm run test:vue"
+  },
   "dependencies": {
     "@dagrejs/dagre": "^1.1.8",
     "@heroicons/vue": "^2.2.0",

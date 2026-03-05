@@ -16,7 +16,6 @@ interface UseInputDataOptions {
     selectedItemIndex: Ref<number | null>;
     isTriggerStep: ComputedRef<boolean>;
     directUpstreamStepIds: ComputedRef<string[]>;
-    inputIndexLabels: ComputedRef<string[]>;
     emit: (...args: any[]) => void;
 }
 
@@ -28,7 +27,6 @@ export function useInputData({
     selectedItemIndex,
     isTriggerStep,
     directUpstreamStepIds,
-    inputIndexLabels,
     emit,
 }: UseInputDataOptions) {
     const currentInputState = computed(() => {

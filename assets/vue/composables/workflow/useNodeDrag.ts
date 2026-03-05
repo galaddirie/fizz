@@ -744,7 +744,7 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     const candidateStepIds = new Set<string>();
     draggedStepNodes.forEach(node => candidateStepIds.add(node.id));
     membershipOverrides.forEach((_groupId, stepId) => candidateStepIds.add(stepId));
-    stepNodeById.forEach((stepNode, stepId) => {
+    stepNodeById.forEach((_stepNode, stepId) => {
       const groupId = effectiveGroupIdForStep(stepId);
       if (groupId && groupBoundsById.has(groupId)) {
         candidateStepIds.add(stepId);

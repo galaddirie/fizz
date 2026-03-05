@@ -1,5 +1,7 @@
 import { h, type Component } from 'vue';
 import { createLiveVue, findComponent, type LiveHook, type ComponentMap } from 'live_vue';
+import RevisionViewer from './RevisionViewer.vue';
+import WorkflowEditor from './WorkflowEditor.vue';
 
 // needed to make $live available in the Vue component
 declare module 'vue' {
@@ -13,10 +15,16 @@ import { createPinia } from 'pinia';
 export default createLiveVue({
   // name will be passed as-is in v-component of the .vue HEEX component
   resolve: name => {
+    const entryComponents = {
+      './RevisionViewer.vue': { default: RevisionViewer },
+      './WorkflowEditor.vue': { default: WorkflowEditor },
+    } satisfies ComponentMap;
+
     // we're importing from ../../lib to allow collocating Vue files with LiveView files
     // eager: true disables lazy loading - all these components will be part of the app.js bundle
     // more: https://vite.dev/guide/features.html#glob-import
     const components = {
+      ...entryComponents,
       ...import.meta.glob('./**/*.vue', { eager: true }),
       ...import.meta.glob('../../lib/**/*.vue', { eager: true }),
     } as ComponentMap;

@@ -90,17 +90,27 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     if (!value || typeof value !== 'object') return null;
 
     const record = value as Record<string, unknown>;
-    const year = record.year;
-    const month = record.month;
-    const day = record.day;
-    const hour = record.hour;
-    const minute = record.minute;
-    const second = record.second;
+    const year =
+      typeof record.year === 'number' && Number.isFinite(record.year) ? record.year : null;
+    const month =
+      typeof record.month === 'number' && Number.isFinite(record.month) ? record.month : null;
+    const day = typeof record.day === 'number' && Number.isFinite(record.day) ? record.day : null;
+    const hour =
+      typeof record.hour === 'number' && Number.isFinite(record.hour) ? record.hour : null;
+    const minute =
+      typeof record.minute === 'number' && Number.isFinite(record.minute) ? record.minute : null;
+    const second =
+      typeof record.second === 'number' && Number.isFinite(record.second)
+        ? record.second
+        : null;
 
     if (
-      ![year, month, day, hour, minute, second].every(
-        part => typeof part === 'number' && Number.isFinite(part)
-      )
+      year === null ||
+      month === null ||
+      day === null ||
+      hour === null ||
+      minute === null ||
+      second === null
     ) {
       return null;
     }

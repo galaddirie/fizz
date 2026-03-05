@@ -1,8 +1,14 @@
 import { ref } from 'vue';
 import type { Ref } from 'vue';
-import type { GraphNode, Node, NodeChange, NodeMouseEvent, XYPosition } from '@vue-flow/core';
-import type { VueFlow } from '@vue-flow/core';
-import type { EventHookOn } from '@vueuse/shared';
+import type {
+  GraphNode,
+  Node,
+  NodeChange,
+  NodeMouseEvent,
+  XYPosition,
+  VueFlow,
+  useVueFlow,
+} from '@vue-flow/core';
 
 import { DEFAULT_GROUP_DIMENSIONS, DOUBLE_CLICK_DELAY_MS } from '@/constants/layout';
 import type { StepNodeData, WorkflowNodeData } from '@/types/workflow';
@@ -28,7 +34,7 @@ interface UseNodeInteractionOptions {
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
   applyNodeChanges: (changes: NodeChange[]) => Node<WorkflowNodeData>[];
   removeNodes: (nodeId: string, removeEdges: boolean) => void;
-  onNodesChange: EventHookOn<NodeChange[]>;
+  onNodesChange: ReturnType<typeof useVueFlow>['onNodesChange'];
   project: (point: XYPosition) => XYPosition;
   canvasRef: Ref<HTMLElement | null>;
   vueFlowRef: Ref<InstanceType<typeof VueFlow> | null>;
@@ -254,17 +260,14 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
     pendingGroupRemovalIds.clear();
   };
 
-  options.onNodesChange((...changes) => {
+  options.onNodesChange(changes => {
     if (options.isSyncingDraft() || !options.canEdit()) return;
 
-    const normalizedChanges = Array.isArray(changes[0])
-      ? (changes[0] as NodeChange[])
-      : (changes as NodeChange[]);
     const nextChanges: NodeChange[] = [];
     const removedStepNodes: GraphNode<WorkflowNodeData>[] = [];
     const removedStepIds: string[] = [];
 
-    for (const change of normalizedChanges) {
+    for (const change of changes) {
       if (change.type === 'position') {
         // We drive node movement via useNodeDrag/updateNode.
         // Applying Vue Flow's raw position changes here can cause

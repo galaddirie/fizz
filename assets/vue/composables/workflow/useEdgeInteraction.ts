@@ -4,8 +4,8 @@ import type {
   EdgeChange,
   GraphEdge,
   UpdateEdge,
+  useVueFlow,
 } from '@vue-flow/core';
-import type { EventHookOn } from '@vueuse/shared';
 
 import type { EdgeData, Connection } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
@@ -16,8 +16,8 @@ interface UseEdgeInteractionOptions {
   canEdit: () => boolean;
   getEdges: () => GraphEdge<EdgeData>[];
   updateEdge: UpdateEdge;
-  onConnect: EventHookOn<VueFlowConnection>;
-  onEdgesChange: EventHookOn<EdgeChange[]>;
+  onConnect: ReturnType<typeof useVueFlow>['onConnect'];
+  onEdgesChange: ReturnType<typeof useVueFlow>['onEdgesChange'];
   applyEdgeChanges: (changes: EdgeChange[]) => GraphEdge<EdgeData>[];
   setEdges: (edges: Edge<EdgeData>[] | GraphEdge<EdgeData>[]) => void;
   getConnections: () => Connection[];
@@ -127,15 +127,12 @@ export function useEdgeInteraction(options: UseEdgeInteractionOptions) {
     });
   });
 
-  options.onEdgesChange((...changes) => {
+  options.onEdgesChange(changes => {
     if (options.isSyncingDraft() || !options.canEdit()) return;
 
-    const normalizedChanges = Array.isArray(changes[0])
-      ? (changes[0] as EdgeChange[])
-      : (changes as EdgeChange[]);
     const nextChanges: EdgeChange[] = [];
 
-    for (const change of normalizedChanges) {
+    for (const change of changes) {
       if (change.type === 'remove') {
         if (!pendingEdgeRemovalIds.has(change.id)) {
           pendingEdgeRemovalIds.add(change.id);

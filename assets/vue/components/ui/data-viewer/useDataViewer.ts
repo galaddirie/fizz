@@ -1,7 +1,7 @@
-import { ref, type Ref } from 'vue';
+import { ref } from 'vue';
 import { type ViewMode } from './types';
 
-export function useDataViewer(data: Ref<unknown>, defaultView: ViewMode = 'tree') {
+export function useDataViewer(defaultView: ViewMode = 'tree') {
   const viewMode = ref<ViewMode>(defaultView);
   const expandedPaths = ref<Set<string>>(new Set());
   const copiedPath = ref<string | null>(null);

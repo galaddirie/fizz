@@ -38,7 +38,7 @@ const {
   collapseAll,
   expandToDepth,
   copyToClipboard,
-} = useDataViewer(dataRef, props.defaultView);
+} = useDataViewer(props.defaultView);
 
 // Auto-expand first level on data change
 watch(dataRef, (newData) => {

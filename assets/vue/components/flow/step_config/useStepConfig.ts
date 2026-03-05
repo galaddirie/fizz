@@ -1,4 +1,4 @@
-import { ref, computed, watch, type InjectionKey } from 'vue';
+import { ref, computed, watch, toRaw, type InjectionKey } from 'vue';
 import { watchDebounced } from '@vueuse/core';
 import type { Node } from '@vue-flow/core';
 import type {
@@ -39,6 +39,52 @@ export interface UseStepConfigProps {
     upstreamStepIds?: Record<string, string[]>;
 }
 
+const cloneValue = <T>(value: T): T => {
+    const rawValue = toRaw(value);
+
+    if (typeof structuredClone === 'function') {
+        try {
+            return structuredClone(rawValue);
+        } catch {
+            // Fall through to JSON cloning for values that still cannot be cloned directly.
+        }
+    }
+
+    return JSON.parse(JSON.stringify(rawValue)) as T;
+};
+
+const valuesEqual = (left: unknown, right: unknown): boolean => {
+    if (left === right) return true;
+    if (Number.isNaN(left) && Number.isNaN(right)) return true;
+    if (typeof left !== typeof right) return false;
+
+    if (Array.isArray(left) && Array.isArray(right)) {
+        return (
+            left.length === right.length &&
+            left.every((value, index) => valuesEqual(value, right[index]))
+        );
+    }
+
+    if (
+        left &&
+        right &&
+        typeof left === 'object' &&
+        typeof right === 'object'
+    ) {
+        const leftRecord = left as Record<string, unknown>;
+        const rightRecord = right as Record<string, unknown>;
+        const leftKeys = Object.keys(leftRecord);
+        const rightKeys = Object.keys(rightRecord);
+
+        return (
+            leftKeys.length === rightKeys.length &&
+            leftKeys.every(key => valuesEqual(leftRecord[key], rightRecord[key]))
+        );
+    }
+
+    return false;
+};
+
 export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) => void) {
     // --- Core state ---
     const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
@@ -61,7 +107,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         if (currentKeys.length !== originalKeys.length) return true;
 
         for (const key of currentKeys) {
-            if (JSON.stringify(fieldValues.value[key]) !== JSON.stringify(originalValues.value[key])) {
+            if (!valuesEqual(fieldValues.value[key], originalValues.value[key])) {
                 return true;
             }
         }
@@ -97,7 +143,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
                 editName.value = newNode.data.name || '';
                 isEditingName.value = false;
 
-                originalValues.value = { ...values };
+                originalValues.value = cloneValue(values);
                 originalName.value = editName.value;
                 showCloseConfirmation.value = false;
             }
@@ -161,7 +207,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             config: { ...fieldValues.value },
         });
 
-        originalValues.value = { ...fieldValues.value };
+        originalValues.value = cloneValue(fieldValues.value);
         originalName.value = editName.value;
         emit('close');
     };
@@ -264,7 +310,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         selectedItemIndex: execution.selectedItemIndex,
         isTriggerStep: subnodes.isTriggerStep,
         directUpstreamStepIds: subnodes.directUpstreamStepIds,
-        inputIndexLabels: subnodes.inputIndexLabels,
         emit,
     });
 
