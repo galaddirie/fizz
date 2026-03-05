@@ -1,7 +1,8 @@
 import { nextTick, onMounted, ref, watch } from 'vue';
 import type { Edge, Node } from '@vue-flow/core';
 
-import type { EdgeData, WorkflowDraft, WorkflowNodeData } from '@/types/workflow';
+import type { EdgeData, WorkflowNodeData } from '@/shared/ui/workflow-scene/types';
+import type { WorkflowDraft } from '@/types/workflow';
 
 interface UseDraftSyncOptions {
   activeDraft: () => WorkflowDraft | undefined;

@@ -8,15 +8,17 @@ import {
   DEFAULT_GROUP_NAME_FONT_SIZE,
 } from '@/constants/layout';
 import type {
+  GroupNodeData,
+  StepNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
+import type {
   Workflow,
   StepType,
   StepExecution,
   EditorState,
   UserPresence,
-  StepNodeData,
   StepHandleQuickAddRequest,
-  GroupNodeData,
-  WorkflowNodeData,
 } from '@/types/workflow';
 
 interface UseWorkflowNodesOptions {

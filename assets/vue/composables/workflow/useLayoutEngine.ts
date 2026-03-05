@@ -8,8 +8,13 @@ import {
   EDGE_LABEL_HALF_WIDTH,
   EDGE_LABEL_POSITION,
 } from '@/constants/layout';
-import type { EdgeData, GroupNodeData, StepNodeData, WorkflowNodeData } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
+import type {
+  EdgeData,
+  GroupNodeData,
+  StepNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import {
   GROUP_CONTENT_INSETS,
   buildGroupBoundsFromPositions,
@@ -36,7 +41,7 @@ interface UseLayoutEngineOptions {
   getEdges: () => Edge<EdgeData>[];
   getSelectedNodes: () => GraphNode<WorkflowNodeData>[];
   updateNode: (id: string, changes: Partial<GraphNode<WorkflowNodeData>>) => void;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
 }
 
 export function useLayoutEngine(options: UseLayoutEngineOptions) {
@@ -320,10 +325,13 @@ export function useLayoutEngine(options: UseLayoutEngineOptions) {
     });
 
     if (stepMoves.length || groupUpdates.length) {
-      options.emit('tidy_layout', {
-        steps: stepMoves,
-        groups: groupUpdates,
-        label: undoLabel,
+      options.dispatch({
+        type: 'document.layout.tidy',
+        payload: {
+          steps: stepMoves,
+          groups: groupUpdates,
+          label: undoLabel,
+        },
       });
     }
   };

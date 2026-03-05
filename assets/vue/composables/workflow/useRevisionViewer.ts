@@ -6,17 +6,17 @@ import type { NodeMouseEvent, Node, Edge } from '@vue-flow/core';
 import WorkflowStepNode from '@/components/flow/Node.vue';
 import WorkflowSubNode from '@/components/flow/SubNode.vue';
 import GroupNode from '@/components/flow/GroupNode.vue';
-import CustomEdge from '@/components/flow/Edge.vue';
 import { useWorkflowEdges } from '@/composables/useWorkflowEdges';
 import { useWorkflowGraph } from '@/composables/useWorkflowGraph';
 import { useWorkflowNodes } from '@/composables/useWorkflowNodes';
 import { useDraftSync } from '@/composables/workflow/useDraftSync';
 import { useMiniMapNodeColor } from '@/composables/workflow/useMiniMapNodeColor';
+import type { RevisionViewerViewProps } from '@/features/revision-viewer/contracts/revisionViewer';
 import { isStepNode } from '@/lib/workflowGuards';
-import type { RevisionViewerProps } from '@/types/revisionViewer';
-import type { EdgeData, WorkflowNodeData } from '@/types/workflow';
+import { workflowEdgeTypes } from '@/shared/ui/workflow-scene/edgeTypes';
+import type { EdgeData, WorkflowNodeData } from '@/shared/ui/workflow-scene/types';
 
-export function useRevisionViewer(props: RevisionViewerProps) {
+export function useRevisionViewer(props: RevisionViewerViewProps) {
   const { setNodes, setEdges, viewport } = useVueFlow();
   const canvasRef = ref<HTMLElement | null>(null);
   const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
@@ -24,15 +24,15 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   const isInspectorOpen = ref(false);
 
   const activeWorkflow = computed(() => ({
-    ...props.workflow,
-    draft: props.draft,
+    ...props.document.workflow,
+    draft: props.document.draft,
   }));
 
   const { nodes } = useWorkflowNodes({
     workflow: () => activeWorkflow.value,
-    stepTypes: () => props.stepTypes,
+    stepTypes: () => props.document.stepTypes,
     stepExecutions: () => [],
-    editorState: () => props.editorState,
+    editorState: () => props.document.editorState,
     presences: () => [],
     currentUserId: () => undefined,
     canEdit: () => false,
@@ -44,7 +44,7 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   });
 
   const draftSync = useDraftSync({
-    activeDraft: () => props.draft,
+    activeDraft: () => props.document.draft,
     nodes: () => nodes.value as Node<WorkflowNodeData>[],
     edges: () => edges.value as Edge<EdgeData>[],
     setNodes,
@@ -57,15 +57,15 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   const { miniMapNodeColor } = useMiniMapNodeColor();
 
   const nodeTypes = { step: markRaw(WorkflowStepNode), subnode: markRaw(WorkflowSubNode), group: markRaw(GroupNode) };
-  const edgeTypes = { custom: markRaw(CustomEdge as any) };
+  const edgeTypes = workflowEdgeTypes;
 
-  const workflowName = computed(() => props.workflow.name);
-  const revisionLabel = computed(() => props.revision.label);
-  const canApply = computed(() => props.revision.kind !== 'current');
-  const isCurrentDraft = computed(() => props.revision.kind === 'current');
-  const workflowUpdatedAt = computed(() => props.workflow.updated_at);
-  const undoStack = computed(() => props.undoStack);
-  const versions = computed(() => props.versions);
+  const workflowName = computed(() => props.document.workflow.name);
+  const revisionLabel = computed(() => props.history.revision.label);
+  const canApply = computed(() => props.history.revision.kind !== 'current');
+  const isCurrentDraft = computed(() => props.history.revision.kind === 'current');
+  const workflowUpdatedAt = computed(() => props.document.workflow.updated_at);
+  const undoStack = computed(() => props.history.undoStack);
+  const versions = computed(() => props.history.versions);
 
   const selectedNode = computed(() => {
     if (!selectedNodeId.value) return null;
@@ -76,7 +76,7 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   const selectedStepType = computed(() => {
     if (!selectedNode.value) return null;
     const typeId = selectedNode.value.data?.type_id;
-    return props.stepTypes.find(stepType => stepType.id === typeId) ?? null;
+    return props.document.stepTypes.find(stepType => stepType.id === typeId) ?? null;
   });
 
   const handleNodeClick = (event: NodeMouseEvent) => {
@@ -102,11 +102,11 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   };
 
   const isSelectedUndo = (entry: { depth: number }) => {
-    return props.revision.kind === 'undo' && props.revision.depth === entry.depth;
+    return props.history.revision.kind === 'undo' && props.history.revision.depth === entry.depth;
   };
 
   const isSelectedVersion = (version: { id: string }) => {
-    return props.revision.kind === 'version' && props.revision.id === version.id;
+    return props.history.revision.kind === 'version' && props.history.revision.id === version.id;
   };
 
   const formatRevisionTimestamp = (value?: string | null) => {

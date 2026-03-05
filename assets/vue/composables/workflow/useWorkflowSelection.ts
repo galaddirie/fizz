@@ -2,7 +2,11 @@ import { computed } from 'vue';
 import type { Node } from '@vue-flow/core';
 
 import { isStepNode } from '@/lib/workflowGuards';
-import type { StepNodeData, StepType, WorkflowNodeData } from '@/types/workflow';
+import type {
+  StepNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
+import type { StepType } from '@/types/workflow';
 
 interface UseWorkflowSelectionOptions {
   nodes: () => Node<WorkflowNodeData>[];

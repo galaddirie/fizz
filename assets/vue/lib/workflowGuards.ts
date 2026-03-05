@@ -1,6 +1,10 @@
 import type { GraphNode, Node } from '@vue-flow/core';
 
-import type { GroupNodeData, StepNodeData, WorkflowNodeData } from '@/types/workflow';
+import type {
+  GroupNodeData,
+  StepNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
 
 export const isGroupNode = (
   node: GraphNode<WorkflowNodeData> | Node<WorkflowNodeData>

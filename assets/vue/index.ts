@@ -1,7 +1,8 @@
 import { h, type Component } from 'vue';
 import { createLiveVue, findComponent, type LiveHook, type ComponentMap } from 'live_vue';
-import RevisionViewer from './RevisionViewer.vue';
-import WorkflowEditor from './WorkflowEditor.vue';
+import RevisionViewerRoot from '@/features/revision-viewer/RevisionViewerRoot.vue';
+import WorkflowEditorRoot from '@/features/workflow-editor/WorkflowEditorRoot.vue';
+import { useThemeStore } from '@/app/theme/themeStore';
 
 // needed to make $live available in the Vue component
 declare module 'vue' {
@@ -16,8 +17,8 @@ export default createLiveVue({
   // name will be passed as-is in v-component of the .vue HEEX component
   resolve: name => {
     const entryComponents = {
-      './RevisionViewer.vue': { default: RevisionViewer },
-      './WorkflowEditor.vue': { default: WorkflowEditor },
+      './RevisionViewer.vue': { default: RevisionViewerRoot },
+      './WorkflowEditor.vue': { default: WorkflowEditorRoot },
     } satisfies ComponentMap;
 
     // we're importing from ../../lib to allow collocating Vue files with LiveView files
@@ -39,6 +40,7 @@ export default createLiveVue({
     const app = createApp({ render: () => h(component as Component, props, slots) });
     const pinia = createPinia();
     app.use(pinia);
+    useThemeStore(pinia).initialize();
     app.use(plugin);
     app.mount(el);
     return app;

@@ -5,9 +5,9 @@ import type {
     EditorState,
     Execution,
     StepExecution,
-    StepNodeData,
     StepType,
 } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 import type {
     ConfigSchemaField,
     ConfigSchema,

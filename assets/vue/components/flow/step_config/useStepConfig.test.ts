@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Node } from '@vue-flow/core';
 
 import { useStepConfig } from './useStepConfig';
-import type { StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 
 const createNode = (config: Record<string, unknown>) =>
   ({

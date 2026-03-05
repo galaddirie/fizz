@@ -1,7 +1,8 @@
 import { computed } from 'vue';
 import type { Edge } from '@vue-flow/core';
 
-import type { Workflow, StepExecution, EdgeData } from '@/types/workflow';
+import type { EdgeData } from '@/shared/ui/workflow-scene/types';
+import type { Workflow, StepExecution } from '@/types/workflow';
 
 interface UseWorkflowEdgesOptions {
   workflow: () => Workflow;

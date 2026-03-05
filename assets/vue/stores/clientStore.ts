@@ -1,20 +1,8 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
+import { readStorageBoolean, writeStorageBoolean } from '@/shared/browser/storage';
 
 const SNAP_ENABLED_STORAGE_KEY = 'fizz.workflow_editor.snap_enabled';
-
-const readStorageBoolean = (key: string, fallback: boolean) => {
-  if (typeof window === 'undefined') return fallback;
-
-  const value = window.localStorage.getItem(key);
-  if (value === null) return fallback;
-  return value === '1';
-};
-
-const writeStorageBoolean = (key: string, value: boolean) => {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(key, value ? '1' : '0');
-};
 
 export const useClientStore = defineStore('client', () => {
   // Panel state

@@ -7,8 +7,9 @@ import type {
   useVueFlow,
 } from '@vue-flow/core';
 
-import type { EdgeData, Connection } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
+import type { EdgeData } from '@/shared/ui/workflow-scene/types';
+import type { Connection } from '@/types/workflow';
 
 type EdgeUpdatePayload = { edge: Edge<EdgeData>; connection: VueFlowConnection };
 
@@ -21,7 +22,7 @@ interface UseEdgeInteractionOptions {
   applyEdgeChanges: (changes: EdgeChange[]) => GraphEdge<EdgeData>[];
   setEdges: (edges: Edge<EdgeData>[] | GraphEdge<EdgeData>[]) => void;
   getConnections: () => Connection[];
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
   isSyncingDraft: () => boolean;
 }
 
@@ -99,13 +100,19 @@ export function useEdgeInteraction(options: UseEdgeInteractionOptions) {
     options.updateEdge(resolvedEdge, normalizedConnection, false);
     const connectionId = resolveConnectionId(edge);
     if (connectionId) {
-      options.emit('remove_connection', { connection_id: connectionId });
+      options.dispatch({
+        type: 'document.connection.remove',
+        payload: { connection_id: connectionId },
+      });
     }
-    options.emit('add_connection', {
-      source_step_id: normalizedConnection.source,
-      target_step_id: normalizedConnection.target,
-      source_output: normalizedConnection.sourceHandle ?? null,
-      target_input: normalizedConnection.targetHandle ?? null,
+    options.dispatch({
+      type: 'document.connection.add',
+      payload: {
+        source_step_id: normalizedConnection.source,
+        target_step_id: normalizedConnection.target,
+        source_output: normalizedConnection.sourceHandle ?? null,
+        target_input: normalizedConnection.targetHandle ?? null,
+      },
     });
   };
 
@@ -119,11 +126,14 @@ export function useEdgeInteraction(options: UseEdgeInteractionOptions) {
       console.warn('Invalid connection: cycles are not allowed.');
       return;
     }
-    options.emit('add_connection', {
-      source_step_id: params.source,
-      target_step_id: params.target,
-      source_output: params.sourceHandle ?? 'main',
-      target_input: params.targetHandle ?? 'main',
+    options.dispatch({
+      type: 'document.connection.add',
+      payload: {
+        source_step_id: params.source,
+        target_step_id: params.target,
+        source_output: params.sourceHandle ?? 'main',
+        target_input: params.targetHandle ?? 'main',
+      },
     });
   });
 
@@ -138,7 +148,10 @@ export function useEdgeInteraction(options: UseEdgeInteractionOptions) {
           pendingEdgeRemovalIds.add(change.id);
           const connectionId = resolveConnectionId(change);
           if (connectionId) {
-            options.emit('remove_connection', { connection_id: connectionId });
+            options.dispatch({
+              type: 'document.connection.remove',
+              payload: { connection_id: connectionId },
+            });
           }
         }
       }

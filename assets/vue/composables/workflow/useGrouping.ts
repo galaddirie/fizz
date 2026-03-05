@@ -7,12 +7,17 @@ import {
   DEFAULT_GROUP_NAME_FONT_SIZE,
 } from '@/constants/layout';
 import type {
-  Workflow,
-  WorkflowDraft,
   GroupNodeData,
   WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
+import type {
+  WorkflowEditorAction,
+  WorkflowEditorDispatch,
+} from '@/features/workflow-editor/contracts/workflowEditor';
+import type {
+  Workflow,
+  WorkflowDraft,
 } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 import {
   GROUP_CONTENT_INSETS,
   buildGroupBounds,
@@ -34,7 +39,7 @@ interface UseGroupingOptions {
   getNodes: () => GraphNode<WorkflowNodeData>[];
   getSelectedNodes: () => GraphNode<WorkflowNodeData>[];
   updateNodeData: (id: string, data: Partial<WorkflowNodeData>) => void;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
 }
 
 export function useGrouping(options: UseGroupingOptions) {
@@ -187,13 +192,16 @@ export function useGrouping(options: UseGroupingOptions) {
       };
     });
 
-    options.emit('add_group', {
-      name: buildGroupName(),
-      step_ids: stepIds,
-      color: DEFAULT_GROUP_COLOR,
-      font_size: DEFAULT_GROUP_NAME_FONT_SIZE,
-      position: bounds,
-      step_positions: stepPositions,
+    options.dispatch({
+      type: 'document.group.add',
+      payload: {
+        name: buildGroupName(),
+        step_ids: stepIds,
+        color: DEFAULT_GROUP_COLOR,
+        font_size: DEFAULT_GROUP_NAME_FONT_SIZE,
+        position: bounds,
+        step_positions: stepPositions,
+      },
     });
   };
 
@@ -326,7 +334,7 @@ export function useGrouping(options: UseGroupingOptions) {
       commitMembershipMap[stepId] = null;
     });
 
-    const payload = {
+    const payload: Extract<WorkflowEditorAction, { type: 'document.layout.commit' }>['payload'] = {
       txn_id: createTxnId(),
       base_seq: options.getCollabSeq(),
       groups: commitGroupUpdates,
@@ -340,26 +348,29 @@ export function useGrouping(options: UseGroupingOptions) {
       Object.keys(payload.group_id_by_step_id).length > 0;
 
     if (hasChanges) {
-      options.emit('commit_drag_layout', payload);
+      options.dispatch({ type: 'document.layout.commit', payload });
     }
   };
 
   const removeGroup = (groupId: string) => {
-    options.emit('remove_group', { group_id: groupId });
+    options.dispatch({ type: 'document.group.remove', payload: { group_id: groupId } });
   };
 
   const emitGroupPositionUpdate = (groupNode: GraphNode<GroupNodeData>) => {
     const width = groupNode.dimensions.width || DEFAULT_GROUP_DIMENSIONS.width;
     const height = groupNode.dimensions.height || DEFAULT_GROUP_DIMENSIONS.height;
 
-    options.emit('update_group', {
-      group_id: groupNode.id,
-      changes: {
-        position: {
-          x: groupNode.position.x,
-          y: groupNode.position.y,
-          width,
-          height,
+    options.dispatch({
+      type: 'document.group.update',
+      payload: {
+        group_id: groupNode.id,
+        changes: {
+          position: {
+            x: groupNode.position.x,
+            y: groupNode.position.y,
+            width,
+            height,
+          },
         },
       },
     });

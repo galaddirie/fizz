@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Node } from '@vue-flow/core';
 
 import { useExpressionPreviews } from './useExpressionPreviews';
-import type { StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 
 const createNode = (id = 'step-current') =>
   ({

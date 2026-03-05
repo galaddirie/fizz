@@ -1,14 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, type VNodeRef } from 'vue';
-import type {
-  Connection,
-  Edge,
-  EdgeTypesObject,
-  GraphNode,
-  Node,
-  NodeMouseEvent,
-  NodeTypesObject,
-} from '@vue-flow/core';
+import { ref } from 'vue';
 import { VueFlow } from '@vue-flow/core';
 import { Background } from '@vue-flow/background';
 import { Controls } from '@vue-flow/controls';
@@ -19,45 +10,16 @@ import CollaborativeCursors from '@/components/flow/CollaborativeCursors.vue';
 import ExecutionOverlay from '@/components/flow/ExecutionOverlay.vue';
 import { DEFAULT_VIEWPORT } from '@/constants/layout';
 import { oklchToHex } from '@/lib/color';
-import type { EdgeData, UserPresence, WorkflowNodeData } from '@/types/workflow';
+import { useWindowEvent } from '@/shared/browser/useWindowEvent';
+
+import type { WorkflowSceneController, WorkflowSceneModel } from './types';
 
 interface Props {
-  nodes: Node<WorkflowNodeData>[];
-  edges: Edge<EdgeData>[];
-  nodeTypes: NodeTypesObject;
-  edgeTypes: EdgeTypesObject;
-  snapEnabled: boolean;
-  gridSize: number;
-  effectiveSnapToGrid: boolean;
-  canEdit: boolean;
-  isRevisionPreviewActive: boolean;
-  previewLabel: string;
-  isMounted: boolean;
-  otherUserPresences: UserPresence[];
-  currentUserId?: string;
-  viewport: { x: number; y: number; zoom: number };
-  miniMapNodeColor: (node: GraphNode<WorkflowNodeData>) => string;
-  setCanvasRef: VNodeRef;
-  setVueFlowRef: VNodeRef;
-  handlePaneMouseMove: (event: MouseEvent) => void;
-  handleNodeClick: (event: NodeMouseEvent) => void;
-  handleNodeDoubleClick: (event: NodeMouseEvent) => void;
-  handleNodeContextMenu: (event: NodeMouseEvent) => void;
-  handleSelectionChange: (event: { nodes: GraphNode<WorkflowNodeData>[] }) => void;
-  handleSelectionContextMenu: (event: { event: MouseEvent; nodes: GraphNode<WorkflowNodeData>[] }) => void;
-  handlePaneContextMenu: (event: MouseEvent) => void;
-  handleEdgeUpdate: (payload: { edge: Edge<EdgeData>; connection: Connection }) => void;
-  handleDragOver: (event: DragEvent) => void;
-  handleDrop: (event: DragEvent) => void;
-  isExecutionFailed: boolean;
-  isExecutionRunning: boolean;
-  workflowExecutionsLink?: string | null;
-  onRunTest: () => void;
-  onCancelExecution: () => void;
-  onToggleSnap: () => void;
+  model: WorkflowSceneModel;
+  controller: WorkflowSceneController;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
 
 const isSelectionModifierPressed = ref(false);
 
@@ -69,114 +31,103 @@ const resetSelectionModifierState = () => {
   isSelectionModifierPressed.value = false;
 };
 
-onMounted(() => {
-  window.addEventListener('keydown', syncSelectionModifierState);
-  window.addEventListener('keyup', syncSelectionModifierState);
-  window.addEventListener('blur', resetSelectionModifierState);
-});
-
-onBeforeUnmount(() => {
-  window.removeEventListener('keydown', syncSelectionModifierState);
-  window.removeEventListener('keyup', syncSelectionModifierState);
-  window.removeEventListener('blur', resetSelectionModifierState);
-});
+useWindowEvent('keydown', syncSelectionModifierState);
+useWindowEvent('keyup', syncSelectionModifierState);
+useWindowEvent('blur', resetSelectionModifierState);
 </script>
 
 <template>
   <div
-    :ref="setCanvasRef"
+    :ref="controller.setCanvasRef"
     class="relative min-w-0 flex-1 overflow-hidden"
     :class="{ 'selection-modifier-active': isSelectionModifierPressed }"
-    @mousemove="handlePaneMouseMove"
+    @mousemove="controller.handlePaneMouseMove?.($event)"
   >
     <VueFlow
-      :ref="setVueFlowRef"
-      :nodes="nodes"
-      :edges="edges"
-      :node-types="nodeTypes"
-      :edge-types="edgeTypes"
-      :nodes-connectable="canEdit"
-      :nodes-draggable="canEdit"
-      :edges-updatable="canEdit"
+      :ref="controller.setVueFlowRef"
+      :nodes="model.nodes"
+      :edges="model.edges"
+      :node-types="model.nodeTypes"
+      :edge-types="model.edgeTypes"
+      :nodes-connectable="model.canEdit"
+      :nodes-draggable="model.canEdit"
+      :edges-updatable="model.canEdit"
       :multi-selection-key-code="['Shift', 'Meta', 'Control']"
-      :snap-to-grid="effectiveSnapToGrid"
-      :snap-grid="[gridSize, gridSize]"
+      :snap-to-grid="model.effectiveSnapToGrid"
+      :snap-grid="[model.gridSize, model.gridSize]"
       :apply-default="false"
       :default-viewport="DEFAULT_VIEWPORT"
       fit-view-on-init
-      @node-click="handleNodeClick"
-      @node-double-click="handleNodeDoubleClick"
-      @node-context-menu="handleNodeContextMenu"
-      @selection-change="handleSelectionChange"
-      @selection-context-menu="handleSelectionContextMenu"
-      @pane-context-menu="handlePaneContextMenu"
-      @edge-update="handleEdgeUpdate"
-      @dragover="handleDragOver"
-      @drop="handleDrop"
+      @node-click="controller.handleNodeClick?.($event)"
+      @node-double-click="controller.handleNodeDoubleClick?.($event)"
+      @node-context-menu="controller.handleNodeContextMenu?.($event)"
+      @selection-change="controller.handleSelectionChange?.($event)"
+      @selection-context-menu="controller.handleSelectionContextMenu?.($event)"
+      @pane-context-menu="controller.handlePaneContextMenu?.($event)"
+      @edge-update="controller.handleEdgeUpdate?.($event)"
+      @dragover="controller.handleDragOver?.($event)"
+      @drop="controller.handleDrop?.($event)"
     >
       <Background
         :pattern-color="oklchToHex('oklch(50% 0.05 260)')"
-        :gap="gridSize"
+        :gap="model.gridSize"
       />
       <Controls
         position="bottom-right"
         class="workflow-controls-panel bg-base-100 p-1 rounded-lg"
-        :show-interactive="canEdit"
+        :show-interactive="model.canEdit"
       >
-        <template v-if="canEdit" #top>
+        <template v-if="model.canEdit" #top>
           <button
             type="button"
             class="vue-flow__controls-button"
-            :class="snapEnabled ? '!bg-primary/12 !text-primary' : ''"
+            :class="model.snapEnabled ? '!bg-primary/12 !text-primary' : ''"
             title="Toggle snap (Cmd/Ctrl while dragging)"
             aria-label="Toggle snap to grid"
-            @click="onToggleSnap"
+            @click="controller.onToggleSnap?.()"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4! w-4!"><path d="m12 15 4 4"/><path d="M2.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.029-6.029a1 1 0 1 1 3 3l-6.029 6.029a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.365-6.367A1 1 0 0 0 8.716 4.282z"/><path d="m5 8 4 4"/></svg>
           </button>
         </template>
       </Controls>
-      <MiniMap position="bottom-left" :node-color="miniMapNodeColor" />
+      <MiniMap position="bottom-left" :node-color="model.miniMapNodeColor" />
     </VueFlow>
 
-
-
     <div
-      v-if="isRevisionPreviewActive"
+      v-if="model.isPreviewActive"
       class="pointer-events-none absolute left-5 top-5 z-[1100] rounded-2xl border border-primary/20 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary"
     >
       <div class="text-[10px] uppercase tracking-[0.2em]">Preview mode</div>
-      <div class="text-xs font-semibold">{{ previewLabel }}</div>
+      <div class="text-xs font-semibold">{{ model.previewLabel }}</div>
     </div>
 
     <div
-      v-if="isMounted"
+      v-if="model.isMounted"
       class="pointer-events-none absolute inset-0 z-[1000]"
       :style="{
-        transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+        transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`,
         transformOrigin: '0 0',
       }"
     >
       <CollaborativeCursors
-        :presences="otherUserPresences"
-        :current-user-id="currentUserId"
-        :zoom="viewport.zoom"
+        :presences="model.otherUserPresences"
+        :current-user-id="model.currentUserId"
+        :zoom="model.viewport.zoom"
       />
     </div>
 
     <ExecutionOverlay
-      :is-execution-failed="isExecutionFailed"
-      :is-execution-running="isExecutionRunning"
-      :is-preview-active="isRevisionPreviewActive"
-      :workflow-executions-link="workflowExecutionsLink"
-      @run="onRunTest"
-      @cancel="onCancelExecution"
+      :is-execution-failed="model.isExecutionFailed"
+      :is-execution-running="model.isExecutionRunning"
+      :is-preview-active="model.isPreviewActive"
+      :workflow-executions-link="model.workflowExecutionsLink"
+      @run="controller.onRunTest?.()"
+      @cancel="controller.onCancelExecution?.()"
     />
   </div>
 </template>
 
 <style>
-/* vue-flow library overrides — can't add Tailwind classes to library-rendered elements */
 .vue-flow__panel {
   margin: 15px;
 }
@@ -243,7 +194,6 @@ onBeforeUnmount(() => {
   z-index: 15;
 }
 
-/* Let additive selection clicks reach nodes even when the group overlay sits above them. */
 .selection-modifier-active .vue-flow__nodesselection-rect {
   pointer-events: none;
 }
@@ -258,6 +208,5 @@ onBeforeUnmount(() => {
 
 .vue-flow__minimap-mask {
   fill: var(--color-base-300);
-  fill-opacity: 0.5;
 }
 </style>

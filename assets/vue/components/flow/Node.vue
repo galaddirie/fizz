@@ -4,8 +4,9 @@ import { Position } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 import { useThemeStore } from '@/stores/theme';
-import type { StepHandleQuickAddRequest, StepNodeData, StepSubnodeSlot } from '@/types/workflow';
+import type { StepHandleQuickAddRequest, StepSubnodeSlot } from '@/types/workflow';
 import {
   GlobeAltIcon,
   ServerIcon,

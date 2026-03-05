@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import { useWorkflowActions } from './useWorkflowActions';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 
 describe('useWorkflowActions', () => {
   it('emits workflow updates only when editing is enabled', () => {
-    const emit = vi.fn() as unknown as WorkflowEditorEmits;
+    const dispatch = vi.fn() as WorkflowEditorDispatch;
     const requestNodeRemoval = vi.fn();
     const selectNode = vi.fn();
 
     const actions = useWorkflowActions({
       canEdit: () => true,
-      emit,
+      dispatch,
       requestNodeRemoval,
       selectNode,
     });
@@ -33,33 +33,39 @@ describe('useWorkflowActions', () => {
     });
     actions.selectTraceStep('step-1');
 
-    expect(emit).toHaveBeenCalledWith('update_step', {
-      step_id: 'step-1',
-      changes: {
-        name: 'Fetch User',
-        config: { method: 'GET' },
-        notes: 'Pull the latest profile',
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'document.step.update',
+      payload: {
+        step_id: 'step-1',
+        changes: {
+          name: 'Fetch User',
+          config: { method: 'GET' },
+          notes: 'Pull the latest profile',
+        },
       },
     });
     expect(requestNodeRemoval).toHaveBeenCalledWith('step-1');
-    expect(emit).toHaveBeenCalledWith('save_workflow');
-    expect(emit).toHaveBeenCalledWith('run_test');
-    expect(emit).toHaveBeenCalledWith('cancel_execution');
-    expect(emit).toHaveBeenCalledWith('preview_expression', {
-      step_id: 'step-1',
-      field_key: 'config.url',
-      expression: '{{ trigger.url }}',
+    expect(dispatch).toHaveBeenCalledWith({ type: 'document.save' });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'execution.runTest' });
+    expect(dispatch).toHaveBeenCalledWith({ type: 'execution.cancel' });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: 'inspector.previewExpression',
+      payload: {
+        step_id: 'step-1',
+        field_key: 'config.url',
+        expression: '{{ trigger.url }}',
+      },
     });
     expect(selectNode).toHaveBeenCalledWith('step-1');
   });
 
   it('guards mutating actions when editing is disabled', () => {
-    const emit = vi.fn() as unknown as WorkflowEditorEmits;
+    const dispatch = vi.fn() as WorkflowEditorDispatch;
     const requestNodeRemoval = vi.fn();
 
     const actions = useWorkflowActions({
       canEdit: () => false,
-      emit,
+      dispatch,
       requestNodeRemoval,
       selectNode: vi.fn(),
     });
@@ -73,7 +79,7 @@ describe('useWorkflowActions', () => {
     actions.handleSave();
     actions.handleRunTest();
 
-    expect(emit).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
     expect(requestNodeRemoval).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import type { GraphNode, XYPosition } from '@vue-flow/core';
 
-import type { WorkflowNodeData } from '@/types/workflow';
+import type { WorkflowNodeData } from '@/shared/ui/workflow-scene/types';
 import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
 import { isStepNode } from '@/lib/workflowGuards';
 

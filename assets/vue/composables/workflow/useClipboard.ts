@@ -2,9 +2,9 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import type { Node, XYPosition } from '@vue-flow/core';
 
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import { isStepNode } from '@/lib/workflowGuards';
-import type { WorkflowNodeData } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
+import type { WorkflowNodeData } from '@/shared/ui/workflow-scene/types';
 import type { useClientStore } from '@/stores/clientStore';
 
 const DUPLICATE_OFFSET: XYPosition = { x: 50, y: 50 };
@@ -15,7 +15,7 @@ interface UseClipboardOptions {
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
   groupByStepId: () => Map<string, string>;
   store: ReturnType<typeof useClientStore>;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
   requestNodeRemoval: (nodeId: string) => void;
   withSelectionLock?: (callback: () => void) => void;
 }
@@ -73,10 +73,13 @@ export function useClipboard(options: UseClipboardOptions) {
     if (!stepIds.length) return;
     const positionByStepId = buildPositionByStepId(stepIds, offset);
     const groupIds = buildGroupIdsByStepId(stepIds);
-    options.emit('duplicate_steps', {
-      step_ids: stepIds,
-      position_by_step_id: positionByStepId,
-      group_id_by_step_id: Object.keys(groupIds).length ? groupIds : undefined,
+    options.dispatch({
+      type: 'document.step.duplicate',
+      payload: {
+        step_ids: stepIds,
+        position_by_step_id: positionByStepId,
+        group_id_by_step_id: Object.keys(groupIds).length ? groupIds : undefined,
+      },
     });
   };
 
@@ -127,7 +130,7 @@ export function useClipboard(options: UseClipboardOptions) {
       updateSelection();
     }
 
-    options.emit('selection_changed', { step_ids: stepIds });
+    options.dispatch({ type: 'collaboration.selection', payload: { step_ids: stepIds } });
   };
 
   const applyPendingDuplicateSelection = () => {

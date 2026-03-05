@@ -1,28 +1,31 @@
 import type { XYPosition } from '@vue-flow/core';
 
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import type { Step } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 
 interface UseWorkflowNodeActionsOptions {
   canEdit: () => boolean;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
 }
 
 export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
   const handleRunNode = (stepId: string) => {
     if (!options.canEdit()) return;
-    options.emit('run_node', { step_id: stepId });
+    options.dispatch({ type: 'execution.runNode', payload: { step_id: stepId } });
   };
 
   const handleToggleDisabled = (stepId: string, isDisabled: boolean) => {
     if (!options.canEdit()) return;
 
     if (isDisabled) {
-      options.emit('enable_step', { step_id: stepId });
+      options.dispatch({ type: 'document.step.enable', payload: { step_id: stepId } });
       return;
     }
 
-    options.emit('disable_step', { step_id: stepId, mode: 'skip' });
+    options.dispatch({
+      type: 'document.step.disable',
+      payload: { step_id: stepId, mode: 'skip' },
+    });
   };
 
   const handleMoveSteps = (stepPositions: Record<string, XYPosition>) => {
@@ -31,15 +34,15 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
 
     if (entries.length === 1) {
       const [stepId, position] = entries[0];
-      options.emit('move_step', { step_id: stepId, position });
+      options.dispatch({ type: 'document.step.move', payload: { step_id: stepId, position } });
       return;
     }
 
-    options.emit('move_steps', { step_positions: stepPositions });
+    options.dispatch({ type: 'document.step.moveMany', payload: { step_positions: stepPositions } });
   };
 
   const handleUpdateStep = (stepId: string, changes: Partial<Step>) => {
-    options.emit('update_step', { step_id: stepId, changes });
+    options.dispatch({ type: 'document.step.update', payload: { step_id: stepId, changes } });
   };
 
   const handleUpdateGroup = (
@@ -53,7 +56,7 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
       font_size?: number;
     }
   ) => {
-    options.emit('update_group', { group_id: groupId, changes });
+    options.dispatch({ type: 'document.group.update', payload: { group_id: groupId, changes } });
   };
 
   return {

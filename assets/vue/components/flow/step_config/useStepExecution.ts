@@ -1,6 +1,7 @@
 import { ref, computed, watch } from 'vue';
 import type { Node } from '@vue-flow/core';
-import type { StepExecution, StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
+import type { StepExecution } from '@/types/workflow';
 
 interface UseStepExecutionOptions {
     node: () => Node<StepNodeData> | null;

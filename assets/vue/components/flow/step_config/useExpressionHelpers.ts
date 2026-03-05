@@ -1,6 +1,6 @@
 import { type ComputedRef, type Ref } from 'vue';
 import type { Node } from '@vue-flow/core';
-import type { StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 
 interface UseExpressionHelpersOptions {
     node: () => Node<StepNodeData> | null;

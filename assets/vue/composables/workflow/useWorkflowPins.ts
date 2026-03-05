@@ -1,11 +1,11 @@
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import type { StepExecution } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
 
 type PinPayload = { step_id: string; output_data?: unknown; item_index?: number | null };
 
 interface UseWorkflowPinsOptions {
   stepExecutions: () => StepExecution[];
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
 }
 
 export function useWorkflowPins(options: UseWorkflowPinsOptions) {
@@ -51,7 +51,10 @@ export function useWorkflowPins(options: UseWorkflowPinsOptions) {
   };
 
   const emitPinOutput = (stepId: string, itemIndex?: number | null) => {
-    options.emit('pin_output', buildPinPayload(stepId, itemIndex));
+    options.dispatch({
+      type: 'document.output.pin',
+      payload: buildPinPayload(stepId, itemIndex),
+    });
   };
 
   const handlePinOutput = (payload: PinPayload) => {
@@ -59,10 +62,13 @@ export function useWorkflowPins(options: UseWorkflowPinsOptions) {
     const hasOutputData = Object.prototype.hasOwnProperty.call(payload, 'output_data');
 
     if (hasOutputData) {
-      options.emit('pin_output', {
-        step_id: payload.step_id,
-        output_data: payload.output_data ?? null,
-        item_index: payload.item_index ?? null,
+      options.dispatch({
+        type: 'document.output.pin',
+        payload: {
+          step_id: payload.step_id,
+          output_data: payload.output_data ?? null,
+          item_index: payload.item_index ?? null,
+        },
       });
       return;
     }
@@ -72,12 +78,12 @@ export function useWorkflowPins(options: UseWorkflowPinsOptions) {
 
   const handleUnpinOutput = (payload: { step_id: string }) => {
     if (!payload?.step_id) return;
-    options.emit('unpin_output', { step_id: payload.step_id });
+    options.dispatch({ type: 'document.output.unpin', payload: { step_id: payload.step_id } });
   };
 
   const handleTogglePin = (stepId: string, isPinned: boolean) => {
     if (isPinned) {
-      options.emit('unpin_output', { step_id: stepId });
+      options.dispatch({ type: 'document.output.unpin', payload: { step_id: stepId } });
       return;
     }
 

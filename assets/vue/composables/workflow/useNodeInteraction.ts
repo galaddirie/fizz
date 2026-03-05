@@ -11,8 +11,11 @@ import type {
 } from '@vue-flow/core';
 
 import { DEFAULT_GROUP_DIMENSIONS, DOUBLE_CLICK_DELAY_MS } from '@/constants/layout';
-import type { StepNodeData, WorkflowNodeData } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
+import type {
+  StepNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import type { useClientStore } from '@/stores/clientStore';
 import {
   GROUP_CONTENT_INSETS,
@@ -38,7 +41,7 @@ interface UseNodeInteractionOptions {
   project: (point: XYPosition) => XYPosition;
   canvasRef: Ref<HTMLElement | null>;
   vueFlowRef: Ref<InstanceType<typeof VueFlow> | null>;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
   isSyncingDraft: () => boolean;
 }
 
@@ -280,7 +283,7 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
         if (removedNode && isGroupNode(removedNode)) {
           if (!pendingGroupRemovalIds.has(change.id)) {
             pendingGroupRemovalIds.add(change.id);
-            options.emit('remove_group', { group_id: change.id });
+            options.dispatch({ type: 'document.group.remove', payload: { group_id: change.id } });
           }
         } else if (!pendingNodeRemovalIds.has(change.id)) {
           if (removedNode && isStepNode(removedNode)) {
@@ -296,10 +299,10 @@ export function useNodeInteraction(options: UseNodeInteractionOptions) {
 
     const deleteCommit = computeDeleteLayoutCommit(removedStepNodes);
     if (deleteCommit) {
-      options.emit('commit_drag_layout', deleteCommit.payload);
+      options.dispatch({ type: 'document.layout.commit', payload: deleteCommit.payload });
     }
     removedStepIds.forEach(stepId => {
-      options.emit('remove_step', { step_id: stepId });
+      options.dispatch({ type: 'document.step.remove', payload: { step_id: stepId } });
     });
 
     const nextNodes = options.applyNodeChanges(nextChanges);

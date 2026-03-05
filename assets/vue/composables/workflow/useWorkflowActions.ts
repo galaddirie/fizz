@@ -1,8 +1,8 @@
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 
 interface UseWorkflowActionsOptions {
   canEdit: () => boolean;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
   requestNodeRemoval: (stepId: string) => void;
   selectNode: (stepId: string | null) => void;
 }
@@ -15,9 +15,12 @@ export function useWorkflowActions(options: UseWorkflowActionsOptions) {
     notes?: string;
   }) => {
     if (!options.canEdit()) return;
-    options.emit('update_step', {
-      step_id: payload.id,
-      changes: { name: payload.name, config: payload.config, notes: payload.notes },
+    options.dispatch({
+      type: 'document.step.update',
+      payload: {
+        step_id: payload.id,
+        changes: { name: payload.name, config: payload.config, notes: payload.notes },
+      },
     });
   };
 
@@ -28,21 +31,21 @@ export function useWorkflowActions(options: UseWorkflowActionsOptions) {
 
   const handleSave = () => {
     if (!options.canEdit()) return;
-    options.emit('save_workflow');
+    options.dispatch({ type: 'document.save' });
   };
 
   const handleRunTest = () => {
     if (!options.canEdit()) return;
-    options.emit('run_test');
+    options.dispatch({ type: 'execution.runTest' });
   };
 
-  const handleCancelExecution = () => options.emit('cancel_execution');
+  const handleCancelExecution = () => options.dispatch({ type: 'execution.cancel' });
 
   const handlePreviewExpression = (payload: {
     step_id: string;
     field_key: string;
     expression: string;
-  }) => options.emit('preview_expression', payload);
+  }) => options.dispatch({ type: 'inspector.previewExpression', payload });
 
   const selectTraceStep = (stepId: string) => {
     options.selectNode(stepId);

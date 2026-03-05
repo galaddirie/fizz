@@ -1,8 +1,8 @@
 import { computed } from 'vue';
 
 import type { MenuItem } from '@/components/ui/ContextMenu.vue';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 import type { useClientStore } from '@/stores/clientStore';
-import type { StepNodeData } from '@/types/workflow';
 import type { Node } from '@vue-flow/core';
 import {
   TrashIcon,

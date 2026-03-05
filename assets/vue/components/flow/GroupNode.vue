@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useVueFlow } from '@vue-flow/core';
 import type { NodeProps } from '@vue-flow/core';
-import type { GroupNodeData } from '@/types/workflow';
+import type { GroupNodeData } from '@/shared/ui/workflow-scene/types';
 import {
   DEFAULT_GROUP_COLOR,
   DEFAULT_GROUP_DIMENSIONS,

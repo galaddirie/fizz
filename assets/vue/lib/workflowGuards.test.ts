@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Node } from '@vue-flow/core';
 
 import { isGroupNode, isStepNode } from './workflowGuards';
-import type { WorkflowNodeData } from '@/types/workflow';
+import type { WorkflowNodeData } from '@/shared/ui/workflow-scene/types';
 
 const createNode = (type: string) =>
   ({

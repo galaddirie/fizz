@@ -1,5 +1,5 @@
 import type { Node } from '@vue-flow/core';
-import type { StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
 
 export interface ErrorPayload {
     type: 'parse_error' | 'render_error';

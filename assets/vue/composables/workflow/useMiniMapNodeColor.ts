@@ -1,7 +1,10 @@
 import type { GraphNode } from '@vue-flow/core';
 
 import { DEFAULT_GROUP_COLOR } from '@/constants/layout';
-import type { GroupNodeData, WorkflowNodeData } from '@/types/workflow';
+import type {
+  GroupNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
 
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.replace('#', '');

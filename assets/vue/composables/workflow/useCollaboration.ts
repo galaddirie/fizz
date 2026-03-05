@@ -3,9 +3,10 @@ import type { Node } from '@vue-flow/core';
 import { useThrottleFn } from '@vueuse/core';
 
 import { CURSOR_THROTTLE_MS } from '@/constants/layout';
+import type { WorkflowEditorDispatch } from '@/features/workflow-editor/contracts/workflowEditor';
 import { isStepNode } from '@/lib/workflowGuards';
-import type { WorkflowNodeData, UserPresence } from '@/types/workflow';
-import type { WorkflowEditorEmits } from '@/types/workflowEditor';
+import type { WorkflowNodeData } from '@/shared/ui/workflow-scene/types';
+import type { UserPresence } from '@/types/workflow';
 import type { useClientStore } from '@/stores/clientStore';
 
 interface UseCollaborationOptions {
@@ -14,7 +15,7 @@ interface UseCollaborationOptions {
   canEdit: () => boolean;
   getNodes: () => Node<WorkflowNodeData>[];
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
-  emit: WorkflowEditorEmits;
+  dispatch: WorkflowEditorDispatch;
   store: ReturnType<typeof useClientStore>;
 }
 
@@ -54,7 +55,7 @@ export function useCollaboration(options: UseCollaborationOptions) {
         payload.y = y;
       }
 
-      options.emit('mouse_move', payload);
+      options.dispatch({ type: 'collaboration.cursor', payload });
     },
     CURSOR_THROTTLE_MS
   );
@@ -70,7 +71,7 @@ export function useCollaboration(options: UseCollaborationOptions) {
 
     if (selectionKey !== lastSelectionKey.value) {
       lastSelectionKey.value = selectionKey;
-      options.emit('selection_changed', { step_ids: selectedIds });
+      options.dispatch({ type: 'collaboration.selection', payload: { step_ids: selectedIds } });
     }
   };
 

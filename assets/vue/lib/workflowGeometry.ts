@@ -1,7 +1,11 @@
 import type { GraphNode, XYPosition } from '@vue-flow/core';
 
 import { DEFAULT_GROUP_DIMENSIONS, DEFAULT_NODE_DIMENSIONS } from '@/constants/layout';
-import type { GroupNodeData, StepNodeData, WorkflowNodeData } from '@/types/workflow';
+import type {
+  GroupNodeData,
+  StepNodeData,
+  WorkflowNodeData,
+} from '@/shared/ui/workflow-scene/types';
 import { isGroupNode, isStepNode } from '@/lib/workflowGuards';
 
 export type NodeRect = { x: number; y: number; width: number; height: number };

@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { Node } from '@vue-flow/core';
 
 import { useContextExplorer } from './useContextExplorer';
-import type { Execution, StepExecution, StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
+import type { Execution, StepExecution } from '@/types/workflow';
 
 const createNode = (id = 'step-current') =>
   ({

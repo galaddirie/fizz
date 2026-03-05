@@ -1,6 +1,7 @@
 import { ref, computed, type ComputedRef } from 'vue';
 import type { Node } from '@vue-flow/core';
-import type { Execution, StepExecution, StepNodeData } from '@/types/workflow';
+import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
+import type { Execution, StepExecution } from '@/types/workflow';
 import { unwrapData } from '@/lib/dataUtils';
 
 interface UseContextExplorerOptions {
