@@ -18,16 +18,7 @@ defmodule Fizz.Application do
 
       # Step type registry - must start before endpoint so types are available
       Fizz.Steps.Registry,
-      {Registry, keys: :unique, name: Fizz.Runtime.Execution.Registry},
-      {Task.Supervisor, name: Fizz.Runtime.Execution.TaskSupervisor},
-      Fizz.Runtime.Execution.Supervisor,
       Fizz.Runtime.Expression.Cache,
-      # Trigger runtime
-      Fizz.Runtime.Triggers.Registry,
-      # Collaboration modules
-      {Registry, keys: :unique, name: Fizz.Collaboration.EditSession.Registry},
-      Fizz.Collaboration.EditSession.Supervisor,
-      {Fizz.Collaboration.EditSession.Presence, []},
 
       # Start a worker by calling: Fizz.Worker.start_link(arg)
       # {Fizz.Worker, arg},

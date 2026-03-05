@@ -52,7 +52,7 @@ defmodule FizzWeb.WorkflowLive.Index do
         {:noreply,
          socket
          |> put_flash(:info, "Workflow created")
-         |> push_navigate(to: Paths.workflow_edit_path(scope, workflow.id))}
+         |> push_navigate(to: Paths.workflow_show_path(scope, workflow.id))}
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "Failed to create workflow")}

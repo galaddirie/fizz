@@ -61,7 +61,6 @@ export type WorkflowEditorCommandType =
   | 'mouse_move'
   | 'selection_changed'
   | 'preview_expression'
-  | 'toggle_webhook_test'
   | 'navigate_revisions';
 
 export interface WorkflowEditorCommand {
@@ -191,10 +190,6 @@ export type WorkflowEditorEmits = {
   (
     e: 'preview_expression',
     payload: { step_id: string; field_key: string; expression: string }
-  ): void;
-  (
-    e: 'toggle_webhook_test',
-    payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }
   ): void;
   (e: 'navigate_revisions'): void;
 };

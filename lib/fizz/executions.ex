@@ -13,7 +13,7 @@ defmodule Fizz.Executions do
   alias Fizz.Executions.{Execution, Events, StepExecution}
   alias Fizz.Workflows.Workflow
   alias Fizz.Accounts.Scope
-  alias Fizz.Runtime.Serializer
+  alias Fizz.Serializer
 
   @active_step_statuses [:pending, :queued, :running]
   @active_status_rank %{pending: 0, queued: 1, running: 2}

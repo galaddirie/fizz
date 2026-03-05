@@ -551,7 +551,6 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     handleDeleteStep: actions.handleDeleteStep,
     handleSave: actions.handleSave,
     handlePreviewExpression: actions.handlePreviewExpression,
-    handleToggleWebhookTest: actions.handleToggleWebhookTest,
     handlePinOutput: pins.handlePinOutput,
     handleUnpinOutput: pins.handleUnpinOutput,
     selectTraceStep: actions.selectTraceStep,

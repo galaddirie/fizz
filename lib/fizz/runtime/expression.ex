@@ -68,7 +68,7 @@ defmodule Fizz.Runtime.Expression do
     strict_variables: false,
     strict_filters: true,
     timeout_ms: 5_000,
-    state_store: Fizz.Runtime.ExecutionState
+    state_store: %{}
   ]
 
   # Pattern to detect if a string contains Liquid expressions

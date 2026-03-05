@@ -254,9 +254,7 @@ defmodule Fizz.Steps.Registry do
       Fizz.Steps.Executors.Aggregator,
       Fizz.Steps.Executors.Splitter,
       Fizz.Steps.Executors.Join,
-      Fizz.Steps.Executors.WebhookTrigger,
       Fizz.Steps.Executors.ScheduleTrigger,
-      Fizz.Steps.Executors.RespondToWebhook,
       Fizz.Steps.Executors.Wait,
 
       # -- AI --

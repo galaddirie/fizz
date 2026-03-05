@@ -137,55 +137,6 @@ defmodule Fizz.Workflows do
           {:ok, Workflow.t()} | {:error, :not_found}
   def get_workflow(scope, id), do: do_get_workflow(id, scope)
 
-  @doc """
-  Finds an active published workflow by its configured webhook path and method.
-  """
-  @spec get_active_workflow_by_webhook(String.t(), String.t()) :: Workflow.t() | nil
-  def get_active_workflow_by_webhook(path, method) do
-    # method should be uppercase for consistency
-    method = String.upcase(method)
-
-    query =
-      from w in Workflow,
-        join: v in assoc(w, :published_version),
-        where: w.status == :active,
-        where:
-          fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR s->'config'->>'http_method' = 'ANY' OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
-            v.steps,
-            ^path,
-            ^method,
-            ^method
-          ),
-        limit: 1
-
-    Repo.one(query)
-  end
-
-  @doc """
-  Finds a workflow by its DRAFT webhook path and method.
-  Ignores status (allows drafts).
-  """
-  @spec get_workflow_by_webhook_draft_path(String.t(), String.t()) :: Workflow.t() | nil
-  def get_workflow_by_webhook_draft_path(path, method) do
-    method = String.upcase(method)
-
-    query =
-      from w in Workflow,
-        join: d in assoc(w, :draft),
-        where:
-          fragment(
-            "EXISTS (SELECT 1 FROM jsonb_array_elements(?) AS s WHERE s->>'type_id' = 'webhook_trigger' AND COALESCE(s->'config'->>'path', s->>'id') = ? AND (s->'config'->>'http_method' = ? OR s->'config'->>'http_method' = 'ANY' OR (s->'config'->>'http_method' IS NULL AND ? = 'POST')))",
-            d.steps,
-            ^path,
-            ^method,
-            ^method
-          ),
-        limit: 1
-
-    Repo.one(query)
-  end
-
   defp do_get_workflow(id, scope) do
     case Repo.get(Workflow, id) do
       nil ->
@@ -283,7 +234,6 @@ defmodule Fizz.Workflows do
           {:ok, Workflow.t()} | {:error, :access_denied}
   def delete_workflow(%Scope{} = scope, %Workflow{} = workflow) do
     if Scope.can_edit_workflow?(scope, workflow) do
-      Fizz.Runtime.Triggers.Activator.deactivate(workflow.id)
       Repo.delete(workflow)
     else
       {:error, :access_denied}
@@ -296,7 +246,6 @@ defmodule Fizz.Workflows do
   @spec archive_workflow(Scope.t(), Workflow.t()) ::
           {:ok, Workflow.t()} | {:error, Ecto.Changeset.t() | :access_denied}
   def archive_workflow(%Scope{} = scope, %Workflow{} = workflow) do
-    Fizz.Runtime.Triggers.Activator.deactivate(workflow.id)
     update_workflow(scope, workflow, %{status: :archived})
   end
 
@@ -404,7 +353,6 @@ defmodule Fizz.Workflows do
       end)
       |> case do
         {:ok, {updated_workflow, version}} ->
-          Fizz.Runtime.Triggers.Activator.activate(updated_workflow)
           {:ok, {updated_workflow, version}}
 
         error ->
@@ -547,7 +495,7 @@ defmodule Fizz.Workflows do
   # Trigger Functions
   # ============================================================================
 
-  @trigger_type_ids ["webhook_trigger", "schedule_trigger", "manual_input", "event_trigger"]
+  @trigger_type_ids ["schedule_trigger", "manual_input", "event_trigger"]
 
   @doc "Returns all trigger steps for the workflow."
   @spec triggers(Workflow.t()) :: [map()]
@@ -597,7 +545,6 @@ defmodule Fizz.Workflows do
     type_id in @trigger_type_ids
   end
 
-  defp trigger_type_to_step_type_id(:webhook), do: "webhook_trigger"
   defp trigger_type_to_step_type_id(:schedule), do: "schedule_trigger"
   defp trigger_type_to_step_type_id(:manual), do: "manual_input"
   defp trigger_type_to_step_type_id(:event), do: "event_trigger"

@@ -1,6 +1,6 @@
-defmodule Fizz.Runtime.Serializer do
+defmodule Fizz.Serializer do
   @moduledoc """
-  Shared helpers for converting runtime values into JSON-safe terms.
+  Shared helpers for converting values into JSON-safe terms.
   """
 
   @type atom_mode :: :string | :preserve_boolean_and_nil

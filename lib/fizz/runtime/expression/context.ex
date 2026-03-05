@@ -88,30 +88,40 @@ defmodule Fizz.Runtime.Expression.Context do
   @doc """
   Builds a variable map from an ExecutionContext.
   """
-  def build_from_context(%Fizz.Runtime.ExecutionContext{} = ctx) do
-    input = normalize_value(ctx.input)
+  def build_from_context(ctx) when is_map(ctx) do
+    input = normalize_value(read_context_field(ctx, :input))
+    step_outputs = read_context_field(ctx, :step_outputs, %{})
+    trigger = read_context_field(ctx, :trigger)
+    trigger_type = read_context_field(ctx, :trigger_type) || "unknown"
+    execution_id = read_context_field(ctx, :execution_id)
+    workflow_id = read_context_field(ctx, :workflow_id)
+    variables = read_context_field(ctx, :variables, %{})
+    metadata = read_context_field(ctx, :metadata, %{})
+    request = read_context_field(ctx, :request, %{})
 
     %{
       "json" => input,
       "input" => input,
-      "steps" => build_steps_map(ctx.step_outputs),
+      "steps" => build_steps_map(step_outputs),
       "execution" => %{
-        "id" => ctx.execution_id,
-        "trigger_type" => to_string(ctx.trigger_type || "unknown"),
-        "trigger_data" => normalize_value(ctx.trigger)
+        "id" => execution_id,
+        "trigger_type" => to_string(trigger_type),
+        "trigger_data" => normalize_value(trigger)
       },
       "workflow" => %{
-        "id" => ctx.workflow_id
+        "id" => workflow_id
       },
-      "variables" => normalize_map(ctx.variables),
-      "metadata" => normalize_map(ctx.metadata),
-      "request" => normalize_map(ctx.request),
-      "trigger" => normalize_value(ctx.trigger),
+      "variables" => normalize_map(variables),
+      "metadata" => normalize_map(metadata),
+      "request" => normalize_map(request),
+      "trigger" => normalize_value(trigger),
       "env" => build_env_map(),
       "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "today" => Date.utc_today() |> Date.to_iso8601()
     }
   end
+
+  def build_from_context(_ctx), do: build_minimal()
 
   @doc """
   Builds a minimal context for testing or simple evaluations.
@@ -299,6 +309,10 @@ defmodule Fizz.Runtime.Expression.Context do
   end
 
   def normalize_value(value), do: value
+
+  defp read_context_field(map, key, default \\ nil) when is_map(map) do
+    Map.get(map, key, Map.get(map, Atom.to_string(key), default))
+  end
 
   defp normalize_map(map) when is_map(map) do
     Map.new(map, fn {k, v} ->

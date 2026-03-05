@@ -20,7 +20,6 @@ import { useExpressionPreviews } from './useExpressionPreviews';
 import { useSubnodes } from './useSubnodes';
 import { useStepExecution } from './useStepExecution';
 import { usePinnedOutputs } from './usePinnedOutputs';
-import { useWebhookTest } from './useWebhookTest';
 import { useInputData } from './useInputData';
 import { useExpressionHelpers } from './useExpressionHelpers';
 import { useContextExplorer } from './useContextExplorer';
@@ -257,14 +256,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         emit,
     });
 
-    const webhook = useWebhookTest({
-        node: () => props.node,
-        editorState: () => props.editorState,
-        canEdit,
-        fieldValues,
-        emit,
-    });
-
     const inputData = useInputData({
         node: () => props.node,
         execution: () => props.execution,
@@ -324,7 +315,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         ...subnodes,
         ...executionPublic,
         ...pinned,
-        ...webhook,
         ...inputData,
         ...expressionHelpers,
         ...contextExplorer,

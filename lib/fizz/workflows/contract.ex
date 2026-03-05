@@ -29,7 +29,7 @@ defmodule Fizz.Workflows.Contract do
   @derive Jason.Encoder
   defstruct inputs: [], outputs: []
 
-  @trigger_type_ids ["manual_input", "webhook_trigger", "schedule_trigger", "event_trigger"]
+  @trigger_type_ids ["manual_input", "schedule_trigger", "event_trigger"]
   @output_type_ids ["workflow_output", "data_output"]
 
   @doc """

@@ -551,7 +551,6 @@ useLiveEvent<{ success: boolean; error?: string }>(
         @run_node="editor.handleRunNode"
         @pin_output="editor.handlePinOutput"
         @unpin_output="editor.handleUnpinOutput"
-        @toggle_webhook_test="editor.handleToggleWebhookTest"
       />
 
       <ContextMenu

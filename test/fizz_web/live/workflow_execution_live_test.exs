@@ -70,7 +70,7 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
     assert has_element?(view, "#workflow-create-button")
   end
 
-  test "workflow index creates a workflow and navigates to edit", %{
+  test "workflow index creates a workflow and navigates to workflow show", %{
     conn: conn,
     workspace: workspace
   } do
@@ -81,8 +81,7 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
              |> element("#workflow-create-button")
              |> render_click()
 
-    assert to =~ "/workspaces/#{workspace.id}/workflows/"
-    assert String.ends_with?(to, "/edit")
+    assert to =~ ~r{^/workspaces/#{workspace.id}/workflows/[0-9a-f-]+$}
   end
 
   test "workflow show renders workspace-scoped navigation links", %{
@@ -99,13 +98,10 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
 
     assert has_element?(
              view,
-             "a[href='/workspaces/#{workspace.id}/workflows/#{workflow.id}/edit']"
-           )
-
-    assert has_element?(
-             view,
              "a[href='/workspaces/#{workspace.id}/workflows/#{workflow.id}/execution/#{execution.id}']"
            )
+
+    refute has_element?(view, "a", "Run Workflow")
   end
 
   test "execution show renders key sections and workflow links", %{
@@ -125,8 +121,7 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
 
     assert has_element?(view, "#execution-back-link")
     assert has_element?(view, "#execution-workflow-link")
-    assert has_element?(view, "#execution-debug-link")
-    assert has_element?(view, "#execution-edit-link")
+    assert has_element?(view, "span", "Runtime unavailable")
     assert has_element?(view, "#execution-step-list")
   end
 

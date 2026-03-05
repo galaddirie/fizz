@@ -370,14 +370,6 @@ export interface EditorState {
   pinned_outputs?: Record<string, unknown>;
   disabled_steps?: string[];
   step_locks?: Record<string, string>;
-  webhook_test?: WebhookTestState | null;
-}
-
-export interface WebhookTestState {
-  step_id?: string;
-  path: string;
-  method?: string;
-  enabled_by?: string;
 }
 
 // =============================================================================

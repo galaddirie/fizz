@@ -44,13 +44,6 @@ export function useWorkflowActions(options: UseWorkflowActionsOptions) {
     expression: string;
   }) => options.emit('preview_expression', payload);
 
-  const handleToggleWebhookTest = (payload: {
-    step_id: string;
-    action: 'start' | 'stop';
-    path?: string;
-    method?: string;
-  }) => options.emit('toggle_webhook_test', payload);
-
   const selectTraceStep = (stepId: string) => {
     options.selectNode(stepId);
   };
@@ -62,7 +55,6 @@ export function useWorkflowActions(options: UseWorkflowActionsOptions) {
     handleRunTest,
     handleCancelExecution,
     handlePreviewExpression,
-    handleToggleWebhookTest,
     selectTraceStep,
   };
 }

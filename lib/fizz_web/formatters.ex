@@ -97,8 +97,6 @@ defmodule FizzWeb.Formatters do
   defp trigger_type_label(:manual), do: "Manual"
   defp trigger_type_label("schedule"), do: "Scheduled"
   defp trigger_type_label(:schedule), do: "Scheduled"
-  defp trigger_type_label("webhook"), do: "Webhook"
-  defp trigger_type_label(:webhook), do: "Webhook"
   defp trigger_type_label("event"), do: "Event"
   defp trigger_type_label(:event), do: "Event"
   defp trigger_type_label(type), do: to_string(type)

@@ -8,7 +8,7 @@ defmodule Fizz.Executions.Events do
   require Logger
 
   alias Fizz.Executions.PubSub
-  alias Fizz.Runtime.Serializer
+  alias Fizz.Serializer
 
   @execution_lifecycle_events [
     :execution_started,

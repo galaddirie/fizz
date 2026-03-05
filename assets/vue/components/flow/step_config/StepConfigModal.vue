@@ -35,7 +35,6 @@ const emit = defineEmits([
   'close',
   'save',
   'preview_expression',
-  'toggle_webhook_test',
   'pin_output',
   'unpin_output',
   'run_node',

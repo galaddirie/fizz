@@ -2,7 +2,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
   @moduledoc """
   Root AI agent node that consumes typed sub-node slots.
 
-  Sub-node outputs are injected by `Fizz.Runtime.Steps.StepRunner` under:
+  Sub-node outputs are injected by the workflow runtime under:
 
   - `_primary` - Primary flow input
   - `model` - Output from `openai_model` or `anthropic_model`
@@ -21,7 +21,6 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   alias Fizz.Accounts.Scope
   alias Fizz.Integrations.Providers.OpenAIApiKey
-  alias Fizz.Runtime.ExecutionContext
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
@@ -91,7 +90,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
   def default_config, do: @default_config
 
   @impl true
-  def execute(config, input, %ExecutionContext{} = ctx) do
+  def execute(config, input, ctx) when is_map(ctx) do
     with {:ok, model_config} <- normalize_model_config(slot_value(input, "model")),
          {:ok, messages} <-
            normalize_messages(slot_value(input, "prompt"), slot_value(input, "_primary")),
@@ -107,7 +106,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
   end
 
   @impl true
-  def execute(config, input, _ctx), do: execute(config, input, %ExecutionContext{})
+  def execute(config, input, _ctx), do: execute(config, input, %{})
 
   @impl true
   def validate_config(config) do
@@ -264,7 +263,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
   defp slot_key_atom("tools"), do: :tools
   defp slot_key_atom(_key), do: nil
 
-  defp scope_and_organization(%ExecutionContext{} = ctx) do
+  defp scope_and_organization(ctx) when is_map(ctx) do
     with {:ok, scope} <- scope_from_context(ctx),
          {:ok, organization_id} <- organization_from_scope(scope) do
       {:ok, scope, organization_id}
@@ -273,16 +272,21 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   defp scope_and_organization(_), do: {:error, :scope_not_available}
 
-  defp scope_from_context(%ExecutionContext{scope: %Scope{} = scope}), do: {:ok, scope}
+  defp scope_from_context(ctx) when is_map(ctx) do
+    metadata = Map.get(ctx, :metadata) || Map.get(ctx, "metadata")
 
-  defp scope_from_context(%ExecutionContext{metadata: metadata}) when is_map(metadata) do
-    case Map.get(metadata, :scope) || Map.get(metadata, "scope") do
+    scope =
+      Map.get(ctx, :scope) ||
+        Map.get(ctx, "scope") ||
+        if(is_map(metadata), do: Map.get(metadata, :scope) || Map.get(metadata, "scope"))
+
+    case scope do
       %Scope{} = scope -> {:ok, scope}
       _ -> {:error, :scope_not_available}
     end
   end
 
-  defp scope_from_context(%ExecutionContext{}), do: {:error, :scope_not_available}
+  defp scope_from_context(_), do: {:error, :scope_not_available}
 
   defp organization_from_scope(%Scope{organization_id: organization_id} = _scope)
        when is_binary(organization_id) and byte_size(organization_id) > 0,
