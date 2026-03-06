@@ -1,25 +1,24 @@
-import { computed } from 'vue';
-import type { Node, XYPosition } from '@vue-flow/core';
+import { computed } from "vue";
+import type { Node, XYPosition } from "@vue-flow/core";
 
-import { generateColor } from '@/lib/color';
 import {
   DEFAULT_GROUP_COLOR,
   DEFAULT_GROUP_DIMENSIONS,
   DEFAULT_GROUP_NAME_FONT_SIZE,
-} from '@/constants/layout';
+} from "@/constants/layout";
+import { generateColor } from "@/lib/color";
 import type {
   GroupNodeData,
   StepNodeData,
   WorkflowNodeData,
-} from '@/shared/ui/workflow-scene/types';
+} from "@/shared/ui/workflow-scene/types";
 import type {
-  Workflow,
-  StepType,
-  StepExecution,
   EditorState,
+  StepExecution,
+  StepType,
   UserPresence,
-  StepHandleQuickAddRequest,
-} from '@/types/workflow';
+  Workflow,
+} from "@/types/workflow";
 
 interface UseWorkflowNodesOptions {
   workflow: () => Workflow;
@@ -29,414 +28,510 @@ interface UseWorkflowNodesOptions {
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
   canEdit?: () => boolean;
-  onRunNode?: (stepId: string) => void;
-  onUpdateGroup?: (
-    groupId: string,
-    changes: {
-      name?: string;
-      color?: string;
-      font_size?: number;
-      position?: { x?: number; y?: number; width?: number; height?: number };
-    }
-  ) => void;
-  onUpdateStep?: (stepId: string, changes: { name?: string }) => void;
-  onMoveSteps?: (stepPositions: Record<string, XYPosition>) => void;
-  onEmitInteraction?: (
-    cursor?: XYPosition | null,
-    dragging_steps?: Record<string, XYPosition> | null,
-    dragging_groups?: Record<
-      string,
-      { x: number; y: number; width: number; height: number }
-    > | null
-  ) => void;
-  onCommitDragLayout?: (payload: {
-    txn_id: string;
-    base_seq?: number;
-    groups: Array<{
-      group_id: string;
-      position: { x: number; y: number; width: number; height: number };
-    }>;
-    step_positions: Record<string, XYPosition>;
-    group_id_by_step_id: Record<string, string | null>;
-  }) => void;
   collabSeq?: () => number | undefined;
-  onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
-  onTogglePin?: (stepId: string, isPinned: boolean) => void;
-  onHandleQuickAdd?: (request: StepHandleQuickAddRequest) => void;
-  groupingPreview?: () => { groupId?: string | null; stepIds?: string[]; color?: string | null };
+  groupingPreview?: () => {
+    groupId?: string | null;
+    stepIds?: string[];
+    color?: string | null;
+  };
 }
 
-export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
-  const stepTypeById = computed<Record<string, StepType | undefined>>(() => {
-    const map: Record<string, StepType> = {};
-    for (const stepType of options.stepTypes()) {
-      map[stepType.id] = stepType;
-    }
-    return map;
-  });
+type ItemStats = {
+  isMultiItem: boolean;
+  itemsTotal: number;
+  completed: number;
+  failed: number;
+  running: number;
+};
 
-  const toTimestampMs = (value: unknown): number | null => {
-    if (value instanceof Date) {
-      return Number.isFinite(value.getTime()) ? value.getTime() : null;
-    }
+type GroupBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 
-    if (typeof value === 'number') {
-      return Number.isFinite(value) ? value : null;
-    }
+type GroupNodesResult = {
+  groupNodes: Node<WorkflowNodeData>[];
+  groupByStepId: Map<string, string>;
+};
 
-    if (typeof value === 'string') {
-      const parsed = Date.parse(value);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
+const buildStepTypeIndex = (stepTypes: StepType[]) => {
+  const stepTypeById: Record<string, StepType> = {};
 
-    if (!value || typeof value !== 'object') return null;
+  for (const stepType of stepTypes) {
+    stepTypeById[stepType.id] = stepType;
+  }
 
-    const record = value as Record<string, unknown>;
-    const year =
-      typeof record.year === 'number' && Number.isFinite(record.year) ? record.year : null;
-    const month =
-      typeof record.month === 'number' && Number.isFinite(record.month) ? record.month : null;
-    const day = typeof record.day === 'number' && Number.isFinite(record.day) ? record.day : null;
-    const hour =
-      typeof record.hour === 'number' && Number.isFinite(record.hour) ? record.hour : null;
-    const minute =
-      typeof record.minute === 'number' && Number.isFinite(record.minute) ? record.minute : null;
-    const second =
-      typeof record.second === 'number' && Number.isFinite(record.second)
-        ? record.second
-        : null;
+  return stepTypeById;
+};
 
-    if (
-      year === null ||
-      month === null ||
-      day === null ||
-      hour === null ||
-      minute === null ||
-      second === null
-    ) {
-      return null;
-    }
+const toTimestampMs = (value: unknown): number | null => {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.getTime() : null;
+  }
 
-    const microsecond = record.microsecond;
-    let millisecond = 0;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
 
-    if (Array.isArray(microsecond) && typeof microsecond[0] === 'number') {
-      millisecond = Math.floor(microsecond[0] / 1000);
-    } else if (typeof microsecond === 'number' && Number.isFinite(microsecond)) {
-      millisecond = Math.floor(microsecond / 1000);
-    }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
 
-    const utcOffset = typeof record.utc_offset === 'number' ? record.utc_offset : 0;
-    const stdOffset = typeof record.std_offset === 'number' ? record.std_offset : 0;
+  if (!value || typeof value !== "object") return null;
 
-    return (
-      Date.UTC(year, month - 1, day, hour, minute, second, millisecond) -
-      (utcOffset + stdOffset) * 1000
+  const record = value as Record<string, unknown>;
+  const year =
+    typeof record.year === "number" && Number.isFinite(record.year)
+      ? record.year
+      : null;
+  const month =
+    typeof record.month === "number" && Number.isFinite(record.month)
+      ? record.month
+      : null;
+  const day =
+    typeof record.day === "number" && Number.isFinite(record.day)
+      ? record.day
+      : null;
+  const hour =
+    typeof record.hour === "number" && Number.isFinite(record.hour)
+      ? record.hour
+      : null;
+  const minute =
+    typeof record.minute === "number" && Number.isFinite(record.minute)
+      ? record.minute
+      : null;
+  const second =
+    typeof record.second === "number" && Number.isFinite(record.second)
+      ? record.second
+      : null;
+
+  if (
+    year === null ||
+    month === null ||
+    day === null ||
+    hour === null ||
+    minute === null ||
+    second === null
+  ) {
+    return null;
+  }
+
+  const microsecond = record.microsecond;
+  let millisecond = 0;
+
+  if (Array.isArray(microsecond) && typeof microsecond[0] === "number") {
+    millisecond = Math.floor(microsecond[0] / 1000);
+  } else if (typeof microsecond === "number" && Number.isFinite(microsecond)) {
+    millisecond = Math.floor(microsecond / 1000);
+  }
+
+  const utcOffset =
+    typeof record.utc_offset === "number" ? record.utc_offset : 0;
+  const stdOffset =
+    typeof record.std_offset === "number" ? record.std_offset : 0;
+
+  return (
+    Date.UTC(year, month - 1, day, hour, minute, second, millisecond) -
+    (utcOffset + stdOffset) * 1000
+  );
+};
+
+const sumRecordedDurations = (
+  executions: StepExecution[]
+): number | undefined => {
+  const durations = executions
+    .map((execution) => execution.duration_us)
+    .filter(
+      (duration): duration is number =>
+        typeof duration === "number" && Number.isFinite(duration)
     );
-  };
 
-  const sumRecordedDurations = (executions: StepExecution[]): number | undefined => {
-    const durations = executions
-      .map(execution => execution.duration_us)
-      .filter((duration): duration is number => typeof duration === 'number' && Number.isFinite(duration));
+  return durations.length > 0
+    ? durations.reduce((total, duration) => total + duration, 0)
+    : undefined;
+};
 
-    return durations.length > 0
-      ? durations.reduce((total, duration) => total + duration, 0)
-      : undefined;
-  };
+const groupStepExecutionsByStepId = (stepExecutions: StepExecution[]) => {
+  const executionsByStepId: Record<string, StepExecution[]> = {};
 
-  // Group all step executions by step_id (for multi-item fan-out steps)
-  const stepExecutionsByStepId = computed<Record<string, StepExecution[]>>(() => {
-    const map: Record<string, StepExecution[]> = {};
-    for (const stepExecution of options.stepExecutions()) {
-      if (!map[stepExecution.step_id]) {
-        map[stepExecution.step_id] = [];
-      }
-      map[stepExecution.step_id].push(stepExecution);
-    }
-    // Sort by item_index within each group
-    for (const stepId in map) {
-      map[stepId].sort((a, b) => (a.item_index ?? -1) - (b.item_index ?? -1));
-    }
-    return map;
-  });
-
-  // Get the "primary" step execution for status display (first one, or single-item step)
-  const stepExecutionByStepId = computed<Record<string, StepExecution | undefined>>(() => {
-    const map: Record<string, StepExecution | undefined> = {};
-    for (const [stepId, executions] of Object.entries(stepExecutionsByStepId.value)) {
-      map[stepId] = executions[0];
-    }
-    return map;
-  });
-
-  // Compute item stats for multi-item steps
-  const stepItemStatsByStepId = computed<
-    Record<
-      string,
-      {
-        isMultiItem: boolean;
-        itemsTotal: number;
-        completed: number;
-        failed: number;
-        running: number;
-      }
-    >
-  >(() => {
-    const map: Record<
-      string,
-      {
-        isMultiItem: boolean;
-        itemsTotal: number;
-        completed: number;
-        failed: number;
-        running: number;
-      }
-    > = {};
-    for (const [stepId, executions] of Object.entries(stepExecutionsByStepId.value)) {
-      const firstExec = executions[0];
-      const itemsTotal = firstExec?.items_total ?? executions.length;
-      const isMultiItem = itemsTotal > 1 || executions.length > 1;
-
-      map[stepId] = {
-        isMultiItem,
-        itemsTotal,
-        completed: executions.filter(e => e.status === 'completed').length,
-        failed: executions.filter(e => e.status === 'failed').length,
-        running: executions.filter(e => e.status === 'running').length,
-      };
-    }
-    return map;
-  });
-
-  const transientPositions = computed<Record<string, XYPosition>>(() => {
-    const positions: Record<string, XYPosition> = {};
-    const currentUserId = options.currentUserId();
-
-    for (const presence of options.presences()) {
-      if (presence.user.id === currentUserId || !presence.dragging_steps) continue;
-      for (const [id, pos] of Object.entries(presence.dragging_steps)) {
-        positions[id] = pos;
-      }
+  for (const stepExecution of stepExecutions) {
+    if (!executionsByStepId[stepExecution.step_id]) {
+      executionsByStepId[stepExecution.step_id] = [];
     }
 
-    return positions;
-  });
+    executionsByStepId[stepExecution.step_id].push(stepExecution);
+  }
 
-  const transientGroupBounds = computed<
-    Record<string, { x: number; y: number; width: number; height: number }>
-  >(() => {
-    const boundsByGroupId: Record<
-      string,
-      { x: number; y: number; width: number; height: number }
-    > = {};
-    const currentUserId = options.currentUserId();
+  for (const executions of Object.values(executionsByStepId)) {
+    executions.sort(
+      (left, right) => (left.item_index ?? -1) - (right.item_index ?? -1)
+    );
+  }
 
-    for (const presence of options.presences()) {
-      if (presence.user.id === currentUserId || !presence.dragging_groups) continue;
-      for (const [groupId, bounds] of Object.entries(presence.dragging_groups)) {
-        boundsByGroupId[groupId] = bounds;
-      }
+  return executionsByStepId;
+};
+
+const buildPrimaryStepExecutionIndex = (
+  stepExecutionsByStepId: Record<string, StepExecution[]>
+) => {
+  const executionByStepId: Record<string, StepExecution | undefined> = {};
+
+  for (const [stepId, executions] of Object.entries(stepExecutionsByStepId)) {
+    executionByStepId[stepId] = executions[0];
+  }
+
+  return executionByStepId;
+};
+
+const buildStepItemStatsIndex = (
+  stepExecutionsByStepId: Record<string, StepExecution[]>
+) => {
+  const itemStatsByStepId: Record<string, ItemStats> = {};
+
+  for (const [stepId, executions] of Object.entries(stepExecutionsByStepId)) {
+    const firstExecution = executions[0];
+    const itemsTotal = firstExecution?.items_total ?? executions.length;
+
+    itemStatsByStepId[stepId] = {
+      isMultiItem: itemsTotal > 1 || executions.length > 1,
+      itemsTotal,
+      completed: executions.filter(
+        (execution) => execution.status === "completed"
+      ).length,
+      failed: executions.filter((execution) => execution.status === "failed")
+        .length,
+      running: executions.filter((execution) => execution.status === "running")
+        .length,
+    };
+  }
+
+  return itemStatsByStepId;
+};
+
+const buildTransientStepPositions = (
+  presences: UserPresence[],
+  currentUserId?: string
+) => {
+  const positions: Record<string, XYPosition> = {};
+
+  for (const presence of presences) {
+    if (presence.user.id === currentUserId || !presence.dragging_steps)
+      continue;
+
+    for (const [stepId, position] of Object.entries(presence.dragging_steps)) {
+      positions[stepId] = position;
+    }
+  }
+
+  return positions;
+};
+
+const buildTransientGroupBounds = (
+  presences: UserPresence[],
+  currentUserId?: string
+) => {
+  const boundsByGroupId: Record<string, GroupBounds> = {};
+
+  for (const presence of presences) {
+    if (presence.user.id === currentUserId || !presence.dragging_groups)
+      continue;
+
+    for (const [groupId, bounds] of Object.entries(presence.dragging_groups)) {
+      boundsByGroupId[groupId] = bounds;
+    }
+  }
+
+  return boundsByGroupId;
+};
+
+const resolveGroupDimensions = (
+  previewBounds: GroupBounds | undefined,
+  position: {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  }
+) => ({
+  width:
+    typeof previewBounds?.width === "number" && previewBounds.width > 0
+      ? previewBounds.width
+      : typeof position.width === "number" && position.width > 0
+      ? position.width
+      : DEFAULT_GROUP_DIMENSIONS.width,
+  height:
+    typeof previewBounds?.height === "number" && previewBounds.height > 0
+      ? previewBounds.height
+      : typeof position.height === "number" && position.height > 0
+      ? position.height
+      : DEFAULT_GROUP_DIMENSIONS.height,
+});
+
+const resolveGroupPosition = (
+  previewBounds: GroupBounds | undefined,
+  position: {
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  }
+) => ({
+  x:
+    typeof previewBounds?.x === "number"
+      ? previewBounds.x
+      : typeof position.x === "number"
+      ? position.x
+      : 0,
+  y:
+    typeof previewBounds?.y === "number"
+      ? previewBounds.y
+      : typeof position.y === "number"
+      ? position.y
+      : 0,
+});
+
+const buildGroupNodes = (params: {
+  groups: NonNullable<Workflow["draft"]>["groups"];
+  canEdit: boolean;
+  collabSeq?: number;
+  groupingColor?: string;
+  groupingTargetId: string | null;
+  transientGroupBounds: Record<string, GroupBounds>;
+}): GroupNodesResult => {
+  const groupByStepId = new Map<string, string>();
+
+  const groupNodes = params.groups.map((group) => {
+    for (const stepId of group.step_ids || []) {
+      groupByStepId.set(stepId, group.id);
     }
 
-    return boundsByGroupId;
-  });
+    const previewBounds = params.transientGroupBounds[group.id];
+    const position = group.position || {};
+    const dimensions = resolveGroupDimensions(previewBounds, position);
+    const color = group.color || DEFAULT_GROUP_COLOR;
+    const fontSize =
+      typeof group.font_size === "number" && Number.isFinite(group.font_size)
+        ? group.font_size
+        : DEFAULT_GROUP_NAME_FONT_SIZE;
 
-  const nodes = computed<Node<WorkflowNodeData>[]>(() => {
-    const steps = options.workflow().draft?.steps || [];
-    const groups = options.workflow().draft?.groups || [];
-    const stepTypes = stepTypeById.value;
-    const stepExecutions = stepExecutionByStepId.value;
-    const itemStats = stepItemStatsByStepId.value;
-    const editorState = options.editorState();
-    const presences = options.presences();
-    const currentUserId = options.currentUserId();
-    const canEdit = options.canEdit?.() ?? true;
-    const onRunNode = options.onRunNode;
-    const groupingPreview = options.groupingPreview?.() ?? {};
-    const groupingStepIds = new Set(groupingPreview.stepIds || []);
-    const groupingTargetId = groupingPreview.groupId ?? null;
-    const groupingColor = groupingPreview.color ?? undefined;
-    const previewGroupBoundsById = transientGroupBounds.value;
-
-    const groupByStepId = new Map<string, string>();
-    const groupNodes = groups.map(group => {
-      const position = group.position || {};
-      const previewBounds = previewGroupBoundsById[group.id];
-      const previewX = previewBounds?.x;
-      const previewY = previewBounds?.y;
-      const previewWidth = previewBounds?.width;
-      const previewHeight = previewBounds?.height;
-      const width =
-        typeof previewWidth === 'number' && previewWidth > 0
-          ? previewWidth
-          : typeof position.width === 'number' && position.width > 0
-          ? position.width
-          : DEFAULT_GROUP_DIMENSIONS.width;
-      const height =
-        typeof previewHeight === 'number' && previewHeight > 0
-          ? previewHeight
-          : typeof position.height === 'number' && position.height > 0
-          ? position.height
-          : DEFAULT_GROUP_DIMENSIONS.height;
-      const color = group.color || DEFAULT_GROUP_COLOR;
-      const fontSize =
-        typeof group.font_size === 'number' && Number.isFinite(group.font_size)
-          ? group.font_size
-          : DEFAULT_GROUP_NAME_FONT_SIZE;
-
-      for (const stepId of group.step_ids || []) {
-        groupByStepId.set(stepId, group.id);
-      }
-
-      const node = {
+    const groupNode = {
+      id: group.id,
+      type: "group",
+      class: "nopan",
+      position: resolveGroupPosition(previewBounds, position),
+      data: {
         id: group.id,
-        type: 'group',
-        class: 'nopan',
-        position: {
-          x: typeof previewX === 'number' ? previewX : typeof position.x === 'number' ? position.x : 0,
-          y: typeof previewY === 'number' ? previewY : typeof position.y === 'number' ? position.y : 0,
-        },
-        data: {
-          id: group.id,
-          name: group.name || 'Group',
-          step_ids: group.step_ids || [],
-          collapsed: !!group.collapsed,
-          color,
-          font_size: fontSize,
-          isGroupingTarget: groupingTargetId === group.id,
-          groupingColor,
-          onUpdate: canEdit ? options.onUpdateGroup : undefined,
-          onCommitDragLayout: canEdit ? options.onCommitDragLayout : undefined,
-          onMoveSteps: canEdit ? options.onMoveSteps : undefined,
-          onEmitInteraction: canEdit ? options.onEmitInteraction : undefined,
-          collabSeq: options.collabSeq?.(),
-          canEdit,
-        },
-        style: {
-          width: `${width}px`,
-          height: `${height}px`,
-        },
-        draggable: canEdit,
-        selectable: true,
-        connectable: false,
-        deletable: false,
-        zIndex: -10,
-      } satisfies Node<GroupNodeData>;
+        name: group.name || "Group",
+        step_ids: group.step_ids || [],
+        collapsed: !!group.collapsed,
+        color,
+        font_size: fontSize,
+        isGroupingTarget: params.groupingTargetId === group.id,
+        groupingColor: params.groupingColor,
+        collabSeq: params.collabSeq,
+        canEdit: params.canEdit,
+      },
+      style: {
+        width: `${dimensions.width}px`,
+        height: `${dimensions.height}px`,
+      },
+      draggable: params.canEdit,
+      selectable: true,
+      connectable: false,
+      deletable: false,
+      zIndex: -10,
+    } satisfies Node<GroupNodeData>;
 
-      return node as Node<WorkflowNodeData>;
+    return groupNode as Node<WorkflowNodeData>;
+  });
+
+  return { groupNodes, groupByStepId };
+};
+
+const resolveSelectedBy = (
+  presences: UserPresence[],
+  currentUserId: string | undefined,
+  stepId: string
+) =>
+  presences
+    .filter(
+      (presence) =>
+        presence.user.id !== currentUserId &&
+        presence.selected_steps?.includes(stepId)
+    )
+    .map((presence) => {
+      const displayName =
+        presence.user.name || presence.user.email || "Unknown User";
+
+      return {
+        id: presence.user.id,
+        name: displayName,
+        color: generateColor(displayName, 0),
+      };
     });
 
-    const stepNodes = steps.map(step => {
-      const stepType = stepTypes[step.type_id];
-      const stepExecution = stepExecutions[step.id];
-      const stepItemStats = itemStats[step.id];
-      const allStepExecutions = stepExecutionsByStepId.value[step.id] || [];
-      const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
-      const isDisabled = editorState?.disabled_steps?.includes(step.id);
-      const lockedBy = editorState?.step_locks?.[step.id];
-      const parentGroupId = groupByStepId.get(step.id);
-      const isGroupingCandidate = groupingStepIds.has(step.id);
+const resolveDisplayStatus = (
+  stepExecution: StepExecution | undefined,
+  itemStats: ItemStats | undefined
+) => {
+  if (!itemStats?.isMultiItem) return stepExecution?.status;
+  if (itemStats.failed > 0) return "failed";
+  if (itemStats.running > 0) return "running";
+  if (itemStats.completed === itemStats.itemsTotal) return "completed";
+  return stepExecution?.status;
+};
 
-      const selectedBy = presences
-        .filter(p => p.user.id !== currentUserId && p.selected_steps?.includes(step.id))
-        .map(p => {
-          const displayName = p.user.name || p.user.email || 'Unknown User';
-          return {
-            id: p.user.id,
-            name: displayName,
-            color: generateColor(displayName, 0),
-          };
-        });
+const resolveTotalDurationUs = (executions: StepExecution[]) => {
+  if (executions.length === 0) return undefined;
 
-      // For multi-item steps, determine overall status from item stats
-      let displayStatus = stepExecution?.status;
-      if (stepItemStats?.isMultiItem) {
-        if (stepItemStats.failed > 0) {
-          displayStatus = 'failed';
-        } else if (stepItemStats.running > 0) {
-          displayStatus = 'running';
-        } else if (stepItemStats.completed === stepItemStats.itemsTotal) {
-          displayStatus = 'completed';
-        }
-      }
+  const fallbackDurationUs = sumRecordedDurations(executions);
+  if (executions.length === 1) return fallbackDurationUs;
 
-      // Calculate total duration for multi-item steps
-      let totalDurationUs: number | undefined;
-      if (allStepExecutions.length > 0) {
-        const fallbackDurationUs = sumRecordedDurations(allStepExecutions);
+  const startedAts = executions
+    .map((execution) => toTimestampMs(execution.started_at))
+    .filter((value): value is number => value !== null);
+  const completedAts = executions
+    .map((execution) => toTimestampMs(execution.completed_at))
+    .filter((value): value is number => value !== null);
 
-        if (allStepExecutions.length === 1) {
-          // Single-item step - use the backend-calculated duration
-          totalDurationUs = fallbackDurationUs;
-        } else {
-          // Multi-item step - calculate total duration from earliest start to latest completion
-          const startedAts = allStepExecutions
-            .map(exec => toTimestampMs(exec.started_at))
-            .filter((value): value is number => value !== null);
+  if (startedAts.length === 0 || completedAts.length === 0) {
+    return fallbackDurationUs;
+  }
 
-          const completedAts = allStepExecutions
-            .map(exec => toTimestampMs(exec.completed_at))
-            .filter((value): value is number => value !== null);
+  const earliestStartMs = Math.min(...startedAts);
+  const latestCompleteMs = Math.max(...completedAts);
 
-          if (startedAts.length > 0 && completedAts.length > 0) {
-            const earliestStartMs = Math.min(...startedAts);
-            const latestCompleteMs = Math.max(...completedAts);
+  return latestCompleteMs >= earliestStartMs
+    ? (latestCompleteMs - earliestStartMs) * 1000
+    : fallbackDurationUs;
+};
 
-            totalDurationUs =
-              latestCompleteMs >= earliestStartMs
-                ? (latestCompleteMs - earliestStartMs) * 1000
-                : fallbackDurationUs;
-          } else {
-            totalDurationUs = fallbackDurationUs;
-          }
-        }
-      }
+const buildStepNodes = (params: {
+  steps: NonNullable<Workflow["draft"]>["steps"];
+  stepTypeById: Record<string, StepType | undefined>;
+  stepExecutionsByStepId: Record<string, StepExecution[]>;
+  stepExecutionByStepId: Record<string, StepExecution | undefined>;
+  itemStatsByStepId: Record<string, ItemStats>;
+  editorState?: EditorState;
+  presences: UserPresence[];
+  currentUserId?: string;
+  canEdit: boolean;
+  transientPositions: Record<string, XYPosition>;
+  groupByStepId: Map<string, string>;
+  groupingStepIds: Set<string>;
+  groupingColor?: string;
+}) =>
+  params.steps.map((step) => {
+    const stepType = params.stepTypeById[step.type_id];
+    const stepExecution = params.stepExecutionByStepId[step.id];
+    const itemStats = params.itemStatsByStepId[step.id];
+    const executions = params.stepExecutionsByStepId[step.id] || [];
+    const parentGroupId = params.groupByStepId.get(step.id);
+    const isGroupingCandidate = params.groupingStepIds.has(step.id);
+    const totalDurationUs = resolveTotalDurationUs(executions);
 
-      const isSubnode = stepType?.node_role === 'subnode';
-
-      const node = {
+    const stepNode = {
+      id: step.id,
+      type: stepType?.node_role === "subnode" ? "subnode" : "step",
+      class: "nopan",
+      position: params.transientPositions[step.id] || step.position,
+      parentNode: parentGroupId,
+      zIndex: parentGroupId ? 20 : 10,
+      data: {
         id: step.id,
-        type: isSubnode ? 'subnode' : 'step',
-        class: 'nopan',
-        position: transientPositions.value[step.id] || step.position,
-        parentNode: parentGroupId,
-        zIndex: parentGroupId ? 20 : 10,
-        data: {
-          id: step.id,
-          type_id: step.type_id,
-          name: step.name,
-          config: step.config,
-          notes: step.notes,
-          icon: stepType?.icon,
-          category: stepType?.category,
-          step_kind: stepType?.step_kind,
-          node_role: stepType?.node_role,
-          status: displayStatus,
-          stats:
-            stepExecution && totalDurationUs !== undefined
-              ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
-              : undefined,
-          subnode_slots: stepType?.subnode_slots ?? [],
-          itemStats: stepItemStats,
-          hasInput: stepType?.step_kind !== 'trigger' && stepType?.node_role !== 'subnode',
-          hasOutput: true,
-          disabled: isDisabled,
-          pinned: isPinned,
-          locked_by: lockedBy,
-          selected_by: selectedBy,
-          isGroupingCandidate,
-          groupingColor: isGroupingCandidate ? groupingColor : undefined,
-          onRunNode: canEdit ? onRunNode : undefined,
-          onUpdate: canEdit ? options.onUpdateStep : undefined,
-          onToggleDisabled: canEdit ? options.onToggleDisabled : undefined,
-          onTogglePin: canEdit ? options.onTogglePin : undefined,
-          onHandleQuickAdd: canEdit ? options.onHandleQuickAdd : undefined,
-          canEdit,
-        } satisfies StepNodeData,
-      };
+        type_id: step.type_id,
+        name: step.name,
+        config: step.config,
+        notes: step.notes,
+        icon: stepType?.icon,
+        category: stepType?.category,
+        step_kind: stepType?.step_kind,
+        node_role: stepType?.node_role,
+        status: resolveDisplayStatus(stepExecution, itemStats),
+        stats:
+          stepExecution && totalDurationUs !== undefined
+            ? {
+                duration_us: totalDurationUs,
+                out: stepExecution.output_item_count,
+              }
+            : undefined,
+        subnode_slots: stepType?.subnode_slots ?? [],
+        itemStats,
+        hasInput:
+          stepType?.step_kind !== "trigger" &&
+          stepType?.node_role !== "subnode",
+        hasOutput: true,
+        disabled: params.editorState?.disabled_steps?.includes(step.id),
+        pinned: params.editorState?.pinned_outputs?.[step.id] !== undefined,
+        locked_by: params.editorState?.step_locks?.[step.id],
+        selected_by: resolveSelectedBy(
+          params.presences,
+          params.currentUserId,
+          step.id
+        ),
+        isGroupingCandidate,
+        groupingColor: isGroupingCandidate ? params.groupingColor : undefined,
+        canEdit: params.canEdit,
+      } satisfies StepNodeData,
+    };
 
-      return node as Node<WorkflowNodeData>;
+    return stepNode as Node<WorkflowNodeData>;
+  });
+
+export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
+  const stepTypeById = computed<Record<string, StepType | undefined>>(() =>
+    buildStepTypeIndex(options.stepTypes())
+  );
+
+  const stepExecutionsByStepId = computed<Record<string, StepExecution[]>>(() =>
+    groupStepExecutionsByStepId(options.stepExecutions())
+  );
+
+  const stepExecutionByStepId = computed<
+    Record<string, StepExecution | undefined>
+  >(() => buildPrimaryStepExecutionIndex(stepExecutionsByStepId.value));
+
+  const stepItemStatsByStepId = computed<Record<string, ItemStats>>(() =>
+    buildStepItemStatsIndex(stepExecutionsByStepId.value)
+  );
+
+  const transientPositions = computed<Record<string, XYPosition>>(() =>
+    buildTransientStepPositions(options.presences(), options.currentUserId())
+  );
+
+  const transientGroupBounds = computed<Record<string, GroupBounds>>(() =>
+    buildTransientGroupBounds(options.presences(), options.currentUserId())
+  );
+
+  const nodes = computed<Node<WorkflowNodeData>[]>(() => {
+    const workflowDraft = options.workflow().draft;
+    const groupingPreview = options.groupingPreview?.() ?? {};
+    const canEdit = options.canEdit?.() ?? true;
+    const { groupNodes, groupByStepId } = buildGroupNodes({
+      groups: workflowDraft?.groups ?? [],
+      canEdit,
+      collabSeq: options.collabSeq?.(),
+      groupingColor: groupingPreview.color ?? undefined,
+      groupingTargetId: groupingPreview.groupId ?? null,
+      transientGroupBounds: transientGroupBounds.value,
+    });
+    const stepNodes = buildStepNodes({
+      steps: workflowDraft?.steps ?? [],
+      stepTypeById: stepTypeById.value,
+      stepExecutionsByStepId: stepExecutionsByStepId.value,
+      stepExecutionByStepId: stepExecutionByStepId.value,
+      itemStatsByStepId: stepItemStatsByStepId.value,
+      editorState: options.editorState(),
+      presences: options.presences(),
+      currentUserId: options.currentUserId(),
+      canEdit,
+      transientPositions: transientPositions.value,
+      groupByStepId,
+      groupingStepIds: new Set(groupingPreview.stepIds || []),
+      groupingColor: groupingPreview.color ?? undefined,
     });
 
     return [...groupNodes, ...stepNodes];

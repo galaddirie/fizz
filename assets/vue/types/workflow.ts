@@ -1,4 +1,6 @@
-import type { Component } from 'vue';
+import type { Component } from "vue";
+
+import type { ConfigSchema } from "@/types/configSchema";
 
 // =============================================================================
 // Workflow Types
@@ -8,7 +10,7 @@ export interface Workflow {
   id: string;
   name: string;
   description?: string;
-  status: 'draft' | 'active' | 'archived';
+  status: "draft" | "active" | "archived";
   public: boolean;
   current_version_tag?: string;
   published_version_id?: string;
@@ -81,7 +83,7 @@ export interface CredentialOption {
   id: string;
   provider: string;
   provider_label: string;
-  auth_type: 'api_key' | 'oauth';
+  auth_type: "api_key" | "oauth";
   display_name: string;
   owner_user_id: string;
   owner_display_name: string;
@@ -94,15 +96,15 @@ export interface CredentialOption {
 // Step Type Registry
 // =============================================================================
 
-export type StepKind = 'trigger' | 'action' | 'transform' | 'control_flow';
-export type NodeRole = 'root' | 'subnode';
+export type StepKind = "trigger" | "action" | "transform" | "control_flow";
+export type NodeRole = "root" | "subnode";
 
 export interface StepSubnodeSlot {
   id: string;
   title?: string;
   description?: string;
   required?: boolean;
-  cardinality?: 'one' | 'many';
+  cardinality?: "one" | "many";
   accepts?: {
     type_ids?: string[];
   };
@@ -116,7 +118,7 @@ export interface AddStepAutoConnect {
   target_input?: string;
 }
 
-export type HandleQuickAddFilterMode = 'output' | 'subnode_slot';
+export type HandleQuickAddFilterMode = "output" | "subnode_slot";
 
 export interface StepHandleQuickAddRequest {
   screenPoint: { x: number; y: number };
@@ -135,9 +137,9 @@ export interface StepType {
   icon?: string;
   step_kind: StepKind;
   node_role?: NodeRole;
-  config_schema?: Record<string, unknown>;
-  input_schema?: Record<string, unknown>;
-  output_schema?: Record<string, unknown>;
+  config_schema?: ConfigSchema;
+  input_schema?: ConfigSchema;
+  output_schema?: ConfigSchema;
   subnode_slots?: StepSubnodeSlot[];
 }
 
@@ -156,29 +158,29 @@ export interface NodeLibraryItem {
 // =============================================================================
 
 export type ExecutionStatus =
-  | 'pending'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'timeout';
+  | "pending"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timeout";
 
 export type StepExecutionStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'skipped'
-  | 'cancelled';
+  | "pending"
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped"
+  | "cancelled";
 
 export interface Execution {
   id: string;
   workflow_id: string;
   workflow_version_id?: string;
   status: ExecutionStatus;
-  execution_type: 'production' | 'preview' | 'partial';
+  execution_type: "production" | "preview" | "partial";
   trigger: {
     type: string;
     data: Record<string, unknown>;
@@ -288,7 +290,7 @@ export interface ContextMenuState {
   x: number;
   y: number;
   targetNodeId: string | null;
-  targetType: 'node' | 'pane';
+  targetType: "node" | "pane";
 }
 
 export interface MenuItem {

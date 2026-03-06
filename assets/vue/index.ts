@@ -1,24 +1,29 @@
-import { h, type Component } from 'vue';
-import { createLiveVue, findComponent, type LiveHook, type ComponentMap } from 'live_vue';
-import RevisionViewerRoot from '@/features/revision-viewer/RevisionViewerRoot.vue';
-import WorkflowEditorRoot from '@/features/workflow-editor/WorkflowEditorRoot.vue';
-import { useThemeStore } from '@/app/theme/themeStore';
+import { h, type Component } from "vue";
+import {
+  createLiveVue,
+  findComponent,
+  type LiveHook,
+  type ComponentMap,
+} from "live_vue";
+import RevisionViewerRoot from "@/features/revision-viewer/RevisionViewerRoot.vue";
+import WorkflowEditorRoot from "@/features/workflow-editor/WorkflowEditorRoot.vue";
+import { useThemeStore } from "@/stores/theme";
 
 // needed to make $live available in the Vue component
-declare module 'vue' {
+declare module "vue" {
   interface ComponentCustomProperties {
     $live: LiveHook;
   }
 }
 
-import { createPinia } from 'pinia';
+import { createPinia } from "pinia";
 
 export default createLiveVue({
   // name will be passed as-is in v-component of the .vue HEEX component
-  resolve: name => {
+  resolve: (name) => {
     const entryComponents = {
-      './RevisionViewer.vue': { default: RevisionViewerRoot },
-      './WorkflowEditor.vue': { default: WorkflowEditorRoot },
+      "./RevisionViewer.vue": { default: RevisionViewerRoot },
+      "./WorkflowEditor.vue": { default: WorkflowEditorRoot },
     } satisfies ComponentMap;
 
     // we're importing from ../../lib to allow collocating Vue files with LiveView files
@@ -26,8 +31,8 @@ export default createLiveVue({
     // more: https://vite.dev/guide/features.html#glob-import
     const components = {
       ...entryComponents,
-      ...import.meta.glob('./**/*.vue', { eager: true }),
-      ...import.meta.glob('../../lib/**/*.vue', { eager: true }),
+      ...import.meta.glob("./**/*.vue", { eager: true }),
+      ...import.meta.glob("../../lib/**/*.vue", { eager: true }),
     } as ComponentMap;
 
     // finds component by name or path suffix and gives a nice error message.
@@ -37,7 +42,9 @@ export default createLiveVue({
   },
   // Standard LiveVue setup - props are already reactive from the VueHook
   setup: ({ createApp, component, props, slots, plugin, el }) => {
-    const app = createApp({ render: () => h(component as Component, props, slots) });
+    const app = createApp({
+      render: () => h(component as Component, props, slots),
+    });
     const pinia = createPinia();
     app.use(pinia);
     useThemeStore(pinia).initialize();

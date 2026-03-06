@@ -1,19 +1,20 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, provide } from 'vue';
-import type { Node } from '@vue-flow/core';
+import { onBeforeUnmount, onMounted, provide } from "vue";
+import type { Node } from "@vue-flow/core";
 import type {
   EditorState,
   Execution,
   StepExecution,
   StepType,
-} from '@/types/workflow';
-import type { StepNodeData } from '@/shared/ui/workflow-scene/types';
-import { CubeIcon, XMarkIcon, PencilIcon } from '@heroicons/vue/24/outline';
-import { useStepConfig, StepConfigKey } from './useStepConfig';
-import StepConfigContextPane from './StepConfigContextPane.vue';
-import StepConfigConfigPane from './StepConfigConfigPane.vue';
-import StepConfigOutputPane from './StepConfigOutputPane.vue';
-import ConfirmDiscardModal from './ConfirmDiscardModal.vue';
+} from "@/types/workflow";
+import type { StepNodeData } from "@/shared/ui/workflow-scene/types";
+import { CubeIcon, XMarkIcon, PencilIcon } from "@heroicons/vue/24/outline";
+import { useStepConfig, StepConfigKey } from "./useStepConfig";
+import type { StepConfigEmit } from "./contracts";
+import StepConfigContextPane from "./StepConfigContextPane.vue";
+import StepConfigConfigPane from "./StepConfigConfigPane.vue";
+import StepConfigOutputPane from "./StepConfigOutputPane.vue";
+import ConfirmDiscardModal from "./ConfirmDiscardModal.vue";
 
 interface Props {
   node: Node<StepNodeData> | null;
@@ -31,32 +32,25 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits([
-  'close',
-  'save',
-  'preview_expression',
-  'pin_output',
-  'unpin_output',
-  'run_node',
-]);
+const emit = defineEmits<StepConfigEmit>();
 
 const state = useStepConfig(props, emit);
 provide(StepConfigKey, state);
 
 const handleEscape = (event: KeyboardEvent) => {
   if (!props.isOpen) return;
-  if (event.key !== 'Escape') return;
+  if (event.key !== "Escape") return;
 
   event.preventDefault();
   state.closeModal();
 };
 
 onMounted(() => {
-  window.addEventListener('keydown', handleEscape);
+  window.addEventListener("keydown", handleEscape);
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', handleEscape);
+  window.removeEventListener("keydown", handleEscape);
 });
 </script>
 
@@ -81,7 +75,10 @@ onBeforeUnmount(() => {
           </div>
           <div>
             <div class="flex items-center gap-2">
-              <div v-if="state.isEditingName.value && state.canEdit.value" class="flex items-center gap-2">
+              <div
+                v-if="state.isEditingName.value && state.canEdit.value"
+                class="flex items-center gap-2"
+              >
                 <input
                   v-model="state.editName.value"
                   type="text"
@@ -108,7 +105,9 @@ onBeforeUnmount(() => {
                 node?.id.slice(0, 8)
               }}</span>
             </div>
-            <p class="text-base-content/50 mt-1 flex items-center gap-1.5 text-xs font-medium">
+            <p
+              class="text-base-content/50 mt-1 flex items-center gap-1.5 text-xs font-medium"
+            >
               <span class="bg-success h-1.5 w-1.5 rounded-full"></span>
               {{ node?.data?.type_id }} Step
             </p>
@@ -129,20 +128,29 @@ onBeforeUnmount(() => {
       <div class="bg-base-200/20 flex flex-1 overflow-hidden">
         <StepConfigContextPane class="shrink-0" />
 
-        <div class="flex-1 custom-scrollbar overflow-y-auto border-r border-base-200 p-8">
+        <div
+          class="flex-1 custom-scrollbar overflow-y-auto border-r border-base-200 p-8"
+        >
           <StepConfigConfigPane />
         </div>
 
-        <div class="w-[400px] xl:w-[500px] shrink-0 bg-base-100/30 overflow-hidden">
+        <div
+          class="w-[400px] xl:w-[500px] shrink-0 bg-base-100/30 overflow-hidden"
+        >
           <StepConfigOutputPane />
         </div>
       </div>
 
       <!-- Footer -->
-      <div class="border-base-200 bg-base-100 flex items-center justify-end border-t px-8 py-5">
+      <div
+        class="border-base-200 bg-base-100 flex items-center justify-end border-t px-8 py-5"
+      >
         <div class="flex items-center gap-4">
           <template v-if="state.canEdit.value">
-            <button class="btn btn-ghost btn-sm text-base-content/60 font-bold" @click="state.closeModal()">
+            <button
+              class="btn btn-ghost btn-sm text-base-content/60 font-bold"
+              @click="state.closeModal()"
+            >
               Discard Changes
             </button>
             <button
@@ -153,7 +161,10 @@ onBeforeUnmount(() => {
             </button>
           </template>
           <template v-else>
-            <button class="btn btn-ghost btn-sm text-base-content/60 font-bold" @click="state.closeModal()">
+            <button
+              class="btn btn-ghost btn-sm text-base-content/60 font-bold"
+              @click="state.closeModal()"
+            >
               Close
             </button>
           </template>

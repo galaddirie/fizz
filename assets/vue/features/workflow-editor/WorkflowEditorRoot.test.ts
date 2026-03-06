@@ -1,19 +1,46 @@
-import { ref } from 'vue';
-import { mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { ref } from "vue";
+import { mount } from "@vue/test-utils";
+import { describe, expect, it, vi } from "vitest";
 
-import WorkflowEditorRoot from './WorkflowEditorRoot.vue';
+import WorkflowEditorRoot from "./WorkflowEditorRoot.vue";
 
-vi.mock('./controllers/useWorkflowEditorRoot', () => ({
-  useWorkflowEditorRoot: (_props: unknown, emitAction: (action: unknown) => void) => ({
+vi.mock("./controllers/useWorkflowEditorRoot", () => ({
+  useWorkflowEditorRoot: (
+    _props: unknown,
+    emitAction: (action: unknown) => void
+  ) => ({
     editor: {
       nodeLibraryItems: [],
       presences: [],
+      commands: {
+        document: {
+          save: () => emitAction({ type: "document.save" }),
+          undo: vi.fn(),
+          redo: vi.fn(),
+        },
+        execution: {
+          runTest: vi.fn(),
+          cancel: vi.fn(),
+        },
+        selection: {
+          selectStep: vi.fn(),
+        },
+        inspector: {
+          saveStepConfig: vi.fn(),
+          deleteStep: vi.fn(),
+          previewExpression: vi.fn(),
+          pinOutput: vi.fn(),
+          unpinOutput: vi.fn(),
+        },
+        step: {
+          run: vi.fn(),
+        },
+      },
       undoStore: {
         canUndo: false,
         canRedo: false,
-        undoTooltip: 'Undo',
-        redoTooltip: 'Redo',
+        undoTooltip: "Undo",
+        redoTooltip: "Redo",
         isPending: false,
       },
       store: {
@@ -39,36 +66,31 @@ vi.mock('./controllers/useWorkflowEditorRoot', () => ({
       addStepPickerX: 0,
       addStepPickerY: 0,
       addStepPickerItems: [],
-      handleRunTest: vi.fn(),
-      handleUndo: vi.fn(),
-      handleRedo: vi.fn(),
-      handleSave: vi.fn(),
-      handleSaveConfig: vi.fn(),
-      handleDeleteStep: vi.fn(),
-      handlePreviewExpression: vi.fn(),
-      handleRunNode: vi.fn(),
-      handlePinOutput: vi.fn(),
-      handleUnpinOutput: vi.fn(),
       handleContextMenuSelect: vi.fn(),
       closeContextMenu: vi.fn(),
       handleAddStepPickerSelect: vi.fn(),
       closeAddStepPicker: vi.fn(),
-      selectTraceStep: vi.fn(),
+      isMounted: true,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      otherUserPresences: [],
+      currentUserId: "user-1",
+      isExecutionFailed: false,
+      isExecutionRunning: false,
     },
     chrome: {
       workflow: ref({
-        id: 'wf-1',
-        name: 'Workflow',
-        status: 'draft',
+        id: "wf-1",
+        name: "Workflow",
+        status: "draft",
         public: false,
-        user_id: 'user-1',
-        inserted_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-        workspace: { name: 'Workspace' },
-        workspace_id: 'ws-1',
+        user_id: "user-1",
+        inserted_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        workspace: { name: "Workspace" },
+        workspace_id: "ws-1",
       }),
-      workspaceLink: ref('/workspaces/ws-1'),
-      workflowExecutionsLink: ref('/workflows/wf-1'),
+      workspaceLink: ref("/workspaces/ws-1"),
+      workflowExecutionsLink: ref("/workflows/wf-1"),
       nodeLibraryWidth: ref(288),
       isNodeLibraryCollapsed: ref(false),
       handleNodeLibraryResizeStart: vi.fn(),
@@ -79,17 +101,16 @@ vi.mock('./controllers/useWorkflowEditorRoot', () => ({
       openPublishModal: vi.fn(),
       closePublishModal: vi.fn(),
       handlePublish: (payload: { version_tag: string; changelog: string }) =>
-        emitAction({ type: 'document.publish', payload }),
-      lastSaved: ref('just now'),
-      lastSavedExact: ref('Saved just now'),
+        emitAction({ type: "document.publish", payload }),
+      lastSaved: ref("just now"),
+      lastSavedExact: ref("Saved just now"),
       isDebugMode: ref(false),
-      debugExecutionShortId: ref('exec-1'),
+      debugExecutionShortId: ref("exec-1"),
       debugExecutionTimestamp: ref<string | null>(null),
-      debugStatusBadge: ref({ dotClass: 'bg-primary', label: 'Running' }),
+      debugStatusBadge: ref({ dotClass: "bg-primary", label: "Running" }),
       debugExecutionLink: ref<string | null>(null),
       debugExitLink: ref<string | null>(null),
-      emitSaveAction: () => emitAction({ type: 'document.save' }),
-      emitRevisionOpenAction: () => emitAction({ type: 'revision.open' }),
+      emitRevisionOpenAction: () => emitAction({ type: "revision.open" }),
     },
     sceneModel: {
       nodes: [],
@@ -100,16 +121,7 @@ vi.mock('./controllers/useWorkflowEditorRoot', () => ({
       gridSize: 24,
       effectiveSnapToGrid: false,
       canEdit: true,
-      isPreviewActive: false,
-      previewLabel: '',
-      isMounted: true,
-      otherUserPresences: [],
-      currentUserId: 'user-1',
-      viewport: { x: 0, y: 0, zoom: 1 },
-      miniMapNodeColor: () => '#000',
-      isExecutionFailed: false,
-      isExecutionRunning: false,
-      workflowExecutionsLink: '/workflows/wf-1',
+      miniMapNodeColor: () => "#000",
     },
     sceneController: {
       setCanvasRef: vi.fn(),
@@ -118,19 +130,19 @@ vi.mock('./controllers/useWorkflowEditorRoot', () => ({
   }),
 }));
 
-describe('WorkflowEditorRoot', () => {
-  it('emits grouped actions from root chrome interactions', async () => {
+describe("WorkflowEditorRoot", () => {
+  it("emits grouped actions from root chrome interactions", async () => {
     const wrapper = mount(WorkflowEditorRoot, {
       props: {
         document: {
           workflow: {
-            id: 'wf-1',
-            name: 'Workflow',
-            status: 'draft',
+            id: "wf-1",
+            name: "Workflow",
+            status: "draft",
             public: false,
-            user_id: 'user-1',
-            inserted_at: '2024-01-01T00:00:00Z',
-            updated_at: '2024-01-01T00:00:00Z',
+            user_id: "user-1",
+            inserted_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
           },
           expressionPreviews: {},
         },
@@ -146,7 +158,7 @@ describe('WorkflowEditorRoot', () => {
         },
         collaboration: {
           presences: [],
-          currentUserId: 'user-1',
+          currentUserId: "user-1",
           collabSeq: 0,
         },
       },
@@ -159,11 +171,12 @@ describe('WorkflowEditorRoot', () => {
           ContextMenu: true,
           AddStepPicker: true,
           WorkflowEditorInfoPanel: {
-            emits: ['save'],
-            template: '<button id="info-save" @click="$emit(\'save\')">Save</button>',
+            emits: ["save"],
+            template:
+              '<button id="info-save" @click="$emit(\'save\')">Save</button>',
           },
           EditorToolbar: {
-            emits: ['open-revisions', 'publish'],
+            emits: ["open-revisions", "publish"],
             template: `
               <div>
                 <button id="open-revisions" @click="$emit('open-revisions')">Revisions</button>
@@ -172,23 +185,27 @@ describe('WorkflowEditorRoot', () => {
             `,
           },
           PublishModal: {
-            emits: ['publish'],
+            emits: ["publish"],
             template:
-              '<button id="publish-submit" @click="$emit(\'publish\', { version_tag: \'v1\', changelog: \'notes\' })">Submit publish</button>',
+              "<button id=\"publish-submit\" @click=\"$emit('publish', { version_tag: 'v1', changelog: 'notes' })\">Submit publish</button>",
           },
         },
       },
     });
 
-    await wrapper.find('#open-revisions').trigger('click');
-    await wrapper.find('#info-save').trigger('click');
-    await wrapper.find('#publish-submit').trigger('click');
+    await wrapper.find("#open-revisions").trigger("click");
+    await wrapper.find("#info-save").trigger("click");
+    await wrapper.find("#publish-submit").trigger("click");
 
-    expect(wrapper.emitted('action')).toEqual([
-      [{ type: 'revision.open' }],
-      [{ type: 'document.save' }],
-      [{ type: 'document.publish', payload: { version_tag: 'v1', changelog: 'notes' } }],
+    expect(wrapper.emitted("action")).toEqual([
+      [{ type: "revision.open" }],
+      [{ type: "document.save" }],
+      [
+        {
+          type: "document.publish",
+          payload: { version_tag: "v1", changelog: "notes" },
+        },
+      ],
     ]);
   });
 });
-

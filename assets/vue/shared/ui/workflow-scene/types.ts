@@ -1,4 +1,4 @@
-import type { VNodeRef } from 'vue';
+import type { InjectionKey, VNodeRef } from "vue";
 import type {
   Connection,
   Edge,
@@ -8,15 +8,33 @@ import type {
   NodeMouseEvent,
   NodeTypesObject,
   XYPosition,
-} from '@vue-flow/core';
+} from "@vue-flow/core";
 
 import type {
   StepExecutionStatus,
+  StepHandleQuickAddRequest,
   StepKind,
   StepSubnodeSlot,
-  UserPresence,
   NodeRole,
-} from '@/types/workflow';
+} from "@/types/workflow";
+
+export interface WorkflowStepChanges {
+  name?: string;
+}
+
+export interface WorkflowGroupChanges {
+  name?: string;
+  color?: string;
+  font_size?: number;
+  position?: { x?: number; y?: number; width?: number; height?: number };
+}
+
+export interface WorkflowSceneGroupBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface StepNodeData {
   id: string;
@@ -55,23 +73,6 @@ export interface StepNodeData {
   }>;
   isGroupingCandidate?: boolean;
   groupingColor?: string;
-  onRunNode?: (stepId: string) => void;
-  onUpdate?: (stepId: string, changes: { name?: string }) => void;
-  onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
-  onTogglePin?: (stepId: string, isPinned: boolean) => void;
-  onHandleQuickAdd?: (request: {
-    screenPoint: { x: number; y: number };
-    autoConnect: {
-      source_step_id?: string;
-      source_output?: string;
-      target_step_id?: string;
-      target_input?: string;
-    };
-    filter: {
-      mode: 'output' | 'subnode_slot';
-      accepted_type_ids?: string[];
-    };
-  }) => void;
   canEdit?: boolean;
 }
 
@@ -89,31 +90,6 @@ export interface GroupNodeData {
   isGroupingTarget?: boolean;
   groupingColor?: string;
   collabSeq?: number;
-  onUpdate?: (
-    groupId: string,
-    changes: {
-      name?: string;
-      color?: string;
-      font_size?: number;
-      position?: { x?: number; y?: number; width?: number; height?: number };
-    }
-  ) => void;
-  onCommitDragLayout?: (payload: {
-    txn_id: string;
-    base_seq?: number;
-    groups: Array<{ group_id: string; position: { x: number; y: number; width: number; height: number } }>;
-    step_positions: Record<string, { x: number; y: number }>;
-    group_id_by_step_id: Record<string, string | null>;
-  }) => void;
-  onEmitInteraction?: (
-    cursor?: { x: number; y: number } | null,
-    dragging_steps?: Record<string, { x: number; y: number }> | null,
-    dragging_groups?: Record<
-      string,
-      { x: number; y: number; width: number; height: number }
-    > | null
-  ) => void;
-  onMoveSteps?: (stepPositions: Record<string, { x: number; y: number }>) => void;
   canEdit?: boolean;
 }
 
@@ -128,16 +104,7 @@ export interface WorkflowSceneModel {
   gridSize: number;
   effectiveSnapToGrid: boolean;
   canEdit: boolean;
-  isPreviewActive: boolean;
-  previewLabel: string;
-  isMounted: boolean;
-  otherUserPresences: UserPresence[];
-  currentUserId?: string;
-  viewport: { x: number; y: number; zoom: number };
   miniMapNodeColor: (node: GraphNode<WorkflowNodeData>) => string;
-  isExecutionFailed: boolean;
-  isExecutionRunning: boolean;
-  workflowExecutionsLink?: string | null;
 }
 
 export interface WorkflowSceneSelectionEvent {
@@ -154,6 +121,36 @@ export interface WorkflowSceneEdgeUpdateEvent {
   connection: Connection;
 }
 
+export interface WorkflowSceneDragLayoutPayload {
+  txn_id: string;
+  base_seq?: number;
+  groups: Array<{
+    group_id: string;
+    position: WorkflowSceneGroupBounds;
+  }>;
+  step_positions: WorkflowScenePositionById;
+  group_id_by_step_id: Record<string, string | null>;
+}
+
+export interface WorkflowSceneStepController {
+  run?: (stepId: string) => void;
+  update?: (stepId: string, changes: WorkflowStepChanges) => void;
+  toggleDisabled?: (stepId: string, isDisabled: boolean) => void;
+  togglePin?: (stepId: string, isPinned: boolean) => void;
+  quickAdd?: (request: StepHandleQuickAddRequest) => void;
+}
+
+export interface WorkflowSceneGroupController {
+  update?: (groupId: string, changes: WorkflowGroupChanges) => void;
+  commitDragLayout?: (payload: WorkflowSceneDragLayoutPayload) => void;
+  emitInteraction?: (
+    cursor?: XYPosition | null,
+    draggingSteps?: WorkflowScenePositionById | null,
+    draggingGroups?: Record<string, WorkflowSceneGroupBounds> | null
+  ) => void;
+  moveSteps?: (stepPositions: WorkflowScenePositionById) => void;
+}
+
 export interface WorkflowSceneController {
   setCanvasRef: VNodeRef;
   setVueFlowRef: VNodeRef;
@@ -162,7 +159,9 @@ export interface WorkflowSceneController {
   handleNodeDoubleClick?: (event: NodeMouseEvent) => void;
   handleNodeContextMenu?: (event: NodeMouseEvent) => void;
   handleSelectionChange?: (event: WorkflowSceneSelectionEvent) => void;
-  handleSelectionContextMenu?: (event: WorkflowSceneSelectionContextMenuEvent) => void;
+  handleSelectionContextMenu?: (
+    event: WorkflowSceneSelectionContextMenuEvent
+  ) => void;
   handlePaneContextMenu?: (event: MouseEvent) => void;
   handleEdgeUpdate?: (payload: WorkflowSceneEdgeUpdateEvent) => void;
   handleDragOver?: (event: DragEvent) => void;
@@ -170,7 +169,12 @@ export interface WorkflowSceneController {
   onRunTest?: () => void;
   onCancelExecution?: () => void;
   onToggleSnap?: () => void;
+  step?: WorkflowSceneStepController;
+  group?: WorkflowSceneGroupController;
 }
 
 export type WorkflowScenePositionById = Record<string, XYPosition>;
 
+export const WorkflowSceneControllerKey = Symbol(
+  "WorkflowSceneController"
+) as InjectionKey<WorkflowSceneController | null>;

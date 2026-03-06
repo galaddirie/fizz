@@ -1,6 +1,7 @@
-import type { XYPosition } from '@vue-flow/core';
+import type { XYPosition } from "@vue-flow/core";
 
-import type { UndoState } from '@/stores/undoStore';
+import type { WorkflowDocumentView } from "@/shared/contracts/workflowDocument";
+import type { UndoState } from "@/stores/undoStore";
 import type {
   AddStepAutoConnect,
   CredentialOption,
@@ -11,15 +12,7 @@ import type {
   StepExecution,
   StepType,
   UserPresence,
-  Workflow,
-} from '@/types/workflow';
-
-export interface WorkflowDocumentView extends Workflow {
-  workspace_id?: string;
-  workspace?: {
-    name?: string;
-  };
-}
+} from "@/types/workflow";
 
 export interface WorkflowEditorDocumentSlice {
   workflow: WorkflowDocumentView;
@@ -60,7 +53,7 @@ export interface WorkflowEditorViewProps {
 
 export type WorkflowEditorAction =
   | {
-      type: 'document.step.add';
+      type: "document.step.add";
       payload: {
         type_id: string;
         position: { x: number; y: number };
@@ -70,7 +63,7 @@ export type WorkflowEditorAction =
       };
     }
   | {
-      type: 'document.group.add';
+      type: "document.group.add";
       payload: {
         name?: string;
         step_ids: string[];
@@ -81,12 +74,17 @@ export type WorkflowEditorAction =
       };
     }
   | {
-      type: 'document.group.update';
+      type: "document.group.update";
       payload: {
         group_id: string;
         changes: {
           name?: string;
-          position?: { x?: number; y?: number; width?: number; height?: number };
+          position?: {
+            x?: number;
+            y?: number;
+            width?: number;
+            height?: number;
+          };
           collapsed?: boolean;
           output_step_id?: string;
           color?: string;
@@ -94,9 +92,9 @@ export type WorkflowEditorAction =
         };
       };
     }
-  | { type: 'document.group.remove'; payload: { group_id: string } }
+  | { type: "document.group.remove"; payload: { group_id: string } }
   | {
-      type: 'document.group.membership.set';
+      type: "document.group.membership.set";
       payload: {
         group_id?: string | null;
         step_ids: string[];
@@ -104,7 +102,7 @@ export type WorkflowEditorAction =
       };
     }
   | {
-      type: 'document.layout.commit';
+      type: "document.layout.commit";
       payload: {
         txn_id: string;
         base_seq?: number;
@@ -117,22 +115,28 @@ export type WorkflowEditorAction =
       };
     }
   | {
-      type: 'document.step.duplicate';
+      type: "document.step.duplicate";
       payload: {
         step_ids: string[];
         position_by_step_id: Record<string, XYPosition>;
         group_id_by_step_id?: Record<string, string>;
       };
     }
-  | { type: 'document.step.update'; payload: { step_id: string; changes: Partial<Step> } }
-  | { type: 'document.step.remove'; payload: { step_id: string } }
   | {
-      type: 'document.step.move';
+      type: "document.step.update";
+      payload: { step_id: string; changes: Partial<Step> };
+    }
+  | { type: "document.step.remove"; payload: { step_id: string } }
+  | {
+      type: "document.step.move";
       payload: { step_id: string; position: { x: number; y: number } };
     }
-  | { type: 'document.step.moveMany'; payload: { step_positions: Record<string, XYPosition> } }
   | {
-      type: 'document.connection.add';
+      type: "document.step.moveMany";
+      payload: { step_positions: Record<string, XYPosition> };
+    }
+  | {
+      type: "document.connection.add";
       payload: {
         source_step_id: string;
         target_step_id: string;
@@ -140,18 +144,25 @@ export type WorkflowEditorAction =
         target_input?: string;
       };
     }
-  | { type: 'document.connection.remove'; payload: { connection_id: string } }
+  | { type: "document.connection.remove"; payload: { connection_id: string } }
   | {
-      type: 'document.output.pin';
-      payload: { step_id: string; output_data?: unknown; item_index?: number | null };
+      type: "document.output.pin";
+      payload: {
+        step_id: string;
+        output_data?: unknown;
+        item_index?: number | null;
+      };
     }
-  | { type: 'document.output.unpin'; payload: { step_id: string } }
-  | { type: 'document.step.disable'; payload: { step_id: string; mode: 'skip' | 'exclude' } }
-  | { type: 'document.step.enable'; payload: { step_id: string } }
-  | { type: 'document.undo'; payload: { count: number } }
-  | { type: 'document.redo'; payload: { count: number } }
+  | { type: "document.output.unpin"; payload: { step_id: string } }
   | {
-      type: 'document.layout.tidy';
+      type: "document.step.disable";
+      payload: { step_id: string; mode: "skip" | "exclude" };
+    }
+  | { type: "document.step.enable"; payload: { step_id: string } }
+  | { type: "document.undo"; payload: { count: number } }
+  | { type: "document.redo"; payload: { count: number } }
+  | {
+      type: "document.layout.tidy";
       payload: {
         steps: Array<{ step_id: string; position: { x: number; y: number } }>;
         groups: Array<{
@@ -161,10 +172,13 @@ export type WorkflowEditorAction =
         label: string;
       };
     }
-  | { type: 'document.save' }
-  | { type: 'document.publish'; payload: { version_tag: string; changelog?: string } }
+  | { type: "document.save" }
   | {
-      type: 'collaboration.cursor';
+      type: "document.publish";
+      payload: { version_tag: string; changelog?: string };
+    }
+  | {
+      type: "collaboration.cursor";
       payload: {
         x?: number;
         y?: number;
@@ -175,18 +189,18 @@ export type WorkflowEditorAction =
         > | null;
       };
     }
-  | { type: 'collaboration.selection'; payload: { step_ids: string[] } }
+  | { type: "collaboration.selection"; payload: { step_ids: string[] } }
   | {
-      type: 'inspector.previewExpression';
+      type: "inspector.previewExpression";
       payload: { step_id: string; field_key: string; expression: string };
     }
-  | { type: 'execution.runTest'; payload?: { step_ids?: string[] } }
-  | { type: 'execution.runNode'; payload: { step_id: string } }
-  | { type: 'execution.cancel' }
-  | { type: 'revision.open' };
+  | { type: "execution.runTest"; payload?: { step_ids?: string[] } }
+  | { type: "execution.runNode"; payload: { step_id: string } }
+  | { type: "execution.cancel" }
+  | { type: "revision.open" };
 
 export type WorkflowEditorDispatch = (action: WorkflowEditorAction) => void;
 
 export type WorkflowEditorRootEmits = {
-  (event: 'action', payload: WorkflowEditorAction): void;
+  (event: "action", payload: WorkflowEditorAction): void;
 };

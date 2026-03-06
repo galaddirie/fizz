@@ -1,13 +1,16 @@
-import { reactive } from 'vue';
+import { reactive } from "vue";
 
-import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
+import { useWorkflowEditor } from "@/composables/workflow/useWorkflowEditor";
 import type {
   WorkflowSceneController,
   WorkflowSceneModel,
-} from '@/shared/ui/workflow-scene/types';
+} from "@/shared/ui/workflow-scene/types";
 
-import type { WorkflowEditorAction, WorkflowEditorViewProps } from '../contracts/workflowEditor';
-import { useWorkflowEditorChrome } from './useWorkflowEditorChrome';
+import type {
+  WorkflowEditorAction,
+  WorkflowEditorViewProps,
+} from "../contracts/workflowEditor";
+import { useWorkflowEditorChrome } from "./useWorkflowEditorChrome";
 
 export function useWorkflowEditorRoot(
   props: WorkflowEditorViewProps,
@@ -41,31 +44,8 @@ export function useWorkflowEditorRoot(
     get canEdit() {
       return editor.canEdit;
     },
-    isPreviewActive: false,
-    previewLabel: props.ui?.revisionPreviewLabel ?? '',
-    get isMounted() {
-      return editor.isMounted;
-    },
-    get otherUserPresences() {
-      return editor.otherUserPresences;
-    },
-    get currentUserId() {
-      return editor.currentUserId;
-    },
-    get viewport() {
-      return editor.viewport;
-    },
     get miniMapNodeColor() {
       return editor.miniMapNodeColor;
-    },
-    get isExecutionFailed() {
-      return editor.isExecutionFailed;
-    },
-    get isExecutionRunning() {
-      return editor.isExecutionRunning;
-    },
-    get workflowExecutionsLink() {
-      return chrome.workflowExecutionsLink.value;
     },
   };
 
@@ -82,9 +62,11 @@ export function useWorkflowEditorRoot(
     handleEdgeUpdate: editor.handleEdgeUpdate,
     handleDragOver: editor.handleDragOver,
     handleDrop: editor.handleDrop,
-    onRunTest: editor.handleRunTest,
-    onCancelExecution: editor.handleCancelExecution,
+    onRunTest: editor.commands.execution.runTest,
+    onCancelExecution: editor.commands.execution.cancel,
     onToggleSnap: editor.store.toggleSnap,
+    step: editor.commands.step,
+    group: editor.commands.group,
   };
 
   return {

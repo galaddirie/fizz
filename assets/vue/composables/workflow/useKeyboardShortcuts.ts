@@ -9,17 +9,15 @@ interface UseKeyboardShortcutsOptions {
   handleCutSteps: (stepIds: string[]) => void;
   createGroupFromSelection: () => void;
   ungroupSelectedSteps: () => void;
-  undo: (callback: () => void) => void;
-  redo: (callback: () => void) => void;
-  sendUndo: () => void;
-  sendRedo: () => void;
+  requestUndo: () => void;
+  requestRedo: () => void;
 }
 
 const isEditableTarget = (target: EventTarget | null) => {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   const tag = target.tagName.toLowerCase();
-  return tag === 'input' || tag === 'textarea' || tag === 'select';
+  return tag === "input" || tag === "textarea" || tag === "select";
 };
 
 export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
@@ -29,17 +27,17 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
     if (!event.metaKey && !event.ctrlKey) return;
 
     const key = event.key.toLowerCase();
-    if (key === 'z') {
+    if (key === "z") {
       event.preventDefault();
       if (event.shiftKey) {
-        options.redo(options.sendRedo);
+        options.requestRedo();
       } else {
-        options.undo(options.sendUndo);
+        options.requestUndo();
       }
       return;
     }
 
-    if (key === 'c') {
+    if (key === "c") {
       const stepIds = options.resolveActiveNodeIds();
       if (!stepIds.length) return;
       event.preventDefault();
@@ -47,14 +45,14 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
       return;
     }
 
-    if (key === 'v') {
+    if (key === "v") {
       if (!options.canPaste()) return;
       event.preventDefault();
       options.handlePasteSteps();
       return;
     }
 
-    if (key === 'x') {
+    if (key === "x") {
       const stepIds = options.resolveActiveNodeIds();
       if (!stepIds.length) return;
       event.preventDefault();
@@ -62,7 +60,7 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
       return;
     }
 
-    if (key === 'g') {
+    if (key === "g") {
       if (event.shiftKey) {
         if (!options.canUngroupSelection()) return;
         event.preventDefault();
@@ -77,11 +75,11 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
   };
 
   const registerShortcuts = () => {
-    window.addEventListener('keydown', handleGlobalKeydown);
+    window.addEventListener("keydown", handleGlobalKeydown);
   };
 
   const unregisterShortcuts = () => {
-    window.removeEventListener('keydown', handleGlobalKeydown);
+    window.removeEventListener("keydown", handleGlobalKeydown);
   };
 
   return {

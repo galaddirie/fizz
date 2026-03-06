@@ -1,5 +1,5 @@
-import { computed, ref } from 'vue';
-import { defineStore } from 'pinia';
+import { computed, ref } from "vue";
+import { defineStore } from "pinia";
 
 export type UndoEntrySummary = {
   id: string;
@@ -17,7 +17,7 @@ export type UndoState = {
   redoStack?: UndoEntrySummary[];
 };
 
-export const useUndoStore = defineStore('undo', () => {
+export const useUndoStore = defineStore("undo", () => {
   const state = ref<UndoState>({
     canUndo: false,
     canRedo: false,
@@ -28,26 +28,43 @@ export const useUndoStore = defineStore('undo', () => {
   });
 
   const isPending = ref(false);
+  const transport = ref<{
+    requestUndo: () => void;
+    requestRedo: () => void;
+  } | null>(null);
 
   const canUndo = computed(() => state.value.canUndo && !isPending.value);
   const canRedo = computed(() => state.value.canRedo && !isPending.value);
   const undoTooltip = computed(() =>
-    state.value.undoLabel ? `Undo: ${state.value.undoLabel} (⌘Z)` : 'Nothing to undo'
+    state.value.undoLabel
+      ? `Undo: ${state.value.undoLabel} (⌘Z)`
+      : "Nothing to undo"
   );
   const redoTooltip = computed(() =>
-    state.value.redoLabel ? `Redo: ${state.value.redoLabel} (⌘⇧Z)` : 'Nothing to redo'
+    state.value.redoLabel
+      ? `Redo: ${state.value.redoLabel} (⌘⇧Z)`
+      : "Nothing to redo"
   );
 
-  const undo = (sendUndo: () => void) => {
-    if (!canUndo.value) return;
-    isPending.value = true;
-    sendUndo();
+  const configureTransport = (nextTransport: {
+    requestUndo: () => void;
+    requestRedo: () => void;
+  }) => {
+    transport.value = nextTransport;
   };
 
-  const redo = (sendRedo: () => void) => {
-    if (!canRedo.value) return;
+  const requestUndo = () => {
+    if (!canUndo.value) return;
+    if (!transport.value) return;
     isPending.value = true;
-    sendRedo();
+    transport.value.requestUndo();
+  };
+
+  const requestRedo = () => {
+    if (!canRedo.value) return;
+    if (!transport.value) return;
+    isPending.value = true;
+    transport.value.requestRedo();
   };
 
   const handleStateUpdate = (payload: UndoState) => {
@@ -59,19 +76,11 @@ export const useUndoStore = defineStore('undo', () => {
     isPending.value = false;
   };
 
-  const handleUndoApplied = () => {
+  const resolveUndoRequest = () => {
     isPending.value = false;
   };
 
-  const handleUndoConflict = () => {
-    isPending.value = false;
-  };
-
-  const handleRedoApplied = () => {
-    isPending.value = false;
-  };
-
-  const handleRedoConflict = () => {
+  const resolveRedoRequest = () => {
     isPending.value = false;
   };
 
@@ -82,12 +91,11 @@ export const useUndoStore = defineStore('undo', () => {
     canRedo,
     undoTooltip,
     redoTooltip,
-    undo,
-    redo,
+    configureTransport,
+    requestUndo,
+    requestRedo,
     handleStateUpdate,
-    handleUndoApplied,
-    handleUndoConflict,
-    handleRedoApplied,
-    handleRedoConflict,
+    resolveUndoRequest,
+    resolveRedoRequest,
   };
 });

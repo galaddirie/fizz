@@ -1,30 +1,40 @@
 <script setup lang="ts">
-import AddStepPicker from '@/components/flow/AddStepPicker.vue';
-import EditorToolbar from '@/components/flow/EditorToolbar.vue';
-import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
-import NodeLibrary from '@/components/flow/NodeLibrary.vue';
-import PublishModal from '@/components/flow/PublishModal.vue';
-import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
-import ContextMenu from '@/components/ui/ContextMenu.vue';
-import WorkflowSceneCanvas from '@/shared/ui/workflow-scene/WorkflowSceneCanvas.vue';
+import type { StepConfigUnpinOutputPayload } from "@/components/flow/step_config/contracts";
+import AddStepPicker from "@/components/flow/AddStepPicker.vue";
+import CollaborativeCursors from "@/components/flow/CollaborativeCursors.vue";
+import EditorToolbar from "@/components/flow/EditorToolbar.vue";
+import ExecutionOverlay from "@/components/flow/ExecutionOverlay.vue";
+import ExecutionTracePanel from "@/components/flow/ExecutionTracePanel.vue";
+import NodeLibrary from "@/components/flow/NodeLibrary.vue";
+import PublishModal from "@/components/flow/PublishModal.vue";
+import StepConfigModal from "@/components/flow/step_config/StepConfigModal.vue";
+import ContextMenu from "@/components/ui/ContextMenu.vue";
+import WorkflowSceneCanvas from "@/shared/ui/workflow-scene/WorkflowSceneCanvas.vue";
 
 import type {
   WorkflowEditorRootEmits,
   WorkflowEditorViewProps,
-} from './contracts/workflowEditor';
-import { useWorkflowEditorRoot } from './controllers/useWorkflowEditorRoot';
-import WorkflowEditorInfoPanel from './components/WorkflowEditorInfoPanel.vue';
+} from "./contracts/workflowEditor";
+import { useWorkflowEditorRoot } from "./controllers/useWorkflowEditorRoot";
+import WorkflowEditorInfoPanel from "./components/WorkflowEditorInfoPanel.vue";
 
 const props = defineProps<WorkflowEditorViewProps>();
 const emit = defineEmits<WorkflowEditorRootEmits>();
 
-const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(props, action =>
-  emit('action', action)
+const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(
+  props,
+  (action) => emit("action", action)
 );
+
+const handleUnpinOutput = (payload: StepConfigUnpinOutputPayload) => {
+  editor.commands.inspector.unpinOutput(payload.step_id);
+};
 </script>
 
 <template>
-  <div class="bg-base-100 text-base-content flex h-screen overflow-hidden font-sans">
+  <div
+    class="bg-base-100 text-base-content flex h-screen overflow-hidden font-sans"
+  >
     <NodeLibrary
       v-if="!chrome.isNodeLibraryCollapsed.value"
       :library-items="editor.nodeLibraryItems"
@@ -46,7 +56,13 @@ const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(pr
         title="Expand panel"
         @click="chrome.toggleNodeLibraryCollapsed"
       >
-        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.22 4.22a.75.75 0 011.06 0l5.25 5.25a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 11-1.06-1.06L11.94 10 7.22 5.28a.75.75 0 010-1.06z" clip-rule="evenodd" /></svg>
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path
+            fill-rule="evenodd"
+            d="M7.22 4.22a.75.75 0 011.06 0l5.25 5.25a.75.75 0 010 1.06l-5.25 5.25a.75.75 0 11-1.06-1.06L11.94 10 7.22 5.28a.75.75 0 010-1.06z"
+            clip-rule="evenodd"
+          />
+        </svg>
       </button>
 
       <div
@@ -76,16 +92,18 @@ const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(pr
           :undo-tooltip="editor.undoStore.undoTooltip"
           :redo-tooltip="editor.undoStore.redoTooltip"
           :is-undo-pending="editor.undoStore.isPending"
-          @save="editor.handleSave"
-          @undo="editor.handleUndo"
-          @redo="editor.handleRedo"
-          @run-test="editor.handleRunTest"
+          @save="editor.commands.document.save"
+          @undo="editor.commands.document.undo"
+          @redo="editor.commands.document.redo"
+          @run-test="editor.commands.execution.runTest"
           @open-revisions="chrome.emitRevisionOpenAction"
           @publish="chrome.openPublishModal"
         />
       </div>
 
-      <div class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner">
+      <div
+        class="relative flex flex-1 overflow-hidden rounded-tl-[20px] border-t border-l border-base-300 bg-base-200 shadow-inner"
+      >
         <WorkflowEditorInfoPanel
           :workspace-link="chrome.workspaceLink.value"
           :workspace-name="chrome.workflow.value.workspace?.name"
@@ -99,12 +117,43 @@ const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(pr
           :debug-execution-timestamp="chrome.debugExecutionTimestamp.value"
           :debug-execution-link="chrome.debugExecutionLink.value"
           :debug-exit-link="chrome.debugExitLink.value"
-          @save="chrome.emitSaveAction"
+          @save="editor.commands.document.save"
         />
 
         <div class="relative flex min-w-0 flex-1 flex-col">
           <div class="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-            <WorkflowSceneCanvas :model="sceneModel" :controller="sceneController" />
+            <WorkflowSceneCanvas
+              :model="sceneModel"
+              :controller="sceneController"
+            >
+              <template #overlay>
+                <div
+                  v-if="editor.isMounted"
+                  class="pointer-events-none absolute inset-0 z-[1000]"
+                  :style="{
+                    transform: `translate(${editor.viewport.x}px, ${editor.viewport.y}px) scale(${editor.viewport.zoom})`,
+                    transformOrigin: '0 0',
+                  }"
+                >
+                  <CollaborativeCursors
+                    :presences="editor.otherUserPresences"
+                    :current-user-id="editor.currentUserId"
+                    :zoom="editor.viewport.zoom"
+                  />
+                </div>
+
+                <ExecutionOverlay
+                  :is-execution-failed="editor.isExecutionFailed"
+                  :is-execution-running="editor.isExecutionRunning"
+                  :is-preview-active="false"
+                  :workflow-executions-link="
+                    chrome.workflowExecutionsLink.value
+                  "
+                  @run="editor.commands.execution.runTest"
+                  @cancel="editor.commands.execution.cancel"
+                />
+              </template>
+            </WorkflowSceneCanvas>
 
             <ExecutionTracePanel
               :execution="editor.execution"
@@ -114,9 +163,9 @@ const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(pr
               :is-expanded="editor.store.isTracePanelExpanded"
               @toggle="editor.store.toggleTracePanel"
               @close="editor.store.isTracePanelExpanded = false"
-              @select-step="editor.selectTraceStep"
-              @run-test="editor.handleRunTest"
-              @cancel="editor.handleCancelExecution"
+              @select-step="editor.commands.selection.selectStep"
+              @run-test="editor.commands.execution.runTest"
+              @cancel="editor.commands.execution.cancel"
             />
           </div>
         </div>
@@ -133,16 +182,18 @@ const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(pr
         :editor-state="editor.editorState"
         :step-name-by-id="editor.stepNameById"
         :incoming-step-ids="editor.incomingStepIdsByStepId"
-        :incoming-connections-by-target-input="editor.incomingConnectionsByTargetInputByStepId"
+        :incoming-connections-by-target-input="
+          editor.incomingConnectionsByTargetInputByStepId
+        "
         :upstream-step-ids="editor.upstreamStepIdsByStepId"
         :can-edit="editor.canEdit"
         @close="editor.store.closeConfigModal"
-        @save="editor.handleSaveConfig"
-        @delete="editor.handleDeleteStep"
-        @preview_expression="editor.handlePreviewExpression"
-        @run_node="editor.handleRunNode"
-        @pin_output="editor.handlePinOutput"
-        @unpin_output="editor.handleUnpinOutput"
+        @save="editor.commands.inspector.saveStepConfig"
+        @delete="editor.commands.inspector.deleteStep"
+        @preview_expression="editor.commands.inspector.previewExpression"
+        @run_node="editor.commands.step.run"
+        @pin_output="editor.commands.inspector.pinOutput"
+        @unpin_output="handleUnpinOutput"
       />
 
       <ContextMenu
@@ -175,4 +226,3 @@ const { editor, chrome, sceneModel, sceneController } = useWorkflowEditorRoot(pr
     </div>
   </div>
 </template>
-

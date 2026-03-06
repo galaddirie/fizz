@@ -1,50 +1,203 @@
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { VNodeRef } from 'vue';
-import { useLiveEvent } from 'live_vue';
-import { VueFlow, useVueFlow } from '@vue-flow/core';
-import type { EdgeTypesObject, NodeTypesObject } from '@vue-flow/core';
-import WorkflowStepNode from '@/components/flow/Node.vue';
-import WorkflowSubNode from '@/components/flow/SubNode.vue';
-import GroupNode from '@/components/flow/GroupNode.vue';
-import { useClientStore } from '@/stores/clientStore';
-import { useUndoStore } from '@/stores/undoStore';
-import { useWorkflowEdges } from '@/composables/useWorkflowEdges';
-import { useWorkflowGraph } from '@/composables/useWorkflowGraph';
-import { useWorkflowNodes } from '@/composables/useWorkflowNodes';
-import { useCanvasInteraction } from '@/composables/workflow/useCanvasInteraction';
-import { useClipboard } from '@/composables/workflow/useClipboard';
-import { useCollaboration } from '@/composables/workflow/useCollaboration';
-import { useContextMenu } from '@/composables/workflow/useContextMenu';
-import { useDraftSync } from '@/composables/workflow/useDraftSync';
-import { useEdgeInteraction } from '@/composables/workflow/useEdgeInteraction';
-import { useGrouping } from '@/composables/workflow/useGrouping';
-import { useKeyboardShortcuts } from '@/composables/workflow/useKeyboardShortcuts';
-import { useLayoutEngine } from '@/composables/workflow/useLayoutEngine';
-import { useMiniMapNodeColor } from '@/composables/workflow/useMiniMapNodeColor';
-import { useNodeDrag } from '@/composables/workflow/useNodeDrag';
-import { useNodeInteraction } from '@/composables/workflow/useNodeInteraction';
-import { useWorkflowActions } from '@/composables/workflow/useWorkflowActions';
-import { useWorkflowExecutionState } from '@/composables/workflow/useWorkflowExecutionState';
-import { useWorkflowNodeActions } from '@/composables/workflow/useWorkflowNodeActions';
-import { useWorkflowPins } from '@/composables/workflow/useWorkflowPins';
-import { useWorkflowSelection } from '@/composables/workflow/useWorkflowSelection';
-import { DEFAULT_NODE_DIMENSIONS, GRID_SIZE } from '@/constants/layout';
-import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
-import { workflowTrace } from '@/lib/workflowTrace';
-import { workflowEdgeTypes } from '@/shared/ui/workflow-scene/edgeTypes';
+import {
+  computed,
+  markRaw,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
+import type { VNodeRef } from "vue";
+import { useLiveEvent } from "live_vue";
+import { VueFlow, useVueFlow } from "@vue-flow/core";
+import type {
+  EdgeTypesObject,
+  GraphNode,
+  NodeTypesObject,
+  XYPosition,
+} from "@vue-flow/core";
+import WorkflowStepNode from "@/components/flow/Node.vue";
+import WorkflowSubNode from "@/components/flow/SubNode.vue";
+import GroupNode from "@/components/flow/GroupNode.vue";
+import { useClientStore } from "@/stores/clientStore";
+import { useUndoStore } from "@/stores/undoStore";
+import { useWorkflowEdges } from "@/composables/useWorkflowEdges";
+import { useWorkflowGraph } from "@/composables/useWorkflowGraph";
+import { useWorkflowNodes } from "@/composables/useWorkflowNodes";
+import { useCanvasInteraction } from "@/composables/workflow/useCanvasInteraction";
+import { useClipboard } from "@/composables/workflow/useClipboard";
+import { useCollaboration } from "@/composables/workflow/useCollaboration";
+import { useContextMenu } from "@/composables/workflow/useContextMenu";
+import { useDraftSync } from "@/composables/workflow/useDraftSync";
+import { useEdgeInteraction } from "@/composables/workflow/useEdgeInteraction";
+import { useGrouping } from "@/composables/workflow/useGrouping";
+import { useKeyboardShortcuts } from "@/composables/workflow/useKeyboardShortcuts";
+import { useLayoutEngine } from "@/composables/workflow/useLayoutEngine";
+import { useMiniMapNodeColor } from "@/composables/workflow/useMiniMapNodeColor";
+import { useNodeDrag } from "@/composables/workflow/useNodeDrag";
+import { useNodeInteraction } from "@/composables/workflow/useNodeInteraction";
+import { useWorkflowCommands } from "@/composables/workflow/useWorkflowCommands";
+import { useWorkflowExecutionState } from "@/composables/workflow/useWorkflowExecutionState";
+import { useWorkflowSelection } from "@/composables/workflow/useWorkflowSelection";
+import { DEFAULT_NODE_DIMENSIONS, GRID_SIZE } from "@/constants/layout";
+import {
+  findGroupAtPoint,
+  getAbsoluteNodePosition,
+} from "@/lib/workflowGeometry";
+import { workflowTrace } from "@/lib/workflowTrace";
+import { workflowEdgeTypes } from "@/shared/ui/workflow-scene/edgeTypes";
+import type {
+  WorkflowNodeData,
+  WorkflowSceneController,
+} from "@/shared/ui/workflow-scene/types";
+import type { UndoState } from "@/stores/undoStore";
 import type {
   NodeLibraryItem,
   StepHandleQuickAddRequest,
   Workflow,
   WorkflowDraft,
-} from '@/types/workflow';
+} from "@/types/workflow";
 import type {
+  WorkflowEditorAction,
   WorkflowEditorDispatch,
   WorkflowEditorViewProps,
-} from '@/features/workflow-editor/contracts/workflowEditor';
+} from "@/features/workflow-editor/contracts/workflowEditor";
 
 const SUBNODE_FALLBACK_DIMENSIONS = { width: 112, height: 96 };
 const QUICK_ADD_OUTPUT_X_OFFSET = GRID_SIZE * 3;
+
+type AddStepPayload = Extract<
+  WorkflowEditorAction,
+  { type: "document.step.add" }
+>["payload"];
+
+type WorkflowCanvasNode = GraphNode<WorkflowNodeData>;
+
+export const buildAddStepPickerItems = (
+  nodeLibraryItems: NodeLibraryItem[],
+  quickAddRequest: StepHandleQuickAddRequest | null
+) => {
+  if (!quickAddRequest) return nodeLibraryItems;
+
+  if (quickAddRequest.filter.mode === "output") {
+    return nodeLibraryItems.filter(
+      (item) => item.node_role !== "subnode" && item.step_kind !== "trigger"
+    );
+  }
+
+  const acceptedTypeIds = quickAddRequest.filter.accepted_type_ids ?? [];
+
+  return nodeLibraryItems.filter((item) => {
+    if (item.node_role !== "subnode") return false;
+    if (acceptedTypeIds.length === 0) return true;
+    return acceptedTypeIds.includes(item.type_id);
+  });
+};
+
+export const resolveAddStepSize = (
+  nodeLibraryItems: NodeLibraryItem[],
+  nodes: WorkflowCanvasNode[],
+  typeId: string
+) => {
+  const selectedItem = nodeLibraryItems.find((item) => item.type_id === typeId);
+  const isSubnode = selectedItem?.node_role === "subnode";
+  const nodeType = isSubnode ? "subnode" : "step";
+  const measuredNode = nodes.find(
+    (node) =>
+      node.type === nodeType &&
+      node.dimensions.width > 0 &&
+      node.dimensions.height > 0
+  );
+
+  if (measuredNode) {
+    return {
+      width: measuredNode.dimensions.width,
+      height: measuredNode.dimensions.height,
+    };
+  }
+
+  return isSubnode ? SUBNODE_FALLBACK_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
+};
+
+const resolveAddStepPosition = (
+  position: XYPosition,
+  quickAddRequest: StepHandleQuickAddRequest | null,
+  stepSize: { width: number; height: number }
+) =>
+  quickAddRequest?.filter.mode === "output"
+    ? {
+        x: position.x + QUICK_ADD_OUTPUT_X_OFFSET,
+        y: position.y - stepSize.height / 2,
+      }
+    : position;
+
+const resolveQuickAddTargetGroup = (
+  nodes: WorkflowCanvasNode[],
+  resolvedPosition: XYPosition,
+  quickAddRequest: StepHandleQuickAddRequest | null,
+  groupByStepId: Map<string, string>
+) => {
+  let targetGroup = findGroupAtPoint(resolvedPosition, nodes);
+  if (targetGroup || !quickAddRequest) return targetGroup;
+
+  const fixedStepId =
+    quickAddRequest.autoConnect.source_step_id ??
+    quickAddRequest.autoConnect.target_step_id;
+  const fixedGroupId = fixedStepId ? groupByStepId.get(fixedStepId) : undefined;
+
+  if (!fixedGroupId) return null;
+
+  return nodes.find(
+    (node) => node.id === fixedGroupId && node.type === "group"
+  );
+};
+
+const buildAddStepPayload = (params: {
+  typeId: string;
+  position: XYPosition;
+  quickAddRequest: StepHandleQuickAddRequest | null;
+  nodeLibraryItems: NodeLibraryItem[];
+  nodes: WorkflowCanvasNode[];
+  groupByStepId: Map<string, string>;
+}): AddStepPayload => {
+  const stepSize = resolveAddStepSize(
+    params.nodeLibraryItems,
+    params.nodes,
+    params.typeId
+  );
+  const resolvedPosition = resolveAddStepPosition(
+    params.position,
+    params.quickAddRequest,
+    stepSize
+  );
+  const payload: AddStepPayload = {
+    type_id: params.typeId,
+    position: resolvedPosition,
+    step_size: stepSize,
+  };
+
+  if (params.quickAddRequest?.autoConnect) {
+    payload.auto_connect = params.quickAddRequest.autoConnect;
+  }
+
+  const targetGroup = resolveQuickAddTargetGroup(
+    params.nodes,
+    resolvedPosition,
+    params.quickAddRequest,
+    params.groupByStepId
+  );
+
+  if (!targetGroup) return payload;
+
+  const groupPosition = getAbsoluteNodePosition(targetGroup);
+  payload.position = {
+    x: resolvedPosition.x - groupPosition.x,
+    y: resolvedPosition.y - groupPosition.y,
+  };
+  payload.group_id = targetGroup.id;
+
+  return payload;
+};
 
 export function useWorkflowEditor(
   props: WorkflowEditorViewProps,
@@ -57,10 +210,13 @@ export function useWorkflowEditor(
   if (props.document.undoState) {
     undoStore.handleStateUpdate(props.document.undoState);
   }
-  const sendUndo = () => dispatch({ type: 'document.undo', payload: { count: 1 } });
-  const sendRedo = () => dispatch({ type: 'document.redo', payload: { count: 1 } });
-  const handleUndo = () => undoStore.undo(sendUndo);
-  const handleRedo = () => undoStore.redo(sendRedo);
+  undoStore.configureTransport({
+    requestUndo: () =>
+      dispatch({ type: "document.undo", payload: { count: 1 } }),
+    requestRedo: () =>
+      dispatch({ type: "document.redo", payload: { count: 1 } }),
+  });
+
   const {
     onPaneClick,
     onConnect,
@@ -71,12 +227,14 @@ export function useWorkflowEditor(
     onNodeDrag,
     onMoveStart,
     project,
+    fitView,
     getNodes,
     getEdges,
     getSelectedNodes,
     updateNode,
     updateNodeData,
     updateEdge,
+    addSelectedNodes,
     applyNodeChanges,
     applyEdgeChanges,
     removeNodes,
@@ -86,25 +244,26 @@ export function useWorkflowEditor(
     nodesSelectionActive,
   } = useVueFlow();
   const vueFlowRef = ref<InstanceType<typeof VueFlow> | null>(null);
-  const syncResetRef = ref<() => void>(() => { });
+  const syncResetRef = ref<() => void>(() => {});
   const canEdit = computed(() => true);
   const gridSize = GRID_SIZE;
   const isSnapModifierPressed = ref(false);
-  const effectiveSnapToGrid = computed(() => store.snapEnabled || isSnapModifierPressed.value);
+  const effectiveSnapToGrid = computed(
+    () => store.snapEnabled || isSnapModifierPressed.value
+  );
   const activeWorkflow = computed<Workflow>(() => props.document.workflow);
-  const activeDraft = computed<WorkflowDraft | undefined>(() => props.document.workflow.draft);
+  const activeDraft = computed<WorkflowDraft | undefined>(
+    () => props.document.workflow.draft
+  );
   const collabSeq = computed(() => props.collaboration.collabSeq);
-  const activeExpressionPreviews = computed(() => props.document.expressionPreviews);
+  const activeExpressionPreviews = computed(
+    () => props.document.expressionPreviews
+  );
   const activeExecution = computed(() => props.execution.execution);
   const activeStepExecutions = computed(() => props.execution.stepExecutions);
   const activeEditorState = computed(() => props.document.editorState);
   const activePresences = computed(() => props.collaboration.presences);
   const activeCurrentUserId = computed(() => props.collaboration.currentUserId);
-  const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, dispatch });
-  const pins = useWorkflowPins({
-    stepExecutions: () => props.execution.stepExecutions,
-    dispatch,
-  });
   const grouping = useGrouping({
     workflow: () => props.document.workflow,
     activeDraft: () => activeDraft.value,
@@ -127,18 +286,7 @@ export function useWorkflowEditor(
     presences: () => props.collaboration.presences,
     currentUserId: () => props.collaboration.currentUserId,
     canEdit: () => canEdit.value,
-    onRunNode: nodeActions.handleRunNode,
-    onUpdateGroup: nodeActions.handleUpdateGroup,
-    onUpdateStep: nodeActions.handleUpdateStep,
-    onMoveSteps: nodeActions.handleMoveSteps,
-    onEmitInteraction: (cursor, dragging_steps, dragging_groups) =>
-      collaboration.emitInteraction(cursor?.x, cursor?.y, dragging_steps, dragging_groups),
-    onCommitDragLayout: payload =>
-      dispatch({ type: 'document.layout.commit', payload }),
     collabSeq: () => collabSeq.value,
-    onToggleDisabled: nodeActions.handleToggleDisabled,
-    onTogglePin: pins.handleTogglePin,
-    onHandleQuickAdd: handleNodeHandleQuickAdd,
     groupingPreview: () => grouping.groupingPreview.value,
   });
   const { edges } = useWorkflowEdges({
@@ -160,7 +308,11 @@ export function useWorkflowEditor(
     incomingConnectionsByTargetInputByStepId,
     upstreamStepIdsByStepId,
   } = useWorkflowGraph(() => activeWorkflow.value);
-  const nodeTypes: NodeTypesObject = { step: markRaw(WorkflowStepNode), subnode: markRaw(WorkflowSubNode), group: markRaw(GroupNode) };
+  const nodeTypes: NodeTypesObject = {
+    step: markRaw(WorkflowStepNode),
+    subnode: markRaw(WorkflowSubNode),
+    group: markRaw(GroupNode),
+  };
   const edgeTypes: EdgeTypesObject = workflowEdgeTypes;
   const collaboration = useCollaboration({
     presences: () => props.collaboration.presences,
@@ -172,8 +324,9 @@ export function useWorkflowEditor(
     store,
   });
   const syncSelectionState = () => {
-    const selectedNodes =
-      getSelectedNodes.value as Parameters<typeof collaboration.handleSelectionChange>[0]['nodes'];
+    const selectedNodes = getSelectedNodes.value as Parameters<
+      typeof collaboration.handleSelectionChange
+    >[0]["nodes"];
 
     collaboration.handleSelectionChange({ nodes: selectedNodes });
     nodesSelectionActive.value = selectedNodes.length > 1;
@@ -185,11 +338,15 @@ export function useWorkflowEditor(
     nodesSelectionActive.value = event.nodes.length > 1;
   };
   watch(
-    () => getSelectedNodes.value.map(node => node.id).sort().join(','),
+    () =>
+      getSelectedNodes.value
+        .map((node) => node.id)
+        .sort((left, right) => left.localeCompare(right))
+        .join(","),
     () => {
       syncSelectionState();
     },
-    { flush: 'sync', immediate: true }
+    { flush: "sync", immediate: true }
   );
   const canvas = useCanvasInteraction({
     canEdit: () => canEdit.value,
@@ -198,10 +355,10 @@ export function useWorkflowEditor(
     getSelectedNodes: () => getSelectedNodes.value,
     emitInteraction: collaboration.emitInteraction,
     updateGroupingPreview: grouping.updateGroupingPreview,
-    onAddStep: payload => dispatch({ type: 'document.step.add', payload }),
+    onAddStep: (payload) => dispatch({ type: "document.step.add", payload }),
   });
   const setCanvasRef: VNodeRef = (element) => {
-    if (typeof HTMLElement !== 'undefined' && element instanceof HTMLElement) {
+    if (typeof HTMLElement !== "undefined" && element instanceof HTMLElement) {
       canvas.canvasRef.value = element;
       return;
     }
@@ -212,7 +369,7 @@ export function useWorkflowEditor(
       vueFlowRef.value = null;
       return;
     }
-    if (typeof HTMLElement !== 'undefined' && instance instanceof HTMLElement) {
+    if (typeof HTMLElement !== "undefined" && instance instanceof HTMLElement) {
       vueFlowRef.value = null;
       return;
     }
@@ -251,6 +408,13 @@ export function useWorkflowEditor(
     dispatch,
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
+  const workflowCommands = useWorkflowCommands({
+    canEdit: () => canEdit.value,
+    dispatch,
+    stepExecutions: () => props.execution.stepExecutions,
+    requestNodeRemoval: nodeInteraction.requestNodeRemoval,
+    selectNode: store.selectNode,
+  });
   const handleNodeClick = (
     event: Parameters<typeof nodeInteraction.handleNodeClick>[0]
   ) => {
@@ -258,7 +422,8 @@ export function useWorkflowEditor(
 
     const nativeEvent = event.event;
     if (!(nativeEvent instanceof MouseEvent)) return;
-    if (!nativeEvent.shiftKey && !nativeEvent.metaKey && !nativeEvent.ctrlKey) return;
+    if (!nativeEvent.shiftKey && !nativeEvent.metaKey && !nativeEvent.ctrlKey)
+      return;
 
     // Vue Flow clears nodesSelectionActive on node clicks.
     // Re-sync it after modifier-based additive selection updates are applied.
@@ -296,50 +461,20 @@ export function useWorkflowEditor(
     dispatch,
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
-  syncResetRef.value = () => { nodeInteraction.resetPendingNodeRemovals(); edgeInteraction.resetPendingEdgeRemovals(); };
-  const nodeLibraryItems = computed<NodeLibraryItem[]>(() => props.catalog.nodeLibraryItems);
+  syncResetRef.value = () => {
+    nodeInteraction.resetPendingNodeRemovals();
+    edgeInteraction.resetPendingEdgeRemovals();
+  };
+  const nodeLibraryItems = computed<NodeLibraryItem[]>(
+    () => props.catalog.nodeLibraryItems
+  );
   const isAddStepPickerOpen = ref(false);
   const addStepPickerX = ref(0);
   const addStepPickerY = ref(0);
   const pendingHandleQuickAdd = ref<StepHandleQuickAddRequest | null>(null);
-  const addStepPickerItems = computed<NodeLibraryItem[]>(() => {
-    const quickAddRequest = pendingHandleQuickAdd.value;
-    if (!quickAddRequest) return nodeLibraryItems.value;
-
-    if (quickAddRequest.filter.mode === 'output') {
-      return nodeLibraryItems.value.filter(item => {
-        const isRootNode = item.node_role !== 'subnode';
-        return isRootNode && item.step_kind !== 'trigger';
-      });
-    }
-
-    const acceptedTypeIds = quickAddRequest.filter.accepted_type_ids ?? [];
-
-    return nodeLibraryItems.value.filter(item => {
-      if (item.node_role !== 'subnode') return false;
-      if (acceptedTypeIds.length === 0) return true;
-      return acceptedTypeIds.includes(item.type_id);
-    });
-  });
-
-  const resolveAddStepSize = (typeId: string) => {
-    const selectedItem = nodeLibraryItems.value.find(item => item.type_id === typeId);
-    const isSubnode = selectedItem?.node_role === 'subnode';
-    const nodeType = isSubnode ? 'subnode' : 'step';
-
-    const measuredNode = getNodes.value.find(
-      node => node.type === nodeType && node.dimensions.width > 0 && node.dimensions.height > 0
-    );
-
-    if (measuredNode) {
-      return {
-        width: measuredNode.dimensions.width,
-        height: measuredNode.dimensions.height,
-      };
-    }
-
-    return isSubnode ? SUBNODE_FALLBACK_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
-  };
+  const addStepPickerItems = computed<NodeLibraryItem[]>(() =>
+    buildAddStepPickerItems(nodeLibraryItems.value, pendingHandleQuickAdd.value)
+  );
 
   const openAddStepPicker = (
     screenPoint: { x: number; y: number },
@@ -365,84 +500,88 @@ export function useWorkflowEditor(
       return;
     }
 
-    const quickAddRequest = pendingHandleQuickAdd.value;
-    const stepSize = resolveAddStepSize(typeId);
-    const resolvedPosition =
-      quickAddRequest?.filter.mode === 'output'
-        ? {
-          x: position.x + QUICK_ADD_OUTPUT_X_OFFSET,
-          y: position.y - stepSize.height / 2,
-        }
-        : position;
+    const addStepPayload = buildAddStepPayload({
+      typeId,
+      position,
+      quickAddRequest: pendingHandleQuickAdd.value,
+      nodeLibraryItems: nodeLibraryItems.value,
+      nodes: getNodes.value,
+      groupByStepId: grouping.groupByStepId.value,
+    });
 
-    const addStepPayload: {
-      type_id: string;
-      position: { x: number; y: number };
-      group_id?: string;
-      auto_connect?: StepHandleQuickAddRequest['autoConnect'];
-      step_size?: { width: number; height: number };
-    } = {
-      type_id: typeId,
-      position: resolvedPosition,
-      step_size: stepSize,
-    };
-
-    const autoConnect = quickAddRequest?.autoConnect;
-    if (autoConnect) {
-      addStepPayload.auto_connect = autoConnect;
-    }
-
-    let targetGroup = findGroupAtPoint(resolvedPosition, getNodes.value);
-
-    if (!targetGroup && quickAddRequest) {
-      const fixedStepId =
-        quickAddRequest.autoConnect.source_step_id ?? quickAddRequest.autoConnect.target_step_id;
-      const fixedGroupId = fixedStepId ? grouping.groupByStepId.value.get(fixedStepId) : undefined;
-
-      if (fixedGroupId) {
-        const matchingGroupNode = getNodes.value.find(
-          node => node.id === fixedGroupId && node.type === 'group'
-        );
-        if (matchingGroupNode) {
-          targetGroup = matchingGroupNode;
-        }
-      }
-    }
-
-    if (targetGroup) {
-      const groupPosition = getAbsoluteNodePosition(targetGroup);
-      addStepPayload.position = {
-        x: resolvedPosition.x - groupPosition.x,
-        y: resolvedPosition.y - groupPosition.y,
-      };
-      addStepPayload.group_id = targetGroup.id;
-    }
-
-    dispatch({ type: 'document.step.add', payload: addStepPayload });
+    dispatch({ type: "document.step.add", payload: addStepPayload });
     closeAddStepPicker();
+  };
+  const stepCommands = {
+    ...workflowCommands.step,
+    quickAdd: handleNodeHandleQuickAdd,
+  } satisfies NonNullable<WorkflowSceneController["step"]>;
+  const groupCommands = {
+    ...workflowCommands.group,
+    commitDragLayout: (payload) =>
+      dispatch({ type: "document.layout.commit", payload }),
+    emitInteraction: (cursor, draggingSteps, draggingGroups) =>
+      collaboration.emitInteraction(
+        cursor?.x,
+        cursor?.y,
+        draggingSteps,
+        draggingGroups
+      ),
+  } satisfies NonNullable<WorkflowSceneController["group"]>;
+  const commands = {
+    document: {
+      save: workflowCommands.document.save,
+      undo: undoStore.requestUndo,
+      redo: undoStore.requestRedo,
+    },
+    execution: workflowCommands.execution,
+    selection: workflowCommands.selection,
+    inspector: workflowCommands.inspector,
+    step: stepCommands,
+    group: groupCommands,
   };
   const contextMenu = useContextMenu({
     store,
     canEdit: () => canEdit.value,
-    tidyLabel: () => (getSelectedNodes.value.length > 1 ? 'Tidy Up Selection' : 'Tidy Up Workflow'),
-    canPaste: () => clipboard.canPaste.value,
-    openAddStepPicker,
-    canGroupSelection: () => grouping.canGroupSelection.value,
-    canUngroupSelection: () => grouping.canUngroupSelection.value,
-    findStepNodeById: nodeInteraction.findStepNodeById,
-    resolveActiveNodeIds: clipboard.resolveActiveNodeIds,
-    createGroupFromSelection: grouping.createGroupFromSelection,
-    ungroupSelectedSteps: grouping.ungroupSelectedSteps,
-    removeGroup: grouping.removeGroup,
-    handleLayout: layoutEngine.handleLayout,
-    handleRunNode: nodeActions.handleRunNode,
-    handleToggleDisabled: nodeActions.handleToggleDisabled,
-    handleDuplicateSteps: clipboard.handleDuplicateSteps,
-    handleCopySteps: clipboard.handleCopySteps,
-    handleCutSteps: clipboard.handleCutSteps,
-    handlePasteSteps: clipboard.handlePasteSteps,
-    requestNodeRemoval: nodeInteraction.requestNodeRemoval,
-    handleTogglePin: pins.handleTogglePin,
+    state: {
+      tidyLabel: () =>
+        getSelectedNodes.value.length > 1
+          ? "Tidy Up Selection"
+          : "Tidy Up Workflow",
+      canPaste: () => clipboard.canPaste.value,
+      canGroupSelection: () => grouping.canGroupSelection.value,
+      canUngroupSelection: () => grouping.canUngroupSelection.value,
+    },
+    lookup: {
+      findStepNodeById: nodeInteraction.findStepNodeById,
+      resolveActiveNodeIds: clipboard.resolveActiveNodeIds,
+    },
+    commands: {
+      canvas: {
+        openAddStepPicker,
+        fitView,
+        selectAll: () => addSelectedNodes(getNodes.value),
+      },
+      group: {
+        createFromSelection: grouping.createGroupFromSelection,
+        ungroupSelection: grouping.ungroupSelectedSteps,
+        remove: grouping.removeGroup,
+        tidy: layoutEngine.handleLayout,
+      },
+      clipboard: {
+        duplicate: clipboard.handleDuplicateSteps,
+        copy: clipboard.handleCopySteps,
+        cut: clipboard.handleCutSteps,
+        paste: clipboard.handlePasteSteps,
+      },
+      step: {
+        inspect: store.openConfigModal,
+        remove: nodeInteraction.requestNodeRemoval,
+        run: commands.step.run,
+        toggleDisabled: commands.step.toggleDisabled,
+        togglePin: commands.step.togglePin,
+      },
+    },
   });
   const keyboard = useKeyboardShortcuts({
     canEdit: () => canEdit.value,
@@ -455,35 +594,32 @@ export function useWorkflowEditor(
     handleCutSteps: clipboard.handleCutSteps,
     createGroupFromSelection: grouping.createGroupFromSelection,
     ungroupSelectedSteps: grouping.ungroupSelectedSteps,
-    undo: undoStore.undo,
-    redo: undoStore.redo,
-    sendUndo,
-    sendRedo,
-  });
-  const actions = useWorkflowActions({
-    canEdit: () => canEdit.value,
-    dispatch,
-    requestNodeRemoval: nodeInteraction.requestNodeRemoval,
-    selectNode: store.selectNode,
+    requestUndo: commands.document.undo,
+    requestRedo: commands.document.redo,
   });
   const selection = useWorkflowSelection({
     nodes: () => nodes.value,
     selectedNodeId: () => store.selectedNodeId,
     stepTypes: () => props.catalog.stepTypes,
   });
-  const executionState = useWorkflowExecutionState({ execution: () => props.execution.execution });
+  const executionState = useWorkflowExecutionState({
+    execution: () => props.execution.execution,
+  });
   const miniMap = useMiniMapNodeColor();
   const closeContextMenu = () => store.hideContextMenu();
-  useLiveEvent<any>('workflow:undo_state', payload => {
+  useLiveEvent<UndoState>("workflow:undo_state", (payload) => {
     undoStore.handleStateUpdate(payload);
   });
-  useLiveEvent('workflow:undo_applied', () => undoStore.handleUndoApplied());
-  useLiveEvent('workflow:undo_conflict', () => undoStore.handleUndoConflict());
-  useLiveEvent('workflow:redo_applied', () => undoStore.handleRedoApplied());
-  useLiveEvent('workflow:redo_conflict', () => undoStore.handleRedoConflict());
-  useLiveEvent<any>('workflow:operation_ack', payload => {
-    workflowTrace('server_ack', payload ?? {});
-  });
+  useLiveEvent("workflow:undo_applied", () => undoStore.resolveUndoRequest());
+  useLiveEvent("workflow:undo_conflict", () => undoStore.resolveUndoRequest());
+  useLiveEvent("workflow:redo_applied", () => undoStore.resolveRedoRequest());
+  useLiveEvent("workflow:redo_conflict", () => undoStore.resolveRedoRequest());
+  useLiveEvent<Record<string, unknown> | null>(
+    "workflow:operation_ack",
+    (payload) => {
+      workflowTrace("server_ack", payload ?? {});
+    }
+  );
 
   const syncSnapModifierState = (event: KeyboardEvent) => {
     isSnapModifierPressed.value = event.metaKey || event.ctrlKey;
@@ -495,15 +631,15 @@ export function useWorkflowEditor(
 
   onMounted(() => {
     keyboard.registerShortcuts();
-    window.addEventListener('keydown', syncSnapModifierState);
-    window.addEventListener('keyup', syncSnapModifierState);
-    window.addEventListener('blur', resetSnapModifierState);
+    window.addEventListener("keydown", syncSnapModifierState);
+    window.addEventListener("keyup", syncSnapModifierState);
+    window.addEventListener("blur", resetSnapModifierState);
   });
   onBeforeUnmount(() => {
     keyboard.unregisterShortcuts();
-    window.removeEventListener('keydown', syncSnapModifierState);
-    window.removeEventListener('keyup', syncSnapModifierState);
-    window.removeEventListener('blur', resetSnapModifierState);
+    window.removeEventListener("keydown", syncSnapModifierState);
+    window.removeEventListener("keyup", syncSnapModifierState);
+    window.removeEventListener("blur", resetSnapModifierState);
   });
   onPaneClick(() => {
     store.hideContextMenu();
@@ -560,18 +696,7 @@ export function useWorkflowEditor(
     addStepPickerY,
     closeAddStepPicker,
     handleAddStepPickerSelect,
-    handleRunTest: actions.handleRunTest,
-    handleCancelExecution: actions.handleCancelExecution,
-    handleRunNode: nodeActions.handleRunNode,
-    handleUndo,
-    handleRedo,
-    handleSaveConfig: actions.handleSaveConfig,
-    handleDeleteStep: actions.handleDeleteStep,
-    handleSave: actions.handleSave,
-    handlePreviewExpression: actions.handlePreviewExpression,
-    handlePinOutput: pins.handlePinOutput,
-    handleUnpinOutput: pins.handleUnpinOutput,
-    selectTraceStep: actions.selectTraceStep,
+    commands,
     expressionPreviews: activeExpressionPreviews,
     nodeLibraryItems,
     addStepPickerItems,

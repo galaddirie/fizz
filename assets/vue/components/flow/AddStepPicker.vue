@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import type { NodeLibraryItem } from '@/types/workflow';
-import { getStepIcon, isImageIcon } from '@/lib/stepIcons';
-import { useThemeStore } from '@/stores/theme';
-import { MagnifyingGlassIcon } from '@heroicons/vue/24/outline';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import type { NodeLibraryItem } from "@/types/workflow";
+import { getStepIcon, isImageIcon } from "@/lib/stepIcons";
+import { useThemeStore } from "@/stores/theme";
+import { MagnifyingGlassIcon } from "@heroicons/vue/24/outline";
 
 interface Props {
   show: boolean;
@@ -21,30 +21,30 @@ const emit = defineEmits<{
 const pickerRef = ref<HTMLElement>();
 const searchInputRef = ref<HTMLInputElement>();
 const listRef = ref<HTMLElement>();
-const searchQuery = ref('');
+const searchQuery = ref("");
 const highlightedIndex = ref(0);
 
 const themeStore = useThemeStore();
 
 const kindStyles = computed(() => ({
-  trigger: 'text-primary',
-  action: 'text-info',
-  transform: themeStore.theme === 'dark' ? 'text-secondary' : 'text-info',
-  control_flow: 'text-warning',
+  trigger: "text-primary",
+  action: "text-info",
+  transform: themeStore.theme === "dark" ? "text-secondary" : "text-info",
+  control_flow: "text-warning",
 }));
 
 const filteredItems = computed(() => {
   const query = searchQuery.value.trim().toLowerCase();
   if (!query) return props.items;
 
-  return props.items.filter(item =>
-    item.name.toLowerCase().includes(query) ||
-    item.description.toLowerCase().includes(query) ||
-    item.type_id.toLowerCase().includes(query)
+  return props.items.filter(
+    (item) =>
+      item.name.toLowerCase().includes(query) ||
+      item.description.toLowerCase().includes(query) ||
+      item.type_id.toLowerCase().includes(query)
   );
 });
 
-/** Items grouped by category, sorted alphabetically. */
 const groupedItems = computed(() => {
   const map = new Map<string, NodeLibraryItem[]>();
 
@@ -57,24 +57,23 @@ const groupedItems = computed(() => {
     group.push(item);
   }
 
-  // Sort items within each category
-  Array.from(map.values()).forEach(items => {
-    items.sort((a: NodeLibraryItem, b: NodeLibraryItem) => a.name.localeCompare(b.name));
+  Array.from(map.values()).forEach((items) => {
+    items.sort((a: NodeLibraryItem, b: NodeLibraryItem) =>
+      a.name.localeCompare(b.name)
+    );
   });
 
-  // Sort categories alphabetically
   return Array.from(map.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([category, items]) => ({ category, items }));
 });
 
-/** Flat list in display order, derived from groupedItems. Used for keyboard navigation. */
 const flatItems = computed(() => {
-  return groupedItems.value.flatMap(g => g.items);
+  return groupedItems.value.flatMap((g) => g.items);
 });
 
 const adjustedPosition = computed(() => {
-  if (!props.show || typeof window === 'undefined') {
+  if (!props.show || typeof window === "undefined") {
     return { x: props.x, y: props.y };
   }
 
@@ -84,7 +83,11 @@ const adjustedPosition = computed(() => {
   const categoryHeaderHeight = 28;
   const categoryCount = groupedItems.value.length;
   const itemCount = Math.min(flatItems.value.length, 7);
-  const estimatedHeight = headerHeight + itemCount * rowHeight + categoryCount * categoryHeaderHeight + 40;
+  const estimatedHeight =
+    headerHeight +
+    itemCount * rowHeight +
+    categoryCount * categoryHeaderHeight +
+    40;
   const padding = 8;
 
   let x = props.x;
@@ -103,16 +106,16 @@ const adjustedPosition = computed(() => {
 
 watch(
   () => props.show,
-  async show => {
+  async (show) => {
     if (!show) return;
-    searchQuery.value = '';
+    searchQuery.value = "";
     highlightedIndex.value = 0;
     await nextTick();
     searchInputRef.value?.focus();
   }
 );
 
-watch(flatItems, items => {
+watch(flatItems, (items) => {
   if (items.length === 0) {
     highlightedIndex.value = -1;
     return;
@@ -127,16 +130,16 @@ const scrollHighlightedIntoView = () => {
   if (!listRef.value) return;
   const el = listRef.value.querySelector('[data-highlighted="true"]');
   if (el) {
-    el.scrollIntoView({ block: 'nearest' });
+    el.scrollIntoView({ block: "nearest" });
   }
 };
 
-const closePicker = () => emit('close');
+const closePicker = () => emit("close");
 
 const selectStep = (item?: NodeLibraryItem) => {
   if (!item) return;
-  emit('select', item.type_id);
-  emit('close');
+  emit("select", item.type_id);
+  emit("close");
 };
 
 const handleClickOutside = (event: MouseEvent) => {
@@ -148,7 +151,7 @@ const handleClickOutside = (event: MouseEvent) => {
 
 const handleKeydown = (event: KeyboardEvent) => {
   if (!props.show) return;
-  if (event.key === 'Escape') {
+  if (event.key === "Escape") {
     event.preventDefault();
     closePicker();
     return;
@@ -157,39 +160,40 @@ const handleKeydown = (event: KeyboardEvent) => {
   const items = flatItems.value;
   if (items.length === 0) return;
 
-  if (event.key === 'ArrowDown') {
+  if (event.key === "ArrowDown") {
     event.preventDefault();
     highlightedIndex.value = (highlightedIndex.value + 1) % items.length;
     nextTick(scrollHighlightedIntoView);
     return;
   }
 
-  if (event.key === 'ArrowUp') {
+  if (event.key === "ArrowUp") {
     event.preventDefault();
-    highlightedIndex.value = (highlightedIndex.value - 1 + items.length) % items.length;
+    highlightedIndex.value =
+      (highlightedIndex.value - 1 + items.length) % items.length;
     nextTick(scrollHighlightedIntoView);
     return;
   }
 
-  if (event.key === 'Enter') {
+  if (event.key === "Enter") {
     event.preventDefault();
     selectStep(items[highlightedIndex.value]);
   }
 };
 
-/** Map an item to its flat index across all groups. */
 const flatIndexOf = (item: NodeLibraryItem) => flatItems.value.indexOf(item);
 
-const kindClass = (item: NodeLibraryItem) => kindStyles.value[item.step_kind] ?? '';
+const kindClass = (item: NodeLibraryItem) =>
+  kindStyles.value[item.step_kind] ?? "";
 
 onMounted(() => {
-  document.addEventListener('mousedown', handleClickOutside);
-  document.addEventListener('keydown', handleKeydown);
+  document.addEventListener("mousedown", handleClickOutside);
+  document.addEventListener("keydown", handleKeydown);
 });
 
 onUnmounted(() => {
-  document.removeEventListener('mousedown', handleClickOutside);
-  document.removeEventListener('keydown', handleKeydown);
+  document.removeEventListener("mousedown", handleClickOutside);
+  document.removeEventListener("keydown", handleKeydown);
 });
 </script>
 
@@ -207,12 +211,16 @@ onUnmounted(() => {
         v-if="show"
         ref="pickerRef"
         class="bg-base-100 border-base-300 fixed z-[1150] w-[280px] max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border shadow-xl"
-        :style="{ left: `${adjustedPosition.x}px`, top: `${adjustedPosition.y}px` }"
+        :style="{
+          left: `${adjustedPosition.x}px`,
+          top: `${adjustedPosition.y}px`,
+        }"
       >
-        <!-- Search -->
         <div class="p-2 pb-0">
           <div class="group relative">
-            <MagnifyingGlassIcon class="text-base-content/30 group-focus-within:text-primary absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transition-colors" />
+            <MagnifyingGlassIcon
+              class="text-base-content/30 group-focus-within:text-primary absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transition-colors"
+            />
             <input
               ref="searchInputRef"
               v-model="searchQuery"
@@ -223,11 +231,14 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Items -->
-        <div ref="listRef" class="custom-scrollbar max-h-[360px] overflow-y-auto p-2">
+        <div
+          ref="listRef"
+          class="custom-scrollbar max-h-[360px] overflow-y-auto p-2"
+        >
           <template v-for="group in groupedItems" :key="group.category">
-            <!-- Category header -->
-            <div class="text-base-content/40 mt-2 mb-1 px-2 text-[11px] font-semibold tracking-wider uppercase first:mt-0">
+            <div
+              class="text-base-content/40 mt-2 mb-1 px-2 text-[11px] font-semibold tracking-wider uppercase first:mt-0"
+            >
               {{ group.category }}
             </div>
 
@@ -250,17 +261,31 @@ onUnmounted(() => {
                     : 'bg-base-200/50 border-base-200/50',
                 ]"
               >
-                <img v-if="isImageIcon(item.icon)" :src="item.icon" alt="" class="h-4 w-4 object-contain" />
-                <component v-else :is="getStepIcon(item.icon)" class="h-4 w-4" />
+                <img
+                  v-if="isImageIcon(item.icon)"
+                  :src="item.icon"
+                  alt=""
+                  class="h-4 w-4 object-contain"
+                />
+                <component
+                  v-else
+                  :is="getStepIcon(item.icon)"
+                  class="h-4 w-4"
+                />
               </div>
               <div class="min-w-0 flex-1 py-0.5">
-                <span class="text-base-content/90 block truncate text-sm font-medium leading-tight">{{ item.name }}</span>
-                <span class="text-base-content/40 block truncate text-xs leading-snug">{{ item.description }}</span>
+                <span
+                  class="text-base-content/90 block truncate text-sm font-medium leading-tight"
+                  >{{ item.name }}</span
+                >
+                <span
+                  class="text-base-content/40 block truncate text-xs leading-snug"
+                  >{{ item.description }}</span
+                >
               </div>
             </button>
           </template>
 
-          <!-- Empty state -->
           <div
             v-if="flatItems.length === 0"
             class="flex flex-col items-center justify-center py-8 text-center"
@@ -270,19 +295,29 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Footer hint -->
         <div class="border-base-200 border-t px-3 py-1.5">
-          <div class="text-base-content/30 flex items-center justify-between text-[11px]">
+          <div
+            class="text-base-content/30 flex items-center justify-between text-[11px]"
+          >
             <span>
-              <kbd class="bg-base-200/60 rounded px-1 py-0.5 font-mono text-[10px]">&uarr;&darr;</kbd>
+              <kbd
+                class="bg-base-200/60 rounded px-1 py-0.5 font-mono text-[10px]"
+                >&uarr;&darr;</kbd
+              >
               navigate
             </span>
             <span>
-              <kbd class="bg-base-200/60 rounded px-1 py-0.5 font-mono text-[10px]">&crarr;</kbd>
+              <kbd
+                class="bg-base-200/60 rounded px-1 py-0.5 font-mono text-[10px]"
+                >&crarr;</kbd
+              >
               select
             </span>
             <span>
-              <kbd class="bg-base-200/60 rounded px-1 py-0.5 font-mono text-[10px]">esc</kbd>
+              <kbd
+                class="bg-base-200/60 rounded px-1 py-0.5 font-mono text-[10px]"
+                >esc</kbd
+              >
               close
             </span>
           </div>

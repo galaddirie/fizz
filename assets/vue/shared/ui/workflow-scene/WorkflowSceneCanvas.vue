@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue';
-import { VueFlow } from '@vue-flow/core';
-import { Background } from '@vue-flow/background';
-import { Controls } from '@vue-flow/controls';
-import { MiniMap } from '@vue-flow/minimap';
-import '@vue-flow/controls/dist/style.css';
+import { provide, ref } from "vue";
+import { VueFlow } from "@vue-flow/core";
+import { Background } from "@vue-flow/background";
+import { Controls } from "@vue-flow/controls";
+import { MiniMap } from "@vue-flow/minimap";
+import "@vue-flow/controls/dist/style.css";
 
-import CollaborativeCursors from '@/components/flow/CollaborativeCursors.vue';
-import ExecutionOverlay from '@/components/flow/ExecutionOverlay.vue';
-import { DEFAULT_VIEWPORT } from '@/constants/layout';
-import { oklchToHex } from '@/lib/color';
-import { useWindowEvent } from '@/shared/browser/useWindowEvent';
+import { DEFAULT_VIEWPORT } from "@/constants/layout";
+import { oklchToHex } from "@/lib/color";
+import { useWindowEvent } from "@/shared/browser/useWindowEvent";
 
-import type { WorkflowSceneController, WorkflowSceneModel } from './types';
+import {
+  WorkflowSceneControllerKey,
+  type WorkflowSceneController,
+  type WorkflowSceneModel,
+} from "./types";
 
 interface Props {
   model: WorkflowSceneModel;
@@ -20,20 +22,22 @@ interface Props {
 }
 
 const props = defineProps<Props>();
+provide(WorkflowSceneControllerKey, props.controller);
 
 const isSelectionModifierPressed = ref(false);
 
 const syncSelectionModifierState = (event: KeyboardEvent) => {
-  isSelectionModifierPressed.value = event.shiftKey || event.metaKey || event.ctrlKey;
+  isSelectionModifierPressed.value =
+    event.shiftKey || event.metaKey || event.ctrlKey;
 };
 
 const resetSelectionModifierState = () => {
   isSelectionModifierPressed.value = false;
 };
 
-useWindowEvent('keydown', syncSelectionModifierState);
-useWindowEvent('keyup', syncSelectionModifierState);
-useWindowEvent('blur', resetSelectionModifierState);
+useWindowEvent("keydown", syncSelectionModifierState);
+useWindowEvent("keyup", syncSelectionModifierState);
+useWindowEvent("blur", resetSelectionModifierState);
 </script>
 
 <template>
@@ -86,44 +90,29 @@ useWindowEvent('blur', resetSelectionModifierState);
             aria-label="Toggle snap to grid"
             @click="controller.onToggleSnap?.()"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4! w-4!"><path d="m12 15 4 4"/><path d="M2.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.029-6.029a1 1 0 1 1 3 3l-6.029 6.029a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.365-6.367A1 1 0 0 0 8.716 4.282z"/><path d="m5 8 4 4"/></svg>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="h-4! w-4!"
+            >
+              <path d="m12 15 4 4" />
+              <path
+                d="M2.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.029-6.029a1 1 0 1 1 3 3l-6.029 6.029a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l6.365-6.367A1 1 0 0 0 8.716 4.282z"
+              />
+              <path d="m5 8 4 4" />
+            </svg>
           </button>
         </template>
       </Controls>
       <MiniMap position="bottom-left" :node-color="model.miniMapNodeColor" />
     </VueFlow>
 
-    <div
-      v-if="model.isPreviewActive"
-      class="pointer-events-none absolute left-5 top-5 z-[1100] rounded-2xl border border-primary/20 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary"
-    >
-      <div class="text-[10px] uppercase tracking-[0.2em]">Preview mode</div>
-      <div class="text-xs font-semibold">{{ model.previewLabel }}</div>
-    </div>
-
-    <div
-      v-if="model.isMounted"
-      class="pointer-events-none absolute inset-0 z-[1000]"
-      :style="{
-        transform: `translate(${model.viewport.x}px, ${model.viewport.y}px) scale(${model.viewport.zoom})`,
-        transformOrigin: '0 0',
-      }"
-    >
-      <CollaborativeCursors
-        :presences="model.otherUserPresences"
-        :current-user-id="model.currentUserId"
-        :zoom="model.viewport.zoom"
-      />
-    </div>
-
-    <ExecutionOverlay
-      :is-execution-failed="model.isExecutionFailed"
-      :is-execution-running="model.isExecutionRunning"
-      :is-preview-active="model.isPreviewActive"
-      :workflow-executions-link="model.workflowExecutionsLink"
-      @run="controller.onRunTest?.()"
-      @cancel="controller.onCancelExecution?.()"
-    />
+    <slot name="overlay" />
   </div>
 </template>
 

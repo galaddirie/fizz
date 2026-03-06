@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import { useVueFlow } from '@vue-flow/core';
-import type { NodeProps } from '@vue-flow/core';
-import type { GroupNodeData } from '@/shared/ui/workflow-scene/types';
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useVueFlow } from "@vue-flow/core";
+import type { NodeProps } from "@vue-flow/core";
+import {
+  WorkflowSceneControllerKey,
+  type GroupNodeData,
+} from "@/shared/ui/workflow-scene/types";
 import {
   DEFAULT_GROUP_COLOR,
   DEFAULT_GROUP_DIMENSIONS,
@@ -10,15 +13,15 @@ import {
   DEFAULT_NODE_DIMENSIONS,
   GROUP_NAME_FONT_SIZE_MAX,
   GROUP_NAME_FONT_SIZE_MIN,
-} from '@/constants/layout';
+} from "@/constants/layout";
 import {
   GROUP_CONTENT_INSETS,
   getGroupContentRect,
-} from '@/lib/workflowGeometry';
-import { workflowTrace } from '@/lib/workflowTrace';
-import { isStepNode } from '@/lib/workflowGuards';
-import { useThemeStore } from '@/stores/theme';
-import { PencilIcon } from '@heroicons/vue/24/outline';
+} from "@/lib/workflowGeometry";
+import { workflowTrace } from "@/lib/workflowTrace";
+import { isStepNode } from "@/lib/workflowGuards";
+import { useThemeStore } from "@/stores/theme";
+import { PencilIcon } from "@heroicons/vue/24/outline";
 
 // Simple debounce utility
 function debounce<T extends (...args: any[]) => any>(
@@ -33,11 +36,12 @@ function debounce<T extends (...args: any[]) => any>(
 }
 
 const props = defineProps<NodeProps<GroupNodeData>>();
+const sceneController = inject(WorkflowSceneControllerKey, null);
 const { getNodes, updateNode, project } = useVueFlow();
 const themeStore = useThemeStore();
 const canEdit = computed(() => props.data.canEdit ?? true);
 
-const DEFAULT_NAME = 'Group';
+const DEFAULT_NAME = "Group";
 const MIN_GROUP_WIDTH = 240;
 const MIN_GROUP_HEIGHT = 180;
 
@@ -48,7 +52,7 @@ const colorInputRef = ref<HTMLInputElement | null>(null);
 
 watch(
   () => props.data.name,
-  name => {
+  (name) => {
     if (!isEditing.value) {
       nameDraft.value = name || DEFAULT_NAME;
     }
@@ -62,7 +66,7 @@ const normalizeHexColor = (color?: string) => {
 };
 
 const hexToRgba = (hex: string, alpha: number) => {
-  const normalized = hex.replace('#', '');
+  const normalized = hex.replace("#", "");
   const r = parseInt(normalized.slice(0, 2), 16);
   const g = parseInt(normalized.slice(2, 4), 16);
   const b = parseInt(normalized.slice(4, 6), 16);
@@ -73,10 +77,12 @@ const accentColor = computed(() => normalizeHexColor(props.data.color));
 const isGroupingTarget = computed(() => !!props.data.isGroupingTarget);
 const nodeStyle = computed(() => {
   const accent = accentColor.value;
-  const selectionRing = props.selected ? `, 0 0 0 2px ${hexToRgba(accent, 0.25)}` : '';
+  const selectionRing = props.selected
+    ? `, 0 0 0 2px ${hexToRgba(accent, 0.25)}`
+    : "";
   const groupRing = isGroupingTarget.value
     ? `, 0 0 0 3px ${groupingRingColor.value}, 0 0 0 6px ${groupingHaloColor.value}`
-    : '';
+    : "";
   return {
     borderColor: hexToRgba(
       accent,
@@ -92,10 +98,14 @@ const outlineStyle = computed(() => ({
 }));
 
 const groupingRingColor = computed(() =>
-  themeStore.theme === 'dark' ? 'rgba(255, 255, 255, 0.35)' : 'rgba(0, 0, 0, 0.65)'
+  themeStore.theme === "dark"
+    ? "rgba(255, 255, 255, 0.35)"
+    : "rgba(0, 0, 0, 0.65)"
 );
 const groupingHaloColor = computed(() =>
-  themeStore.theme === 'dark' ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.12)'
+  themeStore.theme === "dark"
+    ? "rgba(255, 255, 255, 0.12)"
+    : "rgba(0, 0, 0, 0.12)"
 );
 const groupingOutlineStyle = computed(() => ({
   borderColor: groupingRingColor.value,
@@ -108,11 +118,15 @@ const handleStyle = computed(() => ({
 }));
 
 const nodeClasses = computed(() => [
-  'group relative h-full w-full rounded-3xl border bg-base-200/30 p-4 transition-all duration-200 ease-out',
-  props.dragging ? 'cursor-grabbing shadow-lg' : canEdit.value ? 'cursor-grab' : 'cursor-default',
+  "group relative h-full w-full rounded-3xl border bg-base-200/30 p-4 transition-all duration-200 ease-out",
+  props.dragging
+    ? "cursor-grabbing shadow-lg"
+    : canEdit.value
+    ? "cursor-grab"
+    : "cursor-default",
 ]);
 
-type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+type ResizeHandle = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
 
 type ResizeState = {
   handle: ResizeHandle;
@@ -131,19 +145,53 @@ const resizeState = ref<ResizeState | null>(null);
 const isResizing = ref(false);
 
 const resizeHandles: Array<{ id: ResizeHandle; className: string }> = [
-  { id: 'nw', className: 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize' },
-  { id: 'n', className: 'left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize' },
-  { id: 'ne', className: 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize' },
-  { id: 'e', className: 'right-0 top-1/2 translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
-  { id: 'se', className: 'right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize' },
-  { id: 's', className: 'left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-ns-resize' },
-  { id: 'sw', className: 'left-0 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize' },
-  { id: 'w', className: 'left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize' },
+  {
+    id: "nw",
+    className:
+      "left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize",
+  },
+  {
+    id: "n",
+    className:
+      "left-1/2 top-0 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize",
+  },
+  {
+    id: "ne",
+    className:
+      "right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize",
+  },
+  {
+    id: "e",
+    className:
+      "right-0 top-1/2 translate-x-1/2 -translate-y-1/2 cursor-ew-resize",
+  },
+  {
+    id: "se",
+    className:
+      "right-0 bottom-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize",
+  },
+  {
+    id: "s",
+    className:
+      "left-1/2 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-ns-resize",
+  },
+  {
+    id: "sw",
+    className:
+      "left-0 bottom-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize",
+  },
+  {
+    id: "w",
+    className:
+      "left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 cursor-ew-resize",
+  },
 ];
 
 const resizeHandleVisibility = computed(() => {
-  if (!canEdit.value) return 'opacity-0';
-  return isResizing.value || props.selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+  if (!canEdit.value) return "opacity-0";
+  return isResizing.value || props.selected
+    ? "opacity-100"
+    : "opacity-0 group-hover:opacity-100";
 });
 
 const getStepPositions = () => {
@@ -151,7 +199,7 @@ const getStepPositions = () => {
   const stepIds = new Set(props.data.step_ids || []);
   if (stepIds.size === 0) return positions;
 
-  getNodes.value.forEach(node => {
+  getNodes.value.forEach((node) => {
     if (!isStepNode(node)) return;
     if (!stepIds.has(node.id)) return;
     positions[node.id] = { x: node.position.x, y: node.position.y };
@@ -160,13 +208,13 @@ const getStepPositions = () => {
   return positions;
 };
 
-const getStepSizes = (stepPositions: ResizeState['stepPositions']) => {
-  const sizes: ResizeState['stepSizes'] = {};
+const getStepSizes = (stepPositions: ResizeState["stepPositions"]) => {
+  const sizes: ResizeState["stepSizes"] = {};
   const stepIds = Object.keys(stepPositions);
   if (stepIds.length === 0) return sizes;
 
-  const nodeById = new Map(getNodes.value.map(node => [node.id, node]));
-  stepIds.forEach(stepId => {
+  const nodeById = new Map(getNodes.value.map((node) => [node.id, node]));
+  stepIds.forEach((stepId) => {
     const node = nodeById.get(stepId);
     const width = node?.dimensions?.width ?? 0;
     const height = node?.dimensions?.height ?? 0;
@@ -179,7 +227,12 @@ const getStepSizes = (stepPositions: ResizeState['stepPositions']) => {
   return sizes;
 };
 
-const updateGroupBounds = (bounds: { x: number; y: number; width: number; height: number }) => {
+const updateGroupBounds = (bounds: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}) => {
   updateNode(props.id, {
     position: { x: bounds.x, y: bounds.y },
     style: { width: `${bounds.width}px`, height: `${bounds.height}px` },
@@ -189,7 +242,7 @@ const updateGroupBounds = (bounds: { x: number; y: number; width: number; height
 const createTxnId = () =>
   `txn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 
-const applyStepPositions = (stepPositions: ResizeState['stepPositions']) => {
+const applyStepPositions = (stepPositions: ResizeState["stepPositions"]) => {
   Object.entries(stepPositions).forEach(([stepId, position]) => {
     updateNode(stepId, {
       position: {
@@ -201,10 +254,10 @@ const applyStepPositions = (stepPositions: ResizeState['stepPositions']) => {
 };
 
 const getFlowPositionFromPointer = (event: PointerEvent) => {
-  if (typeof document === 'undefined') return null;
+  if (typeof document === "undefined") return null;
 
-  const rootElement = document.querySelector('.vue-flow') as HTMLElement | null;
-  if (!rootElement || typeof project !== 'function') return null;
+  const rootElement = document.querySelector(".vue-flow") as HTMLElement | null;
+  if (!rootElement || typeof project !== "function") return null;
 
   const { left, top } = rootElement.getBoundingClientRect();
   return project({
@@ -214,8 +267,8 @@ const getFlowPositionFromPointer = (event: PointerEvent) => {
 };
 
 const hasStepPositionChanges = (
-  nextPositions: ResizeState['stepPositions'],
-  prevPositions: ResizeState['stepPositions']
+  nextPositions: ResizeState["stepPositions"],
+  prevPositions: ResizeState["stepPositions"]
 ) => {
   for (const [stepId, position] of Object.entries(nextPositions)) {
     const prev = prevPositions[stepId];
@@ -231,11 +284,11 @@ const buildAdjustedStepPositions = (
   delta: { x: number; y: number },
   bounds: { width: number; height: number }
 ) => {
-  const basePositions: ResizeState['stepPositions'] = {};
+  const basePositions: ResizeState["stepPositions"] = {};
   const stepIds = Object.keys(state.stepPositions);
   if (stepIds.length === 0) return basePositions;
 
-  stepIds.forEach(stepId => {
+  stepIds.forEach((stepId) => {
     const position = state.stepPositions[stepId];
     basePositions[stepId] = {
       x: position.x - delta.x,
@@ -248,7 +301,7 @@ const buildAdjustedStepPositions = (
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  stepIds.forEach(stepId => {
+  stepIds.forEach((stepId) => {
     const position = basePositions[stepId];
     const size = state.stepSizes[stepId] ?? DEFAULT_NODE_DIMENSIONS;
     minX = Math.min(minX, position.x);
@@ -281,9 +334,9 @@ const buildAdjustedStepPositions = (
       } else if (maxX > innerRight) {
         shiftX = innerRight - maxX;
       }
-    } else if (state.handle.includes('e')) {
+    } else if (state.handle.includes("e")) {
       shiftX = innerRight - maxX;
-    } else if (state.handle.includes('w')) {
+    } else if (state.handle.includes("w")) {
       shiftX = innerLeft - minX;
     } else {
       shiftX = innerLeft - minX;
@@ -298,9 +351,9 @@ const buildAdjustedStepPositions = (
       } else if (maxY > innerBottom) {
         shiftY = innerBottom - maxY;
       }
-    } else if (state.handle.includes('s')) {
+    } else if (state.handle.includes("s")) {
       shiftY = innerBottom - maxY;
-    } else if (state.handle.includes('n')) {
+    } else if (state.handle.includes("n")) {
       shiftY = innerTop - minY;
     } else {
       shiftY = innerTop - minY;
@@ -309,8 +362,8 @@ const buildAdjustedStepPositions = (
 
   if (shiftX === 0 && shiftY === 0) return basePositions;
 
-  const adjustedPositions: ResizeState['stepPositions'] = {};
-  stepIds.forEach(stepId => {
+  const adjustedPositions: ResizeState["stepPositions"] = {};
+  stepIds.forEach((stepId) => {
     const position = basePositions[stepId];
     adjustedPositions[stepId] = {
       x: position.x + shiftX,
@@ -321,7 +374,10 @@ const buildAdjustedStepPositions = (
   return adjustedPositions;
 };
 
-const getStepBounds = (stepPositions: ResizeState['stepPositions'], stepSizes: ResizeState['stepSizes']) => {
+const getStepBounds = (
+  stepPositions: ResizeState["stepPositions"],
+  stepSizes: ResizeState["stepSizes"]
+) => {
   const stepIds = Object.keys(stepPositions);
   if (stepIds.length === 0) return null;
 
@@ -330,7 +386,7 @@ const getStepBounds = (stepPositions: ResizeState['stepPositions'], stepSizes: R
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  stepIds.forEach(stepId => {
+  stepIds.forEach((stepId) => {
     const position = stepPositions[stepId];
     const size = stepSizes[stepId] ?? DEFAULT_NODE_DIMENSIONS;
     minX = Math.min(minX, position.x);
@@ -355,10 +411,10 @@ const handleResizeMove = (event: PointerEvent) => {
   let nextX = state.startPosition.x;
   let nextY = state.startPosition.y;
 
-  const hasWest = state.handle.includes('w');
-  const hasEast = state.handle.includes('e');
-  const hasNorth = state.handle.includes('n');
-  const hasSouth = state.handle.includes('s');
+  const hasWest = state.handle.includes("w");
+  const hasEast = state.handle.includes("e");
+  const hasNorth = state.handle.includes("n");
+  const hasSouth = state.handle.includes("s");
 
   if (hasEast) {
     nextWidth = state.startSize.width + dx;
@@ -388,7 +444,7 @@ const handleResizeMove = (event: PointerEvent) => {
     y: nextY - state.startPosition.y,
   };
 
-  const baseStepPositions: ResizeState['stepPositions'] = {};
+  const baseStepPositions: ResizeState["stepPositions"] = {};
   Object.entries(state.stepPositions).forEach(([stepId, position]) => {
     baseStepPositions[stepId] = {
       x: position.x - delta.x,
@@ -399,11 +455,17 @@ const handleResizeMove = (event: PointerEvent) => {
   const stepBounds = getStepBounds(baseStepPositions, state.stepSizes);
   if (stepBounds) {
     const minWidth = Math.max(
-      stepBounds.maxX - stepBounds.minX + GROUP_CONTENT_INSETS.left + GROUP_CONTENT_INSETS.right,
+      stepBounds.maxX -
+        stepBounds.minX +
+        GROUP_CONTENT_INSETS.left +
+        GROUP_CONTENT_INSETS.right,
       MIN_GROUP_WIDTH
     );
     const minHeight = Math.max(
-      stepBounds.maxY - stepBounds.minY + GROUP_CONTENT_INSETS.top + GROUP_CONTENT_INSETS.bottom,
+      stepBounds.maxY -
+        stepBounds.minY +
+        GROUP_CONTENT_INSETS.top +
+        GROUP_CONTENT_INSETS.bottom,
       MIN_GROUP_HEIGHT
     );
 
@@ -431,10 +493,14 @@ const handleResizeMove = (event: PointerEvent) => {
     x: nextX - state.startPosition.x,
     y: nextY - state.startPosition.y,
   };
-  const nextStepPositions = buildAdjustedStepPositions(state, adjustedDelta, bounds);
+  const nextStepPositions = buildAdjustedStepPositions(
+    state,
+    adjustedDelta,
+    bounds
+  );
   updateGroupBounds(bounds);
   applyStepPositions(nextStepPositions);
-  props.data.onEmitInteraction?.(
+  sceneController?.group?.emitInteraction?.(
     getFlowPositionFromPointer(event),
     Object.keys(nextStepPositions).length > 0 ? nextStepPositions : null,
     {
@@ -442,23 +508,30 @@ const handleResizeMove = (event: PointerEvent) => {
     }
   );
 
-  resizeState.value = { ...state, lastBounds: bounds, lastStepPositions: nextStepPositions };
+  resizeState.value = {
+    ...state,
+    lastBounds: bounds,
+    lastStepPositions: nextStepPositions,
+  };
 };
 
 const stopResize = () => {
   const state = resizeState.value;
   if (!state) return;
 
-  window.removeEventListener('pointermove', handleResizeMove);
-  window.removeEventListener('pointerup', stopResize);
-  window.removeEventListener('pointercancel', stopResize);
+  window.removeEventListener("pointermove", handleResizeMove);
+  window.removeEventListener("pointerup", stopResize);
+  window.removeEventListener("pointercancel", stopResize);
 
   const bounds = state.lastBounds;
   const lastStepPositions = state.lastStepPositions;
   if (bounds) {
     let stepPositionsForCommit: Record<string, { x: number; y: number }> = {};
 
-    if (lastStepPositions && hasStepPositionChanges(lastStepPositions, state.stepPositions)) {
+    if (
+      lastStepPositions &&
+      hasStepPositionChanges(lastStepPositions, state.stepPositions)
+    ) {
       stepPositionsForCommit = lastStepPositions;
     } else if (!lastStepPositions) {
       const delta = {
@@ -477,13 +550,12 @@ const stopResize = () => {
       }
     }
 
-    const groupIdByStepId = Object.keys(stepPositionsForCommit).reduce<Record<string, string>>(
-      (acc, stepId) => {
-        acc[stepId] = props.id;
-        return acc;
-      },
-      {}
-    );
+    const groupIdByStepId = Object.keys(stepPositionsForCommit).reduce<
+      Record<string, string>
+    >((acc, stepId) => {
+      acc[stepId] = props.id;
+      return acc;
+    }, {});
 
     const commitPayload = {
       txn_id: createTxnId(),
@@ -503,17 +575,17 @@ const stopResize = () => {
       group_id_by_step_id: groupIdByStepId,
     };
 
-    workflowTrace('drop_commit_payload', {
-      source: 'group_resize',
+    workflowTrace("drop_commit_payload", {
+      source: "group_resize",
       txn_id: commitPayload.txn_id,
       base_seq: commitPayload.base_seq,
       payload: commitPayload,
     });
 
-    if (props.data.onCommitDragLayout) {
-      props.data.onCommitDragLayout(commitPayload);
+    if (sceneController?.group?.commitDragLayout) {
+      sceneController.group.commitDragLayout(commitPayload);
     } else {
-      props.data.onUpdate?.(props.id, {
+      sceneController?.group?.update?.(props.id, {
         position: {
           x: bounds.x,
           y: bounds.y,
@@ -522,12 +594,12 @@ const stopResize = () => {
         },
       });
       if (Object.keys(stepPositionsForCommit).length > 0) {
-        props.data.onMoveSteps?.(stepPositionsForCommit);
+        sceneController?.group?.moveSteps?.(stepPositionsForCommit);
       }
     }
   }
 
-  props.data.onEmitInteraction?.(null, null, null);
+  sceneController?.group?.emitInteraction?.(null, null, null);
 
   resizeState.value = null;
   isResizing.value = false;
@@ -556,15 +628,15 @@ const startResize = (handle: ResizeHandle, event: PointerEvent) => {
   };
 
   isResizing.value = true;
-  window.addEventListener('pointermove', handleResizeMove);
-  window.addEventListener('pointerup', stopResize);
-  window.addEventListener('pointercancel', stopResize);
+  window.addEventListener("pointermove", handleResizeMove);
+  window.addEventListener("pointerup", stopResize);
+  window.addEventListener("pointercancel", stopResize);
 };
 
 onBeforeUnmount(() => {
-  window.removeEventListener('pointermove', handleResizeMove);
-  window.removeEventListener('pointerup', stopResize);
-  window.removeEventListener('pointercancel', stopResize);
+  window.removeEventListener("pointermove", handleResizeMove);
+  window.removeEventListener("pointerup", stopResize);
+  window.removeEventListener("pointercancel", stopResize);
 });
 
 const startEditing = () => {
@@ -579,7 +651,7 @@ const commitName = () => {
   isEditing.value = false;
 
   if (nextName !== (props.data.name || DEFAULT_NAME)) {
-    props.data.onUpdate?.(props.id, { name: nextName });
+    sceneController?.group?.update?.(props.id, { name: nextName });
   }
 };
 
@@ -589,10 +661,10 @@ const cancelName = () => {
 };
 
 const handleNameKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter') {
+  if (event.key === "Enter") {
     event.preventDefault();
     commitName();
-  } else if (event.key === 'Escape') {
+  } else if (event.key === "Escape") {
     event.preventDefault();
     cancelName();
   }
@@ -604,7 +676,7 @@ const openColorPicker = () => {
 };
 
 const debouncedUpdateColor = debounce((color: string) => {
-  props.data.onUpdate?.(props.id, { color });
+  sceneController?.group?.update?.(props.id, { color });
 }, 300);
 
 const handleColorInput = (event: Event) => {
@@ -615,11 +687,14 @@ const handleColorInput = (event: Event) => {
 };
 
 const clampGroupNameFontSize = (value: number) =>
-  Math.min(GROUP_NAME_FONT_SIZE_MAX, Math.max(GROUP_NAME_FONT_SIZE_MIN, Math.round(value)));
+  Math.min(
+    GROUP_NAME_FONT_SIZE_MAX,
+    Math.max(GROUP_NAME_FONT_SIZE_MIN, Math.round(value))
+  );
 
 const groupNameFontSize = computed(() => {
   const fontSize = props.data.font_size;
-  if (typeof fontSize !== 'number' || !Number.isFinite(fontSize)) {
+  if (typeof fontSize !== "number" || !Number.isFinite(fontSize)) {
     return DEFAULT_GROUP_NAME_FONT_SIZE;
   }
 
@@ -631,7 +706,7 @@ const setGroupNameFontSize = (nextSize: number) => {
 
   const normalizedSize = clampGroupNameFontSize(nextSize);
   if (normalizedSize === groupNameFontSize.value) return;
-  props.data.onUpdate?.(props.id, { font_size: normalizedSize });
+  sceneController?.group?.update?.(props.id, { font_size: normalizedSize });
 };
 
 const adjustGroupNameFontSize = (delta: number) => {
@@ -655,7 +730,6 @@ const adjustGroupNameFontSize = (delta: number) => {
     <div class="relative flex items-start justify-between gap-3">
       <div class="flex min-w-0 items-center gap-2.5">
         <div class="min-w-0">
-
           <div class="flex items-center gap-2">
             <input
               v-if="isEditing && canEdit"
@@ -744,9 +818,11 @@ const adjustGroupNameFontSize = (delta: number) => {
 
     <div
       class="absolute bottom-2 right-2 text-right text-[11px] font-medium transition-colors"
-      :class="isGroupingTarget ? 'text-base-content/70' : 'text-base-content/40'"
+      :class="
+        isGroupingTarget ? 'text-base-content/70' : 'text-base-content/40'
+      "
     >
-      {{ isGroupingTarget ? 'Release to group' : 'Drop nodes to group' }}
+      {{ isGroupingTarget ? "Release to group" : "Drop nodes to group" }}
     </div>
 
     <template v-if="canEdit">
