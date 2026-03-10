@@ -51,13 +51,6 @@ defmodule FizzWeb.Router do
     end
   end
 
-  ## Authentication routes
-  scope "/api", FizzWeb do
-    pipe_through :api
-
-    get "/workflows/:id/contract", WorkflowContractController, :show
-  end
-
   scope "/", FizzWeb do
     pipe_through [:browser]
 
