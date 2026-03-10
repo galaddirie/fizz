@@ -1,4 +1,6 @@
-# Node Executor Design Guide
+# Step Executor Design Guide
+
+In this repo, a workflow "node" is implemented as a step executor module under `Fizz.Steps.Executors`.
 
 ## Core Principle
 
@@ -113,7 +115,7 @@ timeout = Map.get(config, "timeout_ms", 30_000)
 ## Executor Template
 
 ```elixir
-defmodule Fizz.Nodes.Executors.MyNode do
+defmodule Fizz.Steps.Executors.MyStep do
   @moduledoc """
   Brief description of what this node does.
 
@@ -127,9 +129,9 @@ defmodule Fizz.Nodes.Executors.MyNode do
   Description of output shape.
   """
 
-  use Fizz.Nodes.Definition,
-    id: "my_node",
-    name: "My Node",
+  use Fizz.Steps.Definition,
+    id: "my_step",
+    name: "My Step",
     category: "Category",
     description: "What it does",
     icon: "hero-icon-name",
@@ -163,7 +165,7 @@ defmodule Fizz.Nodes.Executors.MyNode do
     }
   }
 
-  @behaviour Fizz.Nodes.Executors.Behaviour
+  @behaviour Fizz.Steps.Executors.Behaviour
 
   @impl true
   def execute(config, _input, _execution) do
@@ -358,7 +360,7 @@ Nodes whose sole purpose is to pass data through unchanged (with optional side e
 **Examples:** Debug/Log, Delay/Wait, Checkpoint
 
 ```elixir
-defmodule Fizz.Nodes.Executors.Wait do
+defmodule Fizz.Steps.Executors.Wait do
   # Config only has options, not data
   @config_schema %{
     "properties" => %{
@@ -385,7 +387,7 @@ Nodes that reshape/filter the incoming data as their primary function.
 **Examples:** Pick Fields, Omit Fields, Flatten, Filter
 
 ```elixir
-defmodule Fizz.Nodes.Executors.Pick do
+defmodule Fizz.Steps.Executors.Pick do
   @config_schema %{
     "required" => ["fields"],
     "properties" => %{
@@ -413,7 +415,7 @@ Nodes that collect or aggregate from multiple runs or branches.
 **Examples:** Batch Collector, Merge Branches, Accumulator
 
 ```elixir
-defmodule Fizz.Nodes.Executors.Merge do
+defmodule Fizz.Steps.Executors.Merge do
   # No data config - merges all parent outputs automatically
   @config_schema %{
     "properties" => %{
@@ -442,7 +444,7 @@ Nodes that receive external data (webhooks, schedules, manual triggers).
 **Examples:** Webhook Trigger, Schedule Trigger, Manual Trigger
 
 ```elixir
-defmodule Fizz.Nodes.Executors.WebhookTrigger do
+defmodule Fizz.Steps.Executors.WebhookTrigger do
   def execute(_config, input, _execution) do
     # input IS the webhook payload - that's the point
     {:ok, input}
@@ -497,6 +499,13 @@ Configure *how* to process the data, not *which* data to process.
 
 @input_schema %{
   "description" => "Receives previous node output automatically"
+
+## Read this next
+
+- [lib/fizz/steps.ex](../../steps.ex)
+- [lib/fizz/steps/registry.ex](../registry.ex)
+- [lib/fizz/runtime/steps/step_runner.ex](../../runtime/steps/step_runner.ex)
+- [lib/fizz/workflows/README.md](../../workflows/README.md)
 }
 ```
 

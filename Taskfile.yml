@@ -34,3 +34,8 @@ tasks:
     desc: Show status of development services
     cmds:
       - docker-compose -f docker-compose.resources.yml ps
+
+  check:
+    desc: Run the full local verification suite
+    cmds:
+      - mix precommit

@@ -99,7 +99,12 @@ defmodule Fizz.MixProject do
       "assets.deploy": [
         "assets.build"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "test"
+      ]
     ]
   end
 end

@@ -8,7 +8,7 @@ It owns:
 - organization/workspace authorization scopes
 - local workspace and workspace membership persistence
 - WorkOS-backed organization identity, auth, and audit integrations
-- user-owned external provider auth persistence via `Fizz.Accounts.ExternalAuth` (ouath via pipes, api keys via vault)
+- user-owned external provider auth persistence via `Fizz.Accounts.ExternalAuth` (oauth via pipes, api keys via vault)
 
 ## Mental model
 
@@ -113,3 +113,10 @@ Frequent reasons include:
 - Keep provider auth persistence in `Fizz.Accounts.ExternalAuth`.
 - Keep provider execution/orchestration logic in `Fizz.Integrations`.
 - Prefer passing a fully resolved `%Fizz.Accounts.Scope{}` into any operation that depends on tenancy or authorization.
+
+## Read this next
+
+- [lib/fizz/integrations.ex](../integrations.ex)
+- [lib/fizz_web/user_auth.ex](../../fizz_web/user_auth.ex)
+- [lib/fizz_web/router.ex](../../fizz_web/router.ex)
+- [lib/fizz_web/live/workspaces_live/show.ex](../../fizz_web/live/workspaces_live/show.ex)
