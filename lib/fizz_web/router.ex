@@ -80,10 +80,6 @@ defmodule FizzWeb.Router do
 
       live "/workspaces/:workspace_id/workflows", WorkflowLive.Index, :index
       live "/workspaces/:workspace_id/workflows/:id", WorkflowLive.Show, :show
-
-      live "/workspaces/:workspace_id/workflows/:workflow_id/execution/:execution_id",
-           ExecutionLive.Show,
-           :show
     end
   end
 end

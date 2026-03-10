@@ -28,7 +28,6 @@ defmodule Fizz.Workflows do
   alias Fizz.Repo
 
   alias Fizz.Workflows.{Workflow, WorkflowVersion, WorkflowDraft}
-  alias Fizz.Executions.Execution
   alias Fizz.Accounts.Scope
 
   @type workflow_params :: %{
@@ -453,45 +452,6 @@ defmodule Fizz.Workflows do
   end
 
   # ============================================================================
-  # Execution Functions
-  # ============================================================================
-
-  @doc """
-  Gets executions for a workflow, checking access permissions.
-
-  Returns a list of executions if the user has access, empty list otherwise.
-  """
-  @spec list_workflow_executions(Scope.t() | nil, Workflow.t()) :: [Execution.t()]
-  def list_workflow_executions(scope, %Workflow{} = workflow) do
-    if Scope.can_view_workflow?(scope, workflow) do
-      Repo.all(
-        from e in Execution,
-          where: e.workflow_id == ^workflow.id,
-          order_by: [desc: e.inserted_at],
-          limit: 100
-      )
-    else
-      []
-    end
-  end
-
-  @doc """
-  Counts executions for a workflow by status.
-
-  Returns a map with status counts.
-  """
-  @spec count_workflow_executions(Workflow.t()) :: %{optional(atom()) => non_neg_integer()}
-  def count_workflow_executions(%Workflow{} = workflow) do
-    query =
-      from e in Execution,
-        where: e.workflow_id == ^workflow.id,
-        select: {e.status, count(e.id)},
-        group_by: e.status
-
-    Repo.all(query) |> Map.new()
-  end
-
-  # ============================================================================
   # Trigger Functions
   # ============================================================================
 
@@ -558,9 +518,9 @@ defmodule Fizz.Workflows do
   Converts a display name into a key-safe step ID.
 
   Uses underscores (not hyphens) to create identifiers safe for use as:
-  - Map keys in execution context
+  - Expression variable namespaces (`steps.<step_id>.json`)
   - Runic component names
-  - Expression variable names (e.g., `steps.my_step.json`)
+  - Connection references
 
   ## Examples
 

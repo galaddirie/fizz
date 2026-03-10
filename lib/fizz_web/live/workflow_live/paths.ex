@@ -7,7 +7,4 @@ defmodule FizzWeb.WorkflowLive.Paths do
 
   def workflow_show_path(%{workspace: %{id: workspace_id}}, workflow_id),
     do: ~p"/workspaces/#{workspace_id}/workflows/#{workflow_id}"
-
-  def execution_show_path(%{workspace: %{id: workspace_id}}, workflow_id, execution_id),
-    do: ~p"/workspaces/#{workspace_id}/workflows/#{workflow_id}/execution/#{execution_id}"
 end

@@ -2,7 +2,6 @@ defmodule Fizz.Accounts.ScopeTest do
   use ExUnit.Case, async: true
 
   alias Fizz.Accounts.Workspace
-  alias Fizz.Executions.Execution
   alias Fizz.Accounts.Scope
   alias Fizz.Workflows.Workflow
 
@@ -71,20 +70,6 @@ defmodule Fizz.Accounts.ScopeTest do
 
     assert Scope.can_edit_workflow?(scope, workflow)
     assert Scope.can_view_workflow?(scope, workflow)
-  end
-
-  test "can_view_execution?/2 delegates to workflow access" do
-    scope = scope_for_workspace("workspace_123", :viewer)
-    execution = %Execution{workflow: %Workflow{workspace_id: "workspace_123"}}
-
-    assert Scope.can_view_execution?(scope, execution)
-  end
-
-  test "can_create_execution?/3 allows nil scope only for production execution in scoped workflows" do
-    scoped_workflow = %Workflow{workspace_id: "workspace_123"}
-
-    assert Scope.can_create_execution?(nil, scoped_workflow, :production)
-    refute Scope.can_create_execution?(nil, scoped_workflow, :preview)
   end
 
   defp scope_for_workspace(workspace_id, workspace_role) do

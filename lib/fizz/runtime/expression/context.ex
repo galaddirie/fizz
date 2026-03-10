@@ -2,12 +2,8 @@ defmodule Fizz.Runtime.Expression.Context do
   @moduledoc """
   Builds the variable context for expression evaluation.
 
-  Transforms an `Fizz.Executions.Execution` struct combined with runtime
-  state from `ExecutionState` into a flat map suitable for Liquid template rendering.
-
-  This module builds the context **on-demand** from the single source of truth:
-  - Static data from `Execution` (trigger, metadata, workflow info)
-  - Dynamic data from `ExecutionState` (step outputs, current input)
+  Transforms a runtime metadata map into a flat map suitable for Liquid template
+  rendering.
 
   ## Variable Structure
 
@@ -27,7 +23,7 @@ defmodule Fizz.Runtime.Expression.Context do
       "id" => "uuid"
     },
     "variables" => %{...workflow variables...},
-    "metadata" => %{...execution metadata...},
+    "metadata" => %{...runtime metadata...},
     "request" => %{
       "user_id" => "uuid",
       "request_id" => "uuid",
@@ -40,8 +36,6 @@ defmodule Fizz.Runtime.Expression.Context do
   ```
   """
 
-  alias Fizz.Executions.Execution
-
   # Environment variables that are safe to expose
   # Configure via application env: config :fizz, :allowed_env_vars, [...]
   @default_allowed_env_vars ~w(
@@ -51,46 +45,27 @@ defmodule Fizz.Runtime.Expression.Context do
   )
 
   @doc """
-  Builds a variable map from an execution and runtime state.
+  Builds a variable map from runtime metadata and step outputs.
 
   The resulting map uses string keys for compatibility with Liquid.
 
   ## Parameters
 
-  - `execution` - The Execution struct
+  - `ctx` - Runtime metadata map
   - `step_outputs` - Map of step_id -> output data
   - `current_input` - The input data for the current step (optional)
   """
-  @spec build(Execution.t(), term(), term()) :: map()
-  def build(%Execution{} = execution, step_outputs \\ %{}, current_input \\ nil) do
-    # Merge persisted context with runtime data
-    execution_context = execution.context || %{}
-    step_outputs_map = if is_map(step_outputs), do: step_outputs, else: %{}
-    all_outputs = Map.merge(execution_context, step_outputs_map)
-    current_input = current_input || Execution.trigger_data(execution)
+  @spec build(map(), term(), term()) :: map()
+  def build(ctx, step_outputs \\ %{}, current_input \\ nil)
 
-    %{
-      "json" => normalize_value(current_input),
-      "input" => normalize_value(current_input),
-      "steps" => build_steps_map(all_outputs),
-      "execution" => build_execution_map(execution),
-      "workflow" => build_workflow_map(execution),
-      "variables" => extract_variables(execution),
-      "metadata" => build_metadata_map(execution),
-      "request" => build_request_map(execution),
-      "trigger" => normalize_value(current_input),
-      "env" => build_env_map(),
-      "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
-      "today" => Date.utc_today() |> Date.to_iso8601()
-    }
-  end
+  def build(ctx, step_outputs, current_input) when is_map(ctx) do
+    input =
+      current_input ||
+        read_context_field(ctx, :input) ||
+        read_context_field(ctx, :trigger)
 
-  @doc """
-  Builds a variable map from an ExecutionContext.
-  """
-  def build_from_context(ctx) when is_map(ctx) do
-    input = normalize_value(read_context_field(ctx, :input))
-    step_outputs = read_context_field(ctx, :step_outputs, %{})
+    base_step_outputs = read_context_field(ctx, :step_outputs, %{})
+    runtime_step_outputs = if is_map(step_outputs), do: step_outputs, else: %{}
     trigger = read_context_field(ctx, :trigger)
     trigger_type = read_context_field(ctx, :trigger_type) || "unknown"
     execution_id = read_context_field(ctx, :execution_id)
@@ -98,11 +73,14 @@ defmodule Fizz.Runtime.Expression.Context do
     variables = read_context_field(ctx, :variables, %{})
     metadata = read_context_field(ctx, :metadata, %{})
     request = read_context_field(ctx, :request, %{})
+    metadata = normalize_map(metadata)
+    request = normalize_map(request)
 
     %{
-      "json" => input,
-      "input" => input,
-      "steps" => build_steps_map(step_outputs),
+      "json" => normalize_value(input),
+      "input" => normalize_value(input),
+      "steps" =>
+        build_steps_map(Map.merge(normalize_map(base_step_outputs), runtime_step_outputs)),
       "execution" => %{
         "id" => execution_id,
         "trigger_type" => to_string(trigger_type),
@@ -112,13 +90,23 @@ defmodule Fizz.Runtime.Expression.Context do
         "id" => workflow_id
       },
       "variables" => normalize_map(variables),
-      "metadata" => normalize_map(metadata),
-      "request" => normalize_map(request),
+      "metadata" => metadata,
+      "request" => request,
       "trigger" => normalize_value(trigger),
       "env" => build_env_map(),
       "now" => DateTime.utc_now() |> DateTime.to_iso8601(),
       "today" => Date.utc_today() |> Date.to_iso8601()
     }
+    |> put_execution_metadata(metadata)
+  end
+
+  def build(_ctx, _step_outputs, current_input), do: build_minimal(current_input || %{})
+
+  @doc """
+  Builds a variable map from runtime metadata.
+  """
+  def build_from_context(ctx) when is_map(ctx) do
+    build(ctx)
   end
 
   def build_from_context(_ctx), do: build_minimal()
@@ -172,54 +160,6 @@ defmodule Fizz.Runtime.Expression.Context do
 
   defp build_steps_map(_), do: %{}
 
-  defp build_execution_map(%Execution{} = execution) do
-    trigger_type = Execution.trigger_type(execution)
-    trigger_data = Execution.trigger_data(execution)
-    metadata = execution.metadata || %{}
-
-    %{
-      "id" => execution.id,
-      "trigger_type" => to_string(trigger_type || "unknown"),
-      "trigger_data" => normalize_value(trigger_data)
-    }
-    |> maybe_put("started_at", execution.started_at)
-    |> maybe_put("trace_id", get_metadata_field(metadata, :trace_id))
-    |> maybe_put("correlation_id", get_metadata_field(metadata, :correlation_id))
-  end
-
-  defp build_workflow_map(%Execution{} = execution) do
-    %{
-      "id" => execution.workflow_id
-    }
-  end
-
-  defp build_request_map(%Execution{} = execution) do
-    metadata = execution.metadata || %{}
-    extras = get_metadata_field(metadata, :extras) || %{}
-    request = (extras["request"] || extras[:request] || %{}) |> normalize_value()
-
-    # Inject user_id from top level execution if not already in request
-    user_id = execution.triggered_by_user_id
-
-    if is_map(request) and user_id do
-      Map.put_new(request, "user_id", to_string(user_id))
-    else
-      request
-    end
-  end
-
-  defp build_metadata_map(%Execution{metadata: metadata}) when is_struct(metadata) do
-    metadata
-    |> Map.from_struct()
-    |> normalize_map()
-  end
-
-  defp build_metadata_map(%Execution{metadata: metadata}) when is_map(metadata) do
-    normalize_map(metadata)
-  end
-
-  defp build_metadata_map(_), do: %{}
-
   defp build_env_map do
     allowed_vars()
     |> Enum.reduce(%{}, fn var, acc ->
@@ -234,22 +174,20 @@ defmodule Fizz.Runtime.Expression.Context do
     Application.get_env(:fizz, :allowed_env_vars, @default_allowed_env_vars)
   end
 
-  defp extract_variables(%Execution{metadata: %Execution.Metadata{extras: extras}})
-       when is_map(extras) do
-    Map.get(extras, "variables") || Map.get(extras, :variables) || %{}
-  end
-
-  defp extract_variables(%Execution{metadata: %{} = metadata}) do
-    Map.get(metadata, "variables") || Map.get(metadata, :variables) || %{}
-  end
-
-  defp extract_variables(_), do: %{}
-
   defp get_metadata_field(%{} = metadata, key) when is_atom(key) do
     Map.get(metadata, key) || Map.get(metadata, Atom.to_string(key))
   end
 
   defp get_metadata_field(_, _), do: nil
+
+  defp put_execution_metadata(%{"execution" => execution} = vars, metadata) do
+    execution =
+      execution
+      |> maybe_put("trace_id", get_metadata_field(metadata, :trace_id))
+      |> maybe_put("correlation_id", get_metadata_field(metadata, :correlation_id))
+
+    put_in(vars, ["execution"], execution)
+  end
 
   # ============================================================================
   # Value Normalization

@@ -6,8 +6,6 @@ defmodule FizzWeb.WorkflowLive.Show do
 
   alias Fizz.Accounts
   alias Fizz.Workflows
-  alias Fizz.Executions
-  alias Fizz.Executions.Execution
   alias FizzWeb.WorkflowLive.Paths
   import FizzWeb.Formatters
 
@@ -16,14 +14,11 @@ defmodule FizzWeb.WorkflowLive.Show do
     with {:ok, scope} <-
            Accounts.build_scope_for_workspace(socket.assigns.current_scope, workspace_id),
          {:ok, workflow} <- Workflows.get_workflow(scope, id) do
-      executions = Executions.list_workflow_executions(scope, workflow, limit: 10)
-
       socket =
         socket
         |> assign(:current_scope, scope)
         |> assign(:page_title, workflow.name)
         |> assign(:workflow, workflow)
-        |> assign(:executions, executions)
 
       {:ok, socket}
     else
@@ -87,86 +82,6 @@ defmodule FizzWeb.WorkflowLive.Show do
       </:page_header>
 
       <div class="space-y-8">
-        <%!-- Recent Executions Section --%>
-        <section>
-          <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
-            <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
-              <.icon name="hero-clock" class="size-5" /> Recent Executions
-            </h2>
-
-            <%= if Enum.empty?(@executions) do %>
-              <div class="text-center py-8 text-base-content/60">
-                <.icon name="hero-inbox" class="size-8 mx-auto mb-2" />
-                <p class="text-sm">No executions yet</p>
-                <p class="text-xs mt-1">Run the workflow to see results here</p>
-              </div>
-            <% else %>
-              <div class="overflow-x-auto">
-                <table class="table table-sm">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Status</th>
-                      <th>Input</th>
-                      <th>Output</th>
-                      <th>Duration</th>
-                      <th>Started</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <%= for execution <- @executions do %>
-                      <tr class="hover">
-                        <td class="font-mono text-xs">
-                          <div class="flex items-center gap-2">
-                            {short_id(execution.id)}
-                            <span
-                              :if={partial_execution?(execution)}
-                              title="Partial execution"
-                              class="inline-flex items-center"
-                            >
-                              <.icon name="hero-beaker" class="size-4 text-primary/80" />
-                            </span>
-                          </div>
-                        </td>
-                        <td>
-                          <span class={["badge badge-xs", execution_status_class(execution.status)]}>
-                            {execution.status}
-                          </span>
-                        </td>
-                        <td class="max-w-32 truncate text-xs">
-                          {format_execution_value(execution.trigger && execution.trigger.data)}
-                        </td>
-                        <td class="max-w-48 truncate text-xs">
-                          {format_execution_value(execution.output)}
-                        </td>
-                        <td class="text-xs">
-                          {format_duration(Execution.duration_us(execution))}
-                        </td>
-                        <td class="text-xs text-base-content/60">
-                          {format_relative_time(execution.started_at)}
-                        </td>
-                        <td>
-                          <.link
-                            navigate={
-                              Paths.execution_show_path(@current_scope, @workflow.id, execution.id)
-                            }
-                            class="btn btn-ghost btn-xs"
-                            title="Inspect execution"
-                          >
-                            <.icon name="hero-eye" class="size-4" />
-                          </.link>
-                        </td>
-                      </tr>
-                    <% end %>
-                  </tbody>
-                </table>
-              </div>
-            <% end %>
-          </div>
-        </section>
-
-        <%!-- Workflow Details Section --%>
         <section>
           <div class="card border border-base-300 rounded-2xl shadow-sm bg-base-100 p-6">
             <h2 class="text-lg font-semibold text-base-content mb-4 flex items-center gap-2">
@@ -233,19 +148,4 @@ defmodule FizzWeb.WorkflowLive.Show do
     </Layouts.app>
     """
   end
-
-  # Helper functions
-
-  defp partial_execution?(%{metadata: %{extras: extras}}) when is_map(extras) do
-    Map.get(extras, "partial") || Map.get(extras, :partial) || false
-  end
-
-  defp partial_execution?(_), do: false
-
-  defp format_execution_value(nil), do: "-"
-
-  defp format_execution_value(%{"value" => value}), do: inspect(value)
-  defp format_execution_value(%{"productions" => prods}) when is_list(prods), do: inspect(prods)
-  defp format_execution_value(value) when is_map(value), do: inspect(value)
-  defp format_execution_value(value), do: inspect(value)
 end

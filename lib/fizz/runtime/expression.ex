@@ -10,10 +10,10 @@ defmodule Fizz.Runtime.Expression do
   - `{{ json }}` or `{{ json.field }}` - Current step input data
   - `{{ steps["StepName"].json }}` - Output from a specific step
   - `{{ steps.StepName.json }}` - Alternative dot notation
-  - `{{ execution.id }}` - Execution metadata
+  - `{{ execution.id }}` - Runtime metadata
   - `{{ workflow.id }}` - Workflow metadata
   - `{{ variables.name }}` - Workflow variables
-  - `{{ metadata.trace_id }}` - Execution metadata
+  - `{{ metadata.trace_id }}` - Runtime metadata
   - `{{ env.VARIABLE }}` - Allowed environment variables (configurable)
 
   ## Filters
@@ -32,17 +32,17 @@ defmodule Fizz.Runtime.Expression do
   ## Examples
 
       # Simple field access
-      Expression.evaluate("Hello {{ json.name }}!", execution)
+      Expression.evaluate("Hello {{ json.name }}!", vars)
 
       # Step output access
-      Expression.evaluate("Status: {{ steps.HTTP.json.status }}", execution)
+      Expression.evaluate("Status: {{ steps.HTTP.json.status }}", vars)
 
       # With filters
-      Expression.evaluate("{{ json.items | size }}", execution)
-      Expression.evaluate("{{ json.data | json }}", execution)
+      Expression.evaluate("{{ json.items | size }}", vars)
+      Expression.evaluate("{{ json.data | json }}", vars)
 
       # Conditionals
-      Expression.evaluate("{% if json.active %}Yes{% else %}No{% endif %}", execution)
+      Expression.evaluate("{% if json.active %}Yes{% else %}No{% endif %}", vars)
 
   ## Security
 
@@ -52,30 +52,27 @@ defmodule Fizz.Runtime.Expression do
   - Strict variable access (unknown vars return nil or error)
   """
 
-  alias Fizz.Runtime.Expression.{Context, Filters, Cache}
-  alias Fizz.Executions.Execution
+  alias Fizz.Runtime.Expression.{Cache, Filters}
 
   @type eval_result :: {:ok, String.t()} | {:error, term()}
   @type eval_opts :: [
           strict_variables: boolean(),
           strict_filters: boolean(),
           timeout_ms: pos_integer(),
-          timeout: pos_integer(),
-          state_store: module() | map()
+          timeout: pos_integer()
         ]
 
   @default_opts [
     strict_variables: false,
     strict_filters: true,
-    timeout_ms: 5_000,
-    state_store: %{}
+    timeout_ms: 5_000
   ]
 
   # Pattern to detect if a string contains Liquid expressions
   @expression_pattern ~r/\{\{.*?\}\}|\{%.*?%\}/s
 
   @doc """
-  Evaluates a Liquid template string with the given execution context.
+  Evaluates a Liquid template string with the given runtime variable map.
 
   Returns `{:ok, result}` or `{:error, reason}`.
 
@@ -84,29 +81,12 @@ defmodule Fizz.Runtime.Expression do
   - `:strict_variables` - Return error for undefined variables (default: false)
   - `:strict_filters` - Return error for undefined filters (default: true)
   - `:timeout_ms` - Maximum evaluation time in ms (default: 1000)
-  - `:state_store` - Module or map for runtime state
   """
-  @spec evaluate(String.t(), Execution.t(), eval_opts()) :: eval_result()
   @spec evaluate(term(), map(), eval_opts()) :: eval_result()
   def evaluate(template, context, opts \\ [])
 
-  def evaluate(template, %Execution{} = execution, opts) when is_binary(template) do
-    opts = Keyword.merge(@default_opts, opts)
-
-    unless contains_expression?(template) do
-      {:ok, template}
-    else
-      vars = build_context(execution, opts)
-      do_evaluate(template, vars, opts)
-    end
-  end
-
   def evaluate(template, vars, opts) when is_binary(template) and is_map(vars) do
     evaluate_with_vars(template, vars, opts)
-  end
-
-  def evaluate(data, %Execution{} = execution, opts) when is_map(data) or is_list(data) do
-    evaluate_deep(data, execution, opts)
   end
 
   def evaluate(data, vars, opts) when (is_map(data) or is_list(data)) and is_map(vars) do
@@ -137,15 +117,9 @@ defmodule Fizz.Runtime.Expression do
   Recursively walks the structure and evaluates any string values that
   contain Liquid expressions.
   """
-  @spec evaluate_deep(term(), Execution.t() | map(), eval_opts()) ::
+  @spec evaluate_deep(term(), map(), eval_opts()) ::
           {:ok, term()} | {:error, term()}
   def evaluate_deep(data, context, opts \\ [])
-
-  def evaluate_deep(data, %Execution{} = execution, opts) do
-    opts = Keyword.merge(@default_opts, opts)
-    vars = build_context(execution, opts)
-    do_evaluate_deep_with_catch(data, vars, opts)
-  end
 
   def evaluate_deep(data, vars, opts) when is_map(vars) do
     opts = Keyword.merge(@default_opts, opts)
@@ -285,38 +259,6 @@ defmodule Fizz.Runtime.Expression do
   end
 
   defp do_evaluate_deep(data, _vars, _opts), do: data
-
-  defp build_context(%Execution{} = execution, opts) do
-    state_store = Keyword.get(opts, :state_store)
-
-    cond do
-      is_map(state_store) ->
-        Context.build(execution, state_store)
-
-      is_atom(state_store) and Code.ensure_loaded?(state_store) ->
-        step_outputs =
-          if function_exported?(state_store, :outputs, 1) do
-            case state_store.outputs(execution) do
-              %{} = outputs -> outputs
-              _ -> %{}
-            end
-          else
-            %{}
-          end
-
-        current_input =
-          if function_exported?(state_store, :current_input, 1) do
-            state_store.current_input(execution)
-          else
-            nil
-          end
-
-        Context.build(execution, step_outputs, current_input)
-
-      true ->
-        Context.build(execution)
-    end
-  end
 
   defp get_timeout_ms(opts) do
     Keyword.get(opts, :timeout_ms) || Keyword.get(opts, :timeout) || 5_000

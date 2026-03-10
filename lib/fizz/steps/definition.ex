@@ -31,7 +31,7 @@ defmodule Fizz.Steps.Definition do
         @behaviour Fizz.Steps.Executors.Behaviour
 
         @impl true
-        def execute(config, input, execution) do
+        def execute(config, input, context) do
           # ... implementation
         end
       end

@@ -11,8 +11,7 @@ defmodule Fizz.Workflows.Embeds.Step do
 
   The `id` is used everywhere as the primary instance identifier:
   - Runic component names
-  - Execution context keys (`steps.<step_id>.json`)
-  - StepExecution records
+  - Expression variable keys (`steps.<step_id>.json`)
   - Connection references
   """
   @derive Jason.Encoder

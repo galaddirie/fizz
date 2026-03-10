@@ -17,16 +17,4 @@ defmodule FizzWeb.WorkflowLiveTest do
     assert {:error, {:redirect, %{to: "/auth/workos"}}} =
              live(conn, ~p"/workspaces/#{workspace_id}/workflows/#{workflow_id}")
   end
-
-  test "execution show requires authentication", %{conn: conn} do
-    workspace_id = Ecto.UUID.generate()
-    workflow_id = Ecto.UUID.generate()
-    execution_id = Ecto.UUID.generate()
-
-    assert {:error, {:redirect, %{to: "/auth/workos"}}} =
-             live(
-               conn,
-               ~p"/workspaces/#{workspace_id}/workflows/#{workflow_id}/execution/#{execution_id}"
-             )
-  end
 end

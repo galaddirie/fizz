@@ -7,7 +7,6 @@ defmodule Fizz.Accounts.Scope do
   """
 
   alias Fizz.Accounts.{User, Workspace}
-  alias Fizz.Executions.Execution
   alias Fizz.Workflows.Workflow
 
   @organization_roles [:owner, :admin, :member]
@@ -148,44 +147,6 @@ defmodule Fizz.Accounts.Scope do
   """
   @spec owns_workflow?(t() | nil, Workflow.t() | map()) :: boolean()
   def owns_workflow?(scope, workflow), do: can_edit_workflow?(scope, workflow)
-
-  @doc """
-  Whether scope can view an execution through its workflow access.
-  """
-  @spec can_view_execution?(t() | nil, Execution.t() | map()) :: boolean()
-  def can_view_execution?(scope, %Execution{workflow: %Workflow{} = workflow}),
-    do: can_view_workflow?(scope, workflow)
-
-  def can_view_execution?(scope, %{workflow: %{workspace_id: _workspace_id} = workflow}),
-    do: can_view_workflow?(scope, workflow)
-
-  def can_view_execution?(_scope, _execution), do: false
-
-  @doc """
-  Whether scope can create executions for a workflow.
-
-  Nil scope is only allowed for production executions, with trigger restrictions
-  enforced in the execution context.
-  """
-  @spec can_create_execution?(t() | nil, Workflow.t() | map(), Execution.execution_type() | nil) ::
-          boolean()
-  def can_create_execution?(%__MODULE__{} = scope, %Workflow{} = workflow, execution_type)
-      when execution_type in [:production, :preview, :partial],
-      do: can_edit_workflow?(scope, workflow)
-
-  def can_create_execution?(
-        %__MODULE__{} = scope,
-        %{workspace_id: _workspace_id} = workflow,
-        execution_type
-      )
-      when execution_type in [:production, :preview, :partial],
-      do: can_edit_workflow?(scope, workflow)
-
-  def can_create_execution?(nil, %{workspace_id: workspace_id}, :production)
-      when is_binary(workspace_id) and byte_size(workspace_id) > 0,
-      do: true
-
-  def can_create_execution?(_scope, _workflow, _execution_type), do: false
 
   defp same_workspace?(%__MODULE__{workspace: %Workspace{id: scope_workspace_id}}, %{
          workspace_id: workflow_workspace_id

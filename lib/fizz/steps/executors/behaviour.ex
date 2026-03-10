@@ -55,16 +55,14 @@ defmodule Fizz.Steps.Executors.Behaviour do
   - `{:skip, reason}` - The step was skipped (e.g., condition not met)
   """
 
-  alias Fizz.Executions.Execution
-
   @doc """
-  Executes the step with the given configuration, input, and execution.
+  Executes the step with the given configuration, input, and runtime context.
 
   ## Parameters
 
   - `config` - The step's configuration map (from `step.config`)
   - `input` - The input data flowing into this step (from parent steps)
-  - `execution` - The current Execution record.
+  - `context` - The current runtime metadata map.
 
   ## Returns
 
@@ -72,7 +70,7 @@ defmodule Fizz.Steps.Executors.Behaviour do
   - `{:error, reason}` - Failure with error details
   - `{:skip, reason}` - Step was skipped
   """
-  @callback execute(config :: map(), input :: term(), execution :: Execution.t()) ::
+  @callback execute(config :: map(), input :: term(), context :: map()) ::
               {:ok, output :: term()}
               | {:error, reason :: term()}
               | {:skip, reason :: term()}
@@ -168,10 +166,10 @@ defmodule Fizz.Steps.Executors.Behaviour do
 
   This is a convenience function that combines resolution and execution.
   """
-  def execute(type_id, config, input, execution) do
+  def execute(type_id, config, input, context) do
     case resolve(type_id) do
       {:ok, module} ->
-        module.execute(config, input, execution)
+        module.execute(config, input, context)
 
       {:error, reason} ->
         {:error, {:executor_not_found, reason}}

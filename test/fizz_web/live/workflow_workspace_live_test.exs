@@ -1,10 +1,9 @@
-defmodule FizzWeb.WorkflowExecutionLiveTest do
+defmodule FizzWeb.WorkflowWorkspaceLiveTest do
   use FizzWeb.ConnCase, async: true
 
   import Phoenix.LiveViewTest
 
   alias Fizz.Accounts.{Scope, Workspace, WorkspaceMembership}
-  alias Fizz.Executions
   alias Fizz.Repo
   alias Fizz.Workflows
 
@@ -57,7 +56,7 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
     scope = scoped_workspace_access(user, workspace)
     conn = log_in_user(conn, user)
 
-    %{conn: conn, user: user, workspace: workspace, scope: scope}
+    %{conn: conn, workspace: workspace, scope: scope}
   end
 
   test "workflow index loads for authenticated workspace user", %{
@@ -84,45 +83,18 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
     assert to =~ ~r{^/workspaces/#{workspace.id}/workflows/[0-9a-f-]+$}
   end
 
-  test "workflow show renders workspace-scoped navigation links", %{
+  test "workflow show renders workflow details without execution history", %{
     conn: conn,
     workspace: workspace,
     scope: scope
   } do
     workflow = workflow_fixture!(scope)
-    execution = execution_fixture!(scope, workflow)
 
     {:ok, view, _html} = live(conn, ~p"/workspaces/#{workspace.id}/workflows/#{workflow.id}")
 
     assert has_element?(view, "a[href='/workspaces/#{workspace.id}/workflows']")
-
-    assert has_element?(
-             view,
-             "a[href='/workspaces/#{workspace.id}/workflows/#{workflow.id}/execution/#{execution.id}']"
-           )
-
-    refute has_element?(view, "a", "Run Workflow")
-  end
-
-  test "execution show renders key sections and workflow links", %{
-    conn: conn,
-    workspace: workspace,
-    scope: scope
-  } do
-    workflow = workflow_fixture!(scope)
-    execution = execution_fixture!(scope, workflow)
-    _step_execution = step_execution_fixture!(scope, execution)
-
-    {:ok, view, _html} =
-      live(
-        conn,
-        ~p"/workspaces/#{workspace.id}/workflows/#{workflow.id}/execution/#{execution.id}"
-      )
-
-    assert has_element?(view, "#execution-back-link")
-    assert has_element?(view, "#execution-workflow-link")
-    assert has_element?(view, "span", "Runtime unavailable")
-    assert has_element?(view, "#execution-step-list")
+    assert has_element?(view, "h2", "Workflow Details")
+    refute has_element?(view, "h2", "Recent Executions")
   end
 
   defp workspace_fixture!(user) do
@@ -167,34 +139,5 @@ defmodule FizzWeb.WorkflowExecutionLiveTest do
       })
 
     workflow
-  end
-
-  defp execution_fixture!(scope, workflow) do
-    {:ok, execution} =
-      Executions.create_execution(scope, %{
-        workflow_id: workflow.id,
-        status: :running,
-        execution_type: :preview,
-        started_at: DateTime.utc_now(),
-        trigger: %{
-          type: :manual,
-          data: %{"source" => "live_test"}
-        }
-      })
-
-    execution
-  end
-
-  defp step_execution_fixture!(scope, execution) do
-    {:ok, step_execution} =
-      Executions.create_step_execution(scope, %{
-        execution_id: execution.id,
-        step_id: "fetch_orders",
-        step_type_id: "http_request",
-        input_data: %{"page" => 1},
-        metadata: %{"test" => true}
-      })
-
-    step_execution
   end
 end
