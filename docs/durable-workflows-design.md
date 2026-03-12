@@ -13,7 +13,7 @@
 - **Activity orchestration**: workflows dispatch side-effecting "activities" (HTTP calls, payments, ML jobs) with configurable retry policies, timeouts, and heartbeating.
 - **Signals and queries**: external systems can send named signals into running or dormant workflows and query their current state without waking them.
 - **Durable timers**: `sleep(duration)` and `schedule_at(datetime)` persist to storage and fire reliably even if the originating node is long gone.
-- **Multi-tenancy**: hard isolation of workflow data per tenant with per-tenant quotas, routing, and observability scoping.
+- **Organization + project isolation**: hard isolation of workflow data per WorkOS organization and local project, with scoped quotas, routing, and observability.
 - **Operator tooling**: list, search, describe, signal, cancel, reset, and time-travel-debug any workflow via a Phoenix LiveView console.
 
 ### Non-functional
@@ -23,6 +23,18 @@
 - **Throughput**: ≥ 10,000 concurrent active workflows per node; millions of dormant workflows system-wide.
 - **Durability**: zero acknowledged work lost, even under simultaneous node failure and S3 partition (bounded by RPO of Litestream replication lag, typically < 1 s).
 - **Operability**: structured logging, distributed tracing (OpenTelemetry), Prometheus metrics, health checks, graceful deployment with zero-downtime drains.
+
+### Fizz Repo Mapping
+
+The research notes use **tenant** as a generic isolation term. In this repo, that maps onto the existing identity model:
+
+- **WorkOS organization** is the outer isolation, billing, credential, and audit boundary.
+- **Project** is the main local resource boundary for workflows, workspaces, jobs, and authorization.
+- Workflow control-plane rows should therefore persist both `workos_organization_id` and `project_id`, rather than a single generic `tenant_id`.
+- Workflow operations should resolve authorization through `%Fizz.Accounts.Scope{}` and `Accounts.build_scope_for_project/2`, matching `Fizz.Workspaces` and `Fizz.Integrations`.
+- If a workflow orchestrates work inside a workspace, treat `workspace_id` as optional workflow metadata, not as the primary isolation key.
+- The examples below use `Platform.*` as placeholder namespaces; in this repo they should land under a new `Fizz.Workflows.*` context/supervision tree.
+- The first operator UI should be project-scoped, e.g. `/projects/:project_id/workflows`, inside the existing authenticated browser scope / `live_session :require_authenticated_user`, because those routes already provide `@current_scope` and match the rest of the app.
 
 ---
 
@@ -36,7 +48,8 @@
 │  │ Global Index  │  │ Lease Table  │  │ Timer Svc  │  │ Signal    │ │
 │  │ (routing,     │  │ (ownership,  │  │ (durable   │  │ Inbox     │ │
 │  │  search,      │  │  fencing)    │  │  wakeups)  │  │ (dedup,   │ │
-│  │  tenants)     │  │              │  │            │  │  delivery) │ │
+│  │  org/project  │  │              │  │            │  │  delivery) │ │
+│  │  scope)       │  │              │  │            │  │            │ │
 │  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘  └─────┬─────┘ │
 │         │                 │                │              │         │
 │         └────────────┬────┴────────────────┴──────────────┘         │
@@ -101,7 +114,7 @@ Application
 │   └── Platform.PassivationSweeper           (GenServer — evicts idle workflows)
 │
 ├── Platform.DataPlane.Supervisor             (one_for_one)
-│   ├── Registry (Platform.WorkflowRegistry)  (unique keys: {tenant_id, run_id})
+│   ├── Registry (Platform.WorkflowRegistry)  (unique keys: {project_id, run_id})
 │   ├── PartitionSupervisor                   (wraps Task.Supervisor, N partitions)
 │   │   └── Task.Supervisor                   (async_nolink for activity execution)
 │   └── DynamicSupervisor (Platform.RunSupervisor)
@@ -137,7 +150,8 @@ Runic's `Workflow.log/1` composes the build log, reaction history, and runnable 
 -- Workflow registry and routing index
 CREATE TABLE workflow_runs (
     run_id          UUID PRIMARY KEY,
-    tenant_id       UUID NOT NULL,
+    workos_organization_id TEXT NOT NULL,
+    project_id      UUID NOT NULL REFERENCES projects(id),
     workflow_type   TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'PENDING'
                     CHECK (status IN ('PENDING','RUNNING','SLEEPING',
@@ -145,13 +159,14 @@ CREATE TABLE workflow_runs (
                                       'CANCELLED')),
     owner_node      TEXT,                  -- node currently holding the lease
     fence_token     BIGINT NOT NULL DEFAULT 0,
-    storage_uri     TEXT,                  -- s3://bucket/tenant/run_id.sqlite
+    storage_uri     TEXT,                  -- s3://bucket/org/project/run_id.sqlite
     last_active_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     next_timer_at   TIMESTAMPTZ,           -- denormalized for timer polling
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     metadata        JSONB DEFAULT '{}'     -- search attributes, tags
 );
-CREATE INDEX idx_runs_tenant ON workflow_runs(tenant_id, status);
+CREATE INDEX idx_runs_org ON workflow_runs(workos_organization_id, status);
+CREATE INDEX idx_runs_project ON workflow_runs(project_id, status);
 CREATE INDEX idx_runs_owner  ON workflow_runs(owner_node) WHERE status = 'RUNNING';
 CREATE INDEX idx_runs_timers ON workflow_runs(next_timer_at)
     WHERE next_timer_at IS NOT NULL AND status IN ('SLEEPING','PASSIVATED');
@@ -169,7 +184,8 @@ CREATE TABLE shard_leases (
 CREATE TABLE durable_timers (
     timer_id      UUID PRIMARY KEY,
     run_id        UUID NOT NULL REFERENCES workflow_runs(run_id),
-    tenant_id     UUID NOT NULL,
+    workos_organization_id TEXT NOT NULL,
+    project_id    UUID NOT NULL REFERENCES projects(id),
     fire_at       TIMESTAMPTZ NOT NULL,
     status        TEXT NOT NULL DEFAULT 'PENDING'
                   CHECK (status IN ('PENDING','FIRING','FIRED','CANCELLED')),
@@ -182,7 +198,8 @@ CREATE INDEX idx_timers_due ON durable_timers(fire_at)
 CREATE TABLE signal_inbox (
     signal_id     TEXT PRIMARY KEY,        -- caller-provided dedup key
     run_id        UUID NOT NULL,
-    tenant_id     UUID NOT NULL,
+    workos_organization_id TEXT NOT NULL,
+    project_id    UUID NOT NULL REFERENCES projects(id),
     signal_name   TEXT NOT NULL,
     payload       BYTEA,
     received_at   TIMESTAMPTZ DEFAULT now(),
@@ -195,7 +212,8 @@ CREATE INDEX idx_signals_pending ON signal_inbox(run_id)
 CREATE TABLE activity_tasks (
     task_id         UUID PRIMARY KEY,
     run_id          UUID NOT NULL,
-    tenant_id       UUID NOT NULL,
+    workos_organization_id TEXT NOT NULL,
+    project_id      UUID NOT NULL REFERENCES projects(id),
     runnable_id     TEXT NOT NULL,          -- Runic's {node.hash, fact.hash} id
     activity_type   TEXT NOT NULL,
     input           BYTEA,
@@ -215,11 +233,11 @@ CREATE INDEX idx_tasks_claimable ON activity_tasks(activity_type, created_at)
     WHERE status = 'PENDING';
 ```
 
-The activity task queue uses Postgres `FOR UPDATE SKIP LOCKED` for multi-consumer claiming, which Postgres documentation explicitly recommends for queue-like tables where consumers should skip locked rows rather than blocking.
+The activity task queue uses Postgres `FOR UPDATE SKIP LOCKED` for multi-consumer claiming, which Postgres documentation explicitly recommends for queue-like tables where consumers should skip locked rows rather than blocking. In this repo, start by validating whether the existing Oban installation can own this responsibility before introducing a second bespoke queue table: `Fizz.Workspaces.ExecJob` already gives you a local pattern for durable Postgres-backed job execution, retries, and supervision.
 
 ### 4.2 SQLite — Per-Workflow Data Plane
 
-Each workflow run gets its own SQLite file at `{data_dir}/{tenant_id}/{prefix1}/{prefix2}/{run_id}.sqlite`. The two-level hash-prefix directory structure keeps directory sizes below ~4,000 entries.
+Each workflow run gets its own SQLite file at `{data_dir}/{workos_organization_id}/{project_id}/{prefix1}/{prefix2}/{run_id}.sqlite`. The two-level hash-prefix directory structure keeps directory sizes below ~4,000 entries.
 
 ```sql
 -- Applied on first open
@@ -517,7 +535,7 @@ Backpressure operates at three levels:
 
 **Node level:** the `DynamicSupervisor` enforces `max_children`. New workflow activations beyond this limit return `{:error, :overloaded}` to the control plane, which routes to another node. The `Task.Supervisor` partition count bounds total concurrent activity tasks per node.
 
-**System level:** the Postgres activity queue provides natural backpressure — if workers can't keep up, tasks accumulate. A queue depth metric triggers alerts. Per-tenant rate limiting at the Phoenix API layer prevents a single tenant from monopolizing capacity.
+**System level:** the Postgres activity queue provides natural backpressure — if workers can't keep up, tasks accumulate. A queue depth metric triggers alerts. In Fizz, rate limiting and quotas should key off `workos_organization_id` and `project_id`, not a synthetic tenant id, so one noisy project cannot monopolize shared capacity inside an organization.
 
 ```elixir
 # In RunWorker
@@ -623,17 +641,17 @@ True exactly-once delivery is impossible (Two Generals Problem), but at-least-on
 
 ---
 
-## 11. Multi-Tenancy
+## 11. Organization and Project Isolation
 
 ### 11.1 Data Isolation
 
-Tenant isolation is enforced at every layer:
+Isolation is enforced at every layer using Fizz's existing org/project model:
 
-**Postgres:** all control-plane tables include `tenant_id`. Row-level security (RLS) policies prevent cross-tenant access. Indexes are tenant-prefixed for query efficiency.
+**Postgres:** all control-plane tables include `workos_organization_id` and `project_id`. Use `project_id` as the main lookup / authorization key, with `workos_organization_id` denormalized for reporting, quotas, and coarse filtering. RLS can be layered on later if the workflow surface grows beyond server-rendered LiveViews and internal contexts.
 
-**SQLite:** each tenant's workflow files live in an isolated directory subtree (`{data_dir}/{tenant_id}/...`). File-system permissions provide a second isolation boundary. S3 objects are keyed by `s3://{bucket}/{tenant_id}/{run_id}.sqlite`.
+**SQLite:** each project's workflow files live in an isolated directory subtree (`{data_dir}/{workos_organization_id}/{project_id}/...`). File-system permissions provide a second isolation boundary. S3 objects are keyed by `s3://{bucket}/{workos_organization_id}/{project_id}/{run_id}.sqlite`.
 
-**Phoenix API:** tenant extraction from JWT claims or API key, injected into `conn.assigns` and propagated through every Repo call and SQLite file path.
+**Phoenix / LiveView:** reuse the existing authenticated browser stack, `@current_scope`, and project-scope resolution. LiveViews should sit in the existing `scope "/", FizzWeb` with `pipe_through [:browser, :require_authenticated_user]` and `live_session :require_authenticated_user`; any controller/API entrypoints should resolve project scope the same way `FizzWeb.Plugs.RequireProjectScope` already does.
 
 ### 11.2 Resource Quotas
 
@@ -647,15 +665,15 @@ defmodule Platform.Quotas do
     max_activity_concurrency: 50
   }
 
-  def check_quota!(tenant_id, :start_run) do
-    active = Repo.count(WorkflowRun, tenant_id: tenant_id, status: "RUNNING")
-    limit = get_limit(tenant_id, :max_active_runs)
+  def check_quota!(project_id, :start_run) do
+    active = Repo.count(WorkflowRun, project_id: project_id, status: "RUNNING")
+    limit = get_limit(project_id, :max_active_runs)
     if active >= limit, do: raise QuotaExceededError
   end
 end
 ```
 
-Quotas are stored in Postgres and cached in ETS with a short TTL. The API layer enforces rate limits via `PlugAttack` or a token-bucket in ETS. Per-tenant metrics (active runs, total storage, activity throughput) feed into billing and alerting.
+Quotas are stored in Postgres and cached in ETS with a short TTL. In Fizz, start with project-level limits and optionally layer organization-wide caps above them. Per-organization and per-project metrics (active runs, total storage, activity throughput) feed into billing and alerting.
 
 ---
 
@@ -727,15 +745,16 @@ Migrations must be idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... AD
 ```elixir
 # :telemetry events emitted by the platform
 :telemetry.execute([:platform, :workflow, :step], %{duration: elapsed}, %{
-  tenant_id: tenant_id,
+  workos_organization_id: workos_organization_id,
+  project_id: project_id,
   workflow_type: type,
   step: step_name,
   status: :ok | :error
 })
 
 # Key metrics to export
-- platform.workflow.step.duration        (histogram, by tenant + type)
-- platform.workflow.active.count         (gauge, by node + tenant)
+- platform.workflow.step.duration        (histogram, by org + project + type)
+- platform.workflow.active.count         (gauge, by node + org + project)
 - platform.workflow.cold_start.duration  (histogram)
 - platform.activity.execution.duration   (histogram, by activity_type)
 - platform.activity.queue.depth          (gauge, by activity_type)
@@ -755,7 +774,8 @@ def dispatch_activity(runnable, ctx) do
   span_ctx = OpenTelemetry.Tracer.start_span("activity.#{runnable.type}", %{
     attributes: %{
       "workflow.run_id" => ctx.run_id,
-      "workflow.tenant_id" => ctx.tenant_id,
+      "workflow.organization_id" => ctx.workos_organization_id,
+      "workflow.project_id" => ctx.project_id,
       "activity.runnable_id" => runnable.id
     }
   })
@@ -767,7 +787,7 @@ end
 
 Per-workflow SQLite databases provide a unique advantage: any workflow's complete state can be inspected offline by downloading its SQLite file from S3 and querying it with standard tools — no running engine required, no risk of side effects. To inspect state at any historical point: load the latest snapshot before the target sequence number, replay events through that point, and examine the reconstructed Runic workflow.
 
-The Phoenix LiveView operator console exposes: describe (metadata, pending activities/timers, search attributes), list/count with SQL-like filtering across the Postgres global index, get history (full event log from the per-workflow SQLite), signal/query/update (interact with live or dormant workflows), reset (rewind to a specific event and re-execute for bug recovery), and terminate/cancel.
+The Phoenix LiveView operator console exposes: describe (metadata, pending activities/timers, search attributes), list/count with SQL-like filtering across the Postgres global index, get history (full event log from the per-workflow SQLite), signal/query/update (interact with live or dormant workflows), reset (rewind to a specific event and re-execute for bug recovery), and terminate/cancel. In this repo that should be implemented as project-scoped LiveViews alongside the existing `ProjectsLive` / `WorkspacesLive` screens, not as a separate unaffiliated admin surface.
 
 Litestream WAL segment retention in S3 enables point-in-time recovery to any moment within the retention window, analogous to Cloudflare Durable Objects' 30-day point-in-time recovery.
 
@@ -777,15 +797,16 @@ Litestream WAL segment retention in S3 enables point-in-time recovery to any mom
 
 ### 14.1 Authentication and Authorization
 
-The Phoenix API authenticates via JWT (for service-to-service) or API keys (for external callers). Tenant ID is extracted from the token and is immutable for the request lifecycle. RBAC roles (admin, operator, developer, service-account) gate access to workflow operations:
+The first workflow UI/API surface should reuse the auth and routing model already in the repo. LiveViews belong in the existing authenticated browser scope and `live_session :require_authenticated_user`, because that is where `@current_scope` is assigned. Project-scoped controllers or channels should resolve a project-aware scope the same way `FizzWeb.Plugs.RequireProjectScope` does today. A service-to-service JWT/API-key entrypoint can be added later if needed, but it should still resolve to the same organization/project authorization model rather than inventing a parallel tenancy scheme.
 
-| Operation | developer | operator | admin |
-|-----------|-----------|----------|-------|
-| Start / signal / query | yes | yes | yes |
+| Operation | project member / viewer | project admin | organization admin / owner |
+|-----------|--------------------------|---------------|-----------------------------|
+| Query / inspect | yes | yes | yes |
+| Start / signal | member only | yes | yes |
 | Cancel / terminate | no | yes | yes |
 | Reset / rewind | no | yes | yes |
-| Manage quotas | no | no | yes |
-| Cross-tenant access | no | no | yes |
+| Manage org/project quotas | no | no | yes |
+| Cross-project access in same org | no | no | yes |
 
 ### 14.2 Data Protection
 
@@ -793,7 +814,7 @@ The Phoenix API authenticates via JWT (for service-to-service) or API keys (for 
 
 **Encryption in transit:** TLS for all Postgres connections, S3 API calls, and inter-node communication. The Phoenix endpoint enforces HTTPS.
 
-**Payload encryption:** for sensitive workflow data (PII, payment info), activity inputs/outputs are encrypted at the application layer with per-tenant KEKs before writing to SQLite or Postgres. The encryption key hierarchy: tenant KEK (in KMS) → per-run DEK (stored encrypted in workflow metadata).
+**Payload encryption:** for sensitive workflow data (PII, payment info), activity inputs/outputs are encrypted at the application layer with per-organization KEKs before writing to SQLite or Postgres. The encryption key hierarchy: organization KEK (in KMS) → per-run DEK (stored encrypted in workflow metadata).
 
 **Secrets management:** activity credentials (API keys, OAuth tokens) are never stored in workflow state. Activities fetch secrets from Vault or AWS Secrets Manager at execution time, referenced by name only.
 
@@ -829,7 +850,7 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 - Implement the `Runic.Runner.Store` behaviour backed by SQLite (using Exqlite). Wire up `Workflow.log/1` and `Workflow.from_log/1` for checkpoint/restore.
 - Stand up Postgres control-plane tables: `workflow_runs`, `shard_leases`, `activity_tasks`.
 - Implement lease acquisition and fence-token validation in SQLite writes.
-- Implement activity dispatch via Postgres `SKIP LOCKED` queue.
+- Prototype activity dispatch on the existing Oban installation first, and only keep a bespoke `SKIP LOCKED` queue if runnable-level claiming / heartbeats need tighter control than Oban provides.
 - Integration tests: start workflow → dispatch activity → record result → crash worker → restore from SQLite → verify state.
 
 ### Phase 2: Durability and Timers (Weeks 5–8)
@@ -843,16 +864,16 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 - Implement `ContinueAsNew` for workflows exceeding event/size limits.
 - Chaos tests: kill nodes mid-execution, verify resume from S3 with correct state.
 
-### Phase 3: Signals, Multi-Tenancy, and API (Weeks 9–12)
+### Phase 3: Signals, Org/Project Isolation, and API (Weeks 9–12)
 
-**Goal:** external interaction and tenant isolation.
+**Goal:** external interaction and repo-native isolation.
 
 - Implement `signal_inbox` and `SignalRouter` with `LISTEN/NOTIFY` optimization.
 - Implement two-layer signal deduplication (Postgres + per-workflow SQLite).
-- Add `tenant_id` to all tables; implement RLS policies and quota enforcement.
-- Build Phoenix API endpoints: start, signal, query, cancel, describe.
-- Implement RBAC and JWT/API-key authentication.
-- Load tests: 10,000 concurrent workflows, multi-tenant, with simulated signal traffic.
+- Add `workos_organization_id` + `project_id` to all workflow tables; wire authorization through `%Fizz.Accounts.Scope{}` and `Accounts.build_scope_for_project/2`.
+- Build Phoenix workflow routes under the existing authenticated project area first (`/projects/:project_id/workflows/...`), then add external API endpoints only if they are actually needed.
+- Implement project/org role checks first; add JWT/API-key authentication only for external entrypoints that genuinely need it.
+- Load tests: 10,000 concurrent workflows across many projects / organizations, with simulated signal traffic.
 
 ### Phase 4: Operator Tooling and Observability (Weeks 13–16)
 
@@ -884,7 +905,7 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 | Workflow VM | Runic | Dataflow DAG with lazy eval, three-phase model, event-log restoration, pluggable store, BEAM-native |
 | Per-run state | SQLite (WAL mode) | ACID with zero network overhead, single-writer = structural linearizability, sub-ms reads, portable file |
 | Durability | Litestream → S3 | Sub-second WAL replication, ~$1/mo storage, no Raft complexity |
-| Coordination | Postgres | Leases, SKIP LOCKED queues, advisory locks, LISTEN/NOTIFY, mature Elixir ecosystem (Ecto) |
+| Coordination | Postgres + Oban | Reuse the repo's existing Postgres-backed job substrate where possible; add leases / SKIP LOCKED only where workflow ownership semantics require it |
 | API / Operator UI | Phoenix + LiveView | Real-time operator console, gRPC/REST APIs, built-in auth |
 | Supervision | OTP | DynamicSupervisor, Registry, Task.Supervisor, PartitionSupervisor — battle-tested primitives |
 | Observability | OpenTelemetry + Prometheus | Distributed tracing, metrics, integrates with Grafana/Datadog |
@@ -892,7 +913,7 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 
 ## Appendix B: SQLite File Management
 
-**Directory layout:** `{data_dir}/{tenant_id}/{hash[0:2]}/{hash[2:4]}/{run_id}.sqlite`
+**Directory layout:** `{data_dir}/{workos_organization_id}/{project_id}/{hash[0:2]}/{hash[2:4]}/{run_id}.sqlite`
 
 **File descriptor budget:** each open SQLite in WAL mode consumes ~3 FDs (main DB, WAL, SHM). At 10,000 active workflows per node: ~30,000 FDs. Set `ulimit -n 65536`. Idle workflows should be aggressively closed (tier 1 warm = file closed, metadata in Registry).
 
