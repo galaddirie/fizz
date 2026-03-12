@@ -284,7 +284,7 @@ end
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | yes | Stable key-safe identifier used by connections, execution records, and output references. |
+| `id` | yes | Key-safe identifier derived from the current step `name`, used by connections, execution records, and output references. It must be unique within the definition version and is regenerated when the step is renamed. |
 | `type_id` | yes | Must match an entry in `Fizz.Steps.Registry`. |
 | `name` | yes | User-facing label. |
 | `config` | yes | Step-type-specific authored configuration. Compound types can keep nested config here if the nested parts are not graph-connected steps. |
@@ -312,6 +312,14 @@ end
 | `color` | no | Group color token or raw color string. |
 | `font_size` | no | Group label font size. |
 | `collapsed` | no | Whether the group is collapsed in the editor. |
+
+### Step ID Semantics
+
+- Step `id` values are generated from the current display `name`, not assigned independently.
+- When duplicate names exist, increment the generated id: `"Fetch Order"` -> `fetch_order`, `"Fetch Order 2"` -> `fetch_order_2`.
+- Renaming a step regenerates its `id`: `"Fetch Order 2"` -> `fetch_order_2`, then renaming to `"Fetch Order Canada"` updates the `id` to `fetch_order_canada`.
+- This is distinct from `type_id`, which identifies the step type from `Fizz.Steps.Registry`. Two renamed HTTP request steps can have different step `id` values while sharing the same `type_id` such as `http_request`.
+- A step `id` can match its `type_id`, especially when a step is first created, but they are not the same concept.
 
 Deliberately omitted from `step_groups` in v1:
 
