@@ -18,7 +18,7 @@ defmodule Fizz.Steps.Executors.SlackTrigger do
     "properties" => %{
       "credential_ref" => %{
         "type" => "object",
-        "title" => "Slack Workspace",
+        "title" => "Slack project",
         "description" => "Slack OAuth credential"
       },
       "channel_id" => %{

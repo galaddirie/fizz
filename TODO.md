@@ -7,7 +7,7 @@
 
 3. [High] Execution runs under workflow owner scope, not triggering user scope.
     lib/fizz/runtime/execution/server.ex:271 builds runtime scope from execution.workflow.user and
-    workspace, while execution records track triggered_by_user_id from request time (lib/fizz/
+    project, while execution records track triggered_by_user_id from request time (lib/fizz/
     executions.ex:221).
     This can produce permission drift for preview/partial runs.
     Better pattern: resolve runtime scope from triggered_by_user_id when present, fallback to system
@@ -114,4 +114,4 @@ for the demo we will show a workflow that constantly adds + 1 to a number stored
 
 simple email agent with human in the loop for deletion of emails 
 
-add a chat endpoint that can use natural language to determine which workflow to run based on the user's input. it will use workflow names, descriptions, and workspaces to determine the best workflow to run. could run multiple workflows - this is a ux feature
+add a chat endpoint that can use natural language to determine which workflow to run based on the user's input. it will use workflow names, descriptions, and projects to determine the best workflow to run. could run multiple workflows - this is a ux feature

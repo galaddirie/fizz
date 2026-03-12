@@ -5,8 +5,8 @@
 It owns:
 
 - local user records
-- organization/workspace authorization scopes
-- local workspace and workspace membership persistence
+- organization/project authorization scopes
+- local project and project membership persistence
 - WorkOS-backed organization identity, auth, and audit integrations
 - user-owned external provider auth persistence via `Fizz.Accounts.ExternalAuth` (ouath via pipes, api keys via vault)
 
@@ -14,28 +14,28 @@ It owns:
 
 Entity hierarchy:
 
-`WorkOS Organization -> Local Workspace -> Local Workspace Membership`
+`WorkOS Organization -> Local Project -> Local Project Membership`
 
 - Organizations are managed in WorkOS (external source of truth).
-- Workspaces are local records scoped to a WorkOS organization.
-- Workspace memberships are local records that connect users to workspaces.
+- Projects are local records scoped to a WorkOS organization.
+- Project memberships are local records that connect users to projects.
 
 Authorization is represented by `Fizz.Accounts.Scope`, which carries:
 
 - authenticated user
 - active WorkOS organization id
-- optional active workspace
+- optional active project
 - organization role
-- workspace role
+- project role
 
 Most context APIs expect a resolved `%Scope{}`.
 
 ## Module map
 
 - `Fizz.Accounts`
-  - Main context facade for users, scope building, workspace/member ops, and WorkOS-driven auth/session helpers.
+  - Main context facade for users, scope building, project/member ops, and WorkOS-driven auth/session helpers.
 - `Fizz.Accounts.Scope`
-  - Authorization carrier and role helper predicates (`organization_admin?/1`, `workspace_admin?/1`, etc.).
+  - Authorization carrier and role helper predicates (`organization_admin?/1`, `project_admin?/1`, etc.).
 - `Fizz.Accounts.ExternalAuth`
   - Account-owned persistence for provider auth state:
     - OAuth connection index (`OauthConnection`)
@@ -46,8 +46,8 @@ Most context APIs expect a resolved `%Scope{}`.
   - WorkOS webhook handling entrypoint.
 - Schemas:
   - `Fizz.Accounts.User`
-  - `Fizz.Accounts.Workspace`
-  - `Fizz.Accounts.WorkspaceMembership`
+  - `Fizz.Accounts.Project`
+  - `Fizz.Accounts.ProjectMembership`
   - `Fizz.Accounts.OauthConnection`
   - `Fizz.Accounts.ApiCredential`
 
@@ -59,19 +59,19 @@ Most context APIs expect a resolved `%Scope{}`.
 
 ## Common flows
 
-### Resolve scope for organization/workspace access
+### Resolve scope for organization/project access
 
 1. Start from `Scope.for_user(user)`.
-2. Resolve org/workspace membership via:
+2. Resolve org/project membership via:
    - `Fizz.Accounts.build_scope/3` (organization-first), or
-   - `Fizz.Accounts.build_scope_for_workspace/2` (workspace-first).
+   - `Fizz.Accounts.build_scope_for_project/2` (project-first).
 3. Pass the resolved scope into downstream context calls.
 
-### Workspace management
+### Project management
 
-- Create workspace: `Fizz.Accounts.create_workspace/2`
-- List workspaces in active org: `Fizz.Accounts.list_workspaces/1`
-- Add/update workspace membership: `Fizz.Accounts.add_workspace_member/4`
+- Create project: `Fizz.Accounts.create_project/2`
+- List projects in active org: `Fizz.Accounts.list_projects/1`
+- Add/update project membership: `Fizz.Accounts.add_project_member/4`
 
 ### External provider auth persistence
 
@@ -102,7 +102,7 @@ Frequent reasons include:
 
 - `:unauthenticated`
 - `:forbidden`
-- `:workspace_not_found`
+- `:project_not_found`
 - `:organization_scope_required`
 - `:credential_not_found`
 - `:invalid_provider`

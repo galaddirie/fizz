@@ -5,7 +5,7 @@ defmodule Fizz.Sprites.Service do
 
   use Fizz.Schema
 
-  alias Fizz.Accounts.Workspace
+  alias Fizz.Accounts.Project
   alias Fizz.Sprites.Sprite
 
   @states [:stopped, :running, :error]
@@ -22,7 +22,7 @@ defmodule Fizz.Sprites.Service do
     field :last_stopped_at, :utc_datetime_usec
 
     belongs_to :sprite, Sprite
-    belongs_to :workspace, Workspace
+    belongs_to :project, Project
 
     timestamps()
   end
@@ -32,7 +32,7 @@ defmodule Fizz.Sprites.Service do
     service
     |> cast(attrs, [
       :sprite_id,
-      :workspace_id,
+      :project_id,
       :name,
       :cmd,
       :args,
@@ -43,10 +43,10 @@ defmodule Fizz.Sprites.Service do
       :last_started_at,
       :last_stopped_at
     ])
-    |> validate_required([:sprite_id, :workspace_id, :name])
+    |> validate_required([:sprite_id, :project_id, :name])
     |> validate_length(:name, min: 2, max: 120)
     |> foreign_key_constraint(:sprite_id)
-    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
     |> unique_constraint(:name, name: :sprite_services_sprite_id_name_index)
   end
 end

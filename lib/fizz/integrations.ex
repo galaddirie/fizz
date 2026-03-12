@@ -21,12 +21,12 @@ defmodule Fizz.Integrations do
   end
 
   @doc """
-  Returns the indexed connection record for a provider in the workspace's organization.
+  Returns the indexed connection record for a provider in the project's organization.
   """
   @spec get_connection(Scope.t(), String.t(), String.t()) ::
           {:ok, OauthConnection.t()} | {:error, term()}
-  def get_connection(%Scope{} = scope, workspace_id, provider) do
-    with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+  def get_connection(%Scope{} = scope, project_id, provider) do
+    with {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
       AccountExternalAuth.get_connection(resolved_scope, organization_id, provider)
     end
@@ -37,9 +37,9 @@ defmodule Fizz.Integrations do
   """
   @spec check_and_sync_connection(Scope.t(), String.t(), String.t()) ::
           {:ok, OauthConnection.t()} | {:error, term()}
-  def check_and_sync_connection(%Scope{} = scope, workspace_id, provider) do
+  def check_and_sync_connection(%Scope{} = scope, project_id, provider) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+         {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id,
          {:ok, status} <- provider_mod.check_connection(resolved_scope, organization_id) do
       AccountExternalAuth.upsert_oauth_connection(
@@ -56,8 +56,8 @@ defmodule Fizz.Integrations do
   """
   @spec list_credential_options(Scope.t(), String.t(), keyword()) ::
           {:ok, [map()]} | {:error, term()}
-  def list_credential_options(%Scope{} = scope, workspace_id, opts \\ []) do
-    with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+  def list_credential_options(%Scope{} = scope, project_id, opts \\ []) do
+    with {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
       AccountExternalAuth.list_credential_options(resolved_scope, organization_id, opts)
     end
@@ -71,8 +71,8 @@ defmodule Fizz.Integrations do
   """
   @spec fetch_token_for_sprite(Scope.t(), String.t(), String.t()) ::
           {:ok, map()} | {:error, term()}
-  def fetch_token_for_sprite(%Scope{} = scope, workspace_id, provider) do
-    with {:ok, auth} <- resolve_auth_for_execution(scope, workspace_id, provider) do
+  def fetch_token_for_sprite(%Scope{} = scope, project_id, provider) do
+    with {:ok, auth} <- resolve_auth_for_execution(scope, project_id, provider) do
       case auth.auth_method do
         :oauth ->
           _ =
@@ -116,8 +116,8 @@ defmodule Fizz.Integrations do
                api_credential_id: String.t()
              }}
           | {:error, term()}
-  def resolve_auth_for_execution(%Scope{} = scope, workspace_id, provider) do
-    with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+  def resolve_auth_for_execution(%Scope{} = scope, project_id, provider) do
+    with {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id,
          {:ok, auth_method, normalized_provider} <-
            resolve_provider_for_execution(provider) do
@@ -152,9 +152,9 @@ defmodule Fizz.Integrations do
                api_credential_id: String.t()
              }}
           | {:error, term()}
-  def resolve_auth_for_execution(%Scope{} = scope, workspace_id, provider, credential_ref)
+  def resolve_auth_for_execution(%Scope{} = scope, project_id, provider, credential_ref)
       when is_binary(provider) and is_map(credential_ref) do
-    with {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+    with {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id,
          {:ok, normalized_ref} <- CredentialRef.normalize(credential_ref),
          :ok <- CredentialRef.ensure_owner(normalized_ref, resolved_scope.user.id),
@@ -187,9 +187,9 @@ defmodule Fizz.Integrations do
   """
   @spec list_repos(Scope.t(), String.t(), String.t(), keyword()) ::
           {:ok, [map()]} | {:error, term()}
-  def list_repos(%Scope{} = scope, workspace_id, provider, opts \\ []) do
+  def list_repos(%Scope{} = scope, project_id, provider, opts \\ []) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+         {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
       opts = Keyword.put(opts, :organization_id, organization_id)
       provider_mod.list_repos(resolved_scope, opts)
@@ -201,9 +201,9 @@ defmodule Fizz.Integrations do
   """
   @spec create_pull_request(Scope.t(), String.t(), String.t(), map()) ::
           {:ok, map()} | {:error, term()}
-  def create_pull_request(%Scope{} = scope, workspace_id, provider, params) do
+  def create_pull_request(%Scope{} = scope, project_id, provider, params) do
     with {:ok, provider_mod} <- provider_module(provider),
-         {:ok, resolved_scope} <- resolve_workspace_scope(scope, workspace_id),
+         {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
       provider_mod.create_pull_request(
         resolved_scope,
@@ -223,11 +223,11 @@ defmodule Fizz.Integrations do
   end
 
   @doc """
-  Resolves a workspace-scoped caller for integration operations.
+  Resolves a project-scoped caller for integration operations.
   """
-  @spec resolve_workspace_scope(Scope.t(), String.t()) :: {:ok, Scope.t()} | {:error, term()}
-  def resolve_workspace_scope(scope, workspace_id) do
-    Accounts.build_scope_for_workspace(scope, workspace_id)
+  @spec resolve_project_scope(Scope.t(), String.t()) :: {:ok, Scope.t()} | {:error, term()}
+  def resolve_project_scope(scope, project_id) do
+    Accounts.build_scope_for_project(scope, project_id)
   end
 
   defp fetch_oauth_token(resolved_scope, organization_id, provider) do

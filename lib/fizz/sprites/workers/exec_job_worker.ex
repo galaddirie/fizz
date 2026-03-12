@@ -252,15 +252,15 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
   defp setup_git_credentials(%ExecJob{requested_by_user: %Accounts.User{} = user} = exec_job) do
     scope = Scope.for_user(user)
 
-    with {:ok, workspace_scope} <-
-           Accounts.build_scope_for_workspace(scope, exec_job.workspace_id),
+    with {:ok, project_scope} <-
+           Accounts.build_scope_for_project(scope, exec_job.project_id),
          {:ok, token_result} <-
            Integrations.fetch_token_for_sprite(
-             workspace_scope,
-             exec_job.workspace_id,
+             project_scope,
+             exec_job.project_id,
              "github_oauth"
            ) do
-      user_opts = git_user_opts(workspace_scope, exec_job.workspace_id)
+      user_opts = git_user_opts(project_scope, exec_job.project_id)
 
       case GitCredentialSetup.setup(
              exec_job.sprite.remote_name,
@@ -283,8 +283,8 @@ defmodule Fizz.Sprites.Workers.ExecJobWorker do
 
   defp setup_git_credentials(_exec_job), do: []
 
-  defp git_user_opts(scope, workspace_id) do
-    case Integrations.get_connection(scope, workspace_id, "github_oauth") do
+  defp git_user_opts(scope, project_id) do
+    case Integrations.get_connection(scope, project_id, "github_oauth") do
       {:ok, connection} ->
         meta = connection.provider_metadata || %{}
         name = meta["name"] || meta["username"]

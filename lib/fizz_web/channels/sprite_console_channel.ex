@@ -29,7 +29,7 @@ defmodule FizzWeb.SpriteConsoleChannel do
         socket
         |> assign(:console_id, console_session.id)
         |> assign(:sprite_id, console_session.sprite_id)
-        |> assign(:workspace_id, console_session.workspace_id)
+        |> assign(:project_id, console_session.project_id)
         |> assign(:runner_pid, runner_pid)
         |> assign(:console_closed?, false)
 
@@ -127,11 +127,11 @@ defmodule FizzWeb.SpriteConsoleChannel do
   defp maybe_close_console(%{assigns: %{console_closed?: true}} = socket, _reason), do: socket
 
   defp maybe_close_console(%{assigns: assigns} = socket, reason) do
-    if assigns[:console_id] && assigns[:workspace_id] && assigns[:sprite_id] do
+    if assigns[:console_id] && assigns[:project_id] && assigns[:sprite_id] do
       _ =
         Sprites.close_console(
           socket.assigns.current_scope,
-          assigns.workspace_id,
+          assigns.project_id,
           assigns.sprite_id,
           assigns.console_id,
           reason
@@ -153,12 +153,12 @@ defmodule FizzWeb.SpriteConsoleChannel do
   defp normalize_integer(_value, fallback), do: fallback
 
   defp setup_git_credentials(scope, console_session) do
-    workspace_id = console_session.workspace_id
+    project_id = console_session.project_id
     remote_name = console_session.sprite.remote_name
 
     with {:ok, token_result} <-
-           Integrations.fetch_token_for_sprite(scope, workspace_id, "github_oauth") do
-      user_opts = git_user_opts(scope, workspace_id)
+           Integrations.fetch_token_for_sprite(scope, project_id, "github_oauth") do
+      user_opts = git_user_opts(scope, project_id)
 
       case GitCredentialSetup.setup(remote_name, token_result.access_token, user_opts) do
         {:ok, env_tuples} ->
@@ -175,8 +175,8 @@ defmodule FizzWeb.SpriteConsoleChannel do
     end
   end
 
-  defp git_user_opts(scope, workspace_id) do
-    case Integrations.get_connection(scope, workspace_id, "github_oauth") do
+  defp git_user_opts(scope, project_id) do
+    case Integrations.get_connection(scope, project_id, "github_oauth") do
       {:ok, connection} ->
         meta = connection.provider_metadata || %{}
         name = meta["name"] || meta["username"]

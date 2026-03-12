@@ -1,51 +1,51 @@
 <Layouts.app
   flash={@flash}
   current_scope={@current_scope}
-  current_path={~p"/workspaces/#{@workspace_id}"}
+  current_path={~p"/projects/#{@project_id}"}
 >
   <:page_header>
     <div class="space-y-2">
       <.link
-        navigate={~p"/workspaces"}
+        navigate={~p"/projects"}
         class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content"
       >
-        <.icon name="hero-arrow-left" class="size-4" /> Back to Workspaces
+        <.icon name="hero-arrow-left" class="size-4" /> Back to projects
       </.link>
-      <h1 class="text-3xl font-semibold">{(@workspace && @workspace.name) || "Workspace"}</h1>
-      <p class="text-sm text-muted">Workspace details and quick links for the current scope.</p>
+      <h1 class="text-3xl font-semibold">{(@project && @project.name) || "project"}</h1>
+      <p class="text-sm text-muted">project details and quick links for the current scope.</p>
     </div>
   </:page_header>
 
-  <%= if @workspace do %>
-    <div id="workspace-show-page" class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+  <%= if @project do %>
+    <div id="project-show-page" class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
       <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
         <h2 class="text-lg font-semibold">Details</h2>
 
         <dl class="mt-4 grid gap-4 sm:grid-cols-2">
-          <div id="workspace-show-id">
-            <dt class="text-xs uppercase tracking-wide text-muted">Workspace ID</dt>
-            <dd class="mt-1 text-sm font-mono">{@workspace.id}</dd>
+          <div id="project-show-id">
+            <dt class="text-xs uppercase tracking-wide text-muted">project ID</dt>
+            <dd class="mt-1 text-sm font-mono">{@project.id}</dd>
           </div>
-          <div id="workspace-show-slug">
+          <div id="project-show-slug">
             <dt class="text-xs uppercase tracking-wide text-muted">Slug</dt>
-            <dd class="mt-1 text-sm">{@workspace.slug}</dd>
+            <dd class="mt-1 text-sm">{@project.slug}</dd>
           </div>
-          <div id="workspace-show-org-id">
+          <div id="project-show-org-id">
             <dt class="text-xs uppercase tracking-wide text-muted">Organization ID</dt>
-            <dd class="mt-1 text-sm font-mono">{@workspace.workos_organization_id}</dd>
+            <dd class="mt-1 text-sm font-mono">{@project.workos_organization_id}</dd>
           </div>
-          <div id="workspace-show-inserted-at">
+          <div id="project-show-inserted-at">
             <dt class="text-xs uppercase tracking-wide text-muted">Created</dt>
-            <dd class="mt-1 text-sm">{to_string(@workspace.inserted_at)}</dd>
+            <dd class="mt-1 text-sm">{to_string(@project.inserted_at)}</dd>
           </div>
         </dl>
 
         <p
-          :if={@workspace.description && @workspace.description != ""}
-          id="workspace-show-description"
+          :if={@project.description && @project.description != ""}
+          id="project-show-description"
           class="mt-4 rounded-box border border-base-300 bg-base-200/40 p-3 text-sm"
         >
-          {@workspace.description}
+          {@project.description}
         </p>
       </section>
 
@@ -54,18 +54,18 @@
 
         <div class="mt-4 space-y-2">
           <.link
-            id="workspace-show-open-sprites"
-            navigate={~p"/workspaces/#{@workspace.id}/sprites"}
+            id="project-show-open-sprites"
+            navigate={~p"/projects/#{@project.id}/sprites"}
             class="btn btn-primary btn-sm w-full"
           >
             Open Sprites
           </.link>
           <.link
-            id="workspace-show-back"
-            navigate={~p"/workspaces"}
+            id="project-show-back"
+            navigate={~p"/projects"}
             class="btn btn-ghost btn-sm w-full"
           >
-            All Workspaces
+            All projects
           </.link>
         </div>
 
@@ -74,13 +74,13 @@
           <div class="flex items-center justify-between gap-3 text-sm">
             <span>Organization role</span>
             <span class="badge badge-outline">
-              {@resolve_workspace_scope.organization_role || :none}
+              {@resolve_project_scope.organization_role || :none}
             </span>
           </div>
           <div class="flex items-center justify-between gap-3 text-sm">
-            <span>Workspace role</span>
+            <span>project role</span>
             <span class="badge badge-outline">
-              {@resolve_workspace_scope.workspace_role || :none}
+              {@resolve_project_scope.project_role || :none}
             </span>
           </div>
         </div>

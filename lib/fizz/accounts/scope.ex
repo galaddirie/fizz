@@ -3,33 +3,33 @@ defmodule Fizz.Accounts.Scope do
   Caller scope used for authentication and role-based authorization.
 
   WorkOS is the source of truth for user/org identity. This scope mirrors
-  the resolved WorkOS organization/workspace context and effective local roles.
+  the resolved WorkOS organization/project context and effective local roles.
   """
 
-  alias Fizz.Accounts.{User, Workspace}
+  alias Fizz.Accounts.{Project, User}
 
   @organization_roles [:owner, :admin, :member]
-  @workspace_roles [:admin, :member, :viewer]
+  @project_roles [:admin, :member, :viewer]
 
   defstruct user: nil,
             actor: :anonymous,
             organization_id: nil,
-            workspace: nil,
+            project: nil,
             organization_role: nil,
-            workspace_role: nil,
+            project_role: nil,
             metadata: %{}
 
   @type organization_role :: :owner | :admin | :member | nil
-  @type workspace_role :: :admin | :member | :viewer | nil
+  @type project_role :: :admin | :member | :viewer | nil
 
   @typedoc "A resolved caller scope"
   @type t :: %__MODULE__{
           user: %User{} | nil,
           actor: :anonymous | :user,
           organization_id: String.t() | nil,
-          workspace: %Workspace{} | nil,
+          project: %Project{} | nil,
           organization_role: organization_role(),
-          workspace_role: workspace_role(),
+          project_role: project_role(),
           metadata: map()
         }
 
@@ -53,11 +53,11 @@ defmodule Fizz.Accounts.Scope do
   def with_organization_id(%__MODULE__{} = scope, nil), do: %{scope | organization_id: nil}
 
   @doc """
-  Assigns the active workspace on the scope.
+  Assigns the active project on the scope.
   """
-  @spec with_workspace(t(), %Workspace{}) :: t()
-  def with_workspace(%__MODULE__{} = scope, %Workspace{} = workspace),
-    do: %{scope | workspace: workspace}
+  @spec with_project(t(), %Project{}) :: t()
+  def with_project(%__MODULE__{} = scope, %Project{} = project),
+    do: %{scope | project: project}
 
   @doc """
   Assigns the organization role.
@@ -69,13 +69,13 @@ defmodule Fizz.Accounts.Scope do
   def with_organization_role(%__MODULE__{} = scope, nil), do: %{scope | organization_role: nil}
 
   @doc """
-  Assigns the workspace role.
+  Assigns the project role.
   """
-  @spec with_workspace_role(t(), workspace_role()) :: t()
-  def with_workspace_role(%__MODULE__{} = scope, role) when role in @workspace_roles,
-    do: %{scope | workspace_role: role}
+  @spec with_project_role(t(), project_role()) :: t()
+  def with_project_role(%__MODULE__{} = scope, role) when role in @project_roles,
+    do: %{scope | project_role: role}
 
-  def with_workspace_role(%__MODULE__{} = scope, nil), do: %{scope | workspace_role: nil}
+  def with_project_role(%__MODULE__{} = scope, nil), do: %{scope | project_role: nil}
 
   @doc """
   Whether the scope is authenticated.
@@ -103,9 +103,9 @@ defmodule Fizz.Accounts.Scope do
   def organization_member?(%__MODULE__{}), do: false
 
   @doc """
-  Whether scope has workspace admin privileges.
+  Whether scope has project admin privileges.
   """
-  @spec workspace_admin?(t()) :: boolean()
-  def workspace_admin?(%__MODULE__{workspace_role: :admin}), do: true
-  def workspace_admin?(%__MODULE__{}), do: false
+  @spec project_admin?(t()) :: boolean()
+  def project_admin?(%__MODULE__{project_role: :admin}), do: true
+  def project_admin?(%__MODULE__{}), do: false
 end

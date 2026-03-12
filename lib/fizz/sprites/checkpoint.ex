@@ -5,7 +5,7 @@ defmodule Fizz.Sprites.Checkpoint do
 
   use Fizz.Schema
 
-  alias Fizz.Accounts.{User, Workspace}
+  alias Fizz.Accounts.{Project, User}
   alias Fizz.Sprites.Sprite
 
   schema "sprite_checkpoints" do
@@ -14,7 +14,7 @@ defmodule Fizz.Sprites.Checkpoint do
     field :created_at_remote, :utc_datetime_usec
 
     belongs_to :sprite, Sprite
-    belongs_to :workspace, Workspace
+    belongs_to :project, Project
     belongs_to :created_by_user, User
 
     timestamps()
@@ -25,15 +25,15 @@ defmodule Fizz.Sprites.Checkpoint do
     checkpoint
     |> cast(attrs, [
       :sprite_id,
-      :workspace_id,
+      :project_id,
       :created_by_user_id,
       :remote_checkpoint_id,
       :comment,
       :created_at_remote
     ])
-    |> validate_required([:sprite_id, :workspace_id, :remote_checkpoint_id])
+    |> validate_required([:sprite_id, :project_id, :remote_checkpoint_id])
     |> foreign_key_constraint(:sprite_id)
-    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:created_by_user_id)
     |> unique_constraint(:remote_checkpoint_id,
       name: :sprite_checkpoints_sprite_id_remote_checkpoint_id_index

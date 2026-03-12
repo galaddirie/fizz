@@ -292,7 +292,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
        when is_binary(organization_id) and byte_size(organization_id) > 0,
        do: {:ok, organization_id}
 
-  defp organization_from_scope(%Scope{workspace: %{workos_organization_id: organization_id}})
+  defp organization_from_scope(%Scope{project: %{workos_organization_id: organization_id}})
        when is_binary(organization_id) and byte_size(organization_id) > 0,
        do: {:ok, organization_id}
 

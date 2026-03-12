@@ -1,27 +1,27 @@
-<Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/workspaces"}>
+<Layouts.app flash={@flash} current_scope={@current_scope} current_path={~p"/projects"}>
   <:page_header>
     <div class="space-y-2">
-      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
-      <h1 class="text-3xl font-semibold">Workspaces</h1>
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">project</p>
+      <h1 class="text-3xl font-semibold">projects</h1>
       <p class="text-sm text-muted">
-        Manage workspace boundaries and open a workspace to access the rest of the app.
+        Manage project boundaries and open a project to access the rest of the app.
       </p>
     </div>
   </:page_header>
 
-  <div id="workspaces-index-page" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+  <div id="projects-index-page" class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
     <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 class="text-lg font-semibold">Workspace Directory</h2>
+          <h2 class="text-lg font-semibold">project Directory</h2>
           <p class="mt-1 text-sm text-muted">
-            Switch organization context to view available workspaces.
+            Switch organization context to view available projects.
           </p>
         </div>
 
         <.form
           for={@organization_form}
-          id="workspaces-organization-form"
+          id="projects-organization-form"
           phx-change="change_organization"
         >
           <.input
@@ -33,50 +33,50 @@
         </.form>
       </div>
 
-      <%= if @workspace_error do %>
+      <%= if @project_error do %>
         <p
-          id="workspaces-index-error"
+          id="projects-index-error"
           class="mt-4 rounded-box border border-warning/40 bg-warning/10 p-4 text-sm"
         >
-          {workspace_error_message(@workspace_error)}
+          {project_error_message(@project_error)}
         </p>
       <% else %>
-        <div id="workspaces-list" phx-update="stream" class="mt-4 space-y-3">
+        <div id="projects-list" phx-update="stream" class="mt-4 space-y-3">
           <div class="hidden only:block rounded-box border border-base-300 bg-base-200/70 p-4 text-sm text-muted">
-            No workspaces in this organization yet.
+            No projects in this organization yet.
           </div>
 
           <article
-            :for={{dom_id, workspace} <- @streams.workspaces}
+            :for={{dom_id, project} <- @streams.projects}
             id={dom_id}
             class="rounded-box border border-base-300 bg-base-100 p-4"
           >
             <div class="flex items-center justify-between gap-3">
               <div>
-                <p class="font-medium text-base-content">{workspace.name}</p>
-                <p class="text-xs text-muted">Slug: {workspace.slug}</p>
+                <p class="font-medium text-base-content">{project.name}</p>
+                <p class="text-xs text-muted">Slug: {project.slug}</p>
               </div>
-              <span class="badge badge-outline">{workspace.workos_organization_id}</span>
+              <span class="badge badge-outline">{project.workos_organization_id}</span>
             </div>
 
             <p
-              :if={workspace.description && workspace.description != ""}
+              :if={project.description && project.description != ""}
               class="mt-3 text-sm text-base-content/80"
             >
-              {workspace.description}
+              {project.description}
             </p>
 
             <div class="mt-3 flex items-center gap-2">
               <.link
-                id={"workspace-open-#{workspace.id}"}
-                navigate={~p"/workspaces/#{workspace.id}"}
+                id={"project-open-#{project.id}"}
+                navigate={~p"/projects/#{project.id}"}
                 class="btn btn-primary btn-sm"
               >
                 Open
               </.link>
               <.link
-                id={"workspace-sprites-#{workspace.id}"}
-                navigate={~p"/workspaces/#{workspace.id}/sprites"}
+                id={"project-sprites-#{project.id}"}
+                navigate={~p"/projects/#{project.id}/sprites"}
                 class="btn btn-ghost btn-sm"
               >
                 Sprites
@@ -88,16 +88,16 @@
     </section>
 
     <aside class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
-      <h2 class="text-lg font-semibold">Create Workspace</h2>
+      <h2 class="text-lg font-semibold">Create project</h2>
       <p class="mt-1 text-sm text-muted">
-        Workspaces are local groups under the selected organization.
+        projects are local groups under the selected organization.
       </p>
 
       <.form
         for={@create_form}
-        id="workspaces-create-form"
-        phx-change="validate_create_workspace"
-        phx-submit="create_workspace"
+        id="projects-create-form"
+        phx-change="validate_create_project"
+        phx-submit="create_project"
         class="mt-4 space-y-4"
       >
         <.input
@@ -115,8 +115,8 @@
           placeholder="Optional description"
         />
 
-        <button id="workspaces-create-submit" type="submit" class="btn btn-primary w-full">
-          Create Workspace
+        <button id="projects-create-submit" type="submit" class="btn btn-primary w-full">
+          Create project
         </button>
       </.form>
     </aside>

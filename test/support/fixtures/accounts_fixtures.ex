@@ -64,13 +64,13 @@ defmodule Fizz.AccountsFixtures do
     |> Scope.with_organization_role(organization_role)
   end
 
-  def workspace_fixture(scope, attrs \\ %{}) do
-    {:ok, workspace} =
-      Accounts.create_workspace(
+  def project_fixture(scope, attrs \\ %{}) do
+    {:ok, project} =
+      Accounts.create_project(
         scope,
-        Map.merge(%{name: "Workspace #{System.unique_integer()}"}, attrs)
+        Map.merge(%{name: "Project #{System.unique_integer()}"}, attrs)
       )
 
-    workspace
+    project
   end
 end

@@ -20,7 +20,7 @@ defmodule FizzWeb.SpriteLogsChannel do
     %{
       id: job.id,
       sprite_id: job.sprite_id,
-      workspace_id: job.workspace_id,
+      project_id: job.project_id,
       state: to_string(job.state),
       command: job.command,
       args: job.args,

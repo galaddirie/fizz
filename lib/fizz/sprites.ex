@@ -1,6 +1,6 @@
 defmodule Fizz.Sprites do
   @moduledoc """
-  Workspace-scoped broker context for Sprites lifecycle, jobs, consoles,
+  project-scoped broker context for Sprites lifecycle, jobs, consoles,
   services, and checkpoints.
   """
 
@@ -28,7 +28,7 @@ defmodule Fizz.Sprites do
 
   @type error_reason ::
           :forbidden
-          | :workspace_not_found
+          | :project_not_found
           | :sprite_not_found
           | :job_not_found
           | :console_not_found
@@ -37,23 +37,23 @@ defmodule Fizz.Sprites do
           | term()
 
   @doc """
-  Returns workspace-aware scope for the workspace id.
+  Returns project-aware scope for the project id.
   """
-  @spec resolve_workspace_scope(Scope.t() | nil, String.t()) ::
+  @spec resolve_project_scope(Scope.t() | nil, String.t()) ::
           {:ok, Scope.t()} | {:error, error_reason()}
-  def resolve_workspace_scope(scope, workspace_id),
-    do: build_workspace_scope(scope, workspace_id)
+  def resolve_project_scope(scope, project_id),
+    do: build_project_scope(scope, project_id)
 
   @doc """
-  Lists sprites in the workspace.
+  Lists sprites in the project.
   """
-  @spec list_workspace_sprites(Scope.t() | nil, String.t()) ::
+  @spec list_project_sprites(Scope.t() | nil, String.t()) ::
           {:ok, [Sprite.t()]} | {:error, error_reason()}
-  def list_workspace_sprites(scope, workspace_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read) do
+  def list_project_sprites(scope, project_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read) do
       sprites =
         from(sprite in Sprite,
-          where: sprite.workspace_id == ^workspace_id,
+          where: sprite.project_id == ^project_id,
           order_by: [asc: sprite.inserted_at]
         )
         |> Repo.all()
@@ -63,13 +63,13 @@ defmodule Fizz.Sprites do
   end
 
   @doc """
-  Gets a sprite by id within the workspace.
+  Gets a sprite by id within the project.
   """
   @spec inspect_sprite(Scope.t() | nil, String.t(), String.t()) ::
           {:ok, Sprite.t()} | {:error, error_reason()}
-  def inspect_sprite(scope, workspace_id, sprite_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id) do
+  def inspect_sprite(scope, project_id, sprite_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id) do
       {:ok, sprite}
     end
   end
@@ -79,11 +79,11 @@ defmodule Fizz.Sprites do
   """
   @spec reconfigure_sprite(Scope.t() | nil, String.t(), String.t(), map()) ::
           {:ok, Sprite.t()} | {:error, error_reason() | Ecto.Changeset.t()}
-  def reconfigure_sprite(scope, workspace_id, sprite_id, attrs) when is_map(attrs) do
+  def reconfigure_sprite(scope, project_id, sprite_id, attrs) when is_map(attrs) do
     attrs = normalize_attrs(attrs)
 
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :manage),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          :ok <- maybe_update_remote_url_auth(sprite, attr(attrs, :url_auth_mode)),
          {:ok, updated_sprite} <-
            sprite
@@ -99,22 +99,22 @@ defmodule Fizz.Sprites do
   end
 
   @doc """
-  Creates a new sprite for the workspace and applies restrictive default egress policy.
+  Creates a new sprite for the project and applies restrictive default egress policy.
   """
   @spec provision_sprite(Scope.t() | nil, String.t(), map()) ::
           {:ok, Sprite.t()} | {:error, error_reason()}
-  def provision_sprite(scope, workspace_id, attrs) when is_map(attrs) do
+  def provision_sprite(scope, project_id, attrs) when is_map(attrs) do
     attrs = normalize_attrs(attrs)
 
-    with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
+    with {:ok, project_scope} <- authorize_project(scope, project_id, :manage),
          {:ok, client} <- Client.client(),
          name when is_binary(name) <- attr(attrs, :name),
-         remote_name <- remote_name_for(workspace_id, name),
+         remote_name <- remote_name_for(project_id, name),
          {:ok, sprite} <-
-           insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name),
+           insert_local_sprite(project_scope, project_id, attrs, remote_name),
          {:ok, sprite} <-
            provision_remote(client, sprite, remote_name, attrs) do
-      emit_event([:fizz, :sprites, :sprite, :created], %{count: 1}, %{workspace_id: workspace_id})
+      emit_event([:fizz, :sprites, :sprite, :created], %{count: 1}, %{project_id: project_id})
       {:ok, sprite}
     else
       nil -> {:error, :invalid_sprite_name}
@@ -127,16 +127,16 @@ defmodule Fizz.Sprites do
   """
   @spec terminate_sprite(Scope.t() | nil, String.t(), String.t()) ::
           {:ok, Sprite.t()} | {:error, error_reason()}
-  def terminate_sprite(scope, workspace_id, sprite_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+  def terminate_sprite(scope, project_id, sprite_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :manage),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, remote_sprite} <- Client.sprite(sprite.remote_name),
          :ok <- Sprites.destroy(remote_sprite),
          {:ok, updated_sprite} <-
            sprite
            |> Sprite.changeset(%{status: :deleted, deleted_at: DateTime.utc_now()})
            |> Repo.update() do
-      emit_event([:fizz, :sprites, :sprite, :deleted], %{count: 1}, %{workspace_id: workspace_id})
+      emit_event([:fizz, :sprites, :sprite, :deleted], %{count: 1}, %{project_id: project_id})
       {:ok, updated_sprite}
     end
   end
@@ -146,19 +146,19 @@ defmodule Fizz.Sprites do
   """
   @spec queue_job(Scope.t() | nil, String.t(), String.t(), map()) ::
           {:ok, ExecJob.t()} | {:error, error_reason()}
-  def queue_job(scope, workspace_id, sprite_id, exec_spec) when is_map(exec_spec) do
+  def queue_job(scope, project_id, sprite_id, exec_spec) when is_map(exec_spec) do
     exec_spec = normalize_attrs(exec_spec)
 
-    with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+    with {:ok, project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          command when is_binary(command) <- attr(exec_spec, :command),
          args <- normalize_string_list(attr(exec_spec, :args)),
          timeout_ms <- attr(exec_spec, :timeout_ms) || Client.exec_timeout_ms_default(),
          {:ok, %{updated_exec_job: exec_job}} <-
            enqueue_job_multi(
              sprite,
-             workspace_id,
-             workspace_scope.user.id,
+             project_id,
+             project_scope.user.id,
              command,
              args,
              normalize_env_map(attr(exec_spec, :env)),
@@ -166,7 +166,7 @@ defmodule Fizz.Sprites do
              timeout_ms
            )
            |> Repo.transaction() do
-      emit_event([:fizz, :sprites, :job, :queued], %{count: 1}, %{workspace_id: workspace_id})
+      emit_event([:fizz, :sprites, :job, :queued], %{count: 1}, %{project_id: project_id})
       {:ok, exec_job}
     else
       nil ->
@@ -185,12 +185,12 @@ defmodule Fizz.Sprites do
   """
   @spec list_sprite_jobs(Scope.t() | nil, String.t(), String.t()) ::
           {:ok, [ExecJob.t()]} | {:error, error_reason()}
-  def list_sprite_jobs(scope, workspace_id, sprite_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id) do
+  def list_sprite_jobs(scope, project_id, sprite_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id) do
       jobs =
         from(job in ExecJob,
-          where: job.workspace_id == ^workspace_id and job.sprite_id == ^sprite.id,
+          where: job.project_id == ^project_id and job.sprite_id == ^sprite.id,
           order_by: [desc: job.inserted_at]
         )
         |> Repo.all()
@@ -204,10 +204,10 @@ defmodule Fizz.Sprites do
   """
   @spec inspect_job(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, ExecJob.t()} | {:error, error_reason()}
-  def inspect_job(scope, workspace_id, sprite_id, job_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         {:ok, job} <- fetch_job(workspace_id, sprite.id, job_id) do
+  def inspect_job(scope, project_id, sprite_id, job_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
+         {:ok, job} <- fetch_job(project_id, sprite.id, job_id) do
       {:ok, job}
     end
   end
@@ -224,11 +224,11 @@ defmodule Fizz.Sprites do
           pos_integer()
         ) ::
           {:ok, [ExecLogChunk.t()]} | {:error, error_reason()}
-  def tail_job_logs(scope, workspace_id, sprite_id, job_id, after_seq, limit)
+  def tail_job_logs(scope, project_id, sprite_id, job_id, after_seq, limit)
       when is_integer(after_seq) and is_integer(limit) and limit > 0 do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         {:ok, job} <- fetch_job(workspace_id, sprite.id, job_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
+         {:ok, job} <- fetch_job(project_id, sprite.id, job_id) do
       chunks =
         from(chunk in ExecLogChunk,
           where: chunk.job_id == ^job.id and chunk.seq > ^after_seq,
@@ -241,7 +241,7 @@ defmodule Fizz.Sprites do
     end
   end
 
-  def tail_job_logs(_scope, _workspace_id, _sprite_id, _job_id, _after_seq, _limit),
+  def tail_job_logs(_scope, _project_id, _sprite_id, _job_id, _after_seq, _limit),
     do: {:error, :job_not_found}
 
   @doc """
@@ -249,10 +249,10 @@ defmodule Fizz.Sprites do
   """
   @spec cancel_job(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, ExecJob.t()} | {:error, error_reason()}
-  def cancel_job(scope, workspace_id, sprite_id, job_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         {:ok, job} <- fetch_job(workspace_id, sprite.id, job_id) do
+  def cancel_job(scope, project_id, sprite_id, job_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
+         {:ok, job} <- fetch_job(project_id, sprite.id, job_id) do
       now = DateTime.utc_now()
 
       cond do
@@ -286,17 +286,17 @@ defmodule Fizz.Sprites do
   """
   @spec open_console(Scope.t() | nil, String.t(), String.t(), map()) ::
           {:ok, ConsoleSession.t()} | {:error, error_reason()}
-  def open_console(scope, workspace_id, sprite_id, opts \\ %{}) do
+  def open_console(scope, project_id, sprite_id, opts \\ %{}) do
     opts = normalize_attrs(opts)
 
-    with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+    with {:ok, project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, console_session} <-
            %ConsoleSession{}
            |> ConsoleSession.changeset(%{
              sprite_id: sprite.id,
-             workspace_id: workspace_id,
-             opened_by_user_id: workspace_scope.user.id,
+             project_id: project_id,
+             opened_by_user_id: project_scope.user.id,
              state: :active,
              opened_at: DateTime.utc_now(),
              rows: normalize_integer(attr(opts, :rows), 24),
@@ -314,19 +314,19 @@ defmodule Fizz.Sprites do
           {:ok, ConsoleSession.t()} | {:error, error_reason()}
   @spec close_console(Scope.t() | nil, String.t(), String.t(), String.t(), String.t()) ::
           {:ok, ConsoleSession.t()} | {:error, error_reason()}
-  def close_console(scope, workspace_id, sprite_id, console_id, reason \\ "closed") do
+  def close_console(scope, project_id, sprite_id, console_id, reason \\ "closed") do
     close_reason = normalize_close_reason(reason)
 
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
-         {:ok, console_session} <- fetch_console_session(workspace_id, sprite.id, console_id) do
-      close_console_session(console_session, workspace_id, close_reason)
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
+         {:ok, console_session} <- fetch_console_session(project_id, sprite.id, console_id) do
+      close_console_session(console_session, project_id, close_reason)
     end
   end
 
   defp close_console_session(
          %ConsoleSession{state: :active} = console_session,
-         workspace_id,
+         project_id,
          reason
        ) do
     with {:ok, closed_session} <-
@@ -337,7 +337,7 @@ defmodule Fizz.Sprites do
              close_reason: reason
            })
            |> Repo.update() do
-      emit_event([:fizz, :sprites, :console, :closed], %{count: 1}, %{workspace_id: workspace_id})
+      emit_event([:fizz, :sprites, :console, :closed], %{count: 1}, %{project_id: project_id})
 
       FizzWeb.Endpoint.broadcast("sprite_console:#{console_session.id}", "closed", %{
         reason: reason
@@ -347,7 +347,7 @@ defmodule Fizz.Sprites do
     end
   end
 
-  defp close_console_session(%ConsoleSession{} = console_session, _workspace_id, _reason),
+  defp close_console_session(%ConsoleSession{} = console_session, _project_id, _reason),
     do: {:ok, console_session}
 
   @doc """
@@ -364,8 +364,8 @@ defmodule Fizz.Sprites do
       |> Repo.one()
 
     with %ConsoleSession{} = console_session <- session,
-         {:ok, _workspace_scope} <-
-           authorize_workspace(scope, console_session.workspace_id, :execute) do
+         {:ok, _project_scope} <-
+           authorize_project(scope, console_session.project_id, :execute) do
       {:ok, console_session}
     else
       nil -> {:error, :console_not_found}
@@ -408,12 +408,12 @@ defmodule Fizz.Sprites do
   """
   @spec list_sprite_services(Scope.t() | nil, String.t(), String.t()) ::
           {:ok, [Service.t()]} | {:error, error_reason()}
-  def list_sprite_services(scope, workspace_id, sprite_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id) do
+  def list_sprite_services(scope, project_id, sprite_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id) do
       services =
         from(service in Service,
-          where: service.workspace_id == ^workspace_id and service.sprite_id == ^sprite.id,
+          where: service.project_id == ^project_id and service.sprite_id == ^sprite.id,
           order_by: [asc: service.name]
         )
         |> Repo.all()
@@ -427,11 +427,11 @@ defmodule Fizz.Sprites do
   """
   @spec inspect_service(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, Service.t()} | {:error, error_reason()}
-  def inspect_service(scope, workspace_id, sprite_id, service_name) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id) do
+  def inspect_service(scope, project_id, sprite_id, service_name) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id) do
       case Repo.get_by(Service,
-             workspace_id: workspace_id,
+             project_id: project_id,
              sprite_id: sprite.id,
              name: service_name
            ) do
@@ -446,18 +446,18 @@ defmodule Fizz.Sprites do
   """
   @spec define_service(Scope.t() | nil, String.t(), String.t(), String.t(), map()) ::
           {:ok, Service.t()} | {:error, error_reason()}
-  def define_service(scope, workspace_id, sprite_id, service_name, attrs) when is_map(attrs) do
+  def define_service(scope, project_id, sprite_id, service_name, attrs) when is_map(attrs) do
     attrs = normalize_attrs(attrs)
 
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :manage),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :manage),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, _response} <-
            Http.put_service(sprite.remote_name, service_name, %{
              cmd: attr(attrs, :cmd),
              args: normalize_string_list(attr(attrs, :args)),
              needs: normalize_string_list(attr(attrs, :needs))
            }),
-         {:ok, service} <- upsert_local_service(workspace_id, sprite, service_name, attrs) do
+         {:ok, service} <- upsert_local_service(project_id, sprite, service_name, attrs) do
       {:ok, service}
     end
   end
@@ -467,12 +467,12 @@ defmodule Fizz.Sprites do
   """
   @spec start_service(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, Service.t()} | {:error, error_reason()}
-  def start_service(scope, workspace_id, sprite_id, service_name) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+  def start_service(scope, project_id, sprite_id, service_name) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, _response} <- Http.start_service(sprite.remote_name, service_name),
          {:ok, service} <-
-           update_local_service_status(workspace_id, sprite.id, service_name, :running) do
+           update_local_service_status(project_id, sprite.id, service_name, :running) do
       {:ok, service}
     end
   end
@@ -482,12 +482,12 @@ defmodule Fizz.Sprites do
   """
   @spec stop_service(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, Service.t()} | {:error, error_reason()}
-  def stop_service(scope, workspace_id, sprite_id, service_name) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+  def stop_service(scope, project_id, sprite_id, service_name) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, _response} <- Http.stop_service(sprite.remote_name, service_name),
          {:ok, service} <-
-           update_local_service_status(workspace_id, sprite.id, service_name, :stopped) do
+           update_local_service_status(project_id, sprite.id, service_name, :stopped) do
       {:ok, service}
     end
   end
@@ -497,9 +497,9 @@ defmodule Fizz.Sprites do
   """
   @spec tail_service_logs(Scope.t() | nil, String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map() | list()} | {:error, error_reason()}
-  def tail_service_logs(scope, workspace_id, sprite_id, service_name, opts \\ []) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+  def tail_service_logs(scope, project_id, sprite_id, service_name, opts \\ []) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, response} <- Http.service_logs(sprite.remote_name, service_name, opts) do
       {:ok, response}
     end
@@ -510,13 +510,13 @@ defmodule Fizz.Sprites do
   """
   @spec list_sprite_checkpoints(Scope.t() | nil, String.t(), String.t()) ::
           {:ok, [map()]} | {:error, error_reason()}
-  def list_sprite_checkpoints(scope, workspace_id, sprite_id) do
-    with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :read),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+  def list_sprite_checkpoints(scope, project_id, sprite_id) do
+    with {:ok, project_scope} <- authorize_project(scope, project_id, :read),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, remote_sprite} <- Client.sprite(sprite.remote_name),
          {:ok, checkpoints} <- Sprites.list_checkpoints(remote_sprite) do
       Enum.each(checkpoints, fn checkpoint ->
-        upsert_local_checkpoint(workspace_id, sprite.id, workspace_scope.user.id, checkpoint)
+        upsert_local_checkpoint(project_id, sprite.id, project_scope.user.id, checkpoint)
       end)
 
       {:ok, Enum.map(checkpoints, &checkpoint_to_map/1)}
@@ -528,20 +528,20 @@ defmodule Fizz.Sprites do
   """
   @spec capture_checkpoint(Scope.t() | nil, String.t(), String.t(), map()) ::
           {:ok, map()} | {:error, error_reason()}
-  def capture_checkpoint(scope, workspace_id, sprite_id, attrs \\ %{}) do
+  def capture_checkpoint(scope, project_id, sprite_id, attrs \\ %{}) do
     attrs = normalize_attrs(attrs)
 
-    with {:ok, workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+    with {:ok, project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, remote_sprite} <- Client.sprite(sprite.remote_name),
          {:ok, _messages} <-
            Sprites.create_checkpoint(remote_sprite, comment: attr(attrs, :comment) || ""),
          {:ok, checkpoints_after} <- Sprites.list_checkpoints(remote_sprite),
          %{} = newest_checkpoint <- newest_checkpoint(checkpoints_after) do
       upsert_local_checkpoint(
-        workspace_id,
+        project_id,
         sprite.id,
-        workspace_scope.user.id,
+        project_scope.user.id,
         newest_checkpoint
       )
 
@@ -557,9 +557,9 @@ defmodule Fizz.Sprites do
   """
   @spec restore_checkpoint(Scope.t() | nil, String.t(), String.t(), String.t()) ::
           {:ok, [map()]} | {:error, error_reason()}
-  def restore_checkpoint(scope, workspace_id, sprite_id, checkpoint_id) do
-    with {:ok, _workspace_scope} <- authorize_workspace(scope, workspace_id, :execute),
-         {:ok, sprite} <- fetch_sprite(workspace_id, sprite_id),
+  def restore_checkpoint(scope, project_id, sprite_id, checkpoint_id) do
+    with {:ok, _project_scope} <- authorize_project(scope, project_id, :execute),
+         {:ok, sprite} <- fetch_sprite(project_id, sprite_id),
          {:ok, remote_sprite} <- Client.sprite(sprite.remote_name),
          {:ok, messages} <- Sprites.restore_checkpoint(remote_sprite, checkpoint_id) do
       {:ok, Enum.map(messages, &stream_message_to_map/1)}
@@ -580,7 +580,7 @@ defmodule Fizz.Sprites do
       |> Repo.one()
 
     with %ExecJob{} = exec_job <- job,
-         {:ok, _workspace_scope} <- authorize_workspace(scope, exec_job.workspace_id, :read) do
+         {:ok, _project_scope} <- authorize_project(scope, exec_job.project_id, :read) do
       {:ok, exec_job}
     else
       nil -> {:error, :job_not_found}
@@ -712,7 +712,7 @@ defmodule Fizz.Sprites do
 
   defp enqueue_job_multi(
          sprite,
-         workspace_id,
+         project_id,
          requested_by_user_id,
          command,
          args,
@@ -725,7 +725,7 @@ defmodule Fizz.Sprites do
       :exec_job,
       ExecJob.changeset(%ExecJob{}, %{
         sprite_id: sprite.id,
-        workspace_id: workspace_id,
+        project_id: project_id,
         requested_by_user_id: requested_by_user_id,
         state: :queued,
         command: command,
@@ -746,11 +746,11 @@ defmodule Fizz.Sprites do
     end)
   end
 
-  defp insert_local_sprite(workspace_scope, workspace_id, attrs, remote_name) do
+  defp insert_local_sprite(project_scope, project_id, attrs, remote_name) do
     %Sprite{}
     |> Sprite.changeset(%{
-      workspace_id: workspace_id,
-      created_by_user_id: workspace_scope.user.id,
+      project_id: project_id,
+      created_by_user_id: project_scope.user.id,
       name: attr(attrs, :name),
       remote_name: remote_name,
       status: :provisioning,
@@ -762,12 +762,12 @@ defmodule Fizz.Sprites do
     |> Repo.insert()
   end
 
-  defp upsert_local_service(workspace_id, sprite, service_name, attrs) do
+  defp upsert_local_service(project_id, sprite, service_name, attrs) do
     now = DateTime.utc_now()
 
     %Service{}
     |> Service.changeset(%{
-      workspace_id: workspace_id,
+      project_id: project_id,
       sprite_id: sprite.id,
       name: service_name,
       cmd: attr(attrs, :cmd),
@@ -779,15 +779,15 @@ defmodule Fizz.Sprites do
     })
     |> Repo.insert(
       on_conflict:
-        {:replace, [:workspace_id, :cmd, :args, :needs, :published, :metadata, :updated_at]},
+        {:replace, [:project_id, :cmd, :args, :needs, :published, :metadata, :updated_at]},
       conflict_target: [:sprite_id, :name],
       returning: true
     )
   end
 
-  defp update_local_service_status(workspace_id, sprite_id, service_name, status) do
+  defp update_local_service_status(project_id, sprite_id, service_name, status) do
     case Repo.get_by(Service,
-           workspace_id: workspace_id,
+           project_id: project_id,
            sprite_id: sprite_id,
            name: service_name
          ) do
@@ -810,14 +810,14 @@ defmodule Fizz.Sprites do
     end
   end
 
-  defp upsert_local_checkpoint(workspace_id, sprite_id, user_id, checkpoint) do
+  defp upsert_local_checkpoint(project_id, sprite_id, user_id, checkpoint) do
     remote_checkpoint_id = checkpoint_id(checkpoint)
 
     if is_binary(remote_checkpoint_id) and byte_size(remote_checkpoint_id) > 0 do
       now = DateTime.utc_now()
 
       attrs = %{
-        workspace_id: workspace_id,
+        project_id: project_id,
         sprite_id: sprite_id,
         created_by_user_id: user_id,
         remote_checkpoint_id: remote_checkpoint_id,
@@ -831,7 +831,7 @@ defmodule Fizz.Sprites do
       |> Repo.insert(
         on_conflict:
           {:replace,
-           [:workspace_id, :created_by_user_id, :comment, :created_at_remote, :updated_at]},
+           [:project_id, :created_by_user_id, :comment, :created_at_remote, :updated_at]},
         conflict_target: [:sprite_id, :remote_checkpoint_id],
         returning: true
       )
@@ -840,66 +840,66 @@ defmodule Fizz.Sprites do
     end
   end
 
-  defp build_workspace_scope(%Scope{} = scope, workspace_id) when is_binary(workspace_id) do
-    Accounts.build_scope_for_workspace(scope, workspace_id)
+  defp build_project_scope(%Scope{} = scope, project_id) when is_binary(project_id) do
+    Accounts.build_scope_for_project(scope, project_id)
   end
 
-  defp build_workspace_scope(_scope, _workspace_id), do: {:error, :unauthenticated}
+  defp build_project_scope(_scope, _project_id), do: {:error, :unauthenticated}
 
-  defp authorize_workspace(scope, workspace_id, permission) do
-    with {:ok, workspace_scope} <- resolve_workspace_scope(scope, workspace_id),
-         :ok <- authorize_scope(workspace_scope, permission) do
-      {:ok, workspace_scope}
+  defp authorize_project(scope, project_id, permission) do
+    with {:ok, project_scope} <- resolve_project_scope(scope, project_id),
+         :ok <- authorize_scope(project_scope, permission) do
+      {:ok, project_scope}
     end
   end
 
-  defp authorize_scope(workspace_scope, :read), do: authorize_read(workspace_scope)
-  defp authorize_scope(workspace_scope, :manage), do: authorize_manage(workspace_scope)
-  defp authorize_scope(workspace_scope, :execute), do: authorize_execute(workspace_scope)
+  defp authorize_scope(project_scope, :read), do: authorize_read(project_scope)
+  defp authorize_scope(project_scope, :manage), do: authorize_manage(project_scope)
+  defp authorize_scope(project_scope, :execute), do: authorize_execute(project_scope)
 
-  defp authorize_read(%Scope{} = workspace_scope) do
+  defp authorize_read(%Scope{} = project_scope) do
     cond do
-      Scope.organization_member?(workspace_scope) -> :ok
-      workspace_scope.workspace_role in [:admin, :member, :viewer] -> :ok
+      Scope.organization_member?(project_scope) -> :ok
+      project_scope.project_role in [:admin, :member, :viewer] -> :ok
       true -> {:error, :forbidden}
     end
   end
 
-  defp authorize_manage(%Scope{} = workspace_scope) do
-    if Scope.organization_admin?(workspace_scope) or Scope.workspace_admin?(workspace_scope) do
+  defp authorize_manage(%Scope{} = project_scope) do
+    if Scope.organization_admin?(project_scope) or Scope.project_admin?(project_scope) do
       :ok
     else
       {:error, :forbidden}
     end
   end
 
-  defp authorize_execute(%Scope{} = workspace_scope) do
+  defp authorize_execute(%Scope{} = project_scope) do
     cond do
-      Scope.organization_admin?(workspace_scope) -> :ok
-      Scope.workspace_admin?(workspace_scope) -> :ok
-      workspace_scope.workspace_role == :member -> :ok
+      Scope.organization_admin?(project_scope) -> :ok
+      Scope.project_admin?(project_scope) -> :ok
+      project_scope.project_role == :member -> :ok
       true -> {:error, :forbidden}
     end
   end
 
-  defp fetch_sprite(workspace_id, sprite_id) do
-    case Repo.get_by(Sprite, id: sprite_id, workspace_id: workspace_id) do
+  defp fetch_sprite(project_id, sprite_id) do
+    case Repo.get_by(Sprite, id: sprite_id, project_id: project_id) do
       %Sprite{} = sprite -> {:ok, sprite}
       nil -> {:error, :sprite_not_found}
     end
   end
 
-  defp fetch_job(workspace_id, sprite_id, job_id) do
-    case Repo.get_by(ExecJob, id: job_id, workspace_id: workspace_id, sprite_id: sprite_id) do
+  defp fetch_job(project_id, sprite_id, job_id) do
+    case Repo.get_by(ExecJob, id: job_id, project_id: project_id, sprite_id: sprite_id) do
       %ExecJob{} = job -> {:ok, job}
       nil -> {:error, :job_not_found}
     end
   end
 
-  defp fetch_console_session(workspace_id, sprite_id, console_id) do
+  defp fetch_console_session(project_id, sprite_id, console_id) do
     case Repo.get_by(ConsoleSession,
            id: console_id,
-           workspace_id: workspace_id,
+           project_id: project_id,
            sprite_id: sprite_id
          ) do
       %ConsoleSession{} = console_session -> {:ok, console_session}
@@ -928,7 +928,7 @@ defmodule Fizz.Sprites do
     end
   end
 
-  defp remote_name_for(workspace_id, name) do
+  defp remote_name_for(project_id, name) do
     slug =
       name
       |> String.downcase()
@@ -937,9 +937,9 @@ defmodule Fizz.Sprites do
       |> String.slice(0, 40)
 
     suffix = System.unique_integer([:positive])
-    workspace_suffix = workspace_id |> String.replace("-", "") |> String.slice(0, 8)
+    project_suffix = project_id |> String.replace("-", "") |> String.slice(0, 8)
 
-    "fizz-#{workspace_suffix}-#{slug}-#{suffix}"
+    "fizz-#{project_suffix}-#{slug}-#{suffix}"
   end
 
   @default_network_allowlist [

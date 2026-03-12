@@ -1,18 +1,18 @@
 <Layouts.app
   flash={@flash}
   current_scope={@current_scope}
-  current_path={~p"/workspaces/#{@workspace_id}/sprites/#{@sprite_id}"}
+  current_path={~p"/projects/#{@project_id}/sprites/#{@sprite_id}"}
 >
   <:page_header>
     <div class="space-y-2">
       <.link
-        navigate={~p"/workspaces/#{@workspace_id}/sprites"}
+        navigate={~p"/projects/#{@project_id}/sprites"}
         class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content"
       >
         <.icon name="hero-arrow-left" class="size-4" /> Back to Sprites
       </.link>
       <h1 class="text-3xl font-semibold">{(@sprite && @sprite.name) || "Sprite"}</h1>
-      <p class="text-sm text-muted">Workspace {@workspace_id}</p>
+      <p class="text-sm text-muted">project {@project_id}</p>
     </div>
   </:page_header>
 

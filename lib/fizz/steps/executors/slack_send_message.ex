@@ -19,7 +19,7 @@ defmodule Fizz.Steps.Executors.SlackSendMessage do
     "properties" => %{
       "credential_ref" => %{
         "type" => "object",
-        "title" => "Slack Workspace"
+        "title" => "Slack project"
       },
       "channel_id" => %{
         "type" => "string",

@@ -5,7 +5,7 @@ defmodule Fizz.Sprites.ConsoleSession do
 
   use Fizz.Schema
 
-  alias Fizz.Accounts.{User, Workspace}
+  alias Fizz.Accounts.{Project, User}
   alias Fizz.Sprites.Sprite
 
   @states [:active, :closed, :errored]
@@ -20,7 +20,7 @@ defmodule Fizz.Sprites.ConsoleSession do
     field :cols, :integer, default: 80
 
     belongs_to :sprite, Sprite
-    belongs_to :workspace, Workspace
+    belongs_to :project, Project
     belongs_to :opened_by_user, User
 
     timestamps()
@@ -31,7 +31,7 @@ defmodule Fizz.Sprites.ConsoleSession do
     console_session
     |> cast(attrs, [
       :sprite_id,
-      :workspace_id,
+      :project_id,
       :opened_by_user_id,
       :remote_session_id,
       :state,
@@ -41,11 +41,11 @@ defmodule Fizz.Sprites.ConsoleSession do
       :rows,
       :cols
     ])
-    |> validate_required([:sprite_id, :workspace_id, :state])
+    |> validate_required([:sprite_id, :project_id, :state])
     |> validate_number(:rows, greater_than: 0)
     |> validate_number(:cols, greater_than: 0)
     |> foreign_key_constraint(:sprite_id)
-    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:opened_by_user_id)
   end
 end

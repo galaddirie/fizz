@@ -22,11 +22,11 @@ defmodule Fizz.Accounts.ScopeTest do
     refute Scope.organization_admin?(member_scope)
   end
 
-  test "workspace_admin?/1 checks workspace admin role" do
-    admin_scope = %Scope{} |> Scope.with_workspace_role(:admin)
-    member_scope = %Scope{} |> Scope.with_workspace_role(:member)
+  test "project_admin?/1 checks project admin role" do
+    admin_scope = %Scope{} |> Scope.with_project_role(:admin)
+    member_scope = %Scope{} |> Scope.with_project_role(:member)
 
-    assert Scope.workspace_admin?(admin_scope)
-    refute Scope.workspace_admin?(member_scope)
+    assert Scope.project_admin?(admin_scope)
+    refute Scope.project_admin?(member_scope)
   end
 end

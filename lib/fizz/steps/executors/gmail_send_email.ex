@@ -1,13 +1,13 @@
 defmodule Fizz.Steps.Executors.GmailSendEmail do
   @moduledoc """
-  Sends an email via Gmail / Google Workspace.
+  Sends an email via Gmail / Google project.
   """
 
   use Fizz.Steps.Definition,
     id: "gmail_send_email",
     name: "Gmail — Send Email",
     category: "Email",
-    description: "Send an email via Gmail or Google Workspace",
+    description: "Send an email via Gmail or Google project",
     icon: "/images/gmail.svg",
     kind: :action
 

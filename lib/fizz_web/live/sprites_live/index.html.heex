@@ -1,14 +1,14 @@
 <Layouts.app
   flash={@flash}
   current_scope={@current_scope}
-  current_path={~p"/workspaces/#{@workspace_id}/sprites"}
+  current_path={~p"/projects/#{@project_id}/sprites"}
 >
   <:page_header>
     <div class="space-y-2">
-      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
+      <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">project</p>
       <h1 class="text-3xl font-semibold">Sprites</h1>
       <p class="text-sm text-muted">
-        Sleep-first execution environments scoped to this workspace.
+        Sleep-first execution environments scoped to this project.
       </p>
     </div>
   </:page_header>
@@ -17,12 +17,12 @@
     <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
       <div class="mb-4 flex items-center justify-between gap-3">
         <h2 class="text-lg font-semibold">Sprites</h2>
-        <span class="badge badge-outline">Workspace {@workspace_id}</span>
+        <span class="badge badge-outline">project {@project_id}</span>
       </div>
 
       <div id="sprites-list" phx-update="stream" class="space-y-3">
         <div class="hidden only:block rounded-box border border-base-300 bg-base-200/70 p-4 text-sm text-muted">
-          No sprites in this workspace yet.
+          No sprites in this project yet.
         </div>
 
         <article
@@ -41,7 +41,7 @@
           <div class="mt-3 flex items-center gap-2">
             <.link
               id={"sprite-open-#{sprite.id}"}
-              navigate={~p"/workspaces/#{@workspace_id}/sprites/#{sprite.id}"}
+              navigate={~p"/projects/#{@project_id}/sprites/#{sprite.id}"}
               class="btn btn-primary btn-sm"
             >
               Open
@@ -62,7 +62,7 @@
 
     <aside class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
       <h2 class="text-lg font-semibold">Create Sprite</h2>
-      <p class="mt-1 text-sm text-muted">Provision a new isolated microVM in this workspace.</p>
+      <p class="mt-1 text-sm text-muted">Provision a new isolated microVM in this project.</p>
 
       <.form
         for={@create_form}

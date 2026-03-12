@@ -5,10 +5,10 @@ defmodule FizzWeb.SpritesLive.Show do
   alias Fizz.Sprites
 
   @impl true
-  def mount(%{"workspace_id" => workspace_id, "sprite_id" => sprite_id}, _session, socket) do
+  def mount(%{"project_id" => project_id, "sprite_id" => sprite_id}, _session, socket) do
     socket =
       socket
-      |> assign(:workspace_id, workspace_id)
+      |> assign(:project_id, project_id)
       |> assign(:sprite_id, sprite_id)
       |> assign(:sprite, nil)
       |> assign(:active_console, nil)
@@ -31,10 +31,10 @@ defmodule FizzWeb.SpritesLive.Show do
   end
 
   @impl true
-  def handle_params(%{"workspace_id" => workspace_id, "sprite_id" => sprite_id}, _uri, socket) do
+  def handle_params(%{"project_id" => project_id, "sprite_id" => sprite_id}, _uri, socket) do
     {:noreply,
      socket
-     |> assign(:workspace_id, workspace_id)
+     |> assign(:project_id, project_id)
      |> assign(:sprite_id, sprite_id)
      |> assign(:selected_job_id, nil)
      |> assign(:selected_job, nil)
@@ -51,7 +51,7 @@ defmodule FizzWeb.SpritesLive.Show do
 
     case Sprites.queue_job(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            exec_spec
          ) do
@@ -74,7 +74,7 @@ defmodule FizzWeb.SpritesLive.Show do
   def handle_event("select_job", %{"id" => job_id}, socket) do
     case Sprites.inspect_job(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            job_id
          ) do
@@ -109,7 +109,7 @@ defmodule FizzWeb.SpritesLive.Show do
   def handle_event("open_console", _params, socket) do
     case Sprites.open_console(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            %{"rows" => 30, "cols" => 120}
          ) do
@@ -131,7 +131,7 @@ defmodule FizzWeb.SpritesLive.Show do
   def handle_event("close_console", _params, socket) do
     case Sprites.close_console(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            socket.assigns.active_console.id
          ) do
@@ -193,7 +193,7 @@ defmodule FizzWeb.SpritesLive.Show do
   def handle_event("start_service", %{"name" => service_name}, socket) do
     case Sprites.start_service(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            service_name
          ) do
@@ -208,7 +208,7 @@ defmodule FizzWeb.SpritesLive.Show do
   def handle_event("stop_service", %{"name" => service_name}, socket) do
     case Sprites.stop_service(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            service_name
          ) do
@@ -223,7 +223,7 @@ defmodule FizzWeb.SpritesLive.Show do
   def handle_event("capture_checkpoint", %{"checkpoint" => params}, socket) do
     case Sprites.capture_checkpoint(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            %{"comment" => params["comment"]}
          ) do
@@ -251,7 +251,7 @@ defmodule FizzWeb.SpritesLive.Show do
     socket =
       case Sprites.inspect_job(
              socket.assigns.current_scope,
-             socket.assigns.workspace_id,
+             socket.assigns.project_id,
              socket.assigns.sprite_id,
              job_id
            ) do
@@ -311,7 +311,7 @@ defmodule FizzWeb.SpritesLive.Show do
   defp load_job_output(socket, job_id) do
     case Sprites.tail_job_logs(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id,
            job_id,
            0,
@@ -371,7 +371,7 @@ defmodule FizzWeb.SpritesLive.Show do
   defp load_sprite(socket) do
     case Sprites.inspect_sprite(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id
          ) do
       {:ok, sprite} ->
@@ -387,7 +387,7 @@ defmodule FizzWeb.SpritesLive.Show do
       {:error, :sprite_not_found} ->
         socket
         |> put_flash(:error, "Sprite not found")
-        |> redirect(to: ~p"/workspaces/#{socket.assigns.workspace_id}/sprites")
+        |> redirect(to: ~p"/projects/#{socket.assigns.project_id}/sprites")
 
       {:error, reason} ->
         put_flash(socket, :error, "Could not load sprite: #{inspect(reason)}")
@@ -397,7 +397,7 @@ defmodule FizzWeb.SpritesLive.Show do
   defp load_jobs(socket) do
     case Sprites.list_sprite_jobs(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id
          ) do
       {:ok, jobs} ->
@@ -413,7 +413,7 @@ defmodule FizzWeb.SpritesLive.Show do
   defp load_services(socket) do
     case Sprites.list_sprite_services(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id
          ) do
       {:ok, services} -> stream(socket, :services, services, reset: true)
@@ -424,7 +424,7 @@ defmodule FizzWeb.SpritesLive.Show do
   defp load_checkpoints(socket) do
     case Sprites.list_sprite_checkpoints(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            socket.assigns.sprite_id
          ) do
       {:ok, checkpoints} -> stream(socket, :checkpoints, checkpoints, reset: true)
@@ -435,7 +435,7 @@ defmodule FizzWeb.SpritesLive.Show do
   defp load_github_repos(socket) do
     case Integrations.list_repos(
            socket.assigns.current_scope,
-           socket.assigns.workspace_id,
+           socket.assigns.project_id,
            "github_oauth",
            per_page: 100,
            sort: "updated",
@@ -468,10 +468,10 @@ defmodule FizzWeb.SpritesLive.Show do
     do: "GitHub denied repo access. Confirm your GitHub scopes."
 
   defp format_github_repo_error({:provider_inactive, _reason}),
-    do: "GitHub integration is not active in this workspace."
+    do: "GitHub integration is not active in this project."
 
   defp format_github_repo_error(:organization_not_found),
-    do: "Workspace is missing an organization context for GitHub."
+    do: "project is missing an organization context for GitHub."
 
   defp format_github_repo_error(reason),
     do: "Could not load repositories: #{inspect(reason)}"

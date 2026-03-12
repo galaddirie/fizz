@@ -1,4 +1,4 @@
-defmodule FizzWeb.WorkspacesLive.Index do
+defmodule FizzWeb.ProjectsLive.Index do
   use FizzWeb, :live_view
 
   alias Fizz.Accounts
@@ -10,17 +10,17 @@ defmodule FizzWeb.WorkspacesLive.Index do
 
     socket =
       socket
-      |> assign(:page_title, "Workspaces")
+      |> assign(:page_title, "Projects")
       |> assign(:organizations, organizations)
       |> assign(:organization_options, organization_options(organizations))
       |> assign(:selected_organization_id, selected_organization_id)
       |> assign(:organization_form, organization_form(selected_organization_id))
-      |> assign(:create_form, to_form(%{"name" => "", "description" => ""}, as: :workspace))
-      |> assign(:resolve_workspace_scope, nil)
-      |> assign(:workspace_error, nil)
-      |> stream(:workspaces, [])
+      |> assign(:create_form, to_form(%{"name" => "", "description" => ""}, as: :project))
+      |> assign(:resolve_project_scope, nil)
+      |> assign(:project_error, nil)
+      |> stream(:projects, [])
 
-    {:ok, load_workspaces(socket)}
+    {:ok, load_projects(socket)}
   end
 
   @impl true
@@ -36,74 +36,72 @@ defmodule FizzWeb.WorkspacesLive.Index do
      socket
      |> assign(:selected_organization_id, selected_organization_id)
      |> assign(:organization_form, organization_form(selected_organization_id))
-     |> assign(:resolve_workspace_scope, nil)
-     |> load_workspaces()}
+     |> assign(:resolve_project_scope, nil)
+     |> load_projects()}
   end
 
-  def handle_event("validate_create_workspace", %{"workspace" => params}, socket) do
-    {:noreply, assign(socket, :create_form, to_form(params, as: :workspace))}
+  def handle_event("validate_create_project", %{"project" => params}, socket) do
+    {:noreply, assign(socket, :create_form, to_form(params, as: :project))}
   end
 
-  def handle_event("create_workspace", %{"workspace" => params}, socket) do
-    case socket.assigns.resolve_workspace_scope do
+  def handle_event("create_project", %{"project" => params}, socket) do
+    case socket.assigns.resolve_project_scope do
       nil ->
-        {:noreply,
-         put_flash(socket, :error, "Select an organization before creating a workspace.")}
+        {:noreply, put_flash(socket, :error, "Select an organization before creating a project.")}
 
       scope ->
-        case Accounts.create_workspace(scope, params) do
-          {:ok, _workspace} ->
+        case Accounts.create_project(scope, params) do
+          {:ok, _project} ->
             {:noreply,
              socket
-             |> put_flash(:info, "Workspace created")
+             |> put_flash(:info, "Project created")
              |> assign(
                :create_form,
-               to_form(%{"name" => "", "description" => ""}, as: :workspace)
+               to_form(%{"name" => "", "description" => ""}, as: :project)
              )
-             |> load_workspaces()}
+             |> load_projects()}
 
           {:error, %Ecto.Changeset{} = changeset} ->
-            {:noreply, assign(socket, :create_form, to_form(changeset, as: :workspace))}
+            {:noreply, assign(socket, :create_form, to_form(changeset, as: :project))}
 
           {:error, reason} ->
-            {:noreply,
-             put_flash(socket, :error, "Could not create workspace: #{inspect(reason)}")}
+            {:noreply, put_flash(socket, :error, "Could not create project: #{inspect(reason)}")}
         end
     end
   end
 
-  defp load_workspaces(%{assigns: %{selected_organization_id: nil}} = socket) do
+  defp load_projects(%{assigns: %{selected_organization_id: nil}} = socket) do
     socket
-    |> assign(:resolve_workspace_scope, nil)
-    |> assign(:workspace_error, :no_organization)
-    |> stream(:workspaces, [], reset: true)
+    |> assign(:resolve_project_scope, nil)
+    |> assign(:project_error, :no_organization)
+    |> stream(:projects, [], reset: true)
   end
 
-  defp load_workspaces(socket) do
+  defp load_projects(socket) do
     case Accounts.build_scope(
            socket.assigns.current_scope,
            socket.assigns.selected_organization_id
          ) do
-      {:ok, resolve_workspace_scope} ->
-        case Accounts.list_workspaces(resolve_workspace_scope) do
-          {:ok, workspaces} ->
+      {:ok, resolve_project_scope} ->
+        case Accounts.list_projects(resolve_project_scope) do
+          {:ok, projects} ->
             socket
-            |> assign(:resolve_workspace_scope, resolve_workspace_scope)
-            |> assign(:workspace_error, nil)
-            |> stream(:workspaces, workspaces, reset: true)
+            |> assign(:resolve_project_scope, resolve_project_scope)
+            |> assign(:project_error, nil)
+            |> stream(:projects, projects, reset: true)
 
           {:error, reason} ->
             socket
-            |> assign(:resolve_workspace_scope, nil)
-            |> assign(:workspace_error, reason)
-            |> stream(:workspaces, [], reset: true)
+            |> assign(:resolve_project_scope, nil)
+            |> assign(:project_error, reason)
+            |> stream(:projects, [], reset: true)
         end
 
       {:error, reason} ->
         socket
-        |> assign(:resolve_workspace_scope, nil)
-        |> assign(:workspace_error, reason)
-        |> stream(:workspaces, [], reset: true)
+        |> assign(:resolve_project_scope, nil)
+        |> assign(:project_error, reason)
+        |> stream(:projects, [], reset: true)
     end
   end
 
@@ -130,19 +128,19 @@ defmodule FizzWeb.WorkspacesLive.Index do
     end
   end
 
-  defp workspace_error_message(:no_organization) do
+  defp project_error_message(:no_organization) do
     "No organization could be resolved for this account."
   end
 
-  defp workspace_error_message(:missing_workos_user_id) do
+  defp project_error_message(:missing_workos_user_id) do
     "This account is missing a WorkOS user id."
   end
 
-  defp workspace_error_message(:forbidden) do
-    "You do not have workspace access in the selected organization."
+  defp project_error_message(:forbidden) do
+    "You do not have project access in the selected organization."
   end
 
-  defp workspace_error_message(_reason) do
-    "Could not load workspaces for this organization right now."
+  defp project_error_message(_reason) do
+    "Could not load projects for this organization right now."
   end
 end

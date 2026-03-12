@@ -44,7 +44,7 @@ defmodule Fizz.IntegrationsTest do
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    _workspace = workspace_fixture(owner_scope, %{name: "Workspace A"})
+    _project = project_fixture(owner_scope, %{name: "Project A"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
@@ -309,7 +309,7 @@ defmodule Fizz.IntegrationsTest do
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    workspace = workspace_fixture(owner_scope, %{name: "Workspace B"})
+    project = project_fixture(owner_scope, %{name: "Project B"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
@@ -334,21 +334,21 @@ defmodule Fizz.IntegrationsTest do
              })
 
     assert {:ok, token_result} =
-             Integrations.fetch_token_for_sprite(scope, workspace.id, "openai_api_key")
+             Integrations.fetch_token_for_sprite(scope, project.id, "openai_api_key")
 
     assert token_result.access_token == "sk-api-key"
     assert credential.provider == "openai_api_key"
   end
 
-  test "credential usage is organization-scoped across workspaces" do
+  test "credential usage is organization-scoped across projects" do
     user = user_fixture()
     org_id = "org_345"
 
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    _workspace_a = workspace_fixture(owner_scope, %{name: "Workspace C"})
-    _workspace_b = workspace_fixture(owner_scope, %{name: "Workspace D"})
+    _project_a = project_fixture(owner_scope, %{name: "Project C"})
+    _project_b = project_fixture(owner_scope, %{name: "Project D"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
@@ -512,7 +512,7 @@ defmodule Fizz.IntegrationsTest do
     assert first_credential.provider_label == second_credential.provider_label
   end
 
-  test "credential usage is owner-scoped within workspace" do
+  test "credential usage is owner-scoped within project" do
     owner_user = user_fixture()
     member_user = user_fixture()
     org_id = "org_456"
@@ -524,10 +524,10 @@ defmodule Fizz.IntegrationsTest do
         organization_role: :owner
       )
 
-    workspace = workspace_fixture(owner_scope, %{name: "Workspace E"})
+    project = project_fixture(owner_scope, %{name: "Project E"})
 
     {:ok, _member_membership} =
-      Fizz.Accounts.add_workspace_member(owner_scope, workspace.id, member_user, %{role: :member})
+      Fizz.Accounts.add_project_member(owner_scope, project.id, member_user, %{role: :member})
 
     owner_runtime_scope = Scope.for_user(owner_user)
     member_runtime_scope = Scope.for_user(member_user)

@@ -8,8 +8,8 @@ defmodule Fizz.SpritesTest do
   alias Fizz.Sprites.{ConsoleSession, Sprite}
   alias Fizz.WorkOSHTTPMock
 
-  test "list_workspace_sprites/2 returns unauthenticated when scope is nil" do
-    assert {:error, :unauthenticated} = Sprites.list_workspace_sprites(nil, Ecto.UUID.generate())
+  test "list_project_sprites/2 returns unauthenticated when scope is nil" do
+    assert {:error, :unauthenticated} = Sprites.list_project_sprites(nil, Ecto.UUID.generate())
   end
 
   test "provision_sprite/3 returns unauthenticated when scope is nil" do
@@ -54,9 +54,9 @@ defmodule Fizz.SpritesTest do
       owner_scope =
         organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-      workspace = workspace_fixture(owner_scope, %{name: "Workspace #{System.unique_integer()}"})
-      sprite = sprite_fixture(workspace.id, user.id)
-      console_session = console_session_fixture(workspace.id, sprite.id, user.id)
+      project = project_fixture(owner_scope, %{name: "Project #{System.unique_integer()}"})
+      sprite = sprite_fixture(project.id, user.id)
+      console_session = console_session_fixture(project.id, sprite.id, user.id)
 
       WorkOSHTTPMock.put_responses([
         membership_response(user.workos_user_id, org_id),
@@ -65,7 +65,7 @@ defmodule Fizz.SpritesTest do
 
       %{
         scope: Scope.for_user(user),
-        workspace: workspace,
+        project: project,
         sprite: sprite,
         console_session: console_session
       }
@@ -73,7 +73,7 @@ defmodule Fizz.SpritesTest do
 
     test "closes once and preserves the first close reason on repeated calls", %{
       scope: scope,
-      workspace: workspace,
+      project: project,
       sprite: sprite,
       console_session: console_session
     } do
@@ -83,7 +83,7 @@ defmodule Fizz.SpritesTest do
       assert {:ok, closed_session} =
                Sprites.close_console(
                  scope,
-                 workspace.id,
+                 project.id,
                  sprite.id,
                  console_session.id,
                  "runner_down"
@@ -101,7 +101,7 @@ defmodule Fizz.SpritesTest do
       assert {:ok, already_closed_session} =
                Sprites.close_console(
                  scope,
-                 workspace.id,
+                 project.id,
                  sprite.id,
                  console_session.id,
                  "disconnect"
@@ -113,12 +113,12 @@ defmodule Fizz.SpritesTest do
     end
   end
 
-  defp sprite_fixture(workspace_id, user_id) do
+  defp sprite_fixture(project_id, user_id) do
     unique = System.unique_integer([:positive])
 
     %Sprite{}
     |> Sprite.changeset(%{
-      workspace_id: workspace_id,
+      project_id: project_id,
       created_by_user_id: user_id,
       name: "sprite#{unique}",
       remote_name: "remote-#{unique}",
@@ -127,10 +127,10 @@ defmodule Fizz.SpritesTest do
     |> Repo.insert!()
   end
 
-  defp console_session_fixture(workspace_id, sprite_id, user_id) do
+  defp console_session_fixture(project_id, sprite_id, user_id) do
     %ConsoleSession{}
     |> ConsoleSession.changeset(%{
-      workspace_id: workspace_id,
+      project_id: project_id,
       sprite_id: sprite_id,
       opened_by_user_id: user_id,
       state: :active,

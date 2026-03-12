@@ -314,18 +314,18 @@ const debugStatusBadge = computed(() => {
 });
 const debugExecutionLink = computed(() => {
   const workflow = editor.workflow as any;
-  if (!workflow?.id || !workflow?.workspace_id || !props.debugExecutionId) return null;
-  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/execution/${props.debugExecutionId}`;
+  if (!workflow?.id || !workflow?.project_id || !props.debugExecutionId) return null;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}/execution/${props.debugExecutionId}`;
 });
 const workflowExecutionsLink = computed(() => {
   const workflow = editor.workflow as any;
-  if (!workflow?.id || !workflow?.workspace_id) return null;
-  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}`;
+  if (!workflow?.id || !workflow?.project_id) return null;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}`;
 });
 const debugExitLink = computed(() => {
   const workflow = editor.workflow as any;
-  if (!workflow?.id || !workflow?.workspace_id) return null;
-  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/edit`;
+  if (!workflow?.id || !workflow?.project_id) return null;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}/edit`;
 });
 
 useLiveEvent<{ success: boolean; error?: string }>(
@@ -410,10 +410,10 @@ useLiveEvent<{ success: boolean; error?: string }>(
           <div class="px-1.5 py-0.5">
             <div class="flex items-center gap-2">
               <a
-                :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`"
+                :href="`/projects/${(editor.workflow as any)?.project_id}`"
                 class="pointer-events-auto select-none text-base-content/60 hover:text-base-content/80 text-xs font-medium transition-colors"
               >
-                {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
+                {{ (editor.workflow as any)?.project?.name || 'project' }}
               </a>
               <SlashIcon class="pointer-events-none text-base-content/30 h-3.5 w-3.5" stroke-width="2.5" />
               <span class="pointer-events-none text-base-content/90 text-xs font-semibold">

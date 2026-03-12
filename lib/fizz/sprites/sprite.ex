@@ -1,11 +1,11 @@
 defmodule Fizz.Sprites.Sprite do
   @moduledoc """
-  Workspace-scoped persistent Sprite descriptor.
+  project-scoped persistent Sprite descriptor.
   """
 
   use Fizz.Schema
 
-  alias Fizz.Accounts.{User, Workspace}
+  alias Fizz.Accounts.{Project, User}
   alias Fizz.Sprites.{Checkpoint, ConsoleSession, ExecJob, Service}
 
   @statuses [:provisioning, :ready, :error, :deleting, :deleted]
@@ -23,7 +23,7 @@ defmodule Fizz.Sprites.Sprite do
     field :last_seen_at, :utc_datetime_usec
     field :deleted_at, :utc_datetime_usec
 
-    belongs_to :workspace, Workspace
+    belongs_to :project, Project
     belongs_to :created_by_user, User
 
     has_many :exec_jobs, ExecJob
@@ -38,7 +38,7 @@ defmodule Fizz.Sprites.Sprite do
   def changeset(sprite, attrs) do
     sprite
     |> cast(attrs, [
-      :workspace_id,
+      :project_id,
       :created_by_user_id,
       :name,
       :remote_name,
@@ -51,16 +51,16 @@ defmodule Fizz.Sprites.Sprite do
       :last_seen_at,
       :deleted_at
     ])
-    |> validate_required([:workspace_id, :name, :remote_name, :status])
+    |> validate_required([:project_id, :name, :remote_name, :status])
     |> validate_length(:name, min: 2, max: 120)
     |> validate_length(:remote_name, min: 3, max: 120)
     |> validate_format(:name, ~r/^[a-zA-Z0-9][a-zA-Z0-9_-]*$/,
       message: "must contain letters, numbers, underscores, or hyphens"
     )
     |> validate_length(:url, max: 500)
-    |> foreign_key_constraint(:workspace_id)
+    |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:created_by_user_id)
     |> unique_constraint(:remote_name)
-    |> unique_constraint(:name, name: :sprites_workspace_id_name_index)
+    |> unique_constraint(:name, name: :sprites_project_id_name_index)
   end
 end

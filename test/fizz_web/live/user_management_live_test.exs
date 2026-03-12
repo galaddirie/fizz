@@ -278,7 +278,7 @@ defmodule FizzWeb.UserManagementLiveTest do
                "role" => %{"slug" => "owner"}
              }
            }},
-          # build_scope_for_workspace context check
+          # build_scope_for_project context check
           memberships_response([
             %{
               "id" => "om_personal",
