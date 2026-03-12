@@ -1,43 +1,132 @@
 ## Workflow Authoring & Definitions
 
-This section focuses on the authored workflow document, how it is stored in Postgres, and how it moves through the draft -> published lifecycle.
+This section defines how authored workflows are stored in Postgres, validated in Ecto, and moved through the draft -> published lifecycle.
 
 ### Design Goals
 
-- Users compose workflows visually from the platform's registered step types (`Fizz.Steps.Registry`).
-- The canonical representation is a JSON document stored in Postgres: portable, inspectable, and diffable.
-- The definition record is the stable identity for a workflow; version rows hold draft and published snapshots of the graph.
-- Editing always happens against a draft. Publishing freezes an immutable snapshot.
-- Publishing also records a computed hash for the frozen graph so identical snapshots are easy to detect and audit.
-- Save and publish have different validation strictness so the canvas can autosave incomplete work without lowering publish quality.
+- The `workflow_definitions` row is the stable identity for a workflow.
+- `workflow_definition_versions` rows hold draft and published snapshots.
+- The version payload should be typed in Elixir, not treated as an opaque `graph` blob.
+- The core authored primitives are Ecto embeds: `steps`, `connections`, and `step_groups`.
+- Draft saves must accept incomplete work for autosave. Publish must enforce full runtime validity.
+- `step_groups` are a UI construct in v1. They may become an execution boundary later, but they do not change execution semantics yet.
+- Publishing stores a `compiled_hash` of the normalized executable graph so runtime-equivalent versions are easy to compare and audit.
+
+---
+
+### Naming
+
+- Persisted and API-facing naming should be `step_groups`.
+- `groups` and `node_groups` are legacy terms from older code and UI types. Keep them only as temporary compatibility shims at the boundary.
+- Rename the old `Fizz.Workflows.Embeds.NodeGroup` concept to `Fizz.Workflows.Embeds.StepGroup`.
+
+---
+
+### Canonical Version Shape
+
+A version snapshot is stored as first-class embedded collections plus small top-level maps for editor metadata:
+
+```json
+{
+  "steps": [
+    {
+      "id": "fetch_orders",
+      "type_id": "http_request",
+      "name": "Fetch Orders",
+      "config": {
+        "url": "https://api.example.com/orders",
+        "method": "GET"
+      },
+      "position": { "x": 200, "y": 100 },
+      "notes": "Pull the latest orders before fan-out."
+    },
+    {
+      "id": "status_ok",
+      "type_id": "condition",
+      "name": "Status OK?",
+      "config": {
+        "field": "status",
+        "operator": "equals",
+        "value": 200
+      },
+      "position": { "x": 440, "y": 100 }
+    },
+    {
+      "id": "notify_team",
+      "type_id": "notify",
+      "name": "Notify Team",
+      "config": {
+        "channel": "email",
+        "template_id": "order_summary"
+      },
+      "position": { "x": 680, "y": 40 }
+    }
+  ],
+  "connections": [
+    {
+      "id": "fetch_orders__status_ok",
+      "source_step_id": "fetch_orders",
+      "source_output": "main",
+      "target_step_id": "status_ok",
+      "target_input": "main"
+    },
+    {
+      "id": "status_ok__notify_team_true",
+      "source_step_id": "status_ok",
+      "source_output": "true",
+      "target_step_id": "notify_team",
+      "target_input": "main"
+    }
+  ],
+  "step_groups": [
+    {
+      "id": "order_checks",
+      "name": "Order Checks",
+      "step_ids": ["status_ok", "notify_team"],
+      "position": { "x": 360, "y": 12, "width": 520, "height": 260 },
+      "color": "#f59e0b",
+      "font_size": 14,
+      "collapsed": false
+    }
+  ],
+  "viewport": { "x": 0, "y": 0, "zoom": 1.0 },
+  "settings": {}
+}
+```
+
+Important: `step_groups` are persisted with the authored document, but in v1 they are editor metadata. The executable graph is derived from `steps` + `connections`.
 
 ---
 
 ### Data Model
 
-```
-┌─────────────────────────────────┐       ┌──────────────────────────────────┐
-│ workflow_definitions            │       │ workflow_definition_versions     │
-│─────────────────────────────────│       │──────────────────────────────────│
-│ id (UUID, PK)                   │──┐    │ id (UUID, PK)                    │
-│ project_id (FK -> projects)     │  │    │ workflow_definition_id (FK)  ────│──┐
-│ workos_organization_id          │  │    │ version (integer, monotonic)     │  │
-│ name (text)                     │  └───►│ status (draft | published |      │  │
-│ description (text)              │       │         archived)                │  │
-│ created_by_user_id              │       │ graph (jsonb)                    │  │
-│ created_at                      │       │ compiled_hash (text, nullable)   │  │
-│ updated_at                      │       │ published_at (timestamptz)       │  │
-│ archived_at (timestamptz)       │       │ published_by_user_id             │  │
-└─────────────────────────────────┘       │ created_at                       │  │
-                                          │ updated_at                       │  │
-                                          └──────────────────────────────────┘  │
-                                                                                │
-                                          ┌──────────────────────────────────┐  │
-                                          │ workflow_runs                    │  │
-                                          │──────────────────────────────────│  │
-                                          │ definition_version_id (FK) ──────│──┘
-                                          │ ...                              │
-                                          └──────────────────────────────────┘
+```text
+workflow_definitions
+- id
+- project_id
+- workos_organization_id
+- name
+- description
+- created_by_user_id
+- archived_at
+- inserted_at
+- updated_at
+
+workflow_definition_versions
+- id
+- workflow_definition_id
+- version
+- status (draft | published | archived)
+- steps (jsonb, embeds_many)
+- connections (jsonb, embeds_many)
+- step_groups (jsonb, embeds_many)
+- viewport (jsonb)
+- settings (jsonb)
+- compiled_hash
+- published_at
+- published_by_user_id
+- inserted_at
+- updated_at
 ```
 
 ```sql
@@ -46,13 +135,13 @@ CREATE TABLE workflow_definitions (
     project_id              UUID NOT NULL REFERENCES projects(id),
     workos_organization_id  TEXT NOT NULL,
     name                    TEXT NOT NULL,
-    description             TEXT DEFAULT '',
+    description             TEXT NOT NULL DEFAULT '',
     created_by_user_id      TEXT NOT NULL,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    archived_at             TIMESTAMPTZ
+    archived_at             TIMESTAMPTZ,
+    inserted_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_wf_defs_project ON workflow_definitions(project_id);
+CREATE INDEX idx_wf_defs_project_id ON workflow_definitions(project_id);
 
 CREATE TABLE workflow_definition_versions (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -60,198 +149,241 @@ CREATE TABLE workflow_definition_versions (
     version                  INTEGER NOT NULL,
     status                   TEXT NOT NULL DEFAULT 'draft'
                              CHECK (status IN ('draft', 'published', 'archived')),
-    graph                    JSONB NOT NULL DEFAULT '{}',
+    steps                    JSONB NOT NULL DEFAULT '[]'::jsonb,
+    connections              JSONB NOT NULL DEFAULT '[]'::jsonb,
+    step_groups              JSONB NOT NULL DEFAULT '[]'::jsonb,
+    viewport                 JSONB NOT NULL DEFAULT '{"x":0,"y":0,"zoom":1.0}'::jsonb,
+    settings                 JSONB NOT NULL DEFAULT '{}'::jsonb,
     compiled_hash            TEXT,
     published_at             TIMESTAMPTZ,
     published_by_user_id     TEXT,
-    created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+    inserted_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (workflow_definition_id, version)
 );
-CREATE INDEX idx_wf_versions_def ON workflow_definition_versions(workflow_definition_id, version);
-CREATE INDEX idx_wf_versions_status ON workflow_definition_versions(workflow_definition_id, status);
+CREATE INDEX idx_wf_versions_definition_id ON workflow_definition_versions(workflow_definition_id, version);
+CREATE INDEX idx_wf_versions_definition_status ON workflow_definition_versions(workflow_definition_id, status);
 ```
+
+Notes:
+- In Ecto migrations these embedded fields are declared as `:map`; Postgres stores them as `jsonb`.
+- `embeds_many` is the right fit here because each version row should be a complete self-contained snapshot.
+- `on_replace: :delete` should be used on the embeds so autosave can replace the full collection cleanly.
 
 **Lifecycle rules:**
 
-- Each definition has at most one draft version at a time. The draft is the working copy the UI edits.
-- Publishing a draft stamps `published_at`, flips status to `published`, and makes that version's `graph` immutable at the application layer.
-- Publishing also computes and stores `compiled_hash` from the frozen graph snapshot.
-- A new draft is created by cloning the latest published version's graph.
-- The `workflow_definitions` row is the long-lived identity and metadata container. The `workflow_definition_versions` rows are the versioned content.
-- Archiving a definition hides it from normal authoring flows without destroying prior published history.
+- Each definition has exactly one mutable draft version at a time.
+- Publishing freezes the current draft row and stamps `published_at` / `published_by_user_id`.
+- A new draft is created by cloning the latest published version's embedded document.
+- Published rows are immutable at the application layer.
+- Archiving a definition hides it from normal authoring flows without deleting historical published versions.
 
-**Ecto schemas:**
+---
+
+### Ecto Modeling
+
+Recommended modules:
 
 ```elixir
 Fizz.Workflows.Definition
 Fizz.Workflows.DefinitionVersion
+Fizz.Workflows.Embeds.Step
+Fizz.Workflows.Embeds.Connection
+Fizz.Workflows.Embeds.StepGroup
+```
+
+Representative schema:
+
+```elixir
+defmodule Fizz.Workflows.DefinitionVersion do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  alias Fizz.Workflows.Embeds
+
+  schema "workflow_definition_versions" do
+    belongs_to :workflow_definition, Fizz.Workflows.Definition
+
+    field :version, :integer
+    field :status, Ecto.Enum, values: [:draft, :published, :archived]
+
+    embeds_many :steps, Embeds.Step, on_replace: :delete
+    embeds_many :connections, Embeds.Connection, on_replace: :delete
+    embeds_many :step_groups, Embeds.StepGroup, on_replace: :delete
+
+    field :viewport, :map, default: %{"x" => 0, "y" => 0, "zoom" => 1.0}
+    field :settings, :map, default: %{}
+
+    field :compiled_hash, :string
+    field :published_at, :utc_datetime_usec
+    field :published_by_user_id, :string
+
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  def changeset(version, attrs) do
+    version
+    |> cast(attrs, [
+      :workflow_definition_id,
+      :version,
+      :status,
+      :viewport,
+      :settings,
+      :compiled_hash,
+      :published_at,
+      :published_by_user_id
+    ])
+    |> validate_required([:workflow_definition_id, :version, :status])
+    |> cast_embed(:steps, required: true, with: &Embeds.Step.changeset/2)
+    |> cast_embed(:connections, required: true, with: &Embeds.Connection.changeset/2)
+    |> cast_embed(:step_groups, with: &Embeds.StepGroup.changeset/2)
+    |> validate_embed_id_uniqueness(:steps)
+    |> validate_embed_id_uniqueness(:connections)
+    |> validate_connection_refs()
+    |> validate_step_group_refs()
+  end
+end
+```
+
+The old `Step` and `Connection` embeds can carry over almost unchanged. The main change is that `NodeGroup` becomes `StepGroup`, and we intentionally drop `output_step_id` for v1 because groups are not execution nodes today.
+
+Representative `StepGroup` embed:
+
+```elixir
+defmodule Fizz.Workflows.Embeds.StepGroup do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :string, autogenerate: false}
+  @default_font_size 14
+
+  embedded_schema do
+    field :name, :string
+    field :step_ids, {:array, :string}, default: []
+    field :position, :map, default: %{}
+    field :color, :string
+    field :font_size, :integer, default: @default_font_size
+    field :collapsed, :boolean, default: false
+  end
+
+  def changeset(group, attrs) do
+    group
+    |> cast(attrs, [:id, :name, :step_ids, :position, :color, :font_size, :collapsed])
+    |> validate_required([:id, :name])
+    |> validate_length(:step_ids, min: 1)
+    |> validate_number(:font_size, greater_than_or_equal_to: 10, less_than_or_equal_to: 32)
+  end
+end
 ```
 
 ---
 
-### Graph JSON Schema
+### Embedded Field Contract
 
-The `graph` JSONB column stores the full canvas payload: nodes, edges, viewport metadata, and any other editor-owned fields that should travel with the draft or published version.
-
-```json
-{
-  "nodes": [
-    {
-      "id": "n_01",
-      "type_id": "http_request",
-      "position": { "x": 200, "y": 100 },
-      "config": {
-        "url": "https://api.example.com/orders",
-        "method": "GET"
-      },
-      "name": "Fetch Orders"
-    },
-    {
-      "id": "n_02",
-      "type_id": "condition",
-      "position": { "x": 420, "y": 100 },
-      "config": {
-        "field": "status",
-        "operator": "equals",
-        "value": 200
-      },
-      "name": "Status OK?"
-    },
-    {
-      "id": "n_03",
-      "type_id": "notify",
-      "position": { "x": 640, "y": 50 },
-      "config": {
-        "channel": "email",
-        "template_id": "order_summary"
-      },
-      "name": "Notify Team"
-    },
-    {
-      "id": "n_04",
-      "type_id": "ai_agent",
-      "position": { "x": 640, "y": 220 },
-      "config": { "mode": "provider_chat" },
-      "name": "Summarize",
-      "subnodes": {
-        "model": {
-          "type_id": "openai_model",
-          "config": {
-            "model": "gpt-4.1-mini",
-            "credential_ref": { "id": "cred_abc", "provider": "openai_api_key" }
-          }
-        },
-        "prompt": {
-          "type_id": "ai_prompt_template",
-          "config": {
-            "system_prompt": "You summarize order data.",
-            "user_prompt": "Summarize the latest order payload."
-          }
-        }
-      }
-    }
-  ],
-  "edges": [
-    { "id": "e_01", "source": "n_01", "target": "n_02" },
-    { "id": "e_02", "source": "n_02", "target": "n_03", "source_handle": "true" },
-    { "id": "e_03", "source": "n_02", "target": "n_04", "source_handle": "false" }
-  ],
-  "viewport": { "x": 0, "y": 0, "zoom": 1.0 }
-}
-```
-
-**Node fields:**
+**Step fields**
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | yes | Stable client-generated identifier that survives reordering. |
-| `type_id` | yes | Must match a `Fizz.Steps.Registry` entry. |
-| `config` | yes | User-authored configuration payload for that step type. |
-| `name` | no | User-facing label. |
-| `position` | no | Canvas coordinates and similar editor-owned metadata. |
-| `subnodes` | no | Nested configuration for compound root nodes such as `ai_agent`. |
+| `id` | yes | Stable key-safe identifier used by connections, execution records, and output references. |
+| `type_id` | yes | Must match an entry in `Fizz.Steps.Registry`. |
+| `name` | yes | User-facing label. |
+| `config` | yes | Step-type-specific authored configuration. Compound types can keep nested config here if the nested parts are not graph-connected steps. |
+| `position` | no | Canvas coordinates and editor placement metadata. |
+| `notes` | no | Freeform author notes. |
 
-**Edge fields:**
+**Connection fields**
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `id` | yes | Stable identifier. |
-| `source` | yes | Node id of the upstream node. |
-| `target` | yes | Node id of the downstream node. |
-| `source_handle` | no | Branch identifier for control-flow nodes such as `"true"` / `"false"`. |
+| `id` | yes | Stable connection identifier. |
+| `source_step_id` | yes | Upstream step id. |
+| `source_output` | no | Output handle name, default `"main"`. |
+| `target_step_id` | yes | Downstream step id. |
+| `target_input` | no | Input handle name, default `"main"`. |
 
-**Subnodes:**
+**Step group fields**
 
-- Compound nodes keep nested step configuration under `subnodes` so the authored document still reflects a single canvas node.
-- Required subnode slots are part of publish-time validation.
-- Subnodes are versioned with their parent node because they live inside the same `graph` snapshot.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Stable UI identifier. |
+| `name` | yes | Group label. |
+| `step_ids` | yes | Step ids contained by the group. |
+| `position` | no | Bounding box data such as `x`, `y`, `width`, and `height`. |
+| `color` | no | Group color token or raw color string. |
+| `font_size` | no | Group label font size. |
+| `collapsed` | no | Whether the group is collapsed in the editor. |
+
+Deliberately omitted from `step_groups` in v1:
+
+- `output_step_id`
+- synthetic group steps in the execution graph
+- any implicit “single output” contract
+
+If step groups become real execution boundaries later, add explicit boundary metadata in a new compiler version rather than retrofitting UI-only fields with runtime meaning.
 
 ---
 
 ### Validation
 
-Validation runs at two points: on every save (lightweight) and on publish (full).
+Validation should happen in two layers: embed casting in the schema changeset, then cross-document validation in a dedicated validator.
 
 **On save (draft):**
 
-- `type_id` exists in the registry.
-- `edges` reference valid node ids.
-- No cycles.
+- `cast_embed` succeeds for `steps`, `connections`, and `step_groups`.
+- Step ids are unique and key-safe.
+- Connection ids are unique.
+- Every `type_id` exists in `Fizz.Steps.Registry`.
+- Every connection references existing step ids.
+- Every `step_group.step_ids` entry references an existing step.
+- A step may belong to at most one group in v1.
+- The step graph is acyclic.
+- Viewport and settings are accepted even if they are incomplete.
 
 **On publish:**
 
-All draft checks, plus:
+- All save-time checks pass.
+- Each step's `config` validates against its registered schema or executor validator.
+- Credential references resolve and are accessible to the current scope.
+- Handle names such as `source_output` / `target_input` are valid for the connected step types.
+- At least one entry step exists.
+- The workflow can be compiled into an executable graph.
+- `step_groups` still only participate in membership validation unless a future compiler version gives them runtime meaning.
 
-- `config` validates against the step type's config schema.
-- Required subnode slots are filled.
-- Credential refs resolve to credentials accessible to the project.
-- At least one entry node exists.
-- Control-flow handles are valid for the connected node type.
+Representative validator shape:
 
 ```elixir
 defmodule Fizz.Workflows.DefinitionValidator do
   alias Fizz.Steps.Registry
+  alias Fizz.Workflows.DefinitionVersion
 
-  def validate_for_save(graph) do
-    with :ok <- validate_node_types(graph),
-         :ok <- validate_edge_refs(graph),
-         :ok <- validate_acyclic(graph) do
+  def validate_for_save(%DefinitionVersion{} = version) do
+    with :ok <- validate_step_types(version.steps),
+         :ok <- validate_connection_refs(version.steps, version.connections),
+         :ok <- validate_step_group_refs(version.steps, version.step_groups),
+         :ok <- validate_non_overlapping_groups(version.step_groups),
+         :ok <- validate_acyclic(version.steps, version.connections) do
       :ok
     end
   end
 
-  def validate_for_publish(graph, scope) do
-    with :ok <- validate_for_save(graph),
-         :ok <- validate_all_configs(graph),
-         :ok <- validate_subnode_slots(graph),
-         :ok <- validate_credentials(graph, scope),
-         :ok <- validate_has_entry_point(graph) do
+  def validate_for_publish(%DefinitionVersion{} = version, scope) do
+    with :ok <- validate_for_save(version),
+         :ok <- validate_all_configs(version.steps),
+         :ok <- validate_credentials(version.steps, scope),
+         :ok <- validate_handles(version.steps, version.connections),
+         :ok <- validate_has_entry_step(version.steps, version.connections),
+         :ok <- validate_compilable(version.steps, version.connections) do
       :ok
     end
   end
 
-  defp validate_node_types(%{"nodes" => nodes}) do
-    Enum.reduce_while(nodes, :ok, fn node, :ok ->
-      if Registry.exists?(node["type_id"]),
+  defp validate_step_types(steps) do
+    Enum.reduce_while(steps, :ok, fn step, :ok ->
+      if Registry.exists?(step.type_id),
         do: {:cont, :ok},
-        else: {:halt, {:error, {:unknown_type, node["id"], node["type_id"]}}}
+        else: {:halt, {:error, {:unknown_type, step.id, step.type_id}}}
     end)
   end
-
-  defp validate_all_configs(%{"nodes" => nodes}) do
-    Enum.reduce_while(nodes, :ok, fn node, :ok ->
-      type = Registry.get!(node["type_id"])
-      module = Fizz.Steps.Type.executor_module!(type)
-
-      case module.validate_config(node["config"] || %{}) do
-        :ok -> {:cont, :ok}
-        {:error, reasons} -> {:halt, {:error, {:invalid_config, node["id"], reasons}}}
-      end
-    end)
-  end
-
-  # ... remaining validators
 end
 ```
 
@@ -259,24 +391,33 @@ end
 
 ### Draft / Publish Lifecycle
 
+1. Create a `workflow_definitions` row.
+2. Create draft version `v1` with empty embedded collections.
+3. Autosave draft edits by replacing the full `steps`, `connections`, `step_groups`, `viewport`, and `settings` payload on the draft row.
+4. Run lightweight validation on each save.
+5. Publish the draft only after full validation succeeds.
+6. Compute `compiled_hash` from the normalized executable graph.
+7. Stamp `published_at` and `published_by_user_id`.
+8. Clone the latest published version into a new draft when further editing starts.
+
+Representative context flow:
+
 ```elixir
 defmodule Fizz.Workflows.Definitions do
   import Ecto.Query
+  import Ecto.Changeset, only: [apply_action: 2]
 
   alias Fizz.Repo
   alias Fizz.Workflows.{Definition, DefinitionVersion, DefinitionValidator}
 
-  @doc "Create a new definition with an empty draft v1."
   def create(project_id, attrs, user_id) do
     Repo.transaction(fn ->
       {:ok, definition} =
         %Definition{}
-        |> Definition.changeset(
-          Map.merge(attrs, %{
-            project_id: project_id,
-            created_by_user_id: user_id
-          })
-        )
+        |> Definition.changeset(Map.merge(attrs, %{
+          project_id: project_id,
+          created_by_user_id: user_id
+        }))
         |> Repo.insert()
 
       {:ok, version} =
@@ -285,7 +426,11 @@ defmodule Fizz.Workflows.Definitions do
           workflow_definition_id: definition.id,
           version: 1,
           status: :draft,
-          graph: %{"nodes" => [], "edges" => [], "viewport" => %{"x" => 0, "y" => 0, "zoom" => 1}}
+          steps: [],
+          connections: [],
+          step_groups: [],
+          viewport: %{"x" => 0, "y" => 0, "zoom" => 1.0},
+          settings: %{}
         })
         |> Repo.insert()
 
@@ -293,30 +438,29 @@ defmodule Fizz.Workflows.Definitions do
     end)
   end
 
-  @doc "Update the draft version's graph. Runs lightweight validation."
-  def update_draft(version_id, graph) do
+  def update_draft(version_id, attrs) do
     version = Repo.get!(DefinitionVersion, version_id)
 
     if version.status != :draft do
       {:error, :not_a_draft}
     else
-      with :ok <- DefinitionValidator.validate_for_save(graph) do
-        version
-        |> DefinitionVersion.changeset(%{graph: graph, updated_at: DateTime.utc_now()})
-        |> Repo.update()
+      changeset = DefinitionVersion.changeset(version, attrs)
+
+      with {:ok, candidate} <- apply_action(changeset, :update),
+           :ok <- DefinitionValidator.validate_for_save(candidate) do
+        Repo.update(changeset)
       end
     end
   end
 
-  @doc "Publish the current draft. Full validation. Freezes the graph."
   def publish(version_id, scope) do
     version = Repo.get!(DefinitionVersion, version_id)
 
     if version.status != :draft do
       {:error, :not_a_draft}
     else
-      with :ok <- DefinitionValidator.validate_for_publish(version.graph, scope) do
-        compiled_hash = :erlang.phash2(version.graph) |> to_string()
+      with :ok <- DefinitionValidator.validate_for_publish(version, scope) do
+        compiled_hash = compute_compiled_hash(version)
 
         version
         |> DefinitionVersion.changeset(%{
@@ -329,33 +473,6 @@ defmodule Fizz.Workflows.Definitions do
       end
     end
   end
-
-  @doc "Create a new draft from the latest published version."
-  def create_new_draft(definition_id) do
-    latest_published =
-      DefinitionVersion
-      |> where(workflow_definition_id: ^definition_id, status: :published)
-      |> order_by(desc: :version)
-      |> limit(1)
-      |> Repo.one()
-
-    case latest_published do
-      nil ->
-        {:error, :no_published_version}
-
-      published ->
-        next_version = published.version + 1
-
-        %DefinitionVersion{}
-        |> DefinitionVersion.changeset(%{
-          workflow_definition_id: definition_id,
-          version: next_version,
-          status: :draft,
-          graph: published.graph
-        })
-        |> Repo.insert()
-    end
-  end
 end
 ```
 
@@ -363,28 +480,27 @@ end
 
 ### Publishing Sequence
 
-```
+```text
 create definition
-    │
-    ▼
+    |
+    v
 create draft v1
-    │
-    ▼
+    |
+    v
 save draft edits
-    │  ── lightweight validation
-    ▼
+    |  -- cast embeds
+    |  -- validate lightweight graph integrity
+    v
 publish draft
-    │  ── full validation
-    │  ── compute compiled_hash from frozen graph
-    │  ── stamp published_at / published_by_user_id
-    │  ── freeze version graph
-    ▼
+    |  -- validate configs, credentials, handles, entry step
+    |  -- compile executable graph
+    |  -- compute compiled_hash from normalized execution payload
+    |  -- stamp published_at / published_by_user_id
+    v
 latest published version
-    │
-    ▼
-create next draft by cloning latest published graph
+    |
+    v
+create next draft by cloning embedded document
 ```
 
-The important boundary is that drafts are mutable working copies and published versions are immutable snapshots. Any further editing happens in a new draft, never by mutating an already published row.
-
-`compiled_hash` stays attached to the published snapshot, not the mutable definition record, because it describes that exact frozen version of the graph.
+The boundary that matters is still draft vs published. The main change in this design is that the snapshot is typed and validated through Ecto embeds instead of being carried around as a single untyped `graph` map.
