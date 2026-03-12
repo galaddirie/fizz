@@ -64,13 +64,13 @@ This means our platform's responsibility narrows to what Runic *doesn't* provide
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        CONTROL PLANE (Postgres)                     │
 │                                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌────────────┐  ┌───────────┐ │
+│  ┌───────────────┐  ┌──────────────┐  ┌────────────┐  ┌───────────┐ │
 │  │ Global Index  │  │ Lease Table  │  │ Timer Svc  │  │ Signal    │ │
 │  │ (routing,     │  │ (ownership,  │  │ (durable   │  │ Inbox     │ │
 │  │  search,      │  │  fencing)    │  │  wakeups)  │  │ (dedup,   │ │
-│  │  org/project  │  │              │  │            │  │  delivery) │ │
-│  │  scope)       │  │              │  │            │  │            │ │
-│  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘  └─────┬─────┘ │
+│  │  org/project  │  │              │  │            │  │ delivery) │ │
+│  │  scope)       │  │              │  │            │  │           │ │
+│  └──────┬────────┘  └──────┬───────┘  └─────┬──────┘  └─────┬─────┘ │
 │         │                 │                │              │         │
 │         └────────────┬────┴────────────────┴──────────────┘         │
 │                      │  LISTEN / NOTIFY                             │
@@ -79,8 +79,8 @@ This means our platform's responsibility narrows to what Runic *doesn't* provide
           ┌────────────┼────────────┐
           ▼            ▼            ▼
    ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
-   │  Worker Node │ │  Worker Node │ │  Worker Node │
-   │  (Elixir)    │ │  (Elixir)    │ │  (Elixir)    │
+   │ Worker Node │ │ Worker Node │ │ Worker Node │
+   │ (Elixir)    │ │ (Elixir)    │ │ (Elixir)    │
    │             │ │             │ │             │
    │ ┌─────────┐ │ │ ┌─────────┐ │ │ ┌─────────┐ │
    │ │ Runic   │ │ │ │ Runic   │ │ │ │ Runic   │ │
@@ -110,8 +110,8 @@ This means our platform's responsibility narrows to what Runic *doesn't* provide
                     └─────────────┘
 
    ┌──────────────────────────────────────────────┐
-   │          Phoenix LiveView Console             │
-   │  (list · search · describe · signal · reset)  │
+   │          Phoenix LiveView Console            │
+   │  (list · search · describe · signal · reset) │
    └──────────────────────────────────────────────┘
 ```
 
