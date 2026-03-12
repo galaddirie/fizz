@@ -33,7 +33,7 @@ The research notes use **tenant** as a generic isolation term. In this repo, tha
 - Workflow control-plane rows should therefore persist both `workos_organization_id` and `project_id`, rather than a single generic `tenant_id`.
 - Workflow operations should resolve authorization through `%Fizz.Accounts.Scope{}` and `Accounts.build_scope_for_project/2`, matching `Fizz.Workspaces` and `Fizz.Integrations`.
 - If a workflow orchestrates work inside a workspace, treat `workspace_id` as optional workflow metadata, not as the primary isolation key.
-- The examples below use `Platform.*` as placeholder namespaces; in this repo they should land under a new `Fizz.Workflows.*` context/supervision tree.
+- The workflow domain itself should live under `Fizz.Workflows.*` (`Fizz.Workflows.WorkflowRun`, `Fizz.Workflows.RunWorker`, `Fizz.Workflows.SignalInbox`, etc.), while LiveViews/controllers remain under `FizzWeb.*` and call into that domain.
 - The first operator UI should be project-scoped, e.g. `/projects/:project_id/workflows`, inside the existing authenticated browser scope / `live_session :require_authenticated_user`, because those routes already provide `@current_scope` and match the rest of the app.
 
 ---
@@ -107,38 +107,39 @@ The deepest structural insight: SQLite's single-writer constraint eliminates an 
 Application
 ├── Repo (Ecto / Postgres)
 │
-├── Platform.ControlPlane.Supervisor          (rest_for_one)
-│   ├── Platform.LeaseManager                 (GenServer — renews Postgres leases)
-│   ├── Platform.TimerPoller                  (GenServer — polls due timers via SKIP LOCKED)
-│   ├── Platform.SignalRouter                 (GenServer — drains signal_inbox, routes)
-│   └── Platform.PassivationSweeper           (GenServer — evicts idle workflows)
+├── Fizz.Workflows.Supervisor                 (one_for_one)
+│   ├── Fizz.Workflows.ControlPlane.Supervisor (rest_for_one)
+│   │   ├── Fizz.Workflows.LeaseManager       (GenServer — renews Postgres leases)
+│   │   ├── Fizz.Workflows.TimerPoller        (GenServer — polls due timers via SKIP LOCKED)
+│   │   ├── Fizz.Workflows.SignalRouter       (GenServer — drains signal_inbox, routes)
+│   │   └── Fizz.Workflows.PassivationSweeper (GenServer — evicts idle workflows)
+│   │
+│   ├── Fizz.Workflows.DataPlane.Supervisor   (one_for_one)
+│   │   ├── Registry (Fizz.Workflows.Registry) (unique keys: {project_id, run_id})
+│   │   ├── PartitionSupervisor               (wraps Task.Supervisor, N partitions)
+│   │   │   └── Task.Supervisor               (async_nolink for activity execution)
+│   │   └── DynamicSupervisor (Fizz.Workflows.RunSupervisor)
+│   │       └── Fizz.Workflows.RunWorker (GenServer) (one per active workflow)
+│   │           ├── owns: Runic.Workflow (in-memory state)
+│   │           ├── owns: SQLite connection (single-writer)
+│   │           └── owns: Litestream child process (WAL → S3)
 │
-├── Platform.DataPlane.Supervisor             (one_for_one)
-│   ├── Registry (Platform.WorkflowRegistry)  (unique keys: {project_id, run_id})
-│   ├── PartitionSupervisor                   (wraps Task.Supervisor, N partitions)
-│   │   └── Task.Supervisor                   (async_nolink for activity execution)
-│   └── DynamicSupervisor (Platform.RunSupervisor)
-│       └── Platform.RunWorker (GenServer)    (one per active workflow)
-│           ├── owns: Runic.Workflow (in-memory state)
-│           ├── owns: SQLite connection (single-writer)
-│           └── owns: Litestream child process (WAL → S3)
-│
-├── Platform.Web.Endpoint (Phoenix)
-│   ├── REST / gRPC API (start, signal, query, cancel)
+├── FizzWeb.Endpoint (Phoenix)
+│   ├── Controllers / channels / LiveViews
 │   └── LiveView operator console
 │
-└── Platform.Telemetry.Supervisor
+└── Fizz.Workflows.Telemetry.Supervisor
     ├── :telemetry_poller (VM + custom metrics)
     └── OpenTelemetry exporter
 ```
 
 **Key design decisions in the supervision tree:**
 
-The `ControlPlane.Supervisor` uses `rest_for_one` so that if the `LeaseManager` crashes, the `TimerPoller` and `SignalRouter` also restart — they depend on valid leases. The `DataPlane.Supervisor` uses `one_for_one` because individual workflow crashes are independent. `PartitionSupervisor` wraps `Task.Supervisor` to spread activity tasks across schedulers, avoiding bottlenecks on a single supervisor mailbox.
+The `Fizz.Workflows.ControlPlane.Supervisor` uses `rest_for_one` so that if the `Fizz.Workflows.LeaseManager` crashes, the `Fizz.Workflows.TimerPoller` and `Fizz.Workflows.SignalRouter` also restart — they depend on valid leases. `Fizz.Workflows.DataPlane.Supervisor` uses `one_for_one` because individual workflow crashes are independent. `PartitionSupervisor` wraps `Task.Supervisor` to spread activity tasks across schedulers, avoiding bottlenecks on a single supervisor mailbox.
 
-Each `RunWorker` is a GenServer that maps directly onto Runic's execution model. Runic's three-phase cycle — *prepare* (identify runnable nodes in the DAG), *execute* (dispatch to supervised tasks via `Task.Supervisor.async_nolink`), *apply* (fold results back into the workflow graph) — runs inside the GenServer's message loop. The "apply" phase is the single-writer state transition: it appends events to SQLite and advances the in-memory Runic workflow atomically. This separation means the "execute" phase can be treated as an isolated activity while "apply" becomes the linearizable state commit.
+Each `Fizz.Workflows.RunWorker` is a GenServer that maps directly onto Runic's execution model. Runic's three-phase cycle — *prepare* (identify runnable nodes in the DAG), *execute* (dispatch to supervised tasks via `Task.Supervisor.async_nolink`), *apply* (fold results back into the workflow graph) — runs inside the GenServer's message loop. The "apply" phase is the single-writer state transition: it appends events to SQLite and advances the in-memory Runic workflow atomically. This separation means the "execute" phase can be treated as an isolated activity while "apply" becomes the linearizable state commit.
 
-Runic's `Workflow.log/1` composes the build log, reaction history, and runnable lifecycle events (`RunnableDispatched`, `RunnableCompleted`, `RunnableFailed`) into a serializable list. `Workflow.from_log/1` replays those events to reconstruct the full graph. The RunWorker uses these APIs for checkpointing and recovery, and `Workflow.pending_runnables/1` identifies dispatched-but-unresolved work after a crash, enabling re-dispatch without re-executing completed steps.
+Runic's `Workflow.log/1` composes the build log, reaction history, and runnable lifecycle events (`RunnableDispatched`, `RunnableCompleted`, `RunnableFailed`) into a serializable list. `Workflow.from_log/1` replays those events to reconstruct the full graph. `Fizz.Workflows.RunWorker` uses these APIs for checkpointing and recovery, and `Workflow.pending_runnables/1` identifies dispatched-but-unresolved work after a crash, enabling re-dispatch without re-executing completed steps.
 
 ---
 
@@ -233,6 +234,14 @@ CREATE INDEX idx_tasks_claimable ON activity_tasks(activity_type, created_at)
     WHERE status = 'PENDING';
 ```
 
+Suggested Ecto surface for the control plane:
+
+- `Fizz.Workflows.WorkflowRun`
+- `Fizz.Workflows.ShardLease`
+- `Fizz.Workflows.DurableTimer`
+- `Fizz.Workflows.SignalInbox`
+- `Fizz.Workflows.ActivityTask`
+
 The activity task queue uses Postgres `FOR UPDATE SKIP LOCKED` for multi-consumer claiming, which Postgres documentation explicitly recommends for queue-like tables where consumers should skip locked rows rather than blocking. In this repo, start by validating whether the existing Oban installation can own this responsibility before introducing a second bespoke queue table: `Fizz.Workspaces.ExecJob` already gives you a local pattern for durable Postgres-backed job execution, retries, and supervision.
 
 ### 4.2 SQLite — Per-Workflow Data Plane
@@ -312,7 +321,7 @@ Runic serves as the workflow virtual machine. Its dataflow DAG with lazy evaluat
 
 1. **Prepare**: `Workflow.plan_eagerly/1` walks the DAG and identifies nodes whose input facts are satisfied — these become `Runnable` structs.
 2. **Execute**: runnables dispatch to `Task.Supervisor.async_nolink` (or to the Postgres activity queue for distributed execution). Each runnable carries a stable `id` derived from `{node.hash, fact.hash}`, which serves as a natural idempotency key.
-3. **Apply**: task results return via `{ref, result}` and `:DOWN` messages. The RunWorker folds results back into the workflow graph and appends lifecycle events (`RunnableCompleted`, `RunnableFailed`) to the SQLite event log — all within a single SQLite transaction.
+3. **Apply**: task results return via `{ref, result}` and `:DOWN` messages. `Fizz.Workflows.RunWorker` folds results back into the workflow graph and appends lifecycle events (`RunnableCompleted`, `RunnableFailed`) to the SQLite event log — all within a single SQLite transaction.
 
 This separation means the execute phase is an isolated, retriable operation, while the apply phase is the linearizable state commit.
 
@@ -320,7 +329,7 @@ This separation means the execute phase is an isolated, retriable operation, whi
 
 ```
                       ┌─────────────────────────────────┐
-                      │     RunWorker GenServer          │
+                      │ Fizz.Workflows.RunWorker GenServer │
                       │                                  │
   signal/timer ──────►│  1. Validate fence token         │
                       │  2. Replay from snapshot if cold │
@@ -357,8 +366,8 @@ The system enforces a clear contract: **workflow state transitions are exactly-o
 *At the activity boundary* (external services), idempotency keys close the loop:
 
 ```elixir
-defmodule Platform.Activities.ChargePayment do
-  @behaviour Platform.Activity
+defmodule Fizz.Workflows.Activities.ChargePayment do
+  @behaviour Fizz.Workflows.Activity
 
   @impl true
   def execute(%{run_id: run_id, runnable_id: rid, attempt: att}, args) do
@@ -443,7 +452,7 @@ Tier 3: ARCHIVE — Run completed, SQLite in S3 Glacier
                    (operator inspection only, minutes to restore)
 ```
 
-The `PassivationSweeper` GenServer runs a periodic scan (every 60 s) of active workflows via `Registry`. Workflows idle longer than the configured threshold (default 10 min) transition through tiers. On passivation to S3: checkpoint WAL (`PRAGMA wal_checkpoint(TRUNCATE)`), take a snapshot, upload, update Postgres `workflow_runs.status = 'PASSIVATED'` and `storage_uri`, release the file handle.
+The `Fizz.Workflows.PassivationSweeper` GenServer runs a periodic scan (every 60 s) of active workflows via `Registry`. Workflows idle longer than the configured threshold (default 10 min) transition through tiers. On passivation to S3: checkpoint WAL (`PRAGMA wal_checkpoint(TRUNCATE)`), take a snapshot, upload, update Postgres `workflow_runs.status = 'PASSIVATED'` and `storage_uri`, release the file handle.
 
 ### 6.3 Litestream Replication
 
@@ -469,7 +478,7 @@ WHERE run_id = :run_id
 RETURNING fence_token;
 ```
 
-The `LeaseManager` GenServer renews all leases held by this node every 10 seconds (well within the 30 s TTL). If a node crashes, leases expire and another node can claim ownership.
+`Fizz.Workflows.LeaseManager` renews all leases held by this node every 10 seconds (well within the 30 s TTL). If a node crashes, leases expire and another node can claim ownership.
 
 ### 7.2 Fencing Token Validation
 
@@ -531,14 +540,14 @@ end
 
 Backpressure operates at three levels:
 
-**Worker level:** each RunWorker tracks in-flight activity count. When it reaches a configurable concurrency limit (e.g., 10 concurrent activities per workflow), it stops dispatching new runnables until slots free up. Runic's `plan_eagerly/1` identifies all ready runnables, but the worker gates dispatch.
+**Worker level:** each `Fizz.Workflows.RunWorker` tracks in-flight activity count. When it reaches a configurable concurrency limit (e.g., 10 concurrent activities per workflow), it stops dispatching new runnables until slots free up. Runic's `plan_eagerly/1` identifies all ready runnables, but the worker gates dispatch.
 
 **Node level:** the `DynamicSupervisor` enforces `max_children`. New workflow activations beyond this limit return `{:error, :overloaded}` to the control plane, which routes to another node. The `Task.Supervisor` partition count bounds total concurrent activity tasks per node.
 
 **System level:** the Postgres activity queue provides natural backpressure — if workers can't keep up, tasks accumulate. A queue depth metric triggers alerts. In Fizz, rate limiting and quotas should key off `workos_organization_id` and `project_id`, not a synthetic tenant id, so one noisy project cannot monopolize shared capacity inside an organization.
 
 ```elixir
-# In RunWorker
+# In Fizz.Workflows.RunWorker
 defp maybe_dispatch(%{in_flight: in_flight, max_concurrency: max} = state)
      when map_size(in_flight) >= max do
   state  # backpressure: wait for completions
@@ -559,11 +568,11 @@ end
 
 When a workflow calls `sleep(duration)` or `schedule_at(datetime)`:
 
-1. The RunWorker appends a `TimerStarted` event to the SQLite event log.
+1. `Fizz.Workflows.RunWorker` appends a `TimerStarted` event to the SQLite event log.
 2. A corresponding row is written to the SQLite `timers` table and the Postgres `durable_timers` table (denormalized for global polling).
-3. The RunWorker snapshots, passivates (if the timer is far in the future), and stops.
+3. `Fizz.Workflows.RunWorker` snapshots, passivates (if the timer is far in the future), and stops.
 
-The `TimerPoller` GenServer runs a periodic scan (every 1 s for near-term timers, every 60 s for far-future) using `SKIP LOCKED` to avoid contention:
+`Fizz.Workflows.TimerPoller` runs a periodic scan (every 1 s for near-term timers, every 60 s for far-future) using `SKIP LOCKED` to avoid contention:
 
 ```elixir
 def poll_due_timers do
@@ -595,7 +604,7 @@ External signals flow through the Postgres `signal_inbox`, which accepts writes 
 ```elixir
 def send_signal(run_id, signal_name, payload, signal_id) do
   # Postgres PRIMARY KEY on signal_id rejects duplicates at the DB level
-  Repo.insert!(%SignalInbox{
+  Repo.insert!(%Fizz.Workflows.SignalInbox{
     signal_id: signal_id,
     run_id: run_id,
     signal_name: signal_name,
@@ -607,13 +616,13 @@ def send_signal(run_id, signal_name, payload, signal_id) do
 end
 ```
 
-The `SignalRouter` subscribes to `LISTEN signals` for low-latency delivery. When a notification arrives, it checks if the target workflow is active on this node (via `Registry`); if so, it sends the signal directly. If the workflow is passivated, it enqueues a wake-up. LISTEN/NOTIFY is a latency optimization only — the `SignalRouter` also polls `signal_inbox` periodically to catch any missed notifications.
+`Fizz.Workflows.SignalRouter` subscribes to `LISTEN signals` for low-latency delivery. When a notification arrives, it checks if the target workflow is active on this node (via `Registry`); if so, it sends the signal directly. If the workflow is passivated, it enqueues a wake-up. LISTEN/NOTIFY is a latency optimization only — `Fizz.Workflows.SignalRouter` also polls `signal_inbox` periodically to catch any missed notifications.
 
-Inside the RunWorker, signal processing uses two layers of dedup:
+Inside `Fizz.Workflows.RunWorker`, signal processing uses two layers of dedup:
 
 ```elixir
 def deliver_signals(db, workflow, fence_token) do
-  pending = Repo.all(from s in SignalInbox,
+  pending = Repo.all(from s in Fizz.Workflows.SignalInbox,
     where: s.run_id == ^run_id and s.delivered == false,
     order_by: s.received_at)
 
@@ -656,7 +665,7 @@ Isolation is enforced at every layer using Fizz's existing org/project model:
 ### 11.2 Resource Quotas
 
 ```elixir
-defmodule Platform.Quotas do
+defmodule Fizz.Workflows.Quotas do
   @defaults %{
     max_active_runs:    1_000,
     max_run_history_mb: 50,
@@ -666,7 +675,7 @@ defmodule Platform.Quotas do
   }
 
   def check_quota!(project_id, :start_run) do
-    active = Repo.count(WorkflowRun, project_id: project_id, status: "RUNNING")
+    active = Repo.count(Fizz.Workflows.WorkflowRun, project_id: project_id, status: "RUNNING")
     limit = get_limit(project_id, :max_active_runs)
     if active >= limit, do: raise QuotaExceededError
   end
@@ -689,16 +698,16 @@ Runic stores components using serializable closures that include the quoted AST 
 # Postgres stores the definition revision for each run
 ALTER TABLE workflow_runs ADD COLUMN definition_version INTEGER NOT NULL DEFAULT 1;
 
-# RunWorker checks compatibility on wake
+# Fizz.Workflows.RunWorker checks compatibility on wake
 def activate(run_id) do
-  run = Repo.get!(WorkflowRun, run_id)
-  current_version = Platform.Definitions.current_version(run.workflow_type)
+  run = Repo.get!(Fizz.Workflows.WorkflowRun, run_id)
+  current_version = Fizz.Workflows.Definitions.current_version(run.workflow_type)
 
   cond do
     run.definition_version == current_version ->
       :ok  # compatible, proceed
 
-    run.definition_version in Platform.Definitions.compatible_versions(run.workflow_type) ->
+    run.definition_version in Fizz.Workflows.Definitions.compatible_versions(run.workflow_type) ->
       :ok  # explicitly marked compatible
 
     true ->
@@ -744,7 +753,7 @@ Migrations must be idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... AD
 
 ```elixir
 # :telemetry events emitted by the platform
-:telemetry.execute([:platform, :workflow, :step], %{duration: elapsed}, %{
+:telemetry.execute([:fizz, :workflows, :step], %{duration: elapsed}, %{
   workos_organization_id: workos_organization_id,
   project_id: project_id,
   workflow_type: type,
@@ -753,16 +762,16 @@ Migrations must be idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... AD
 })
 
 # Key metrics to export
-- platform.workflow.step.duration        (histogram, by org + project + type)
-- platform.workflow.active.count         (gauge, by node + org + project)
-- platform.workflow.cold_start.duration  (histogram)
-- platform.activity.execution.duration   (histogram, by activity_type)
-- platform.activity.queue.depth          (gauge, by activity_type)
-- platform.timer.fire.lag                (histogram — fire_at vs actual)
-- platform.sqlite.file_size.bytes        (histogram)
-- platform.sqlite.event_count            (histogram)
-- platform.passivation.rate              (counter)
-- platform.lease.renewal.failure         (counter — critical alert)
+- fizz.workflows.step.duration        (histogram, by org + project + type)
+- fizz.workflows.active.count         (gauge, by node + org + project)
+- fizz.workflows.cold_start.duration  (histogram)
+- fizz.workflows.activity.duration    (histogram, by activity_type)
+- fizz.workflows.activity.queue.depth (gauge, by activity_type)
+- fizz.workflows.timer.fire.lag       (histogram — fire_at vs actual)
+- fizz.workflows.sqlite.file_size     (histogram)
+- fizz.workflows.sqlite.event_count   (histogram)
+- fizz.workflows.passivation.count    (counter)
+- fizz.workflows.lease.renewal.error  (counter — critical alert)
 ```
 
 ### 13.2 Distributed Tracing
@@ -846,7 +855,7 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 
 **Goal:** core execution loop running on a single node with Postgres coordination.
 
-- Implement `Platform.RunWorker` GenServer wrapping Runic's three-phase cycle.
+- Implement `Fizz.Workflows.RunWorker` GenServer wrapping Runic's three-phase cycle.
 - Implement the `Runic.Runner.Store` behaviour backed by SQLite (using Exqlite). Wire up `Workflow.log/1` and `Workflow.from_log/1` for checkpoint/restore.
 - Stand up Postgres control-plane tables: `workflow_runs`, `shard_leases`, `activity_tasks`.
 - Implement lease acquisition and fence-token validation in SQLite writes.
@@ -858,8 +867,8 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 **Goal:** workflows survive node restarts and sleep for arbitrary durations.
 
 - Integrate Litestream for continuous SQLite → S3 replication.
-- Implement passivation tiers (hot → warm → cold) with the `PassivationSweeper`.
-- Implement `durable_timers` table and `TimerPoller` with cold-start wake-up path.
+- Implement passivation tiers (hot → warm → cold) with `Fizz.Workflows.PassivationSweeper`.
+- Implement `durable_timers` table and `Fizz.Workflows.TimerPoller` with cold-start wake-up path.
 - Implement snapshot-on-passivation and snapshot-every-N-events.
 - Implement `ContinueAsNew` for workflows exceeding event/size limits.
 - Chaos tests: kill nodes mid-execution, verify resume from S3 with correct state.
@@ -868,7 +877,7 @@ The append-only SQLite event log is a natural audit trail. For compliance-critic
 
 **Goal:** external interaction and repo-native isolation.
 
-- Implement `signal_inbox` and `SignalRouter` with `LISTEN/NOTIFY` optimization.
+- Implement `signal_inbox` and `Fizz.Workflows.SignalRouter` with `LISTEN/NOTIFY` optimization.
 - Implement two-layer signal deduplication (Postgres + per-workflow SQLite).
 - Add `workos_organization_id` + `project_id` to all workflow tables; wire authorization through `%Fizz.Accounts.Scope{}` and `Accounts.build_scope_for_project/2`.
 - Build Phoenix workflow routes under the existing authenticated project area first (`/projects/:project_id/workflows/...`), then add external API endpoints only if they are actually needed.
