@@ -18,7 +18,6 @@ defmodule Fizz.Application do
 
       # Step type registry - must start before endpoint so types are available
       Fizz.Steps.Registry,
-      Fizz.Runtime.Expression.Cache,
 
       # Start a worker by calling: Fizz.Worker.start_link(arg)
       # {Fizz.Worker, arg},
