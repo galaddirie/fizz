@@ -52,7 +52,7 @@ defmodule Fizz.Runtime.Expression do
   - Strict variable access (unknown vars return nil or error)
   """
 
-  alias Fizz.Runtime.Expression.{Context, Filters, Cache}
+  alias Fizz.Runtime.Expression.{Context, Filters}
   alias Fizz.Executions.Execution
 
   @type eval_result :: {:ok, String.t()} | {:error, term()}
@@ -180,7 +180,7 @@ defmodule Fizz.Runtime.Expression do
   """
   @spec compile(String.t()) :: {:ok, Solid.Template.t()} | {:error, term()}
   def compile(template) when is_binary(template) do
-    case Cache.get_or_compile(template) do
+    case Solid.parse(template) do
       {:ok, compiled} -> {:ok, compiled}
       {:error, error} -> {:error, format_parse_error(error)}
     end
@@ -213,12 +213,12 @@ defmodule Fizz.Runtime.Expression do
 
     task =
       Task.async(fn ->
-        case Cache.get_or_compile(template) do
+        case compile(template) do
           {:ok, compiled} ->
             do_render(compiled, vars, opts)
 
           {:error, reason} ->
-            {:error, format_parse_error(reason)}
+            {:error, reason}
         end
       end)
 
