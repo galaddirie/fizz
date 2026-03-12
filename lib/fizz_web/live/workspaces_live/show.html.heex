@@ -12,7 +12,7 @@
         <.icon name="hero-arrow-left" class="size-4" /> Back to Workspaces
       </.link>
       <h1 class="text-3xl font-semibold">{(@workspace && @workspace.name) || "Workspace"}</h1>
-      <p class="text-sm text-muted">Workspace details and quick links.</p>
+      <p class="text-sm text-muted">Workspace details and quick links for the current scope.</p>
     </div>
   </:page_header>
 
@@ -54,16 +54,9 @@
 
         <div class="mt-4 space-y-2">
           <.link
-            id="workspace-show-open-workflows"
-            navigate={~p"/workspaces/#{@workspace.id}/workflows"}
-            class="btn btn-primary btn-sm w-full"
-          >
-            Open Workflows
-          </.link>
-          <.link
             id="workspace-show-open-sprites"
             navigate={~p"/workspaces/#{@workspace.id}/sprites"}
-            class="btn btn-outline btn-sm w-full"
+            class="btn btn-primary btn-sm w-full"
           >
             Open Sprites
           </.link>

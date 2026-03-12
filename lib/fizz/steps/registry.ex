@@ -245,7 +245,6 @@ defmodule Fizz.Steps.Registry do
       Fizz.Steps.Executors.DataFilter,
       Fizz.Steps.Executors.DataTransform,
       Fizz.Steps.Executors.DataOutput,
-      Fizz.Steps.Executors.WorkflowOutput,
       Fizz.Steps.Executors.Condition,
       Fizz.Steps.Executors.Switch,
       Fizz.Steps.Executors.Format,

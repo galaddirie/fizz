@@ -4,7 +4,7 @@
       <p class="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Workspace</p>
       <h1 class="text-3xl font-semibold">Workspaces</h1>
       <p class="text-sm text-muted">
-        Manage workspace boundaries and open a workspace to access Sprites.
+        Manage workspace boundaries and open a workspace to access the rest of the app.
       </p>
     </div>
   </:page_header>
@@ -80,13 +80,6 @@
                 class="btn btn-ghost btn-sm"
               >
                 Sprites
-              </.link>
-              <.link
-                id={"workspace-workflows-#{workspace.id}"}
-                navigate={~p"/workspaces/#{workspace.id}/workflows"}
-                class="btn btn-ghost btn-sm"
-              >
-                Workflows
               </.link>
             </div>
           </article>

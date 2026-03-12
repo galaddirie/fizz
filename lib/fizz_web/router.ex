@@ -70,9 +70,6 @@ defmodule FizzWeb.Router do
       live "/workspaces/:workspace_id", WorkspacesLive.Show, :show
       live "/workspaces/:workspace_id/sprites", SpritesLive.Index, :index
       live "/workspaces/:workspace_id/sprites/:sprite_id", SpritesLive.Show, :show
-
-      live "/workspaces/:workspace_id/workflows", WorkflowLive.Index, :index
-      live "/workspaces/:workspace_id/workflows/:id", WorkflowLive.Show, :show
     end
   end
 end

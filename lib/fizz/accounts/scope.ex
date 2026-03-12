@@ -7,12 +7,9 @@ defmodule Fizz.Accounts.Scope do
   """
 
   alias Fizz.Accounts.{User, Workspace}
-  alias Fizz.Workflows.Workflow
 
   @organization_roles [:owner, :admin, :member]
   @workspace_roles [:admin, :member, :viewer]
-  @workspace_view_roles [:admin, :member, :viewer]
-  @workspace_edit_roles [:admin, :member]
 
   defstruct user: nil,
             actor: :anonymous,
@@ -111,60 +108,4 @@ defmodule Fizz.Accounts.Scope do
   @spec workspace_admin?(t()) :: boolean()
   def workspace_admin?(%__MODULE__{workspace_role: :admin}), do: true
   def workspace_admin?(%__MODULE__{}), do: false
-
-  @doc """
-  Whether scope can view a workflow in the active workspace.
-  """
-  @spec can_view_workflow?(t() | nil, Workflow.t() | map()) :: boolean()
-  def can_view_workflow?(%__MODULE__{} = scope, %Workflow{} = workflow) do
-    authenticated?(scope) and same_workspace?(scope, workflow) and can_read_workspace?(scope)
-  end
-
-  def can_view_workflow?(%__MODULE__{} = scope, %{workspace_id: _workspace_id} = workflow) do
-    authenticated?(scope) and same_workspace?(scope, workflow) and can_read_workspace?(scope)
-  end
-
-  def can_view_workflow?(_scope, _workflow), do: false
-
-  @doc """
-  Whether scope can edit workflows in the active workspace.
-  """
-  @spec can_edit_workflow?(t() | nil, Workflow.t() | map()) :: boolean()
-  def can_edit_workflow?(%__MODULE__{} = scope, %Workflow{} = workflow) do
-    authenticated?(scope) and same_workspace?(scope, workflow) and can_write_workspace?(scope)
-  end
-
-  def can_edit_workflow?(%__MODULE__{} = scope, %{workspace_id: _workspace_id} = workflow) do
-    authenticated?(scope) and same_workspace?(scope, workflow) and can_write_workspace?(scope)
-  end
-
-  def can_edit_workflow?(_scope, _workflow), do: false
-
-  @doc """
-  Compatibility helper kept for call sites that previously used owner checks.
-
-  Under workspace-scoped auth, delete-level access follows edit permissions.
-  """
-  @spec owns_workflow?(t() | nil, Workflow.t() | map()) :: boolean()
-  def owns_workflow?(scope, workflow), do: can_edit_workflow?(scope, workflow)
-
-  defp same_workspace?(%__MODULE__{workspace: %Workspace{id: scope_workspace_id}}, %{
-         workspace_id: workflow_workspace_id
-       })
-       when is_binary(scope_workspace_id) and is_binary(workflow_workspace_id),
-       do: scope_workspace_id == workflow_workspace_id
-
-  defp same_workspace?(_scope, _workflow), do: false
-
-  defp can_read_workspace?(%__MODULE__{workspace_role: workspace_role})
-       when workspace_role in @workspace_view_roles,
-       do: true
-
-  defp can_read_workspace?(%__MODULE__{} = scope), do: organization_admin?(scope)
-
-  defp can_write_workspace?(%__MODULE__{workspace_role: workspace_role})
-       when workspace_role in @workspace_edit_roles,
-       do: true
-
-  defp can_write_workspace?(%__MODULE__{} = scope), do: organization_admin?(scope)
 end
