@@ -1,20 +1,28 @@
 defmodule Fizz.Steps.Executors.AIAgent do
   @moduledoc """
-  Root AI agent node that consumes typed sub-node slots.
+  Root AI step that assembles typed subnode outputs into a provider payload.
 
-  Sub-node outputs are injected by the workflow runtime under:
+  Subnode outputs are injected by the workflow runtime under:
 
-  - `_primary` - Primary flow input
-  - `model` - Output from `openai_model` or `anthropic_model`
-  - `prompt` - Output from `ai_prompt_template`
-  - `tools` - List of outputs from `ai_tool_http`
+  - `_primary` - upstream flow input
+  - `model` - output from `openai_model` or `anthropic_model`
+  - `prompt` - output from `ai_prompt_template`
+  - `tools` - zero or more outputs from `ai_tool_http`
+
+  `mode: "assemble_only"` returns the assembled payload without calling a
+  provider.
+
+  `mode: "provider_chat"` currently calls `OpenAIApiKey.generate_text/5` for
+  OpenAI models. Anthropic execution still returns
+  `{:error, :anthropic_chat_not_implemented}`. Tool descriptors are included in
+  the assembled output, but they are not forwarded to the provider call yet.
   """
 
   use Fizz.Steps.Definition,
     id: "ai_agent",
     name: "AI Agent",
     category: "AI",
-    description: "Compose model/prompt/tool sub-nodes and run an AI request",
+    description: "Assemble AI subnodes into a payload or execute an OpenAI chat request",
     icon: "hero-bolt",
     kind: :action,
     role: :root

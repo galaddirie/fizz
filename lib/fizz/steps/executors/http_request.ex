@@ -1,9 +1,16 @@
 defmodule Fizz.Steps.Executors.HttpRequest do
+  @moduledoc """
+  Placeholder HTTP request step.
+
+  The current executor validates the configured URL and returns a stubbed
+  success payload. It does not issue a real network request yet.
+  """
+
   use Fizz.Steps.Definition,
     id: "http_request",
     name: "HTTP Request",
     category: "Integrations",
-    description: "Fetch data from a URL",
+    description: "Validate a URL and return a placeholder HTTP response",
     icon: "hero-globe-alt",
     kind: :action
 

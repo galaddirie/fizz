@@ -2,8 +2,9 @@ defmodule Fizz.Steps.Definition do
   @moduledoc """
   Macro for declaring step type definitions within executor modules.
 
-  This provides a declarative way to define step types alongside their
-  executor implementation, keeping the definition and logic co-located.
+  This keeps step metadata, schemas, and executor behaviour co-located with
+  the executor implementation. It also injects the helper functions consumed by
+  `Fizz.Steps.Registry` and validates required metadata at compile time.
 
   ## Usage
 
@@ -46,16 +47,23 @@ defmodule Fizz.Steps.Definition do
   - `:kind` (required) - One of :action, :trigger, :control_flow, :transform
   - `:role` (optional) - One of :root, :subnode (default: :root)
 
-  ## Schema Attributes
+  ## Definition Attributes
 
-  After `use`, you can define these module attributes:
+  After `use`, you can redefine these module attributes:
 
   - `@config_schema` - JSON Schema for step configuration (what users fill in)
   - `@default_config` - Default configuration map (optional)
   - `@input_schema` - JSON Schema describing expected input
   - `@output_schema` - JSON Schema describing output
+  - `@subnode_slots` - Slot declarations accepted by root nodes (optional)
 
-  If not defined, these default to empty objects.
+  The macro defaults these attributes to:
+
+  - `@config_schema` - `%{"type" => "object", "properties" => %{}}`
+  - `@default_config` - `%{}`
+  - `@input_schema` - `%{"type" => "object"}`
+  - `@output_schema` - `%{"type" => "object"}`
+  - `@subnode_slots` - `[]`
   """
 
   @required_opts [:id, :name, :category, :description, :icon, :kind]

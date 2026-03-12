@@ -1,13 +1,17 @@
 defmodule Fizz.Steps.Executors.OpenAIModel do
   @moduledoc """
-  Produces OpenAI-specific model configuration for AI agent steps.
+  AI agent subnode that normalizes OpenAI model settings.
+
+  It requires an `openai_api_key` credential reference and emits the provider
+  payload consumed by `ai_agent`: provider, credential reference, model,
+  temperature, and max token settings.
   """
 
   use Fizz.Steps.Definition,
     id: "openai_model",
     name: "OpenAI Model",
     category: "AI",
-    description: "Configure OpenAI model parameters for AI agent steps",
+    description: "Provide OpenAI model settings and credential selection for AI agent steps",
     icon: "/images/openai.svg",
     kind: :transform,
     role: :subnode
