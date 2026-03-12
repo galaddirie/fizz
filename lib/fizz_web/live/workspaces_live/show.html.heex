@@ -1,0 +1,303 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_path={~p"/projects/#{@project_id}/workspaces/#{@workspace_id}"}
+>
+  <:page_header>
+    <div class="space-y-2">
+      <.link
+        navigate={~p"/projects/#{@project_id}/workspaces"}
+        class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content"
+      >
+        <.icon name="hero-arrow-left" class="size-4" /> Back to Workspaces
+      </.link>
+      <h1 class="text-3xl font-semibold">{(@workspace && @workspace.name) || "Workspace"}</h1>
+      <p class="text-sm text-muted">project {@project_id}</p>
+    </div>
+  </:page_header>
+
+  <div id="workspace-show-page" class="space-y-6">
+    <div class="grid gap-6 xl:grid-cols-2">
+      <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Jobs</h2>
+          <button id="workspace-refresh-button" class="btn btn-ghost btn-sm" phx-click="refresh">
+            Refresh
+          </button>
+        </div>
+
+        <.form for={@job_form} id="workspace-job-form" phx-submit="queue_job" class="space-y-3">
+          <.input
+            field={@job_form[:command]}
+            type="text"
+            label="Command"
+            placeholder="echo hello"
+            required
+          />
+          <button id="workspace-job-submit" type="submit" class="btn btn-primary btn-sm">
+            Run Job
+          </button>
+        </.form>
+
+        <div id="workspace-jobs" phx-update="stream" class="mt-4 space-y-2">
+          <div id="workspace-jobs-empty" class="hidden only:block text-sm text-muted">
+            No jobs yet.
+          </div>
+
+          <article
+            :for={{dom_id, job} <- @streams.jobs}
+            id={dom_id}
+            class={[
+              "rounded-box border p-3 cursor-pointer transition-colors hover:bg-base-200",
+              if(@selected_job_id == job.id,
+                do: "border-primary bg-primary/5",
+                else: "border-base-300"
+              )
+            ]}
+            phx-click="select_job"
+            phx-value-id={job.id}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <p class="font-medium truncate">{job_display_command(job)}</p>
+              <span class={["badge", job_state_badge_class(job.state)]}>{job.state}</span>
+            </div>
+            <p class="mt-1 text-xs text-muted">{job.inserted_at}</p>
+          </article>
+        </div>
+
+        <%= if @selected_job do %>
+          <div class="mt-4 rounded-box border border-base-300 bg-base-200 p-4">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <h3 class="font-semibold truncate text-sm">
+                {job_display_command(@selected_job)}
+              </h3>
+              <button
+                class="btn btn-ghost btn-xs"
+                phx-click="close_output"
+              >
+                <.icon name="hero-x-mark" class="size-4" />
+              </button>
+            </div>
+
+            <%= if @selected_job.state in [:failed, :system_error] do %>
+              <div class="alert alert-error mb-3 text-sm">
+                <%= if @selected_job.error_message do %>
+                  {@selected_job.error_message}
+                <% else %>
+                  Job {to_string(@selected_job.state) |> String.replace("_", " ")}
+                <% end %>
+              </div>
+            <% end %>
+
+            <div
+              id="job-output"
+              phx-hook="ScrollBottom"
+              class="max-h-96 overflow-y-auto rounded-box border border-base-300 bg-base-100 p-3 font-mono text-sm whitespace-pre-wrap break-all"
+            >
+              <%= if @job_output_empty? and not terminal_state?(@selected_job.state) do %>
+                <p class="text-muted italic">Waiting for output...</p>
+              <% end %>
+
+              <div id="job-output-stream" phx-update="stream">
+                <span
+                  :for={{dom_id, chunk} <- @streams.job_output}
+                  id={dom_id}
+                  class={if chunk.stream == "stderr", do: "text-warning", else: ""}
+                >
+                  {chunk.text}
+                </span>
+              </div>
+            </div>
+
+            <%= if terminal_state?(@selected_job.state) and @selected_job.exit_code do %>
+              <p class="mt-2 text-xs text-muted">
+                Exit code: {@selected_job.exit_code}
+              </p>
+            <% end %>
+          </div>
+        <% end %>
+      </section>
+
+      <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Console</h2>
+
+          <div class="flex items-center gap-2">
+            <%= if @active_console do %>
+              <button
+                id="workspace-console-close"
+                class="btn btn-error btn-sm"
+                phx-click="close_console"
+              >
+                Close Console
+              </button>
+            <% else %>
+              <button
+                id="workspace-console-open"
+                class="btn btn-primary btn-sm"
+                phx-click="open_console"
+              >
+                Open Console
+              </button>
+            <% end %>
+          </div>
+        </div>
+
+        <%= if @active_console do %>
+          <section id="workspace-console-repos" class="mb-4 rounded-lg border border-base-300">
+            <div class="flex items-center justify-between px-3 py-2">
+              <p class="text-xs font-medium text-muted">Repositories</p>
+              <button
+                id="workspace-console-repos-refresh"
+                class="text-muted transition-colors hover:text-base-content"
+                phx-click="refresh_repos"
+              >
+                <.icon name="hero-arrow-path" class="size-3.5" />
+              </button>
+            </div>
+
+            <%= if @github_repos_error do %>
+              <div id="workspace-console-repos-error" class="px-3 pb-3 text-xs text-warning">
+                {@github_repos_error}
+              </div>
+            <% else %>
+              <div
+                id="workspace-console-repos-stream"
+                phx-update="stream"
+                class="max-h-64 overflow-y-auto border-t border-base-300"
+              >
+                <p
+                  id="workspace-console-repos-empty"
+                  class="hidden only:block px-3 py-4 text-center text-xs text-muted"
+                >
+                  No repositories found.
+                </p>
+
+                <div
+                  :for={{dom_id, repo} <- @streams.github_repos}
+                  id={dom_id}
+                  class="group flex items-center justify-between gap-3 border-b border-base-300 px-3 py-2 last:border-b-0"
+                >
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                      <.icon
+                        name={if(repo.private, do: "hero-lock-closed", else: "hero-globe-alt")}
+                        class={[
+                          "size-3 shrink-0",
+                          if(repo.private, do: "text-warning", else: "text-muted")
+                        ]}
+                      />
+                      <p class="truncate text-sm">{repo.full_name}</p>
+                    </div>
+                  </div>
+                  <button
+                    id={"workspace-console-clone-repo-#{repo.id}"}
+                    class="shrink-0 text-xs text-muted opacity-0 transition-opacity group-hover:opacity-100 hover:text-primary"
+                    phx-click="clone_repo"
+                    phx-value-repo-id={repo.id}
+                  >
+                    Clone
+                  </button>
+                </div>
+              </div>
+            <% end %>
+          </section>
+
+          <div
+            id="workspace-console"
+            phx-hook="WorkspaceConsole"
+            phx-update="ignore"
+            data-console-id={@active_console.id}
+            class="rounded-box border border-base-300 bg-base-200 p-3"
+          >
+            <div
+              id="workspace-console-output"
+              data-console-output
+              class="h-72 overflow-hidden rounded-box border border-base-300"
+            >
+            </div>
+          </div>
+        <% else %>
+          <p class="text-sm text-muted">Open an interactive shell for this workspace.</p>
+        <% end %>
+      </section>
+    </div>
+
+    <div class="grid gap-6 xl:grid-cols-2">
+      <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <h2 class="text-lg font-semibold">Services</h2>
+
+        <div id="workspace-services" phx-update="stream" class="mt-4 space-y-2">
+          <div id="workspace-services-empty" class="hidden only:block text-sm text-muted">
+            No services configured.
+          </div>
+
+          <article
+            :for={{dom_id, service} <- @streams.services}
+            id={dom_id}
+            class="rounded-box border border-base-300 p-3"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <p class="font-medium">{service.name}</p>
+              <span class="badge badge-outline">{service.status}</span>
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <button
+                id={"workspace-service-start-#{service.id}"}
+                class="btn btn-primary btn-xs"
+                phx-click="start_service"
+                phx-value-name={service.name}
+              >
+                Start
+              </button>
+              <button
+                id={"workspace-service-stop-#{service.id}"}
+                class="btn btn-outline btn-xs"
+                phx-click="stop_service"
+                phx-value-name={service.name}
+              >
+                Stop
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <h2 class="text-lg font-semibold">Checkpoints</h2>
+
+        <.form
+          for={@checkpoint_form}
+          id="workspace-checkpoint-form"
+          phx-submit="create_checkpoint"
+          class="mt-3 space-y-3"
+        >
+          <.input
+            field={@checkpoint_form[:comment]}
+            type="text"
+            label="Comment"
+            placeholder="before major changes"
+          />
+          <button id="workspace-checkpoint-submit" type="submit" class="btn btn-primary btn-sm">
+            Create Checkpoint
+          </button>
+        </.form>
+
+        <div id="workspace-checkpoints" phx-update="stream" class="mt-4 space-y-2">
+          <div id="workspace-checkpoints-empty" class="hidden only:block text-sm text-muted">
+            No checkpoints available.
+          </div>
+
+          <article
+            :for={{dom_id, checkpoint} <- @streams.checkpoints}
+            id={dom_id}
+            class="rounded-box border border-base-300 p-3"
+          >
+            <p class="font-medium">{checkpoint.id}</p>
+            <p class="text-xs text-muted">{checkpoint.comment}</p>
+          </article>
+        </div>
+      </section>
+    </div>
+  </div>
+</Layouts.app>

@@ -64,14 +64,14 @@ defmodule Fizz.Integrations do
   end
 
   @doc """
-  Fetches execution-time auth material for a sprite.
+  Fetches execution-time auth material for a workspace.
 
   OAuth providers return a short-lived access token. API-key providers return the
   decrypted API key from WorkOS Vault under the same token-like response shape.
   """
-  @spec fetch_token_for_sprite(Scope.t(), String.t(), String.t()) ::
+  @spec fetch_token_for_execution(Scope.t(), String.t(), String.t()) ::
           {:ok, map()} | {:error, term()}
-  def fetch_token_for_sprite(%Scope{} = scope, project_id, provider) do
+  def fetch_token_for_execution(%Scope{} = scope, project_id, provider) do
     with {:ok, auth} <- resolve_auth_for_execution(scope, project_id, provider) do
       case auth.auth_method do
         :oauth ->

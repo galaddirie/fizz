@@ -28,7 +28,7 @@ import topbar from "topbar"
 import {getHooks} from "live_vue"
 import liveVueApp from "../vue"
 import {PipesWidget, WorkOSReactWidget} from "./hooks/workos_react_widgets"
-import {SpriteConsole} from "./hooks/sprite_console"
+import {WorkspaceConsole} from "./hooks/workspace_console"
 
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
@@ -40,7 +40,7 @@ const liveSocket = new LiveSocket("/live", Socket, {
     ...getHooks(liveVueApp),
     PipesWidget,
     WorkOSReactWidget,
-    SpriteConsole,
+    WorkspaceConsole,
     ScrollBottom: {
       updated() { this.el.scrollTop = this.el.scrollHeight }
     },

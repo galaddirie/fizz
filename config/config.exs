@@ -13,12 +13,12 @@ config :fizz, Oban,
   plugins: [
     {Oban.Plugins.Cron,
      crontab: [
-       {"*/3 * * * *", Fizz.Sprites.Workers.ReconcileStaleJobsWorker},
-       {"*/5 * * * *", Fizz.Sprites.Workers.ConsoleReaperWorker},
-       {"0 * * * *", Fizz.Sprites.Workers.GCWorker}
+       {"*/3 * * * *", Fizz.Workspaces.Workers.ReconcileStaleJobsWorker},
+       {"*/5 * * * *", Fizz.Workspaces.Workers.ConsoleReaperWorker},
+       {"0 * * * *", Fizz.Workspaces.Workers.GCWorker}
      ]}
   ],
-  queues: [default: 10, sprites: 20, sprites_maintenance: 5],
+  queues: [default: 10, workspaces: 20, workspaces_maintenance: 5],
   repo: Fizz.Repo
 
 config :live_vue, ssr: true
@@ -45,6 +45,7 @@ config :fizz, :scopes,
   ]
 
 config :fizz,
+  workspaces: [provider: "sprites"],
   ecto_repos: [Fizz.Repo],
   generators: [timestamp_type: :utc_datetime]
 

@@ -4,8 +4,8 @@ defmodule FizzWeb.UserSocket do
   alias Fizz.Accounts
   alias Fizz.Accounts.Scope
 
-  channel "sprite_console:*", FizzWeb.SpriteConsoleChannel
-  channel "sprite_logs:*", FizzWeb.SpriteLogsChannel
+  channel "workspace_console:*", FizzWeb.WorkspaceConsoleChannel
+  channel "workspace_logs:*", FizzWeb.WorkspaceLogsChannel
 
   @impl true
   def connect(_params, socket, %{session: session}) do

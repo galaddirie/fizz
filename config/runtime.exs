@@ -35,18 +35,22 @@ config :fizz,
     owner: System.get_env("WORKOS_ROLE_SLUG_OWNER", "owner"),
     admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN", "admin"),
     member: System.get_env("WORKOS_ROLE_SLUG_MEMBER", "member")
-  },
-  sprites_api_key: System.get_env("SPRITES_API_KEY"),
-  sprites_api_base_url: System.get_env("SPRITES_API_BASE_URL", "https://api.sprites.dev"),
-  sprites_default_region: System.get_env("SPRITES_DEFAULT_REGION"),
-  sprites_log_retention_days:
-    String.to_integer(System.get_env("SPRITES_LOG_RETENTION_DAYS", "14")),
-  sprites_checkpoint_retention_days:
-    String.to_integer(System.get_env("SPRITES_CHECKPOINT_RETENTION_DAYS", "14")),
-  sprites_service_log_tail_lines:
-    String.to_integer(System.get_env("SPRITES_SERVICE_LOG_TAIL_LINES", "200")),
-  sprites_exec_timeout_ms_default:
-    String.to_integer(System.get_env("SPRITES_EXEC_TIMEOUT_MS_DEFAULT", "30000"))
+  }
+
+config :fizz, :workspaces, provider: System.get_env("WORKSPACE_PROVIDER", "sprites")
+
+config :fizz, Fizz.Workspaces.Providers.Sprites,
+  api_key: System.get_env("WORKSPACE_SPRITES_API_KEY"),
+  api_base_url: System.get_env("WORKSPACE_SPRITES_API_BASE_URL", "https://api.sprites.dev"),
+  default_region: System.get_env("WORKSPACE_SPRITES_DEFAULT_REGION"),
+  log_retention_days:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_LOG_RETENTION_DAYS", "14")),
+  checkpoint_retention_days:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_CHECKPOINT_RETENTION_DAYS", "14")),
+  service_log_tail_lines:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_SERVICE_LOG_TAIL_LINES", "200")),
+  exec_timeout_ms_default:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_EXEC_TIMEOUT_MS_DEFAULT", "30000"))
 
 if api_key = System.get_env("WORKOS_API_KEY") do
   config :workos, WorkOS.Client,

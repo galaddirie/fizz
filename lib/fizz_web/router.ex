@@ -68,8 +68,8 @@ defmodule FizzWeb.Router do
       live "/settings/", UserManagementLive, :index
       live "/projects", ProjectsLive.Index, :index
       live "/projects/:project_id", ProjectsLive.Show, :show
-      live "/projects/:project_id/sprites", SpritesLive.Index, :index
-      live "/projects/:project_id/sprites/:sprite_id", SpritesLive.Show, :show
+      live "/projects/:project_id/workspaces", WorkspacesLive.Index, :index
+      live "/projects/:project_id/workspaces/:workspace_id", WorkspacesLive.Show, :show
     end
   end
 end

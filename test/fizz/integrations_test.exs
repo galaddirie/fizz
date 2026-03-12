@@ -302,7 +302,7 @@ defmodule Fizz.IntegrationsTest do
              )
   end
 
-  test "fetch_token_for_sprite/3 resolves api_key auth directly from credentials" do
+  test "fetch_token_for_execution/3 resolves api_key auth directly from credentials" do
     user = user_fixture()
     org_id = "org_234"
 
@@ -334,7 +334,7 @@ defmodule Fizz.IntegrationsTest do
              })
 
     assert {:ok, token_result} =
-             Integrations.fetch_token_for_sprite(scope, project.id, "openai_api_key")
+             Integrations.fetch_token_for_execution(scope, project.id, "openai_api_key")
 
     assert token_result.access_token == "sk-api-key"
     assert credential.provider == "openai_api_key"
