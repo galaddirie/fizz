@@ -115,3 +115,11 @@ for the demo we will show a workflow that constantly adds + 1 to a number stored
 simple email agent with human in the loop for deletion of emails 
 
 add a chat endpoint that can use natural language to determine which workflow to run based on the user's input. it will use workflow names, descriptions, and projects to determine the best workflow to run. could run multiple workflows - this is a ux feature
+
+
+
+workflow example idea
+
+A bot that starts an a/b experiment and updates the experiments based on events and signals from Google Analytics or the website itself updating the experiment continuously.
+
+ bot that can detect errors, triage them, and update the website, then emails the user the issue and the fix.
