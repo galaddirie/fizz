@@ -134,7 +134,7 @@ const onDragStart = (event: DragEvent, typeId: string) => {
               <path d="M472.3,443.6l-40.4,52.7c-8.7,11.3-13.4,25.2-13.4,39.5v87.5c0,23-18.6,41.6-41.6,41.6H112.6c-41.8,0-75.7-33.9-75.7-75.7,0,0,99.5-554,187-554h153c23,0,35.6,47.3,43.2,72.4,67.5,225.1,130.8,262,52.2,336Z"/>
             </svg>
           </div>
-          <span class="text-base-content text-lg font-bold tracking-tight transition-colors duration-200 group-hover:text-primary">Fizz</span>
+          <span class="text-base-content text-lg font-bold tracking-tight transition-colors duration-200 group-hover:text-primary">HermitScale</span>
         </a>
 
         <button
