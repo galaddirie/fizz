@@ -70,12 +70,13 @@ defmodule Fizz.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:nvir, "~> 0.16"},
-      {:runic, git: "https://github.com/zblanco/runic.git", branch: "main"},
+      {:runic, "~> 0.1.0-alpha.4"},
       {:jsv, "~> 0.13.1"},
       {:oban, "~> 2.20"},
       {:sprites, git: "https://github.com/superfly/sprites-ex.git"},
       {:flame, "~> 0.5.3"},
-      {:solid, "~> 1.2"}
+      {:solid, "~> 1.2"},
+      {:gen_stage, "~> 1.3"}
     ]
   end
 
