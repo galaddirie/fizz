@@ -44,15 +44,15 @@ The deepest architectural insight in this design is that **Runic workflows are s
 
 This has profound consequences:
 
-1. **The workflow IS the event store.** `Workflow.log/1` returns the complete serializable history — `ComponentAdded` events for structure, `ReactionOccurred` events for execution state, `RunnableDispatched/Completed/Failed` for durable lifecycle tracking. `Workflow.from_log/1` reconstructs everything. We do not need a separate event-sourcing layer.
+1. **The workflow IS the event store.** `Workflow.log/1` returns the complete serializable history — `ComponentAdded` events for structure, granular runtime events (`FactProduced`, `ActivationConsumed`, `ConditionSatisfied`, `JoinCompleted`, `FanOutFactEmitted`, `FanInCompleted`, etc.) for execution state, `RunnableDispatched/Completed/Failed` for durable lifecycle tracking. `Workflow.from_log/1` reconstructs everything. Runic also provides native event-sourced persistence via `Store.append/3` and `Store.stream/2`, with `Workflow.from_events/2` rebuilding from a granular event stream. For this design we use full-log checkpointing (see Section 8.1) because per-execution SQLite files make the write-amplification trade-off acceptable, and it keeps the SQLite schema minimal.
 
-2. **Checkpointing is trivial.** Persisting a workflow is `:erlang.term_to_binary(Workflow.log(workflow))`. Restoring is `Workflow.from_log(:erlang.binary_to_term(data))`. No custom replay logic, no sequence numbers, no snapshot/event separation.
+2. **Checkpointing is trivial.** Persisting a workflow is `:erlang.term_to_binary(Workflow.log(workflow))`. Restoring is `Workflow.from_log(:erlang.binary_to_term(data))`. No custom replay logic, no sequence numbers, no snapshot/event separation. (Runic's event-sourced path with `append/3`/`stream/2` is available if a future store adapter benefits from incremental writes — e.g. a shared Postgres-backed store where full-log rewrites would be expensive.)
 
 3. **Time-travel is a one-liner.** `Workflow.from_log(Enum.take(log, n))` gives you the workflow at any historical point. You can fork a workflow at any point by replaying a prefix and feeding different inputs. You can diff two workflow states by comparing their production graphs.
 
 4. **One SQLite file per execution, not per definition.** A "definition" is just a function that builds a fresh `%Workflow{}`. The moment you feed it input, facts and causal edges enter the graph alongside the structure. Two executions cannot share a workflow value without colliding. Each execution maps 1:1 to a SQLite file.
 
-5. **Runic.Runner already provides the execution infrastructure.** Supervised workers, task dispatch, policy-driven retries/timeouts/fallbacks, configurable checkpointing, crash recovery via `pending_runnables/1`, telemetry — all built in. We extend Runic via its `Runner.Store` behaviour rather than rebuilding worker infrastructure.
+5. **Runic.Runner already provides the execution infrastructure.** Supervised workers, pluggable executors (`Executor.Task`, `:inline`, `Executor.GenStage`), pluggable schedulers (`Scheduler.Default`, `Scheduler.ChainBatching`, `Scheduler.Adaptive`), batched dispatch via Promises, policy-driven retries/timeouts/fallbacks, configurable checkpoint strategies, hook-based observability (`on_dispatch`, `on_complete`, `on_failed`, `on_idle`), crash recovery via `pending_runnables/1`, and memory-efficient rehydration for cold-load recovery — all built in. We extend Runic via its `Runner.Store` behaviour rather than rebuilding worker infrastructure.
 
 This means our platform's responsibility narrows to what Runic *doesn't* provide: **coordination across nodes** (leases, fencing), **durable sleep** (timers in Postgres), **external interaction when dormant** (signal inbox), **storage management** (SQLite + Litestream + S3 passivation), and **multi-tenant isolation** (org/project scoping).
 
@@ -142,7 +142,10 @@ Application
 │   │       └── Runic.Runner.Worker (one per active workflow execution)
 │   │           ├── owns: %Runic.Workflow{} (in-memory state)
 │   │           ├── delegates to: Store adapter for checkpoint/restore
-│   │           └── uses: SchedulerPolicy + PolicyDriver for retries/timeouts
+│   │           ├── uses: Executor (Task/inline/GenStage) for dispatch
+│   │           ├── uses: Scheduler (Default/ChainBatching/Adaptive) for dispatch planning
+│   │           ├── uses: SchedulerPolicy + PolicyDriver for retries/timeouts
+│   │           └── uses: hooks for observability (on_dispatch/on_complete/on_failed/on_idle)
 │
 ├── FizzWeb.Endpoint (Phoenix)
 │   ├── Controllers / channels / LiveViews
@@ -157,7 +160,7 @@ Application
 
 The `Fizz.Workflows.ControlPlane.Supervisor` uses `rest_for_one` so that if the `Fizz.Workflows.LeaseManager` crashes, the `Fizz.Workflows.TimerPoller` and `Fizz.Workflows.SignalRouter` also restart — they depend on valid leases.
 
-`Runic.Runner` is used directly rather than building a parallel worker infrastructure. It already provides DynamicSupervisor, Registry, Task.Supervisor (with optional PartitionSupervisor), and Store-backed persistence. Each `Runic.Runner.Worker` wraps a `%Workflow{}`, dispatches runnables via `Task.Supervisor.async_nolink`, executes through `PolicyDriver` with configured retry/timeout/fallback policies, and checkpoints via the Store adapter.
+`Runic.Runner` is used directly rather than building a parallel worker infrastructure. It already provides DynamicSupervisor, Registry, Task.Supervisor (with optional PartitionSupervisor), Store-backed persistence, and a pluggable execution pipeline. Each `Runic.Runner.Worker` wraps a `%Workflow{}`, dispatches runnables through a configurable Executor (default `Executor.Task` using `Task.Supervisor.async_nolink`; also `:inline` for sub-millisecond computations and `Executor.GenStage` for backpressure-aware dispatch), uses a Scheduler to plan dispatch (default one-at-a-time, or `Scheduler.ChainBatching` to batch linear chains into Promises), executes through `PolicyDriver` with configured retry/timeout/fallback policies, and checkpoints via the Store adapter. Worker hooks (`on_dispatch`, `on_complete`, `on_failed`, `on_idle`, `transform_runnables`) provide observability without modifying kernel internals.
 
 The custom `Fizz.Workflows.Store.SQLiteLitestream` adapter implements `Runic.Runner.Store` behaviour to bridge Runic's persistence abstraction with our SQLite + Litestream + S3 storage layer.
 
@@ -237,7 +240,7 @@ Suggested Ecto surface for the control plane:
 - `Fizz.Workflows.DurableTimer`
 - `Fizz.Workflows.SignalInbox`
 
-Note the absence of an `activity_tasks` table. Runic's Runner dispatches activities locally via `Task.Supervisor.async_nolink` with `PolicyDriver`-managed retries, timeouts, and fallbacks. Since each workflow execution is owned by a single node (enforced by leases), cross-node activity dispatch is unnecessary for v1. If the need arises later, validate whether the existing Oban installation can own the responsibility before introducing a bespoke queue table.
+Note the absence of an `activity_tasks` table. Runic's Runner dispatches activities locally via a pluggable Executor (default `Executor.Task` using `Task.Supervisor.async_nolink`) with `PolicyDriver`-managed retries, timeouts, and fallbacks. The Scheduler layer can batch linear chains into Promises for reduced process spawn overhead. Since each workflow execution is owned by a single node (enforced by leases), cross-node activity dispatch is unnecessary for v1. If the need arises later, validate whether the existing Oban installation can own the responsibility before introducing a bespoke queue table.
 
 ### 5.2 SQLite — Per-Execution Store
 
@@ -279,7 +282,11 @@ CREATE TABLE outbox (
 CREATE INDEX idx_outbox_unpub ON outbox(outbox_id) WHERE published = FALSE;
 ```
 
-**Why not a separate events table?** Runic workflows are self-contained event-sourced values. `Workflow.log/1` returns the complete ordered list of `ComponentAdded`, `ReactionOccurred`, `RunnableDispatched`, `RunnableCompleted`, and `RunnableFailed` events. `Workflow.from_log/1` reconstructs the full workflow from this list — structure, execution state, causal history, pending runnables, everything. Building a parallel event store with its own sequence numbers and replay logic would duplicate what Runic already provides and create a second source of truth.
+**Why full-log checkpoints instead of an events table?** Runic now supports both persistence models. The `Store` behaviour defines optional `append/3` and `stream/2` callbacks for event-sourced persistence, where granular events (`ComponentAdded`, `FactProduced`, `ActivationConsumed`, `ConditionSatisfied`, `JoinCompleted`, `FanOutFactEmitted`, `FanInCompleted`, `RunnableDispatched/Completed/Failed`) are appended incrementally and `Workflow.from_events/2` reconstructs the workflow from the stream.
+
+For this design, we use full-log checkpoints via `save/3` and `load/2` because each execution has its own SQLite file. The write-amplification of re-serializing the full log is bounded by the single-execution scope, and the simpler schema (one blob per checkpoint) keeps the SQLite storage layer minimal. An events table would add complexity (sequence tracking, snapshot management) without meaningful benefit when each file is already isolated to one execution.
+
+If a future store adapter targets shared Postgres (e.g. for small/short-lived workflows where per-file SQLite is overkill), the event-sourced path with `append/3`/`stream/2` becomes the better choice — incremental appends avoid rewriting the full log on every checkpoint. Runic also supports optional snapshots on top of the event stream (`save_snapshot/4`/`load_snapshot/2`) to bound replay cost.
 
 Checkpointing writes the full `Workflow.log()` output. Restoring deserializes the latest checkpoint and calls `Workflow.from_log/1`. For workflows with very large histories, older checkpoints can be pruned since each checkpoint is self-contained.
 
@@ -310,6 +317,16 @@ defmodule Fizz.Workflows.Store.SQLiteLitestream do
   - Litestream child process management
   - Passivation/restoration to/from S3
   - Checkpoint writes as atomic SQLite transactions
+
+  Implements the required Store callbacks (init_store/1, save/3, load/2)
+  plus optional lifecycle callbacks (checkpoint/3, delete/2, list/1, exists?/2).
+
+  Does NOT implement the event-sourced tier (append/3, stream/2) or
+  fact-storage tier (save_fact/3, load_fact/2) — full-log checkpointing is
+  the right trade-off for per-execution SQLite files. See Section 5.2 for
+  the rationale. If rehydration for memory-efficient cold-load becomes
+  valuable, add save_fact/3 and load_fact/2 to store fact values by
+  content hash alongside the checkpoint blobs.
   """
 
   use GenServer
@@ -414,7 +431,17 @@ end
     data_dir: Application.get_env(:fizz, :workflow_data_dir),
     s3_bucket: Application.get_env(:fizz, :workflow_s3_bucket)
   ],
-  task_supervisor: {:partition, System.schedulers_online()}}
+  task_supervisor: {:partition, System.schedulers_online()},
+  # Pluggable execution pipeline (defaults shown — override per needs)
+  executor: Runic.Runner.Executor.Task,
+  scheduler: Runic.Runner.Scheduler.Default,
+  # Or batch linear chains into Promises for reduced spawn overhead:
+  # scheduler: Runic.Runner.Scheduler.ChainBatching,
+  # promise_opts: [min_chain_length: 3],
+  hooks: [
+    on_complete: &Fizz.Workflows.Hooks.on_activity_complete/3,
+    on_failed: &Fizz.Workflows.Hooks.on_activity_failed/3
+  ]}
 ```
 
 ### 6.3 Starting and Running Workflows
@@ -445,7 +472,15 @@ defmodule Fizz.Workflows do
       workflow,
       max_concurrency: opts[:max_concurrency] || 10,
       checkpoint_strategy: :every_cycle,
-      on_complete: {Fizz.Workflows, :on_workflow_complete, [run_id]}
+      on_complete: {Fizz.Workflows, :on_workflow_complete, [run_id]},
+      # Per-workflow overrides (optional — falls back to Runner defaults)
+      # executor: Runic.Runner.Executor.Task,
+      # scheduler: Runic.Runner.Scheduler.ChainBatching,
+      # promise_opts: [min_chain_length: 3],
+      hooks: [
+        on_complete: &Fizz.Workflows.Hooks.on_activity_complete/3,
+        on_failed: &Fizz.Workflows.Hooks.on_activity_failed/3
+      ]
     )
 
     # 4. Feed initial input
@@ -481,34 +516,40 @@ end
 Runic serves as the workflow virtual machine. Its dataflow DAG with lazy evaluation and concurrency models "programs as data-driven workflows," supporting runtime composition. The three-phase model is the critical enabler:
 
 1. **Prepare**: `Workflow.prepare_for_dispatch/1` walks the DAG and extracts nodes whose input facts are satisfied into `%Runnable{}` structs containing everything needed for isolated execution.
-2. **Execute**: Runnables dispatch to `Task.Supervisor.async_nolink` via the Runner. Each runnable carries a stable `id` derived from `{node.hash, fact.hash}`, which serves as a natural idempotency key. `PolicyDriver` wraps execution with configurable retries, timeouts, backoff, and fallbacks.
-3. **Apply**: Task results return via `{ref, result}` messages. The Runner Worker applies completed runnables back to the workflow via `Workflow.apply_runnable/2`, then checkpoints via the Store adapter.
+2. **Schedule**: The Worker's pluggable Scheduler (`Runic.Runner.Scheduler` behaviour) receives the list of ready runnables and decides what gets dispatched together. `Scheduler.Default` dispatches each individually. `Scheduler.ChainBatching` detects linear chains and batches them into Promises — a single task that executes multiple runnables sequentially, reducing process spawn overhead. `Scheduler.Adaptive` profiles execution and adapts batching over time.
+3. **Execute**: Dispatch units (individual runnables or Promises) are sent to a pluggable Executor (`Runic.Runner.Executor` behaviour). `Executor.Task` (default) uses `Task.Supervisor.async_nolink`. `:inline` executes synchronously for sub-millisecond computations. `Executor.GenStage` provides backpressure-aware dispatch. Per-component executor overrides are possible via `SchedulerPolicy`. Each runnable carries a stable `id` derived from `{node.hash, fact.hash}`, which serves as a natural idempotency key. `PolicyDriver` wraps execution with configurable retries, timeouts, backoff, and fallbacks.
+4. **Apply**: Task results return via `{ref, result}` messages. The Runner Worker applies completed runnables back to the workflow via `Workflow.apply_runnable/2`, then checkpoints via the Store adapter.
 
-**This entire cycle is already implemented in `Runic.Runner.Worker`.** The Worker handles the dispatch loop (plan → prepare → dispatch → apply), tracks active tasks, manages backpressure via `max_concurrency`, and calls `Store.checkpoint/3` according to the configured strategy.
+**This entire cycle is already implemented in `Runic.Runner.Worker`.** The Worker handles the dispatch loop (plan → prepare → schedule → dispatch → apply), tracks active tasks and Promises, manages backpressure via `max_concurrency`, calls `Store.checkpoint/3` according to the configured strategy, and fires hooks (`on_dispatch`, `on_complete`, `on_failed`, `on_idle`) for platform-level observability.
 
 ### 7.2 The Step Lifecycle
 
 ```
-                      ┌──────────────────────────────────────┐
-                      │ Runic.Runner.Worker (per execution)   │
-                      │                                       │
-  signal/timer ──────►│  1. Workflow.plan_eagerly(wf, input)  │
-                      │  2. Workflow.prepare_for_dispatch(wf) │
-                      │  3. For each runnable:                │
-                      │     a. SchedulerPolicy.resolve(...)   │
-                      │     b. Task.Supervisor.async_nolink   │
-                      │        └─ PolicyDriver.execute(...)   │
-                      │           (retries, timeout, fallback)│
-                      │  4. On task completion (handle_info): │
-                      │     a. Workflow.apply_runnable(wf, r) │
-                      │     b. Store.checkpoint(id, log)      │
-                      │        └─ SQLite atomic write         │
-                      │           (fence check + log blob)    │
-                      │     c. plan_eagerly → loop to 2       │
-                      │  5. When !is_runnable?(wf):           │
-                      │     a. Store.save(id, log)            │
-                      │     b. on_complete callback           │
-                      └──────────────────────────────────────┘
+                      ┌──────────────────────────────────────────┐
+                      │ Runic.Runner.Worker (per execution)       │
+                      │                                           │
+  signal/timer ──────►│  1. Workflow.plan_eagerly(wf, input)      │
+                      │  2. Workflow.prepare_for_dispatch(wf)     │
+                      │  3. Scheduler.plan_dispatch(wf, runnables)│
+                      │     → dispatch units: runnables + Promises│
+                      │  4. For each dispatch unit:               │
+                      │     a. SchedulerPolicy.resolve(...)       │
+                      │     b. Executor.dispatch(work_fn, opts)   │
+                      │        └─ PolicyDriver.execute(...)       │
+                      │           (retries, timeout, fallback)    │
+                      │     c. hooks.on_dispatch(runnable, state) │
+                      │  5. On task completion (handle_info):     │
+                      │     a. Workflow.apply_runnable(wf, r)     │
+                      │     b. hooks.on_complete(r, duration, st) │
+                      │     c. Store.checkpoint(id, log)          │
+                      │        └─ SQLite atomic write             │
+                      │           (fence check + log blob)        │
+                      │     d. plan_eagerly → loop to 2           │
+                      │  6. When !is_runnable?(wf):               │
+                      │     a. Store.save(id, log)                │
+                      │     b. hooks.on_idle(state)               │
+                      │     c. on_complete callback               │
+                      └──────────────────────────────────────────┘
 ```
 
 ### 7.3 Idempotency and Exactly-Once Semantics
@@ -569,13 +610,15 @@ defmodule Fizz.Workflows.Definitions do
 end
 ```
 
-The `:durable` execution mode enables `RunnableDispatched/Completed/Failed` event emission, which are included in `Workflow.log/1` and survive checkpoint/restore for crash recovery.
+The `:durable` execution mode enables `RunnableDispatched/Completed/Failed` event emission, which are included in `Workflow.log/1` (or appended via `Store.append/3` for event-sourced stores) and survive checkpoint/restore for crash recovery.
 
 ---
 
 ## 8. State Persistence Strategy
 
 ### 8.1 Workflow Log as the Source of Truth
+
+Runic's `Store` behaviour supports two persistence models: full-log checkpointing (`save/3`/`load/2`) and event-sourced persistence (`append/3`/`stream/2`). For this design we use full-log checkpointing — see Section 5.2 for the rationale.
 
 The per-execution SQLite database stores checkpoints of `Workflow.log/1` output. This is a complete, ordered list of events that reconstructs the full workflow:
 
@@ -614,12 +657,16 @@ Tier 1: WARM    — Runner.Worker stopped, SQLite file on local SSD
 
 Tier 2: COLD    — SQLite uploaded to S3, local file evicted
                    (download + restore in 200 ms – 2 s)
+                   (use Runner.resume/3 with rehydration: :hybrid
+                    for memory-efficient recovery of large workflows)
 
 Tier 3: ARCHIVE — Execution completed, SQLite in S3 Glacier
                    (operator inspection only, minutes to restore)
 ```
 
 The `Fizz.Workflows.PassivationSweeper` GenServer runs a periodic scan (every 60 s) of active workflows via the Runner's Registry. Workflows idle longer than the configured threshold (default 10 min) transition through tiers. On passivation to S3: checkpoint via Store, `PRAGMA wal_checkpoint(TRUNCATE)`, upload, update Postgres `workflow_runs.status = 'PASSIVATED'` and `storage_uri`, stop the Runner Worker via `Runic.Runner.stop/3`.
+
+**Rehydration for memory-efficient cold-load:** When resuming large workflows from cold storage, `Runner.resume/3` supports a `:rehydration` option. With `:hybrid` mode, the workflow is rebuilt with lightweight `FactRef` vertices (via `Workflow.from_events/3` with `fact_mode: :ref`), then `Rehydration.classify/2` identifies hot facts (pending inputs, active frontier, join inputs) and only those values are loaded from the store. Cold historical values stay on disk. This is particularly valuable for Tier 2 recovery of long-running workflows that have accumulated thousands of facts. To use hybrid rehydration, the Store adapter would need to implement `save_fact/3` and `load_fact/2` — a future enhancement if memory pressure from cold-loads becomes a concern. `Rehydration.should_rehydrate?/2` can help decide dynamically whether a workflow would benefit (based on configurable fact count and value size thresholds).
 
 ### 8.3 Litestream Replication
 
@@ -786,12 +833,18 @@ end
 
 ### 14.1 Metrics (Prometheus / OpenTelemetry)
 
-Runic Runner already emits telemetry events under `[:runic, :runner, ...]`. We extend with platform-specific metrics:
+Runic Runner provides two complementary observability mechanisms:
+
+1. **Telemetry events** under `[:runic, :runner, ...]` for metrics and tracing.
+2. **Worker hooks** (`on_dispatch`, `on_complete`, `on_failed`, `on_idle`, `transform_runnables`) for platform-level logic that runs inline with the dispatch cycle. Hook exceptions are logged but never crash the Worker.
+
+We use hooks for lightweight platform integration (e.g. updating Postgres `last_active_at` on activity completion, enriching structured logs) and telemetry for aggregated metrics:
 
 ```elixir
 # Runic Runner built-in events (automatic):
 # [:runic, :runner, :workflow, :start/:stop/:exception]
 # [:runic, :runner, :runnable, :start/:stop/:exception]
+# [:runic, :runner, :promise, :start/:stop]
 # [:runic, :runner, :store, :start/:stop/:exception]
 
 # Platform-specific metrics to add:
@@ -1007,8 +1060,8 @@ The workflow log (`Workflow.log/1`) is a natural audit trail — it records ever
 
 | Concern | Technology | Rationale |
 |---------|-----------|-----------|
-| Workflow VM | Runic | Dataflow DAG with lazy eval, three-phase model, event-log restoration, pluggable store, BEAM-native. Workflow-as-value model eliminates need for external event sourcing |
-| Execution infrastructure | Runic.Runner | Supervised workers, task dispatch, PolicyDriver retries/timeouts, configurable checkpointing, crash recovery — all built-in |
+| Workflow VM | Runic | Dataflow DAG with lazy eval, three-phase model, dual persistence paths (full-log + event-sourced), rehydration, content-addressable closures, pluggable store, BEAM-native. Workflow-as-value model eliminates need for external event sourcing |
+| Execution infrastructure | Runic.Runner | Supervised workers, pluggable executors (Task/inline/GenStage), pluggable schedulers (Default/ChainBatching/Adaptive), Promises for batched dispatch, PolicyDriver retries/timeouts, configurable checkpointing, hook-based observability, rehydration for memory-efficient recovery, crash recovery — all built-in |
 | Per-execution state | SQLite (WAL mode) | ACID with zero network overhead, single-writer = structural linearizability, portable file. Stores serialized `Workflow.log()` output |
 | Durability | Litestream → S3 | Sub-second WAL replication, ~$1/mo storage, no Raft complexity |
 | Coordination | Postgres leases + fencing | Single-writer ownership per execution. Reuse repo's existing Postgres; add bespoke leasing only where workflow ownership semantics require it |
