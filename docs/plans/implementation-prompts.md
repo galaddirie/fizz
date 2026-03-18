@@ -222,13 +222,13 @@ Build the per-execution SQLite store adapter (implementing Runic's `Store` behav
 
 - `{:runic, "~> 0.1.0-alpha.4"}` — provides `Runic.Runner.Store` behaviour. Check `deps/runic/` for the exact callbacks.
 - `Fizz.Repo` — Postgres via Ecto.
-- No Exqlite dependency yet — you will need to add `{:exqlite, "~> 0.25"}` to `mix.exs`.
+- No Exqlite dependency yet — you will need to add `{:exqlite, "~> 0.35.0"}` to `mix.exs`.
 - Oban is configured in the supervision tree.
 - `Fizz.Accounts.Scope` and `Fizz.Accounts.Project` for tenant scoping.
 
 ### Deliverables
 
-**Add Dependency**: `{:exqlite, "~> 0.25"}` in `mix.exs`.
+**Add Dependency**: `{:exqlite, "~> 0.35.0"}` in `mix.exs`.
 
 **Migration** (`mix ecto.gen.migration create_workflow_run_leases`):
 - `workflow_run_leases` table: `run_id` (UUID PK — will FK to workflow_runs later), `owner_node` (string), `fence_token` (bigint, default 0), `checkpoint_seq` (bigint, default 0), `lease_expiry` (utc_datetime_usec). Index on `(lease_expiry)` for expired-lease scans.
