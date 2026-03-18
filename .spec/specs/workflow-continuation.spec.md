@@ -44,6 +44,11 @@ surface:
   priority: must
   stability: stable
 
+- id: workflows.continuation.stable_workflow_address
+  statement: Each logical workflow maintains a stable `workflow_id` that persists across continuation boundaries. The control plane records the currently active `run_id` for each `workflow_id`, enabling callers to address signals to the logical workflow without tracking individual run transitions. Signals addressed to a `workflow_id` are routed to the active run's inbox; if the active run is mid-handoff, the signal is accepted into the incoming child's inbox once creation completes, or into the parent's inbox if handoff fails.
+  priority: should
+  stability: evolving
+
 - id: workflows.continuation.recommendation
   statement: Log-size or retention policies may recommend ContinueAsNew, but the decision to continue remains outside the persistence layer and must be surfaced at the workflow/runtime level.
   priority: should
@@ -114,6 +119,18 @@ surface:
   covers:
     - workflows.continuation.explicit_boundary
     - workflows.continuation.parent_state
+
+- id: workflows.continuation.signal_via_workflow_id
+  given:
+    - a logical workflow has continued from run A to run B
+    - a caller sends a signal addressed to the stable workflow_id
+  when:
+    - the control plane resolves the active run for the workflow_id
+  then:
+    - the signal is routed to run B's inbox
+    - the caller does not need to know about the continuation or track individual run_ids
+  covers:
+    - workflows.continuation.stable_workflow_address
 
 - id: workflows.continuation.chained_lineage
   given:

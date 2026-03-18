@@ -19,7 +19,7 @@ surface:
 
 ```spec-requirements
 - id: workflows.durable_timers.state_machine
-  statement: Durable timers follow the state machine PENDING to FIRING to FIRED or CANCELLED, with no other valid transitions.
+  statement: Durable timers follow the state machine PENDING to FIRING to FIRED or CANCELLED, with one recovery transition — FIRING to PENDING — that occurs when a poller claims a timer but fails to complete delivery within a bounded claim TTL. The poller records a `claimed_at` timestamp and `claimed_by` identifier when transitioning to FIRING; if the claim TTL expires without the timer reaching FIRED, any poller may reset it to PENDING for re-claim. This prevents stranded timers when a poller or worker crashes mid-delivery.
   priority: must
   stability: stable
 
@@ -109,6 +109,20 @@ surface:
   covers:
     - workflows.durable_timers.passivation_interaction
     - workflows.durable_timers.kernel_boundary
+
+- id: workflows.durable_timers.poller_crash_during_firing
+  given:
+    - a poller has claimed a timer and transitioned it to FIRING with a claim TTL
+    - the poller crashes before completing delivery
+  when:
+    - the claim TTL expires and another poller scans for stale FIRING timers
+  then:
+    - the stale timer is reset to PENDING
+    - a subsequent poll cycle re-claims and delivers the timer normally
+    - the timer is not permanently stranded
+  covers:
+    - workflows.durable_timers.state_machine
+    - workflows.durable_timers.polling_skip_locked
 ```
 
 ## Verification

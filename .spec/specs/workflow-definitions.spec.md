@@ -33,7 +33,7 @@ surface:
   stability: stable
 
 - id: workflows.definitions.step_ids
-  statement: Step `id` values are unique, key-safe identifiers derived from the current step name, regenerate on rename, and remain distinct from the step `type_id`.
+  statement: Step `id` values are stable UUIDs assigned at step creation time and never change, even when the step is renamed. The step display name is presentational metadata only and does not participate in identity, connection references, or expression bindings. Step ids remain distinct from the step `type_id`.
   priority: must
   stability: stable
 
@@ -53,9 +53,9 @@ surface:
   stability: stable
 
 - id: workflows.definitions.concurrent_editing
-  statement: Concurrent draft editing uses full-document last-write-wins autosave semantics in v1.
-  priority: should
-  stability: stable
+  statement: Concurrent draft editing semantics are out of scope for v1 and will be addressed when the workflow editor is designed. Single-user draft editing is the assumed mode.
+  priority: deferred
+  stability: evolving
 ```
 
 ## Scenarios
@@ -89,12 +89,13 @@ surface:
 
 - id: workflows.definitions.rename_step
   given:
-    - a definition contains a step with a generated name-derived id
+    - a definition contains a step with a stable UUID id and a display name
   when:
     - the step is renamed
   then:
-    - its step id is regenerated from the new name
-    - connection and expression references are expected to follow the regenerated id rather than the prior display label
+    - the step id remains unchanged
+    - all connection and expression references continue to resolve without modification
+    - only the presentational display name is updated
   covers:
     - workflows.definitions.step_ids
 
@@ -133,14 +134,14 @@ surface:
   covers:
     - workflows.definitions.save_validation
 
-- id: workflows.definitions.concurrent_last_write_wins
+- id: workflows.definitions.single_user_draft_editing
   given:
-    - two users concurrently edit the same draft version
+    - a single user is editing a draft version
   when:
-    - both save at roughly the same time
+    - the user saves the draft
   then:
-    - the last save persisted wins with full-document replacement
-    - no merge conflict is raised
+    - the draft is persisted as a full-document replacement
+    - concurrent editing conflicts are not handled in v1
   covers:
     - workflows.definitions.concurrent_editing
 ```

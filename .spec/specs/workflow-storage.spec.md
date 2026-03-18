@@ -38,8 +38,13 @@ surface:
   priority: must
   stability: stable
 
+- id: workflows.storage.fact_level_persistence
+  statement: When hybrid or lazy rehydration is enabled for an execution, the store adapter must persist individual fact values keyed by content hash alongside the canonical full-log checkpoint — for example as a `facts(hash, value)` table in the per-execution SQLite file. The full-log checkpoint remains the canonical recovery path and integrity guarantee; the fact table is a supplementary index that enables `FactResolver.resolve/2` to load individual values without deserializing the entire log. Fact rows are written during the same checkpoint transaction that writes the log blob, so they share the same durability properties as the checkpoint strategy in effect.
+  priority: must
+  stability: stable
+
 - id: workflows.storage.rehydration_modes
-  statement: Cold-load recovery supports three rehydration modes — full (all fact values loaded, highest memory, immediate readiness), hybrid (FactRef-based selective loading of hot facts only), and lazy (all facts as FactRef, resolved on demand) — selectable per resume based on workflow size and memory constraints.
+  statement: Cold-load recovery supports three rehydration modes — full (reconstruct via `Workflow.from_log/1` with all fact values, highest memory, immediate readiness), hybrid (lean replay via `Workflow.from_events/3` with `fact_mode: :ref` producing `FactRef` vertices, then `Rehydration.resolve_hot/3` loads only hot facts from the fact table), and lazy (all facts as `FactRef`, resolved on demand by `FactResolver` during dispatch) — selectable per resume based on workflow size and memory constraints. Full rehydration requires only the canonical log checkpoint. Hybrid and lazy rehydration additionally require fact-level persistence as defined in `workflows.storage.fact_level_persistence`.
   priority: must
   stability: stable
 
@@ -134,6 +139,7 @@ surface:
   covers:
     - workflows.storage.checkpoint_format
     - workflows.storage.checkpoint_strategies
+    - workflows.storage.fact_level_persistence
     - workflows.storage.rehydration_modes
     - workflows.storage.checkpoint_and_restore
 
@@ -156,6 +162,7 @@ surface:
     - workflows.storage.checkpoint_format
     - workflows.storage.checkpoint_strategies
     - workflows.storage.passivation_tiers
+    - workflows.storage.fact_level_persistence
     - workflows.storage.rehydration_modes
     - workflows.storage.litestream_replication
     - workflows.storage.schema_versioning
