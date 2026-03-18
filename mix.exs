@@ -70,7 +70,7 @@ defmodule Fizz.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:nvir, "~> 0.16"},
-      {:runic, "~> 0.1.0-alpha.4"},
+      {:runic, path: "vendor/runic"},
       {:jsv, "~> 0.13.1"},
       {:oban, "~> 2.20"},
       {:sprites, git: "https://github.com/superfly/sprites-ex.git"},

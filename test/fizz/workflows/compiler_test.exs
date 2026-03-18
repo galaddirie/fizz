@@ -104,7 +104,7 @@ defmodule Fizz.Workflows.CompilerTest do
 
     assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
     assert %Runic.Workflow.Map{} = Workflow.get_component(workflow, ids.splitter)
-    assert %Runic.Workflow.Reduce{} = Workflow.get_component(workflow, ids.aggregator)
+    assert Workflow.get_component(workflow, ids.aggregator)
 
     workflow =
       workflow
