@@ -214,6 +214,8 @@ Optional callbacks:
 
 `fetch_token/2` always returns a live, non-expired token. Implementors handle refresh internally (WorkOS Pipes for OAuth, Vault for API keys).
 
+**Resume safety:** The credential resolver closure (which calls `fetch_token/2`) is injected into the workflow's `run_context` at start time. On workflow resume from checkpoint, this closure must be **reconstructed** from durable metadata (Postgres `workflow_runs` row), not deserialized from the checkpoint. The closure captures `scope`, which may contain process-bound references that don't survive serialization. See the compiler design doc's "Known Gaps" section and the durable platform design doc for the full contract.
+
 `connection_status` carries structured connection health:
 
 ```elixir

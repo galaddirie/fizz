@@ -115,6 +115,8 @@ This is different from the step `type_id`.
 
 ### Automatic rename updates
 
+**Scope: Post-v1 enhancement.** This feature requires parsing all expressions across all step configs, matching the first path segment after the root namespace, and rewriting — which is non-trivial when expressions may be partially written during a draft save. For v1, the editor should show a warning when a step is renamed that existing expressions may reference the old name. Automated rewriting is deferred.
+
 If the editor supports rename-aware expression updates, it should rewrite only the first access segment after these root namespaces:
 
 - `steps`

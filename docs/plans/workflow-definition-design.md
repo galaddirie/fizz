@@ -178,6 +178,8 @@ Notes:
 - Published rows are immutable at the application layer.
 - Archiving a definition hides it from normal authoring flows without deleting historical published versions.
 
+**Concurrent editing (v1 decision):** If two users open the same draft simultaneously, autosave uses last-write-wins semantics — each save replaces the full `steps`/`connections`/`step_groups` payload. This is an accepted limitation for v1. The system records `published_by_user_id` but does not track concurrent draft editors. Collaborative editing (OT/CRDT) is a future enhancement, not a v1 requirement.
+
 ---
 
 ### Ecto Modeling

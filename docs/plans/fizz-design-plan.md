@@ -219,8 +219,12 @@ CREATE INDEX idx_timers_due ON durable_timers(fire_at)
     WHERE status = 'PENDING';
 
 -- Signal inbox (write target for external systems, even when workflow is cold)
+-- NOTE: signal_id is a global primary key (caller-provided). Dedup is therefore
+-- global across all runs. If signal_id should be scoped per run_id instead,
+-- change the primary key to (run_id, signal_id). Document the contract clearly
+-- for API callers: they must provide globally unique IDs, or scope them per run.
 CREATE TABLE signal_inbox (
-    signal_id     TEXT PRIMARY KEY,        -- caller-provided dedup key
+    signal_id     TEXT PRIMARY KEY,        -- caller-provided dedup key (globally unique)
     run_id        UUID NOT NULL,
     workos_organization_id TEXT NOT NULL,
     project_id    UUID NOT NULL REFERENCES projects(id),
@@ -646,6 +650,14 @@ For a workflow restored after passivation, this is all that's needed — `Workfl
 
 **Log growth management:** Workflows that accumulate beyond 50,000 log entries or 50 MB serialized should use a `ContinueAsNew` pattern — carry forward essential state into a fresh execution with a clean history, preserving the parent execution's SQLite file as an archived artifact.
 
+**ContinueAsNew design gap (resolve before Phase 2):** The mechanism for ContinueAsNew is mentioned but not designed. Before implementation, document:
+
+- **Essential state identification**: which accumulator values, pending facts, and workflow metadata carry forward. This likely requires a `Workflow.extract_carry_forward_state/1` helper or equivalent.
+- **Parent-child linkage**: how the archived parent execution links to the child. Options: `continued_from_run_id` column on `workflow_runs`, or a dedicated `run_lineage` table.
+- **Archive policy**: whether the old SQLite file moves to S3 Glacier immediately or stays warm for operator inspection.
+- **Operator UX**: how the console presents a timeline that spans multiple continued executions as a single logical workflow.
+- **Automatic trigger**: whether the Store adapter's checkpoint path should check `max_log_entries_per_run` and trigger ContinueAsNew automatically (the quota module defines this limit but nothing enforces it during execution).
+
 ### 8.2 Passivation Tiers
 
 ```
@@ -1004,7 +1016,7 @@ The workflow log (`Workflow.log/1`) is a natural audit trail — it records ever
 
 **Goal:** Core execution with Runic Runner and SQLite persistence on a single node.
 
-- Implement `Fizz.Workflows.Store.SQLiteLitestream` as a `Runic.Runner.Store` adapter, initially without Litestream (SQLite only).
+- Implement `Fizz.Workflows.Store.SQLite` as a `Runic.Runner.Store` adapter (SQLite only, no Litestream). The adapter name should reflect Phase 1 capabilities — rename to `SQLiteLitestream` (or wrap with Litestream concerns) in Phase 2 when replication is added. This avoids coupling Phase 1 code to Litestream concepts that don't exist yet, and keeps the S3 restore fallback path in `load/2` cleanly gated.
 - Wire `Runic.Runner` into the application supervision tree with the custom store.
 - Stand up Postgres control-plane tables: `workflow_runs`, `shard_leases`.
 - Implement lease acquisition and fence-token validation in the Store adapter's write path.
