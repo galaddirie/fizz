@@ -38,7 +38,7 @@ surface:
   stability: stable
 
 - id: workflows.ownership.fence_validation_at_commit
-  statement: Fence token validation occurs at the SQLite commit boundary by reading the authoritative token from Postgres within the write transaction, not from a cached or locally stored value.
+  statement: Fence token validation occurs at the SQLite commit boundary via a two-phase protocol — (1) within a Postgres transaction, the owner conditionally updates a checkpoint-sequence column on the lease row only if its fence token still matches the authoritative value, and (2) the SQLite write proceeds only if the Postgres conditional update succeeded. This ensures the stale-owner check and the commit authorization are linearized through Postgres, not relying on a bare read that could be stale by the time SQLite commits.
   priority: must
   stability: stable
 

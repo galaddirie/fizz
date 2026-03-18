@@ -29,7 +29,7 @@ surface:
   stability: stable
 
 - id: workflows.storage.checkpoint_strategies
-  statement: The store supports configurable checkpoint strategies per execution — `every_cycle` (after each react cycle), `every_n` (every N completed runnables), `on_complete` (only when workflow satisfies), and `manual` (explicit `Runner.checkpoint/2` calls only) — trading durability against write overhead.
+  statement: The store supports configurable checkpoint strategies per execution — `every_cycle` (after each react cycle), `every_n` (every N completed runnables), `on_complete` (only when workflow satisfies), and `manual` (explicit `Runner.checkpoint/2` calls only) — trading durability against write overhead. Strategies other than `every_cycle` accept weaker crash-recovery guarantees — progress since the last checkpoint is lost on crash, Litestream can only replicate what has been written to SQLite, and the sub-second RPO guarantee applies only to checkpointed state.
   priority: must
   stability: stable
 

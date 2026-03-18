@@ -16,7 +16,8 @@
       "Bash(npx vue-tsc:*)",
       "Bash(tail:*)",
       "Bash(mix deps.tree)",
-      "Bash(xargs basename:*)"
+      "Bash(xargs basename:*)",
+      "Bash(find /Users/galdirie/code/fizz/deps/runic -type f -name *.ex)"
     ]
   }
 }

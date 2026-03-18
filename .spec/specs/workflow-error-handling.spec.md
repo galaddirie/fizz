@@ -33,7 +33,7 @@ surface:
   stability: stable
 
 - id: workflows.error_handling.failure_mitigation_table
-  statement: The platform documents and mitigates expected failure modes including worker process crash (supervisor restart plus checkpoint restore), node failure (lease expiry plus failover), split-brain (fencing token rejection), Postgres outage (active workflows continue locally), S3 outage (passivation retries with backoff), SQLite corruption (Litestream replica recovery), activity timeout (PolicyDriver enforcement), and schema incompatibility (migration-on-wake).
+  statement: The platform documents and mitigates expected failure modes including worker process crash (supervisor restart plus checkpoint restore), node failure (lease expiry plus failover), split-brain (fencing token rejection), Postgres outage (in-flight step completes but no new steps dispatch, lease renewal and fence validation suspend, execution is paused until Postgres recovers), S3 outage (passivation retries with backoff), SQLite corruption (Litestream replica recovery), activity timeout (PolicyDriver enforcement), and schema incompatibility (migration-on-wake).
   priority: must
   stability: stable
 

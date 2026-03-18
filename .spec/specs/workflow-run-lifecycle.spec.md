@@ -23,7 +23,7 @@ surface:
   stability: stable
 
 - id: workflows.run_lifecycle.valid_transitions
-  statement: Status transitions follow a defined graph — PENDING to RUNNING, RUNNING to SLEEPING or PASSIVATED or COMPLETED or FAILED or CANCELLED, SLEEPING to RUNNING or PASSIVATED or CANCELLED, PASSIVATED to RUNNING — and invalid transitions must be rejected.
+  statement: Status transitions follow a defined graph — PENDING to RUNNING, RUNNING to SLEEPING or PASSIVATED or COMPLETED or FAILED or CANCELLED or CONTINUED, SLEEPING to RUNNING or PASSIVATED or CANCELLED, PASSIVATED to RUNNING — and invalid transitions must be rejected.
   priority: must
   stability: stable
 
@@ -33,7 +33,7 @@ surface:
   stability: stable
 
 - id: workflows.run_lifecycle.operations_per_state
-  statement: Each run status defines which operations are valid — signaling requires a non-terminal state, cancellation requires a non-terminal state, and passivation requires RUNNING or SLEEPING.
+  statement: Each run status defines which operations are valid — signal acceptance into the durable inbox is unconditional regardless of run state, signal delivery to the workflow graph requires a non-terminal state, cancellation requires a non-terminal state, and passivation requires RUNNING or SLEEPING.
   priority: must
   stability: stable
 
