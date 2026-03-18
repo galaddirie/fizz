@@ -17,7 +17,11 @@
       "Bash(tail:*)",
       "Bash(mix deps.tree)",
       "Bash(xargs basename:*)",
-      "Bash(find /Users/galdirie/code/fizz/deps/runic -type f -name *.ex)"
+      "Bash(find /Users/galdirie/code/fizz/deps/runic -type f -name *.ex)",
+      "WebFetch(domain:hexdocs.pm)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:litestream.io)",
+      "WebFetch(domain:hex.pm)"
     ]
   }
 }

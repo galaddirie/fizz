@@ -222,13 +222,14 @@ Build the per-execution SQLite store adapter (implementing Runic's `Store` behav
 
 - `{:runic, "~> 0.1.0-alpha.4"}` — provides `Runic.Runner.Store` behaviour. Check `deps/runic/` for the exact callbacks.
 - `Fizz.Repo` — Postgres via Ecto.
-- No Exqlite dependency yet — you will need to add `{:exqlite, "~> 0.35.0"}` to `mix.exs`.
+- No Exqlite dependency yet — you will need to add `{:exqlite, "~> 0.25"}` to `mix.exs`.
 - Oban is configured in the supervision tree.
 - `Fizz.Accounts.Scope` and `Fizz.Accounts.Project` for tenant scoping.
 
 ### Deliverables
 
-**Add Dependency**: `{:exqlite, "~> 0.35.0"}` in `mix.exs`.
+**Add Dependencies** in `mix.exs`:
+- `{:exqlite, "~> 0.25"}` — SQLite driver for per-execution databases.
 
 **Migration** (`mix ecto.gen.migration create_workflow_run_leases`):
 - `workflow_run_leases` table: `run_id` (UUID PK — will FK to workflow_runs later), `owner_node` (string), `fence_token` (bigint, default 0), `checkpoint_seq` (bigint, default 0), `lease_expiry` (utc_datetime_usec). Index on `(lease_expiry)` for expired-lease scans.
@@ -237,7 +238,7 @@ Build the per-execution SQLite store adapter (implementing Runic's `Store` behav
 
 `Fizz.Workflows.Store.SqliteStore` implementing Runic's Store behaviour:
 
-- `init(run_id, opts)` — Create/open SQLite file at `{data_dir}/{org_id}/{project_id}/{hash[0:2]}/{hash[2:4]}/{run_id}.sqlite`. Set `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`. Create tables: `workflow_log (id INTEGER PRIMARY KEY, data BLOB, created_at TEXT)`, `shard_fence (id INTEGER PRIMARY KEY, fence_token BIGINT)`, `facts (hash TEXT PRIMARY KEY, value BLOB)`, `meta (key TEXT PRIMARY KEY, value TEXT)`. Set `PRAGMA user_version` to current schema version. Insert initial fence token from lease.
+- `init(run_id, opts)` — Create/open SQLite file at `{data_dir}/{org_id}/{project_id}/{hash[0:2]}/{hash[2:4]}/{run_id}.sqlite`. Set `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`. Create tables: `workflow_log (id INTEGER PRIMARY KEY, data BLOB, created_at TEXT)`, `shard_fence (id INTEGER PRIMARY KEY, fence_token BIGINT)`, `facts (hash TEXT PRIMARY KEY, value BLOB)`, `meta (key TEXT PRIMARY KEY, value TEXT)`. Set `PRAGMA user_version` to current schema version. Insert initial fence token from lease. The directory structure must match the Litestream directory-mode config so new files are automatically discovered for replication.
 - `save(run_id, log, store_state)` — Serialize `log` via `:erlang.term_to_binary(log, [:compressed])`. Validate fence token via two-phase protocol: (1) conditional UPDATE on Postgres `workflow_run_leases` incrementing `checkpoint_seq` only if `fence_token` matches, (2) if Postgres confirms, write to SQLite atomically. Raise `StaleOwnerError` if fence check fails.
 - `load(run_id, store_state)` — Read latest log blob from SQLite, deserialize via `:erlang.binary_to_term/1`, return for `Workflow.from_log/1`.
 - `save_fact(hash, value, store_state)` — Write individual fact to `facts` table (for hybrid/lazy rehydration support per `fact_level_persistence` spec).
@@ -270,14 +271,82 @@ Build the per-execution SQLite store adapter (implementing Runic's `Store` behav
 3. Only if Postgres confirmed → proceed with SQLite write.
 This ensures the stale-owner check is linearized through Postgres, not relying on a bare read.
 
+**Litestream Manager** (`lib/fizz/workflows/store/litestream_manager.ex`):
+
+`Fizz.Workflows.Store.LitestreamManager` (GenServer):
+
+This module manages the Litestream binary as a supervised port process, using **directory-based replication** so a single Litestream process watches the entire workflow data directory tree and automatically discovers/replicates new SQLite files.
+
+**Why not the `{:litestream, "~> 0.4.0"}` Elixir package**: That package is designed for single-database replication (one Ecto repo → one S3 URL). Fizz needs per-execution replication of thousands of databases. Litestream's native directory-mode replication (`dir` + `pattern` + `recursive` + `watch`) is the correct primitive.
+
+**Binary requirement**: The `litestream` binary must be available on `PATH`. In production, install it in the Docker image (`apt-get install litestream` or download from GitHub releases). In development, install via Homebrew (`brew install litestream`). The manager validates the binary exists at startup and logs an error with clear instructions if missing.
+
+**Config generation** — `generate_config/1`:
+- Generates a YAML config file at `{data_dir}/litestream.yml` with this structure:
+  ```yaml
+  dbs:
+    - dir: {data_dir}
+      pattern: "*.sqlite"
+      recursive: true
+      watch: true
+      replica:
+        type: s3
+        bucket: {s3_bucket}
+        path: {s3_prefix}
+        region: {aws_region}
+        access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+        secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+        sync-interval: 1s
+  ```
+- Config is regenerated on restart. Environment variables are expanded by Litestream at runtime (not embedded in the file).
+
+**Lifecycle** — `start_link/1`:
+- Accepts opts: `data_dir`, `s3_bucket`, `s3_prefix`, `aws_region`, `bin_path` (optional override).
+- On init: validate binary exists, generate config, start `litestream replicate -config {config_path}` via `Port.open/2` with `:binary` and `:exit_status`.
+- Monitor the port. If it crashes, log the error and restart (the GenServer supervisor handles this).
+- `handle_info({port, {:exit_status, code}}, state)` — log and crash the GenServer so the supervisor restarts it.
+
+**Restore** — `restore/2`:
+- `restore(run_id, opts)` — Computes the S3 replica URL from `run_id` + directory structure. Calls `System.cmd("litestream", ["restore", "-o", local_path, replica_url])`. Returns `{:ok, local_path}` or `{:error, reason}`.
+- Only runs if the local file does not already exist (safety check).
+- Validates the restored file is a valid SQLite database (`PRAGMA integrity_check`).
+- After restore, the Litestream directory watcher automatically picks up the file for ongoing replication.
+
+**Status** — `status/0`:
+- Returns `:running` or `:down` based on whether the port is alive.
+
+**Passivation support** — `wal_checkpoint/1`:
+- `wal_checkpoint(db_path)` — Executes `PRAGMA wal_checkpoint(TRUNCATE)` on the given database to flush all WAL data. Called before local file eviction to ensure Litestream has replicated everything.
+
+**Application** — Add to `Fizz.Application` children:
+```elixir
+{Fizz.Workflows.Store.LitestreamManager,
+  data_dir: Application.get_env(:fizz, :workflow_data_dir),
+  s3_bucket: Application.get_env(:fizz, :litestream_s3_bucket),
+  s3_prefix: Application.get_env(:fizz, :litestream_s3_prefix),
+  aws_region: Application.get_env(:fizz, :litestream_aws_region)}
+```
+
+**Runtime config** — Add to `config/runtime.exs`:
+```elixir
+config :fizz,
+  workflow_data_dir: System.get_env("WORKFLOW_DATA_DIR", "priv/workflow_data"),
+  litestream_s3_bucket: System.get_env("LITESTREAM_S3_BUCKET"),
+  litestream_s3_prefix: System.get_env("LITESTREAM_S3_PREFIX", "workflows"),
+  litestream_aws_region: System.get_env("LITESTREAM_AWS_REGION", "us-east-1")
+```
+
+Litestream reads `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY` environment variables automatically — don't pass them through Elixir config.
+
 ### Tests
 
 `test/fizz/workflows/store/sqlite_store_test.exs`:
-- Init creates SQLite file with correct schema
+- Init creates SQLite file with correct schema and WAL mode
 - Save + load round-trips workflow log
 - Save with stale fence token raises `StaleOwnerError`
 - Save_fact + load_fact round-trips individual facts
 - Schema migration upgrades old user_version
+- File is created in the correct directory structure for Litestream discovery
 
 `test/fizz/workflows/lease_manager_test.exs`:
 - Acquire lease returns fence token
@@ -285,15 +354,27 @@ This ensures the stale-owner check is linearized through Postgres, not relying o
 - Expired lease can be claimed by another node
 - Concurrent acquisition: only one succeeds (test with two Ecto transactions)
 
+`test/fizz/workflows/store/litestream_manager_test.exs`:
+- Config generation produces valid YAML with directory-mode replication
+- Config includes correct `dir`, `pattern: "*.sqlite"`, `recursive: true`, `watch: true`
+- Restore computes correct S3 replica URL from run_id
+- Restore refuses to overwrite existing local file
+- Manager reports `:down` status when binary is not available
+- Manager reports `:running` status when port is alive
+
+Note: Full integration tests (actual S3 replication) require Litestream binary + S3 credentials. Tag these tests with `@tag :litestream_integration` so they can be skipped in CI without credentials. Unit tests for config generation and path computation don't need the binary.
+
 ### Constraints
 
 - SQLite files are opened with WAL mode. No shared/network filesystem.
 - Fence validation uses the two-phase Postgres-then-SQLite protocol described in the ownership spec.
 - Lease TTL = 30 seconds, renewal cadence = 10 seconds.
 - The `StaleOwnerError` must be a dedicated exception module.
-- Litestream integration is out of scope for now — just ensure WAL mode is on and files are in the correct directory structure.
-- Don't implement the PassivationSweeper yet — that's Phase 4.
-- Don't implement S3 upload/download yet — mock the cold-tier path.
+- The Litestream binary must be available on `PATH` or at a configured `bin_path`. The LitestreamManager validates this at startup and fails with a clear error message if missing.
+- Do NOT use the `{:litestream, "~> 0.4.0"}` Elixir package — it only supports single-database replication. Build the manager directly with `Port.open/2`.
+- Directory-based replication means no per-database config changes are needed when executions are created or destroyed.
+- `litestream restore` is the cold-start path — it downloads from S3 to local disk. After restore, the directory watcher picks up the file automatically for ongoing replication.
+- Don't implement the PassivationSweeper yet — that's Phase 4. But ensure the `wal_checkpoint/1` helper exists for Phase 4 to call before file eviction.
 
 ---
 

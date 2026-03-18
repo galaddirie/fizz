@@ -49,7 +49,17 @@ surface:
   stability: stable
 
 - id: workflows.storage.litestream_replication
-  statement: Active SQLite files are continuously replicated to S3 via Litestream WAL streaming, providing sub-second recovery point objective for disaster recovery independent of checkpoint strategy.
+  statement: Active SQLite files are continuously replicated to S3 via Litestream WAL streaming, providing sub-second recovery point objective for disaster recovery independent of checkpoint strategy. The platform manages the Litestream binary as a supervised process using directory-based replication — a single Litestream process watches the workflow data directory tree, automatically discovering and replicating new SQLite files as executions are created. Cold-start restore uses `litestream restore` to download a database from S3 to a local path before the Worker opens it.
+  priority: must
+  stability: stable
+
+- id: workflows.storage.litestream_directory_layout
+  statement: The workflow data directory follows the structure `{data_dir}/{org_id}/{project_id}/{hash_prefix}/{run_id}.sqlite` and the Litestream config uses directory-mode replication with `recursive: true` and `watch: true` to track all databases under the root data directory. The S3 replica preserves the same directory structure as keys, enabling restore by run_id without a separate path registry.
+  priority: must
+  stability: stable
+
+- id: workflows.storage.litestream_restore
+  statement: Cold-start restore invokes `litestream restore -o {local_path} {replica_url}` to download a SQLite database from S3 before the Worker opens it. Restore only runs if the local file does not already exist. The platform must verify the restore succeeded and the file is a valid SQLite database before proceeding with rehydration.
   priority: must
   stability: stable
 
@@ -77,31 +87,50 @@ surface:
 - id: workflows.storage.passivation_to_cold
   given:
     - a WARM-tier SQLite file has been idle beyond the configured eviction threshold
+    - Litestream has been continuously replicating the file's WAL to S3 via directory-mode replication
   when:
     - the passivation sweeper runs
   then:
-    - "the SQLite WAL is checkpointed via `PRAGMA wal_checkpoint(TRUNCATE)` to minimize upload size"
-    - the file is uploaded to S3
-    - the Postgres control plane is updated with `storage_uri` and PASSIVATED status
-    - the local file is evicted
+    - "the SQLite WAL is checkpointed via `PRAGMA wal_checkpoint(TRUNCATE)` to ensure all data is replicated"
+    - the Postgres control plane is updated with PASSIVATED status
+    - the local file may be evicted since the S3 replica is authoritative for restore
   covers:
     - workflows.storage.passivation_tiers
     - workflows.storage.litestream_replication
+    - workflows.storage.litestream_directory_layout
 
 - id: workflows.storage.cold_restore_from_s3
   given:
     - a COLD execution with SQLite in S3 receives a wake-up event
+    - the local SQLite file does not exist
   when:
     - the platform initiates resume
   then:
-    - the SQLite file is downloaded from S3
+    - "`litestream restore -o {local_path} {replica_url}` downloads the database from S3"
+    - the platform verifies the restored file is a valid SQLite database
     - schema migration runs if needed
     - "`Runner.resume/3` reconstructs the workflow with the chosen rehydration mode"
+    - Litestream directory-mode replication automatically picks up the restored file for ongoing replication
     - execution continues from the last checkpoint
   covers:
     - workflows.storage.passivation_tiers
     - workflows.storage.rehydration_modes
     - workflows.storage.schema_versioning
+    - workflows.storage.litestream_restore
+    - workflows.storage.litestream_directory_layout
+
+- id: workflows.storage.litestream_auto_discovery
+  given:
+    - the Litestream process is running with directory-mode replication watching the workflow data root
+  when:
+    - a new workflow execution creates a SQLite file in the directory tree
+  then:
+    - Litestream automatically discovers the new file and begins WAL replication to S3
+    - the S3 key structure mirrors the local directory structure
+    - no per-database configuration change or Litestream restart is required
+  covers:
+    - workflows.storage.litestream_replication
+    - workflows.storage.litestream_directory_layout
 
 - id: workflows.storage.schema_migration_on_wake
   given:
@@ -128,11 +157,14 @@ surface:
     - workflows.storage.passivation_tiers
     - workflows.storage.rehydration_modes
     - workflows.storage.litestream_replication
+    - workflows.storage.litestream_directory_layout
+    - workflows.storage.litestream_restore
     - workflows.storage.schema_versioning
     - workflows.storage.checkpoint_and_restore
     - workflows.storage.passivation_to_cold
     - workflows.storage.cold_restore_from_s3
     - workflows.storage.schema_migration_on_wake
+    - workflows.storage.litestream_auto_discovery
 
 - kind: doc_file
   target: docs/plans/runic-research.md
@@ -165,5 +197,7 @@ surface:
     - workflows.storage.fact_level_persistence
     - workflows.storage.rehydration_modes
     - workflows.storage.litestream_replication
+    - workflows.storage.litestream_directory_layout
+    - workflows.storage.litestream_restore
     - workflows.storage.schema_versioning
 ```
