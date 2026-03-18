@@ -97,6 +97,52 @@ surface:
     - connection and expression references are expected to follow the regenerated id rather than the prior display label
   covers:
     - workflows.definitions.step_ids
+
+- id: workflows.definitions.archive_definition
+  given:
+    - a workflow definition has at least one published version
+  when:
+    - the operator archives the definition
+  then:
+    - the definition is marked archived and no new runs can start from it
+    - existing active runs are unaffected
+    - historical versions remain inspectable
+  covers:
+    - workflows.definitions.lifecycle
+
+- id: workflows.definitions.clone_published_to_draft
+  given:
+    - a workflow definition has a published version and no current draft
+  when:
+    - the user initiates editing
+  then:
+    - a new draft version is created by cloning the latest published version's snapshot
+    - the draft inherits the full steps, connections, step_groups, viewport, and settings
+  covers:
+    - workflows.definitions.lifecycle
+    - workflows.definitions.snapshot_shape
+
+- id: workflows.definitions.save_rejects_cyclic_graph
+  given:
+    - a draft contains steps with connections forming a cycle
+  when:
+    - the user saves the draft
+  then:
+    - save-time validation rejects the save with an acyclicity violation error
+    - the draft is not persisted in its cyclic state
+  covers:
+    - workflows.definitions.save_validation
+
+- id: workflows.definitions.concurrent_last_write_wins
+  given:
+    - two users concurrently edit the same draft version
+  when:
+    - both save at roughly the same time
+  then:
+    - the last save persisted wins with full-document replacement
+    - no merge conflict is raised
+  covers:
+    - workflows.definitions.concurrent_editing
 ```
 
 ## Verification

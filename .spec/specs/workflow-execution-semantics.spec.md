@@ -100,6 +100,32 @@ surface:
   covers:
     - workflows.execution_semantics.recovery
     - workflows.execution_semantics.run_context_rebuild
+
+- id: workflows.execution_semantics.parallel_fan_out_fan_in
+  given:
+    - a workflow DAG has a fan-out node producing multiple independent branches that converge at a join node
+  when:
+    - all branch inputs are satisfied and dispatched concurrently
+  then:
+    - each branch executes independently
+    - results apply in completion order through the single-writer apply boundary
+    - the join node fires once all required branch outputs are available
+  covers:
+    - workflows.execution_semantics.progression_exactly_once
+    - workflows.execution_semantics.single_writer
+
+- id: workflows.execution_semantics.partial_failure_in_parallel
+  given:
+    - a workflow has multiple parallel branches executing concurrently
+    - one branch's activity fails with `on_failure: :fail` and exhausts retries
+  when:
+    - the failed branch is marked terminal
+  then:
+    - remaining in-flight branches complete or are cancelled according to policy
+    - the workflow transitions to a failed state
+  covers:
+    - workflows.execution_semantics.recovery
+    - workflows.execution_semantics.activities_at_least_once
 ```
 
 ## Verification

@@ -89,6 +89,42 @@ surface:
     - it starts from the same workflow definition identity and version unless a separate migration flow has been invoked
   covers:
     - workflows.continuation.version
+
+- id: workflows.continuation.pending_signals_not_inherited
+  given:
+    - a parent run has undelivered signals in its inbox at the time of ContinueAsNew
+  when:
+    - the continuation handoff completes
+  then:
+    - undelivered parent signals remain associated with the parent run_id
+    - the child run starts with an empty signal inbox
+  covers:
+    - workflows.continuation.carry_forward
+    - workflows.continuation.parent_state
+
+- id: workflows.continuation.child_creation_failure
+  given:
+    - ContinueAsNew is triggered at a safe checkpoint boundary
+    - child run creation fails due to a transient error
+  when:
+    - the handoff cannot complete
+  then:
+    - the parent run does not transition to `continued`
+    - the parent remains in its prior state and the error is surfaced for retry or operator intervention
+  covers:
+    - workflows.continuation.explicit_boundary
+    - workflows.continuation.parent_state
+
+- id: workflows.continuation.chained_lineage
+  given:
+    - workflow run A continues as run B, then run B continues as run C
+  when:
+    - each continuation records lineage metadata in the control plane
+  then:
+    - the lineage chain A to B to C is navigable
+    - each run records its immediate parent and the chain is traversable for operator inspection
+  covers:
+    - workflows.continuation.lineage
 ```
 
 ## Verification

@@ -20,6 +20,18 @@ contracts.
   - External signal delivery, dedup scope, and wakeup semantics.
 - `specs/steps-and-integration-auth.spec.md`
   - Implemented step registry, executor, provider, and credential-resolution contracts.
+- `specs/workflow-run-lifecycle.spec.md`
+  - Run states, Postgres statuses, valid transitions, terminal states, passivation sweep.
+- `specs/workflow-durable-timers.spec.md`
+  - Timer state machine, polling, cancellation, and kernel/platform boundary.
+- `specs/workflow-storage.spec.md`
+  - Checkpoint format, SQLite 1:1 mapping, passivation tiers, rehydration, Litestream, schema versioning.
+- `specs/workflow-ownership.spec.md`
+  - Lease acquisition/renewal/expiry, fence token monotonicity, stale owner rejection.
+- `specs/workflow-activity-dispatch.spec.md`
+  - Dispatch flow, SchedulerPolicy, durable mode events, pluggable executors, recovery, skip/fail.
+- `specs/workflow-error-handling.spec.md`
+  - Step-level retry/skip, workflow failure states, failure mitigation table, no compensation in v1.
 
 ## Decisions
 

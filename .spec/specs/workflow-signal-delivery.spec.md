@@ -85,6 +85,43 @@ surface:
   covers:
     - workflows.signal_delivery.payload_distinctness
     - workflows.signal_delivery.delivery_authority
+
+- id: workflows.signal_delivery.signal_to_terminated_run
+  given:
+    - a workflow run is in a terminal state such as COMPLETED or FAILED
+  when:
+    - an external signal targets the run
+  then:
+    - the signal is accepted into the durable inbox as a record
+    - delivery to the workflow graph is skipped because the run is terminal
+    - the run status does not change
+  covers:
+    - workflows.signal_delivery.inbox
+    - workflows.signal_delivery.delivery_authority
+
+- id: workflows.signal_delivery.ordering_not_guaranteed
+  given:
+    - two signals are sent to the same run in rapid succession with different signal ids
+  when:
+    - both are accepted into the inbox
+  then:
+    - delivery order to the workflow graph is not guaranteed to match submission order
+    - each signal is an independent delivery event
+  covers:
+    - workflows.signal_delivery.inbox
+
+- id: workflows.signal_delivery.signal_during_continue_as_new
+  given:
+    - a signal arrives while a workflow run is in the process of ContinueAsNew handoff
+  when:
+    - the signal is recorded in the inbox keyed to the parent run_id
+  then:
+    - the signal targets the parent run which is becoming terminal
+    - the child run does not automatically inherit undelivered parent signals
+    - callers must direct new signals to the child run_id after continuation completes
+  covers:
+    - workflows.signal_delivery.inbox
+    - workflows.signal_delivery.delivery_authority
 ```
 
 ## Verification
