@@ -28,8 +28,18 @@ That ownership model applies at the durable commit boundary:
 - Multi-node ownership safety is enforced at the storage boundary, not by
   trusting process liveness alone.
 - The runtime keeps one serialized apply and commit path per execution.
+- The fence token source of truth is the control-plane store (Postgres), not the
+  per-execution SQLite file, so a stale owner cannot validate against its own
+  cached state.
 - Exact lease TTLs, renewal cadence, and polling intervals are operational
   tuning details and are not part of the durable decision.
+
+## Related decisions
+
+- `postgres-control-plane.md` — the authoritative store for lease records and
+  fence tokens
+- `per-execution-sqlite-store.md` — the execution store that validates fence
+  tokens at commit time
 
 ## Sources
 

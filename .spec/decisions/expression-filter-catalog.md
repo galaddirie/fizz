@@ -83,6 +83,13 @@ Everything outside this catalog is unsupported in v1.
   filter sprawl.
 - Future filter additions require an explicit catalog change rather than ad hoc
   implementation drift.
+- `concat` (a Solid built-in) was intentionally omitted because `append` covers
+  the array case and string concatenation is handled by template interpolation.
+
+## Related decisions
+
+- `programmatic-meta-ref-wiring.md` — compiled expressions interact with
+  meta-ref wiring at the compiler level
 
 ## Sources
 

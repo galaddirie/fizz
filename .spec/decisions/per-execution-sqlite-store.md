@@ -28,11 +28,24 @@ For this store shape:
 - Execution durability stays isolated to one file per run.
 - The SQLite schema remains minimal because it stores workflow checkpoints
   rather than a large shared event table.
+- Global queries across executions (list runs, find by status, etc.) are served
+  by the Postgres control plane, not by scanning individual SQLite files.
+- Full-log checkpointing grows with history length; ContinueAsNew is the
+  mitigation for long-lived runs.
 - Event-sourced persistence remains a valid alternative for a different future
   store adapter, but it is not the current store contract.
 - Litestream replication, S3 passivation, pruning policy, and file lifecycle
   tuning were intentionally left out because they are still implementation and
   operations detail, not core storage truth.
+
+## Related decisions
+
+- `postgres-control-plane.md` — the global index and coordination layer that
+  complements per-execution SQLite files
+- `single-writer-leasing-and-fencing.md` — the ownership model that guards
+  writes to each execution store
+- `continue-as-new-boundary.md` — the mechanism that bounds full-log checkpoint
+  growth for long-lived runs
 
 ## Sources
 

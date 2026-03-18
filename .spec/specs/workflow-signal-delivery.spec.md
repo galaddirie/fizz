@@ -11,6 +11,7 @@ summary: Signals enter through a durable inbox, deduplicate per run and signal i
 surface:
   - docs/plans/durable-workflow-system-design.md
   - .spec/decisions/signal-dedup-scope.md
+  - .spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements

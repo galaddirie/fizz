@@ -36,6 +36,13 @@ not internal IR structs.
 - Closure compatibility across deploys improves because IR struct shape changes
   are not serialized into workflow checkpoints.
 
+## Related decisions
+
+- `runic-as-execution-kernel.md` — establishes Runic as the target compilation
+  kernel
+- `expression-filter-catalog.md` — the expression surface whose compiled form
+  must respect these wiring rules
+
 ## Sources
 
 - `docs/plans/compiler-and-runtime-context-design.md`

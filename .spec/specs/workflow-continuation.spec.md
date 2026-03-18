@@ -12,6 +12,8 @@ surface:
   - docs/plans/durable-workflow-system-design.md
   - docs/plans/compiler-and-runtime-context-design.md
   - .spec/decisions/continue-as-new-boundary.md
+  - .spec/decisions/per-execution-sqlite-store.md
+  - .spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements

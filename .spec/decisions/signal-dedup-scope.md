@@ -31,6 +31,15 @@ The durable dedup contract is:
 - Distinct but identical-looking events are preserved when they carry distinct
   signal ids.
 - Inbox schema and APIs should model dedup as a per-run uniqueness boundary.
+- The signal inbox lives in the control-plane store (Postgres) so that signals
+  can be accepted and deduplicated even when the target execution is dormant and
+  its SQLite file is not open.
+
+## Related decisions
+
+- `postgres-control-plane.md` — the durable home of the signal inbox
+- `per-execution-sqlite-store.md` — the execution store that a delivered signal
+  ultimately affects
 
 ## Sources
 

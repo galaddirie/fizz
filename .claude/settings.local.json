@@ -14,7 +14,9 @@
       "Bash(mix assets.build:*)",
       "Bash(wc:*)",
       "Bash(npx vue-tsc:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(mix deps.tree)",
+      "Bash(xargs basename:*)"
     ]
   }
 }

@@ -27,16 +27,20 @@ contracts.
   - The durable runtime is built around Runic as the execution kernel.
 - `decisions/per-execution-sqlite-store.md`
   - Each workflow execution owns its own SQLite durability shard.
-- `decisions/programmatic-meta-ref-wiring.md`
-  - Compiled workflows generate quoted Runic components with explicit meta references.
-- `decisions/continue-as-new-boundary.md`
-  - ContinueAsNew is an explicit continuation boundary with lineage and carry-forward rules.
-- `decisions/signal-dedup-scope.md`
-  - Signal idempotency is scoped per workflow run, not globally.
-- `decisions/expression-filter-catalog.md`
-  - The workflow expression system uses a bounded v1 filter catalog with strict validation.
+- `decisions/postgres-control-plane.md`
+  - Postgres is the control-plane store for global queries, leases, signals, timers, and lineage.
 - `decisions/single-writer-leasing-and-fencing.md`
   - Multi-node ownership is protected with leases plus fencing tokens.
+- `decisions/durable-timer-model.md`
+  - Durable timers are platform-level Postgres rows; Runic SchedulerPolicy owns in-process timeouts and retry.
+- `decisions/signal-dedup-scope.md`
+  - Signal idempotency is scoped per workflow run, not globally.
+- `decisions/continue-as-new-boundary.md`
+  - ContinueAsNew is an explicit continuation boundary with lineage and carry-forward rules.
+- `decisions/expression-filter-catalog.md`
+  - The workflow expression system uses a bounded v1 filter catalog with strict validation.
+- `decisions/programmatic-meta-ref-wiring.md`
+  - Compiled workflows generate quoted Runic components with explicit meta references.
 
 ## Exclusions
 

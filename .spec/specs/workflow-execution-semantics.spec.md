@@ -11,6 +11,11 @@ summary: Workflow state progression is durable and replayable, while external si
 surface:
   - docs/plans/runic-research.md
   - docs/plans/durable-workflow-system-design.md
+  - .spec/decisions/runic-as-execution-kernel.md
+  - .spec/decisions/per-execution-sqlite-store.md
+  - .spec/decisions/single-writer-leasing-and-fencing.md
+  - .spec/decisions/postgres-control-plane.md
+  - .spec/decisions/durable-timer-model.md
 ```
 
 ## Requirements
@@ -130,7 +135,7 @@ surface:
 
 ```spec-exceptions
 - id: workflows.execution_semantics.control_plane_out_of_scope
-  note: Timer delivery, passivation tiers, observability, and rollout sequencing remain outside this spec and are tracked separately from the core execution kernel contract.
+  note: Passivation tiers, observability, and rollout sequencing remain outside this spec. The durable timer model decision establishes the platform/kernel timer boundary, and the Postgres control plane decision establishes the coordination layer; their schemas and firing mechanics are tracked separately from the core execution kernel contract.
   relates_to:
     - workflows.execution_semantics.kernel_boundary
 

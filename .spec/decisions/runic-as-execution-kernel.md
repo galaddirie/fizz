@@ -33,6 +33,13 @@ That means:
   part of this decision because they are implementation planning detail rather
   than durable architecture.
 
+## Related decisions
+
+- `programmatic-meta-ref-wiring.md` — the compilation strategy for assembling
+  Runic workflows from authored definitions
+- `per-execution-sqlite-store.md` — the storage model the platform wraps around
+  the kernel
+
 ## Sources
 
 - `docs/plans/runic-research.md`
