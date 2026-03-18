@@ -484,9 +484,9 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
     ]
 
     case ctx.fan_out_context do
-      %{is_reduced: true, source_fact_hash: sfh, fan_out_hash: foh, fan_out_fact_hash: fofh} ->
+      %{tracks: tracks} when is_list(tracks) and tracks != [] ->
         events ++
-          [
+          Enum.map(tracks, fn %{source_fact_hash: sfh, fan_out_hash: foh, fan_out_fact_hash: fofh} ->
             %MapReduceTracked{
               source_fact_hash: sfh,
               fan_out_hash: foh,
@@ -494,7 +494,7 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
               step_hash: step.hash,
               result_fact_hash: result_fact.hash
             }
-          ]
+          end)
 
       _ ->
         events
@@ -503,77 +503,71 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
 
   defp build_fan_out_context(workflow, step, fact) do
     if is_reduced_in_map?(workflow, step) do
-      # Try to find FanOut info by checking the input fact's producer
-      case find_fan_out_info_from_input(workflow, fact) do
-        {source_fact_hash, fan_out_hash, fan_out_fact_hash} ->
-          %{
-            is_reduced: true,
-            source_fact_hash: source_fact_hash,
-            fan_out_hash: fan_out_hash,
-            fan_out_fact_hash: fan_out_fact_hash
-          }
-
-        nil ->
+      case map_reduce_tracks(workflow, step.hash, fact) do
+        [] ->
           nil
+
+        tracks ->
+          %{tracks: tracks}
       end
     else
       nil
     end
   end
 
-  # For the prepare phase, the input fact IS the fan-out fact.
-  # Its ancestry is {fan_out_hash, source_fact_hash} when produced by a FanOut.
-  defp find_fan_out_info_from_input(
-         workflow,
-         %Fact{ancestry: {producer_hash, parent_fact_hash}} = fact
-       ) do
-    producer = workflow.graph.vertices[producer_hash]
-
-    case producer do
-      %Runic.Workflow.FanOut{} = fan_out ->
-        {parent_fact_hash, fan_out.hash, fact.hash}
-
-      _ ->
-        # Fall back to walking up the ancestry chain from the fact
-        find_fan_out_info(workflow, fact)
-    end
-  end
-
-  defp find_fan_out_info_from_input(_workflow, _fact), do: nil
-
   defp is_reduced_in_map?(workflow, step) do
-    MapSet.member?(workflow.mapped.mapped_paths, step.hash)
+    workflow.mapped
+    |> Map.get(:mapped_path_fan_outs, %{})
+    |> Map.has_key?(step.hash)
   end
 
   defp maybe_prepare_map_reduce(workflow, step, fact) do
     if is_reduced_in_map?(workflow, step) do
-      # Find the fan_out info: {source_fact_hash, fan_out_hash, fan_out_fact_hash}
-      case find_fan_out_info(workflow, fact) do
-        {source_fact_hash, fan_out_hash, fan_out_fact_hash} ->
-          # Key using source_fact.hash (the input to FanOut) - stable across merges
-          key = {source_fact_hash, step.hash}
-          seen = workflow.mapped[key] || %{}
+      map_reduce_tracks(workflow, step.hash, fact)
+      |> Enum.reduce(workflow, fn %{source_fact_hash: source_fact_hash, fan_out_hash: fan_out_hash,
+                                     fan_out_fact_hash: fan_out_fact_hash},
+                                    workflow_acc ->
+        seen_key = {fan_out_hash, source_fact_hash, step.hash}
+        seen = Map.get(workflow_acc.mapped, seen_key, %{})
+        seen = Map.put(seen, fan_out_fact_hash, fact.hash)
 
-          # Track which fan_out fact produced this step output
-          seen = Map.put(seen, fan_out_fact_hash, fact.hash)
+        mapped =
+          workflow_acc.mapped
+          |> Map.put(seen_key, seen)
+          |> Map.put({:fan_out_for_batch, source_fact_hash}, fan_out_hash)
 
-          # Also store the fan_out_hash so FanIn can find the expected list
-          workflow = store_fan_out_hash_for_batch(workflow, source_fact_hash, fan_out_hash)
-
-          Map.put(workflow, :mapped, Map.put(workflow.mapped, key, seen))
-
-        nil ->
-          workflow
-      end
+        Map.put(workflow_acc, :mapped, mapped)
+      end)
     else
       workflow
     end
   end
 
-  # Store the fan_out hash for a batch so FanIn can look up the expected list
-  defp store_fan_out_hash_for_batch(workflow, source_fact_hash, fan_out_hash) do
-    key = {:fan_out_for_batch, source_fact_hash}
-    Map.put(workflow, :mapped, Map.put(workflow.mapped, key, fan_out_hash))
+  defp map_reduce_tracks(workflow, step_hash, fact) do
+    workflow
+    |> relevant_fan_out_hashes(step_hash)
+    |> Enum.flat_map(fn fan_out_hash ->
+      case find_fan_out_info(workflow, fact, fan_out_hash) do
+        {source_fact_hash, ^fan_out_hash, fan_out_fact_hash} ->
+          [
+            %{
+              source_fact_hash: source_fact_hash,
+              fan_out_hash: fan_out_hash,
+              fan_out_fact_hash: fan_out_fact_hash
+            }
+          ]
+
+        nil ->
+          []
+      end
+    end)
+  end
+
+  defp relevant_fan_out_hashes(workflow, step_hash) do
+    workflow.mapped
+    |> Map.get(:mapped_path_fan_outs, %{})
+    |> Map.get(step_hash, MapSet.new())
+    |> MapSet.to_list()
   end
 
   @doc false
@@ -586,18 +580,19 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
 
   def fan_out_origin_fact_hash(_workflow, _fact), do: nil
 
-  # Returns {source_fact_hash, fan_out_hash, fan_out_fact_hash} or nil
-  defp find_fan_out_info(workflow, %Runic.Workflow.Fact{
-         ancestry: {_producer_hash, input_fact_hash}
-       }) do
-    do_find_fan_out_info(workflow, input_fact_hash)
+  defp find_fan_out_info(
+         workflow,
+         %Runic.Workflow.Fact{ancestry: {_producer_hash, input_fact_hash}},
+         target_fan_out_hash
+       ) do
+    do_find_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
   end
 
-  defp find_fan_out_info(_workflow, _fact), do: nil
+  defp find_fan_out_info(_workflow, _fact, _target_fan_out_hash), do: nil
 
-  defp do_find_fan_out_info(_workflow, nil), do: nil
+  defp do_find_fan_out_info(_workflow, nil, _target_fan_out_hash), do: nil
 
-  defp do_find_fan_out_info(workflow, fact_hash) do
+  defp do_find_fan_out_info(workflow, fact_hash, target_fan_out_hash) do
     fact = workflow.graph.vertices[fact_hash]
 
     case fact do
@@ -605,14 +600,11 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
         producer = workflow.graph.vertices[producer_hash]
 
         case producer do
-          %Runic.Workflow.FanOut{} = fan_out ->
-            # This fact was produced by a FanOut
-            # parent_fact_hash is the source_fact that triggered the FanOut
+          %Runic.Workflow.FanOut{} = fan_out when fan_out.hash == target_fan_out_hash ->
             {parent_fact_hash, fan_out.hash, fact_hash}
 
           _ ->
-            # Keep walking up the ancestry chain
-            do_find_fan_out_info(workflow, parent_fact_hash)
+            do_find_fan_out_info(workflow, parent_fact_hash, target_fan_out_hash)
         end
 
       _ ->
@@ -1243,7 +1235,7 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
       %FanOut{} ->
         # Find the source_fact_hash that triggered the FanOut batch
         # This is stable across workflow merges and re-planning
-        source_fact_hash = find_fan_out_source_fact_hash(workflow, fact)
+        source_fact_hash = find_fan_out_source_fact_hash(workflow, fact, fan_out.hash)
 
         # Check if this batch has already been reduced by looking for a :reduced edge
         # This is more robust than checking mapped data which may not survive merges
@@ -1255,7 +1247,7 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
 
         # Use source_fact_hash based keys (stable across merges)
         expected_key = {source_fact_hash, fan_out.hash}
-        seen_key = {source_fact_hash, parent_step_hash}
+        seen_key = {fan_out.hash, source_fact_hash, parent_step_hash}
 
         expected_list = workflow.mapped[expected_key] || []
         expected_set = MapSet.new(expected_list)
@@ -1328,6 +1320,16 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
     do_find_fan_out_source(workflow, input_fact_hash)
   end
 
+  defp find_fan_out_source_fact_hash(workflow, fact, target_fan_out_hash) do
+    case find_fan_out_info(workflow, fact, target_fan_out_hash) do
+      {source_fact_hash, ^target_fan_out_hash, _fan_out_fact_hash} ->
+        source_fact_hash
+
+      nil ->
+        find_fan_out_source_fact_hash(workflow, fact)
+    end
+  end
+
   defp do_find_fan_out_source(_workflow, nil), do: nil
 
   defp do_find_fan_out_source(workflow, fact_hash) do
@@ -1346,6 +1348,38 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
           _ ->
             # Keep walking up the ancestry chain
             do_find_fan_out_source(workflow, parent_fact_hash)
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp find_fan_out_info(
+         workflow,
+         %Fact{ancestry: {_producer_hash, input_fact_hash}},
+         target_fan_out_hash
+       ) do
+    do_find_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
+  end
+
+  defp find_fan_out_info(_workflow, _fact, _target_fan_out_hash), do: nil
+
+  defp do_find_fan_out_info(_workflow, nil, _target_fan_out_hash), do: nil
+
+  defp do_find_fan_out_info(workflow, fact_hash, target_fan_out_hash) do
+    fact = workflow.graph.vertices[fact_hash]
+
+    case fact do
+      %Fact{ancestry: {producer_hash, parent_fact_hash}} ->
+        producer = workflow.graph.vertices[producer_hash]
+
+        case producer do
+          %FanOut{} = fan_out when fan_out.hash == target_fan_out_hash ->
+            {parent_fact_hash, fan_out.hash, fact_hash}
+
+          _ ->
+            do_find_fan_out_info(workflow, parent_fact_hash, target_fan_out_hash)
         end
 
       _ ->
@@ -1509,14 +1543,14 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
         {:ok, Runnable.new(fan_in, fact, context)}
 
       %FanOut{} ->
-        source_fact_hash = find_fan_out_source_fact_hash(workflow, fact)
+        source_fact_hash = find_fan_out_source_fact_hash(workflow, fact, fan_out.hash)
 
         already_completed = has_reduced_output?(workflow, fan_in, source_fact_hash)
         completed_key = {:fan_in_completed, source_fact_hash, fan_in.hash}
         already_completed = already_completed or Map.get(workflow.mapped, completed_key, false)
 
         expected_key = {source_fact_hash, fan_out.hash}
-        seen_key = {source_fact_hash, parent_step_hash}
+        seen_key = {fan_out.hash, source_fact_hash, parent_step_hash}
 
         expected_list = workflow.mapped[expected_key] || []
         expected_set = MapSet.new(expected_list)

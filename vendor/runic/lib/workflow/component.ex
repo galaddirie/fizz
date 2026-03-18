@@ -348,7 +348,15 @@ defimpl Runic.Component, for: Runic.Workflow.Map do
       | mapped: %{
           workflow.mapped
           | mapped_paths:
-              MapSet.union(workflow.mapped.mapped_paths, map.pipeline.mapped.mapped_paths)
+              MapSet.union(workflow.mapped.mapped_paths, map.pipeline.mapped.mapped_paths),
+            mapped_path_fan_outs:
+              Map.merge(
+                Map.get(workflow.mapped, :mapped_path_fan_outs, %{}),
+                Map.get(map.pipeline.mapped, :mapped_path_fan_outs, %{}),
+                fn _node_hash, fan_outs1, fan_outs2 ->
+                  MapSet.union(fan_outs1, fan_outs2)
+                end
+              )
         },
         components: Map.merge(wrk.components, map.pipeline.components),
         build_log: wrk.build_log ++ map.pipeline.build_log
@@ -478,17 +486,25 @@ defimpl Runic.Component, for: Runic.Workflow.Reduce do
     # Use flow-only path to ensure all steps in the dataflow are tracked
     path_to_fan_out = FlowPath.flow_path(wrk.graph, map_fan_out, reduce.fan_in)
 
-    wrk
-    |> Map.put(
-      :mapped,
-      Map.put(
-        wrk.mapped,
-        :mapped_paths,
-        Enum.reduce(path_to_fan_out, wrk.mapped.mapped_paths, fn node, mapset ->
-          MapSet.put(mapset, node.hash)
+    mapped_paths =
+      Enum.reduce(path_to_fan_out, wrk.mapped.mapped_paths, fn node, mapset ->
+        MapSet.put(mapset, node.hash)
+      end)
+
+    mapped_path_fan_outs =
+      Enum.reduce(path_to_fan_out, Map.get(wrk.mapped, :mapped_path_fan_outs, %{}), fn node, acc ->
+        Map.update(acc, node.hash, MapSet.new([map_fan_out.hash]), fn fan_outs ->
+          MapSet.put(fan_outs, map_fan_out.hash)
         end)
-      )
-    )
+      end)
+
+    %Workflow{
+      wrk
+      | mapped:
+          wrk.mapped
+          |> Map.put(:mapped_paths, mapped_paths)
+          |> Map.put(:mapped_path_fan_outs, mapped_path_fan_outs)
+    }
   end
 
   def connect(%{fan_in: %{map: mapped}} = reduce, %Workflow.Step{} = step, workflow)
@@ -507,17 +523,25 @@ defimpl Runic.Component, for: Runic.Workflow.Reduce do
     # Use flow-only path to ensure all steps in the dataflow are tracked
     path_to_fan_out = FlowPath.flow_path(wrk.graph, map_fanout, reduce.fan_in)
 
-    wrk
-    |> Map.put(
-      :mapped,
-      Map.put(
-        wrk.mapped,
-        :mapped_paths,
-        Enum.reduce(path_to_fan_out, wrk.mapped.mapped_paths, fn node, mapset ->
-          MapSet.put(mapset, node.hash)
+    mapped_paths =
+      Enum.reduce(path_to_fan_out, wrk.mapped.mapped_paths, fn node, mapset ->
+        MapSet.put(mapset, node.hash)
+      end)
+
+    mapped_path_fan_outs =
+      Enum.reduce(path_to_fan_out, Map.get(wrk.mapped, :mapped_path_fan_outs, %{}), fn node, acc ->
+        Map.update(acc, node.hash, MapSet.new([map_fanout.hash]), fn fan_outs ->
+          MapSet.put(fan_outs, map_fanout.hash)
         end)
-      )
-    )
+      end)
+
+    %Workflow{
+      wrk
+      | mapped:
+          wrk.mapped
+          |> Map.put(:mapped_paths, mapped_paths)
+          |> Map.put(:mapped_path_fan_outs, mapped_path_fan_outs)
+    }
   end
 
   def connect(reduce, to, workflow) when is_list(to) do
@@ -1779,6 +1803,10 @@ defimpl Runic.Component, for: Runic.Workflow do
     merged_mapped =
       Map.merge(workflow.mapped, child_workflow.mapped, fn
         :mapped_paths, v1, v2 -> MapSet.union(v1, v2)
+        :mapped_path_fan_outs, v1, v2 ->
+          Map.merge(v1, v2, fn _node_hash, fan_outs1, fan_outs2 ->
+            MapSet.union(fan_outs1, fan_outs2)
+          end)
         # For tracking keys like {generation, hash} -> list or map, merge appropriately
         _key, v1, v2 when is_list(v1) and is_list(v2) -> Enum.uniq(v1 ++ v2)
         _key, v1, v2 when is_map(v1) and is_map(v2) -> Map.merge(v1, v2)

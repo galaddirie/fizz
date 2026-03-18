@@ -328,7 +328,7 @@ defmodule Runic.Workflow do
     |> Map.put(:after_hooks, %{})
     |> Map.put(:build_log, [])
     |> Map.put(:inputs, %{})
-    |> Map.put(:mapped, %{mapped_paths: MapSet.new()})
+    |> Map.put(:mapped, %{mapped_paths: MapSet.new(), mapped_path_fan_outs: %{}})
     |> Map.put_new(:scheduler_policies, [])
     |> Map.put_new(:runnable_events, [])
   end
@@ -994,7 +994,7 @@ defmodule Runic.Workflow do
   end
 
   def apply_event(%__MODULE__{} = wf, %MapReduceTracked{} = e) do
-    seen_key = {e.source_fact_hash, e.step_hash}
+    seen_key = {e.fan_out_hash, e.source_fact_hash, e.step_hash}
     seen = Map.get(wf.mapped, seen_key, %{})
     seen = Map.put(seen, e.fan_out_fact_hash, e.result_fact_hash)
 
