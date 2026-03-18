@@ -4,6 +4,7 @@ defmodule Fizz.Workflows do
   alias Ecto.Multi
   alias Fizz.Accounts.{Project, Scope}
   alias Fizz.Repo
+  alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion}
 
   @default_snapshot_attrs %{
@@ -78,14 +79,31 @@ defmodule Fizz.Workflows do
     with {:ok, version_record} <- fetch_version(scope, version),
          :ok <- ensure_draft(version_record),
          {:ok, user_id} <- user_id_from_scope(scope) do
-      version_record
-      |> WorkflowDefinitionVersion.publish_changeset(%{
-        status: :published,
-        compiled_hash: compiled_hash(version_record),
-        published_at: DateTime.utc_now(),
-        published_by_user_id: user_id
-      })
-      |> Repo.update()
+      published_at = DateTime.utc_now()
+
+      changeset =
+        WorkflowDefinitionVersion.publish_changeset(version_record, %{
+          status: :published,
+          compiled_hash: provisional_compiled_hash(),
+          published_at: published_at,
+          published_by_user_id: user_id
+        })
+
+      if changeset.valid? do
+        compiled_version = Ecto.Changeset.apply_changes(changeset)
+
+        case Compiler.compile(compiled_version) do
+          {:ok, _workflow, compiled_hash} ->
+            changeset
+            |> Ecto.Changeset.put_change(:compiled_hash, compiled_hash)
+            |> Repo.update()
+
+          {:error, errors} ->
+            {:error, add_compile_errors(changeset, errors)}
+        end
+      else
+        {:error, changeset}
+      end
     end
   end
 
@@ -280,41 +298,13 @@ defmodule Fizz.Workflows do
   defp embed_to_attrs(%_{} = embed), do: Map.from_struct(embed)
   defp embed_to_attrs(embed) when is_map(embed), do: embed
 
-  defp compiled_hash(version) do
-    payload = %{
-      "steps" => Enum.sort_by(version.steps, & &1.id),
-      "connections" => Enum.sort_by(version.connections, & &1.id)
-    }
-
-    payload
-    |> encode_canonical_json()
-    |> then(&:crypto.hash(:sha256, &1))
-    |> Base.encode16(case: :lower)
+  defp provisional_compiled_hash do
+    String.duplicate("0", 64)
   end
 
-  defp encode_canonical_json(%_{} = struct) do
-    struct
-    |> Map.from_struct()
-    |> encode_canonical_json()
+  defp add_compile_errors(changeset, errors) do
+    Enum.reduce(errors, changeset, fn error, acc ->
+      Ecto.Changeset.add_error(acc, :steps, error.message)
+    end)
   end
-
-  defp encode_canonical_json(map) when is_map(map) do
-    contents =
-      map
-      |> Enum.map(fn {key, value} -> {normalize_json_key(key), encode_canonical_json(value)} end)
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.map_join(",", fn {key, value} -> Jason.encode!(key) <> ":" <> value end)
-
-    "{#{contents}}"
-  end
-
-  defp encode_canonical_json(list) when is_list(list) do
-    "[#{Enum.map_join(list, ",", &encode_canonical_json/1)}]"
-  end
-
-  defp encode_canonical_json(value), do: Jason.encode!(value)
-
-  defp normalize_json_key(key) when is_atom(key), do: Atom.to_string(key)
-  defp normalize_json_key(key) when is_binary(key), do: key
-  defp normalize_json_key(key), do: inspect(key)
 end

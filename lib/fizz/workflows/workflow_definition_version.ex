@@ -4,6 +4,7 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
   alias Fizz.Graph
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
+  alias Fizz.Workflows.Compiler.ExpressionCompiler
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.WorkflowDefinition
 
@@ -310,7 +311,16 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
     end
   end
 
-  defp validate_expression_integrity(changeset), do: changeset
+  defp validate_expression_integrity(changeset) do
+    steps = get_field(changeset, :steps, [])
+    known_step_ids = Enum.map(steps, & &1.id)
+
+    ExpressionCompiler.validate_step_configs(steps, known_step_ids)
+    |> Enum.reduce(changeset, fn error, acc ->
+      add_error(acc, :steps, error.message)
+    end)
+  end
+
   defp validate_credential_accessibility(changeset), do: changeset
 
   defp maybe_add_missing_step_ref(errors, true, _connection_id, _field, _step_id), do: errors

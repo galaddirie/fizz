@@ -148,6 +148,42 @@ defmodule Fizz.WorkflowsTest do
     assert_message!(errors_on(changeset).steps, "invalid config")
   end
 
+  test "publish draft rejects unsupported expression filters" do
+    scope = project_scope_fixture()
+    %{draft: draft} = definition_fixture(scope)
+
+    debug_step =
+      step(%{
+        type_id: "debug",
+        name: "Debug",
+        config: %{"label" => "{{ input.name | concat: \"!\" }}"}
+      })
+
+    assert {:ok, saved_draft} =
+             Workflows.save_draft(scope, draft, snapshot_attrs(%{steps: [debug_step]}))
+
+    assert {:error, changeset} = Workflows.publish_draft(scope, saved_draft)
+    assert_message!(errors_on(changeset).steps, "unsupported filter `concat`")
+  end
+
+  test "publish draft rejects invalid step expression references" do
+    scope = project_scope_fixture()
+    %{draft: draft} = definition_fixture(scope)
+
+    debug_step =
+      step(%{
+        type_id: "debug",
+        name: "Debug",
+        config: %{"label" => "{{ steps.#{Ecto.UUID.generate()}.body }}"}
+      })
+
+    assert {:ok, saved_draft} =
+             Workflows.save_draft(scope, draft, snapshot_attrs(%{steps: [debug_step]}))
+
+    assert {:error, changeset} = Workflows.publish_draft(scope, saved_draft)
+    assert_message!(errors_on(changeset).steps, "unknown step reference")
+  end
+
   test "published version is immutable" do
     scope = project_scope_fixture()
     %{draft: draft} = definition_fixture(scope)
