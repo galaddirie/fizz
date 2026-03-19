@@ -32,6 +32,8 @@ contracts.
   - Dispatch flow, SchedulerPolicy, durable mode events, pluggable executors, recovery, skip/fail.
 - `specs/workflow-error-handling.spec.md`
   - Step-level retry/skip, workflow failure states, failure mitigation table, no compensation in v1.
+- `specs/workflow-triggers.spec.md`
+  - Trigger registration lifecycle, fire routing, event dedup, compiler integration, behaviour composition.
 
 ## Decisions
 
@@ -53,6 +55,8 @@ contracts.
   - The workflow expression system uses a bounded v1 filter catalog with strict validation.
 - `decisions/programmatic-meta-ref-wiring.md`
   - Compiled workflows generate quoted Runic components with explicit meta references.
+- `decisions/trigger-registry-architecture.md`
+  - ETS-backed trigger registration cache with LISTEN/NOTIFY sync for sub-millisecond webhook routing.
 
 ## Exclusions
 

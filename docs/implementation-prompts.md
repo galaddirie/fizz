@@ -515,13 +515,13 @@ Add durable timer persistence and polling, and the signal inbox with dedup and d
 **Migration** (`mix ecto.gen.migration create_durable_timers_and_signals`):
 
 `durable_timers` table:
-- `id` (UUID PK), `run_id` (FK to workflow_runs), `timer_name` (string), `fire_at` (utc_datetime_usec), `status` (string: "pending"/"firing"/"fired"/"cancelled"), `claimed_at` (utc_datetime_usec, nullable), `claimed_by` (string, nullable — node identifier), `created_at` (utc_datetime_usec).
-- Indexes: `(status, fire_at)` for polling, `(run_id, status)` for cancellation.
+- `id` (UUID PK), `run_id` (FK to workflow_runs), `step_id` (string — the step that produced the timer intent), `timer_name` (string), `project_id` (FK to projects), `workos_organization_id` (string), `fire_at` (utc_datetime_usec), `status` (string: "pending"/"firing"/"fired"/"cancelled"), `payload` (jsonb, nullable), `claimed_at` (utc_datetime_usec, nullable), `claimed_by` (string, nullable — node identifier), timestamps.
+- Indexes: `(fire_at) WHERE status = 'pending'` for polling, `(run_id) WHERE status = 'pending'` for cancellation, `(claimed_at) WHERE status = 'firing'` for stale recovery.
 
 `signal_inbox` table:
-- `id` (UUID PK), `run_id` (FK to workflow_runs), `signal_id` (string — caller-provided idempotency key), `signal_name` (string), `payload` (jsonb), `delivered` (boolean, default false), `created_at` (utc_datetime_usec).
+- `id` (UUID PK), `run_id` (FK to workflow_runs), `signal_id` (string — caller-provided idempotency key), `signal_name` (string), `payload` (jsonb), `status` (string: "pending"/"delivered"/"skipped", default "pending"), `project_id` (FK to projects), `workos_organization_id` (string), `delivered_at` (utc_datetime_usec, nullable), timestamps.
 - Unique index on `(run_id, signal_id)` for dedup.
-- Index on `(run_id, delivered)` for delivery scan.
+- Index on `(run_id) WHERE status = 'pending'` for delivery scan.
 
 **Durable Timers**:
 
@@ -538,15 +538,16 @@ Add durable timer persistence and polling, and the signal inbox with dedup and d
 
 Timer creation integration in Worker:
 - When a step produces a `sleep(duration)` or `schedule_at(datetime)` intent, the Worker inserts a `durable_timers` row and transitions the run to `sleeping`.
-- The exact mechanism: define a step output convention (e.g., `{:timer, %{fire_at: datetime}}`) that the Worker's dispatch loop recognizes and persists.
+- Timer intent convention: extend the executor return type with tagged tuples. An executor returning `{:sleep, duration, output}` or `{:schedule_at, datetime, output}` signals a timer intent. The Worker's apply-runnable path detects these tagged returns, extracts the `fire_at` timestamp (computed as `DateTime.add(DateTime.utc_now(), duration, :second)` for sleep), inserts the `durable_timers` row via `Fizz.Workflows.create_timer/4`, and transitions the run to `sleeping` if the timer is beyond the idle threshold.
+- Short timer optimization: if `fire_at` is within the idle_timeout_ms threshold, keep the Worker hot. The timer row is still persisted for crash recovery, but the Worker does not passivate.
 
 Timer cancellation in `Fizz.Workflows.cancel_run/2`:
 - `UPDATE durable_timers SET status = 'cancelled' WHERE run_id = ? AND status = 'pending'`.
 
 **Signal Delivery**:
 
-`Fizz.Workflows.Signal` (Ecto schema):
-- Standard schema for the `signal_inbox` table.
+`Fizz.Workflows.SignalInbox` (Ecto schema):
+- Standard schema for the `signal_inbox` table. Uses `status` field with values "pending", "delivered", "skipped" instead of a bare boolean — cleaner for tracking terminal-run skip semantics.
 
 `Fizz.Workflows.SignalRouter`:
 - `accept_signal(run_id, signal_id, signal_name, payload)` — Insert into inbox with `ON CONFLICT (run_id, signal_id) DO NOTHING` for idempotent acceptance. Signal is always accepted into inbox regardless of run status.
@@ -558,7 +559,9 @@ Optionally implement LISTEN/NOTIFY as a latency optimization — but polling cat
 
 **Worker Integration**:
 - Add `deliver_event(pid, event)` to Worker — accepts timer fires and signals, feeds them into the Runic workflow as new input facts.
-- After delivering a signal, mark it as `delivered = true` in the inbox.
+- After delivering a signal, mark it as `status = 'delivered'` with `delivered_at` timestamp in the inbox. Signals to terminal runs are marked `status = 'skipped'`.
+
+**Forward dependency note**: The signal inbox and `SignalRouter.accept_signal/4` API will be reused by the trigger system in Phase 7. When a run-level trigger fires, `TriggerFireWorker` delivers the event via `accept_signal` rather than creating a new run. Design the signal inbox API to be trigger-agnostic — it accepts signals from any source.
 
 ### Tests
 
@@ -687,3 +690,360 @@ Lineage queries:
 - v1 has NO automatic compensation or rollback. Workflows needing undo must author it as forward steps.
 - `run_context` must be reconstructed on resume, never deserialized from checkpoints.
 - Use `Process.monitor/1` in tests, not `Process.sleep/1`.
+
+---
+
+## Phase 7: Trigger Foundation
+
+### Specs
+
+- `.spec/specs/workflow-triggers.spec.md`
+
+### Goal
+
+Build the trigger registration infrastructure, fire routing worker, trigger registry cache, and compiler integration. This phase creates the machinery that manages *what* is listening and *how* events route to runs — but does not implement any specific trigger type (manual, webhook, schedule). Those are wired in Phase 8.
+
+The foundational insight from `docs/plans/triggers-design.md` is that **triggers and signals are the same delivery mechanism with different registration lifecycles**. A trigger is a signal with a persistent, externally-registered source. This phase builds the registration and routing layer on top of the signal inbox from Phase 5.
+
+### What Already Exists
+
+- Phase 5: `Fizz.Workflows.SignalInbox`, `Fizz.Workflows.SignalRouter`, `Fizz.Workflows.DurableTimer`, `Fizz.Workflows.TimerPoller`. Signal delivery to active and dormant runs.
+- Phase 6: Error handling, ContinueAsNew, `workflow_address_id`.
+- `Fizz.Steps.Registry` — ETS-backed step type registry (different concern from trigger registration registry).
+- `Fizz.Steps.Definition` macro with `kind: :trigger` support.
+- Existing trigger executor stubs: `manual_input.ex`, `schedule_trigger.ex`, `on_chat_trigger.ex` — define metadata and passthrough `execute/3` but no registration infrastructure.
+- `docs/plans/triggers-design.md` — complete design document.
+- Oban configured with queues `default`, `workspaces`, `workspaces_maintenance`.
+
+### Deliverables
+
+**Trigger Behaviour** (`lib/fizz/triggers/behaviour.ex`):
+
+`Fizz.Triggers.Behaviour`:
+- `@callback registration_spec(config :: map(), context :: map()) :: {:ok, Fizz.Triggers.RegistrationSpec.t()} | {:error, term()}` — Returns a registration specification describing the external source. Called at publish time (definition-level) and subscribe time (run-level).
+- `@callback match?(config :: map(), incoming_event :: map()) :: boolean()` — Filter predicate for shared channels. Default: always true. Mark as `@optional_callbacks`.
+- `@callback normalize_event(config :: map(), raw_event :: map()) :: {:ok, map()} | {:error, term()}` — Transforms raw external event into the trigger step's output schema.
+
+**Registration Spec** (`lib/fizz/triggers/registration_spec.ex`):
+
+`Fizz.Triggers.RegistrationSpec`:
+- Struct: `kind` (atom: `:manual | :webhook | :schedule | :polling | :subscription | :chat`), `params` (map), `dedup_key` (string, nullable).
+- `defstruct [:kind, :params, :dedup_key]`.
+
+**Migration** (`mix ecto.gen.migration create_trigger_tables`):
+
+`trigger_registrations` table — copy the exact schema from `docs/plans/triggers-design.md` Section 6.1:
+- `id` (UUID PK), `workflow_definition_id` (FK), `definition_version_id` (FK), `step_id` (string), `project_id` (FK), `workos_organization_id` (string), `run_id` (UUID FK nullable — NULL = definition-level, non-NULL = run-level), `kind` (string, CHECK IN manual/webhook/schedule/polling/subscription/chat), `status` (string, default 'active', CHECK IN active/paused/errored/inactive/firing), `registration_params` (jsonb, default '{}'), `config_digest` (string), `webhook_path` (string nullable), `webhook_secret` (string nullable), `cron_expression` (string nullable), `next_fire_at` (utc_datetime_usec nullable), `cursor` (jsonb nullable), `poll_interval_ms` (integer nullable), `last_polled_at` (utc_datetime_usec nullable), `batch_size` (integer, default 100), `error_message` (string nullable), `consecutive_errors` (integer, default 0), `last_error_at` (utc_datetime_usec nullable), timestamps.
+- Unique indexes: `(definition_version_id, step_id) WHERE run_id IS NULL` for definition-level dedup, `(run_id, step_id) WHERE run_id IS NOT NULL` for run-level dedup.
+- Unique index: `(webhook_path) WHERE webhook_path IS NOT NULL AND status = 'active'` for webhook routing.
+- Index: `(next_fire_at) WHERE kind = 'schedule' AND status = 'active'` for schedule polling.
+- Index: `(project_id, status)` for UI queries.
+
+`trigger_events` table — from Section 6.3:
+- `id` (UUID PK), `trigger_registration_id` (FK), `project_id` (FK), `workos_organization_id` (string), `event_id` (string), `event_data` (jsonb), `status` (string, default 'pending', CHECK IN pending/processing/fired/skipped/failed), `run_id` (UUID nullable), timestamps including `processed_at` (utc_datetime_usec nullable).
+- Unique index: `(trigger_registration_id, event_id)` for dedup.
+- Index: `(created_at) WHERE status IN ('fired','skipped','failed')` for cleanup.
+
+**Migration** (`mix ecto.gen.migration add_triggered_by_to_workflow_runs`):
+- Add `triggered_by` (jsonb, nullable) column to `workflow_runs`. Structure: `{"trigger_registration_id": "uuid", "trigger_step_id": "step-id", "trigger_kind": "webhook", "event_id": "dedup-key", "received_at": "iso8601"}`.
+
+**Schemas**:
+
+`Fizz.Triggers.TriggerRegistration` (`lib/fizz/triggers/trigger_registration.ex`):
+- `use Fizz.Schema`. All fields from the table. Status and kind as string fields (not Ecto enums — keep consistent with `WorkflowRun`). Changeset for upsert with `unique_constraint` on the dedup indexes.
+
+`Fizz.Triggers.TriggerEvent` (`lib/fizz/triggers/trigger_event.ex`):
+- `use Fizz.Schema`. All fields from the table. `unique_constraint` on `[:trigger_registration_id, :event_id]`.
+
+Update `Fizz.Workflows.WorkflowRun` (`lib/fizz/workflows/workflow_run.ex`):
+- Add `field :triggered_by, :map` to schema.
+
+**Trigger Registry** (`lib/fizz/triggers/registry.ex`):
+
+`Fizz.Triggers.Registry` (GenServer):
+- On init: load all active `trigger_registrations` from Postgres into ETS. Create ETS tables indexed by `webhook_path`, by `{project_id, kind}`.
+- Subscribe to Postgres LISTEN on `trigger_registrations` channel for real-time sync.
+- Periodic full refresh every 60 seconds as LISTEN/NOTIFY fallback.
+- Public APIs: `get_by_webhook_path(path)` → `{:ok, registration} | :error`, `list_by_kind(project_id, kind)` → `[registration]`, `list_by_project(project_id)` → `[registration]`.
+
+**TriggerFireWorker** (`lib/fizz/triggers/workers/trigger_fire_worker.ex`):
+
+`Fizz.Triggers.Workers.TriggerFireWorker` (Oban.Worker):
+- Queue: `:triggers`. Max attempts: 5.
+- Unique: `[keys: [:trigger_registration_id, :event_id], period: 300]` — 5-minute dedup window.
+- Args: `trigger_registration_id`, `event_id`, `normalized_data`.
+- Routing logic:
+  - Fetch registration by id.
+  - If `registration.run_id == nil` → definition-level: create a new workflow run via `Fizz.Workflows.start_run/3` with `triggered_by` metadata.
+  - If `registration.run_id != nil` → run-level: deliver signal via `Fizz.Workflows.signal_run/5`.
+- Record event in `trigger_events` table.
+
+**RegistrationSyncWorker** (`lib/fizz/triggers/workers/registration_sync_worker.ex`):
+
+`Fizz.Triggers.Workers.RegistrationSyncWorker` (Oban.Worker):
+- Cron: every minute (`"* * * * *"`).
+- Reconciliation:
+  1. Find published definition versions with missing registrations → create them.
+  2. Find registrations for unpublished/archived versions → deactivate.
+  3. Find errored registrations past cooldown (e.g., 5 minutes since last error) → reset to active.
+  4. Prune terminal trigger_events older than 7 days.
+
+**Registration Manager** (`lib/fizz/triggers/registration_manager.ex`):
+
+`Fizz.Triggers.RegistrationManager`:
+- `sync_on_publish(definition_version)` — Read `trigger_manifest` from compiled workflow's `fizz_metadata`. For each trigger: resolve executor, call `registration_spec/2`, upsert registration with `config_digest` for idempotency. For webhook triggers: generate `webhook_path` and `webhook_secret`. For schedule triggers: compute initial `next_fire_at`.
+- `deactivate_stale_registrations(definition_version)` — Deactivate registrations for previous published versions of the same definition.
+
+**Compiler Integration**:
+
+Modify `Fizz.Workflows.Compiler.Normalizer` (`lib/fizz/workflows/compiler/normalizer.ex`):
+- In the validation phase, check that all steps with `kind: :trigger` (resolved via the step registry) have in-degree zero. Return a compile error like `{:error, [{step_id, "trigger steps must be graph roots with no incoming connections"}]}` if violated.
+
+Modify `Fizz.Workflows.Compiler.Assembler` (`lib/fizz/workflows/compiler/assembler.ex`):
+- After assembling the Runic workflow, extract trigger steps and build the `trigger_manifest` list. Each entry: `%{step_id: step.id, type_id: step.type_id, config: step.config}`.
+- Store in `fizz_metadata`: `%{compiler_version: N, trigger_manifest: [...]}`.
+
+Modify `Fizz.Workflows.Compiler` (`lib/fizz/workflows/compiler.ex`):
+- Bump `@compiler_version` from current value (3) to 4.
+
+**Publish Hook**:
+
+Modify `Fizz.Workflows.publish_draft/2` (`lib/fizz/workflows.ex`):
+- After successful compilation and Repo update, call `Fizz.Triggers.RegistrationManager.sync_on_publish/1` with the published version.
+- If registration sync fails, log the error but do not fail the publish — the `RegistrationSyncWorker` will catch up.
+
+**Definition Macro**:
+
+Modify `Fizz.Steps.Definition` (`lib/fizz/steps/definition.ex`):
+- When `kind: :trigger`, automatically inject `@behaviour Fizz.Triggers.Behaviour`.
+- Add a default `match?/2` implementation that returns `true` (since it's an optional callback).
+
+**Context Module** (`lib/fizz/triggers.ex`):
+
+`Fizz.Triggers`:
+- `get_registration!(id)` — fetch by id or raise.
+- `list_registrations(scope, opts)` — project-scoped, filterable by kind, status, definition_id.
+- `upsert_registration(attrs)` — insert or update by config_digest. Notify `trigger_registrations` channel on success.
+- `deactivate_registration(registration)` — set status to inactive. Notify channel.
+- `record_event(registration_id, event_id, event_data, status)` — insert into trigger_events.
+
+**Supervisor** (`lib/fizz/triggers/supervisor.ex`):
+
+`Fizz.Triggers.Supervisor`:
+- Strategy: `:rest_for_one` (Registry must start before pollers).
+- Children: `Fizz.Triggers.Registry`.
+- Schedule poller and event stream supervisor will be added in Phase 8.
+
+**Config**:
+
+Modify `config/config.exs`:
+- Add `triggers: 20` to Oban queues.
+- Add `{"* * * * *", Fizz.Triggers.Workers.RegistrationSyncWorker}` to Oban cron plugin.
+
+**Application**:
+
+Modify `lib/fizz/application.ex`:
+- Add `Fizz.Triggers.Supervisor` to children list, after `Fizz.Steps.Registry`.
+
+### Tests
+
+`test/fizz/triggers/trigger_registration_test.exs`:
+- Schema changeset validates required fields
+- Definition-level dedup constraint prevents duplicate `(version_id, step_id)`
+- Run-level dedup constraint prevents duplicate `(run_id, step_id)`
+- Webhook path unique constraint enforced
+
+`test/fizz/triggers/trigger_event_test.exs`:
+- Event dedup constraint on `(registration_id, event_id)`
+
+`test/fizz/triggers/registry_test.exs`:
+- Registry loads registrations into ETS on init
+- `get_by_webhook_path/1` returns matching registration
+- `get_by_webhook_path/1` returns error for unknown path
+- `list_by_kind/2` filters by project and kind
+
+`test/fizz/triggers/workers/trigger_fire_worker_test.exs`:
+- Definition-level (run_id nil): creates new workflow run with triggered_by metadata
+- Run-level (run_id set): delivers signal via signal_run
+- Event recorded in trigger_events table
+
+`test/fizz/triggers/workers/registration_sync_worker_test.exs`:
+- Creates missing registrations for published versions
+- Deactivates registrations for unpublished versions
+- Resets errored registrations past cooldown
+
+`test/fizz/triggers/registration_manager_test.exs`:
+- `sync_on_publish` creates registrations from trigger manifest
+- `sync_on_publish` deactivates previous version registrations
+- Idempotent: re-sync with same config produces no duplicates
+
+`test/fizz/workflows/compiler/trigger_manifest_test.exs`:
+- Compiler extracts trigger_manifest for workflows with trigger steps
+- Compiler rejects trigger steps with incoming connections
+- Trigger manifest includes step_id, type_id, config
+
+### Constraints
+
+- All tables include `project_id` and `workos_organization_id`.
+- Registration kinds match `Fizz.Triggers.RegistrationSpec`: manual, webhook, schedule, polling, subscription, chat.
+- TriggerFireWorker Oban unique constraint: `[:trigger_registration_id, :event_id]`.
+- Do NOT implement specific trigger types (webhook routing, schedule polling, etc.) — that's Phase 8.
+- Do NOT implement advanced triggers (polling, subscription, chat) — those are future phases.
+- The `trigger_manifest` is metadata extracted at compile time. It does NOT affect Runic workflow execution — triggers are assembled as normal Runic steps whose `execute/3` receives normalized input.
+- Remember: Ecto `:string` type for both string and text columns. Use `Ecto.Changeset.get_field/2` for changeset field access. Don't use map access on structs.
+- Use `start_supervised!/1` in tests for process cleanup.
+
+---
+
+## Phase 8: Basic Triggers (Manual, Webhook, Schedule)
+
+### Specs
+
+- `.spec/specs/workflow-triggers.spec.md` (same spec, different scenarios exercised)
+
+### Goal
+
+Wire up the three basic trigger types — manual, webhook, and schedule — and update existing executor stubs to implement `Fizz.Triggers.Behaviour`. After this phase, workflows can be started by API calls, incoming webhooks, and cron schedules.
+
+### What Already Exists
+
+- Phase 7: `Fizz.Triggers.Behaviour`, `RegistrationSpec`, `TriggerRegistration`, `TriggerEvent`, `Fizz.Triggers.Registry` (ETS), `TriggerFireWorker`, `RegistrationSyncWorker`, `RegistrationManager`, compiler trigger_manifest extraction, publish hook.
+- Phase 5: `SignalInbox`, `SignalRouter` for run-level trigger delivery.
+- Existing trigger stubs: `manual_input.ex` (passthrough), `schedule_trigger.ex` (interval config), `on_chat_trigger.ex` (minimal).
+- Integration trigger stubs: `github_trigger.ex`, `slack_trigger.ex`, `gmail_trigger.ex`, etc. — each has metadata and passthrough `execute/3`.
+
+### Deliverables
+
+**Manual Trigger**:
+
+Modify `lib/fizz/steps/executors/manual_input.ex`:
+- Add `@behaviour Fizz.Triggers.Behaviour` (or rely on the `kind: :trigger` macro wire-up from Phase 7).
+- Implement `registration_spec/2`: `{:ok, %RegistrationSpec{kind: :manual, params: %{input_schema: config["input_schema"]}}}`. No external infrastructure needed — this is a marker telling the UI this workflow can be manually triggered and what input schema to present.
+- Implement `normalize_event/2`: passthrough — `{:ok, raw_event}`.
+
+No new infrastructure needed. The existing `Fizz.Workflows.start_run/3` API already serves as the manual trigger path. The registration is purely a discovery/UI concern.
+
+**Schedule Trigger**:
+
+Modify `lib/fizz/steps/executors/schedule_trigger.ex`:
+- Add `@behaviour Fizz.Triggers.Behaviour`.
+- Implement `registration_spec/2`:
+  ```
+  {:ok, %RegistrationSpec{
+    kind: :schedule,
+    params: %{
+      cron: config["cron_expression"],
+      interval_seconds: config["interval_seconds"],
+      timezone: config["timezone"] || "UTC"
+    }
+  }}
+  ```
+- Implement `normalize_event/2`: `{:ok, %{"scheduled_at" => DateTime.to_iso8601(DateTime.utc_now())}}`.
+- Update `@config_schema` to add `cron_expression` (string, optional) alongside `interval_seconds`. One of `cron_expression` or `interval_seconds` must be provided.
+- Update `validate_config/1` to accept either cron or interval.
+
+`Fizz.Triggers.SchedulePoller` (`lib/fizz/triggers/schedule_poller.ex`) — GenServer:
+- Polls every 1 second (configurable).
+- Query: `SELECT * FROM trigger_registrations WHERE kind = 'schedule' AND status = 'active' AND next_fire_at <= now() ORDER BY next_fire_at LIMIT 50 FOR UPDATE SKIP LOCKED`. Transition matched rows to `status = 'firing'`.
+- For each claimed registration: call `normalize_event/2` on the executor, enqueue `TriggerFireWorker` with the normalized data and a generated `event_id` (e.g., `"sched_#{registration_id}_#{next_fire_at_unix}"`).
+- After enqueue: compute next `next_fire_at` from `cron_expression` or `interval_seconds`, update the registration row, reset status to `active`.
+- Stale FIRING recovery: same pattern as `TimerPoller` — scan for firing registrations with stale claimed timestamps, reset to active.
+
+Cron expression parsing: add `{:crontab, "~> 1.1"}` to `mix.exs` dependencies. Use `Crontab.CronExpression.Parser.parse/1` and `Crontab.Scheduler.get_next_run_date/2` for computing `next_fire_at`. If `interval_seconds` is used instead of cron, compute `next_fire_at` as `DateTime.add(now, interval_seconds, :second)`.
+
+Add `Fizz.Triggers.SchedulePoller` to `Fizz.Triggers.Supervisor` children (after `Registry`).
+
+**Webhook Trigger**:
+
+`Fizz.Triggers.Webhook` (`lib/fizz/triggers/webhook.ex`):
+- `generate_path()` — `"wh_" <> Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)`. Produces unpredictable ~22-char tokens.
+- `generate_secret()` — `:crypto.strong_rand_bytes(32) |> Base.encode64()`.
+- `verify_signature(payload_body, secret, signature_header_value, algorithm)` — Compute HMAC-SHA256 (or configured algorithm) and compare with timing-safe equality (`Plug.Crypto.secure_compare/2`).
+
+`FizzWeb.Triggers.WebhookController` (`lib/fizz_web/controllers/triggers/webhook_controller.ex`):
+- Action `receive(conn, %{"webhook_path" => path})`:
+  1. Look up registration via `Fizz.Triggers.Registry.get_by_webhook_path(path)`. Return 404 if not found.
+  2. Verify HMAC signature using `Fizz.Triggers.Webhook.verify_signature/4`. Return 401 if invalid.
+  3. Read the raw body (must be cached in a Plug for HMAC verification).
+  4. Resolve executor via `Fizz.Steps.Executors.Behaviour.resolve!/1`.
+  5. Call `executor.match?(registration.registration_params, raw_body_decoded)`. Return 200 (accepted but filtered) if false.
+  6. Call `executor.normalize_event(registration.registration_params, raw_body_decoded)`. Return 422 if error.
+  7. Generate `event_id` from provider-supplied header (e.g., `X-GitHub-Delivery`) or content hash.
+  8. Enqueue `TriggerFireWorker` with `trigger_registration_id`, `event_id`, `normalized_data`.
+  9. Return 202 Accepted.
+
+Router (`lib/fizz_web/router.ex`):
+- Add a webhook scope OUTSIDE the authenticated browser/API pipelines — webhook endpoints are machine-to-machine and verified by HMAC, not user session:
+  ```
+  scope "/triggers", FizzWeb.Triggers do
+    pipe_through [:api]
+    post "/wh/:webhook_path", WebhookController, :receive
+  end
+  ```
+- Ensure the `:api` pipeline is used (JSON parsing, no CSRF). A raw body reader plug must be added to cache the body for HMAC verification (see Plug.Parsers `:body_reader` option).
+
+**Integration Trigger Stubs** (incremental — start with GitHub as reference):
+
+Modify `lib/fizz/steps/executors/github_trigger.ex`:
+- Add `@behaviour Fizz.Triggers.Behaviour`.
+- Implement `registration_spec/2`: `%RegistrationSpec{kind: :webhook, params: %{events: config["events"], repository: config["repository"]}}`.
+- Implement `match?/2`: check incoming event's `X-GitHub-Event` header against configured `events` list.
+- Implement `normalize_event/2`: extract relevant fields (action, sender, repository, etc.) from GitHub webhook payload into a clean output map.
+
+Other integration triggers (`slack_trigger`, `gmail_trigger`, `notion_trigger`, etc.) follow the same pattern — add behaviour, implement the three callbacks. These can be done incrementally and are not required for Phase 8 completion. The reference pattern from `github_trigger` is sufficient.
+
+**Webhook Registration in RegistrationManager**:
+
+Modify `lib/fizz/triggers/registration_manager.ex`:
+- In `sync_on_publish`, when a trigger's `RegistrationSpec` has `kind: :webhook`: generate `webhook_path` via `Fizz.Triggers.Webhook.generate_path/0` and `webhook_secret` via `Fizz.Triggers.Webhook.generate_secret/0`. Store in the registration row.
+- Preserve existing `webhook_path` and `webhook_secret` if a registration already exists for the same step (avoid breaking existing webhook URLs on re-publish).
+
+### Tests
+
+`test/fizz/steps/executors/manual_input_trigger_test.exs`:
+- `registration_spec/2` returns `%RegistrationSpec{kind: :manual}`
+- `normalize_event/2` passes through input
+
+`test/fizz/steps/executors/schedule_trigger_test.exs`:
+- `registration_spec/2` returns `%RegistrationSpec{kind: :schedule}` with cron params
+- `normalize_event/2` produces `scheduled_at` timestamp
+- `validate_config/1` accepts cron expression or interval_seconds
+- `validate_config/1` rejects missing both cron and interval
+
+`test/fizz/triggers/schedule_poller_test.exs`:
+- Due schedule registration is claimed and TriggerFireWorker enqueued
+- `next_fire_at` is recomputed after fire
+- Concurrent pollers claim disjoint registrations (skip locked)
+- Stale firing registrations are recovered
+
+`test/fizz_web/controllers/triggers/webhook_controller_test.exs`:
+- Valid HMAC → 202 Accepted, TriggerFireWorker enqueued
+- Invalid HMAC → 401 Unauthorized
+- Unknown webhook_path → 404 Not Found
+- `match?` returns false → 200 OK (filtered, no job enqueued)
+- `normalize_event` error → 422 Unprocessable Entity
+
+`test/fizz/triggers/webhook_test.exs`:
+- Path generation produces unique tokens
+- Secret generation produces strong random values
+- Signature verification succeeds with correct secret
+- Signature verification fails with wrong secret
+- Timing-safe comparison used (no early exit)
+
+Integration:
+- Publish workflow with schedule trigger → registration created with `next_fire_at` → SchedulePoller fires → TriggerFireWorker creates run → run executes
+- Publish workflow with webhook trigger → POST to webhook URL → 202 → TriggerFireWorker creates run → run executes
+- Re-publish preserves existing webhook_path (URLs don't break)
+
+### Constraints
+
+- Webhook paths are cryptographically random tokens — NOT sequential, NOT guessable.
+- Webhook routes are OUTSIDE authenticated pipelines. The HMAC signature IS the authentication.
+- The raw request body must be cached for HMAC verification. Use `Plug.Parsers` `:body_reader` option to capture raw bytes before JSON parsing.
+- Rate limiting per-registration is deferred to a future phase.
+- Chat trigger (`on_chat_trigger`) is deferred — it requires session management that depends on the LiveView chat UI.
+- Advanced patterns (polling, subscription, event stream) are deferred to future phases.
+- Integration trigger stubs (github, slack, gmail, etc.) are incremental — start with `github_trigger` as the reference, others follow the same pattern.
+- Add `{:crontab, "~> 1.1"}` dependency for cron expression parsing. Run `mix deps.get` after adding.
+- Remember: Ecto `:string` type for both string and text columns. Don't nest modules in the same file.
+- Use `start_supervised!/1` in tests. Use `Process.monitor/1` + `assert_receive {:DOWN, ...}` instead of `Process.sleep`.
