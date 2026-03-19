@@ -1,5 +1,18 @@
 defmodule Fizz.Workflows.Compiler do
-  @moduledoc false
+  @moduledoc """
+  Compiles a published workflow definition version into a reusable
+  `Runic.Workflow`.
+
+  Compilation is the structural step of the runtime pipeline:
+
+  - normalize the authored workflow definition
+  - compile dynamic expressions into runtime access plans
+  - assemble the final Runic graph
+  - derive a deterministic compiled hash from the normalized definition
+
+  Runtime concerns such as the current scope, run ids, and credential lookup are
+  attached later by `Fizz.Workflows.Runtime.ContextBuilder`.
+  """
 
   alias Fizz.Workflows.Compiler.Assembler
   alias Fizz.Workflows.Compiler.ExpressionCompiler
@@ -9,10 +22,17 @@ defmodule Fizz.Workflows.Compiler do
 
   @compiler_version 3
 
+  @doc """
+  Returns the current compiler version used in compiled workflow metadata.
+  """
   def compiler_version, do: @compiler_version
 
   @spec compile(WorkflowDefinitionVersion.t()) ::
           {:ok, Runic.Workflow.t(), String.t()} | {:error, [map()]}
+  @doc """
+  Compiles a published workflow definition version into a `Runic.Workflow` and
+  its deterministic compiled hash.
+  """
   def compile(%WorkflowDefinitionVersion{} = version) do
     with {:ok, ir} <- Normalizer.normalize(version),
          {:ok, compiled_ir} <- ExpressionCompiler.compile(ir),

@@ -5,6 +5,8 @@ defmodule Fizz.WorkflowsTest do
 
   alias Fizz.Accounts.Scope
   alias Fizz.Workflows
+  alias Fizz.Workflows.Runner.Worker
+  alias Fizz.WorkflowsFixtures
 
   test "create definition with initial empty draft" do
     scope = project_scope_fixture()
@@ -232,6 +234,62 @@ defmodule Fizz.WorkflowsTest do
     assert {:ok, []} = Workflows.list_definitions(scope)
   end
 
+  test "start_run executes steps and transitions to completed" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+    %{version: version} = WorkflowsFixtures.published_version_fixture(scope)
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"name" => "Ada"})
+
+    completed_run =
+      eventually(fn ->
+        with {:ok, workflow_run} <- Workflows.get_run(scope, run.id),
+             true <- workflow_run.status == :completed do
+          {:ok, workflow_run}
+        else
+          _ -> :retry
+        end
+      end)
+
+    assert completed_run.status == :completed
+    assert completed_run.output != nil
+  end
+
+  test "cancel_run transitions the run to cancelled and stops the worker" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+
+    %{version: version} =
+      WorkflowsFixtures.published_version_fixture(
+        scope,
+        WorkflowsFixtures.long_running_snapshot_attrs(1_000)
+      )
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"name" => "Ada"})
+
+    pid =
+      eventually(fn ->
+        case Worker.lookup(run.id) do
+          nil ->
+            :retry
+
+          worker_pid ->
+            state = :sys.get_state(worker_pid)
+
+            if map_size(state.active_tasks) > 0 do
+              {:ok, worker_pid}
+            else
+              :retry
+            end
+        end
+      end)
+
+    ref = Process.monitor(pid)
+
+    assert {:ok, cancelled_run} = Workflows.cancel_run(scope, run.id)
+    assert cancelled_run.status == :cancelled
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+    assert {:ok, %{status: :cancelled}} = Workflows.get_run(scope, run.id)
+  end
+
   defp definition_fixture(scope) do
     {:ok, %{definition: definition, draft: draft}} =
       Workflows.create_definition(scope, %{
@@ -309,4 +367,21 @@ defmodule Fizz.WorkflowsTest do
   defp assert_message!(messages, expected_substring) do
     assert Enum.any?(messages, &String.contains?(&1, expected_substring))
   end
+
+  defp eventually(fun, attempts \\ 50)
+
+  defp eventually(fun, attempts) when attempts > 0 do
+    case fun.() do
+      {:ok, value} ->
+        value
+
+      :retry ->
+        receive do
+        after
+          20 -> eventually(fun, attempts - 1)
+        end
+    end
+  end
+
+  defp eventually(_fun, 0), do: flunk("condition was not met in time")
 end

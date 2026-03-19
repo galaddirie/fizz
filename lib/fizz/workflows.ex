@@ -1,11 +1,29 @@
 defmodule Fizz.Workflows do
+  @moduledoc """
+  Project-scoped context for workflow authoring, compilation, and run lifecycle
+  management.
+
+  This context owns both sides of the workflow system:
+
+  - definition CRUD and publishing for authored workflow graphs
+  - runtime operations for creating, looking up, cancelling, and passivating
+    workflow runs
+
+  Phase 4 extends the context with the runtime entrypoints that turn a published
+  `WorkflowDefinitionVersion` into a durable `WorkflowRun` backed by a worker,
+  lease, and checkpoint store.
+  """
+
   import Ecto.Query
 
   alias Ecto.Multi
   alias Fizz.Accounts.{Project, Scope}
   alias Fizz.Repo
   alias Fizz.Workflows.Compiler
-  alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion}
+  alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
+  alias Fizz.Workflows.Runtime.ContextBuilder
+  alias Fizz.Workflows.Store.SqliteStore
+  alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun}
 
   @default_snapshot_attrs %{
     steps: [],
@@ -14,14 +32,19 @@ defmodule Fizz.Workflows do
     viewport: WorkflowDefinitionVersion.default_viewport(),
     settings: %{}
   }
+  @run_statuses WorkflowRun.statuses()
 
   @type error_reason ::
           :definition_not_found
           | :not_a_draft
           | :project_scope_required
           | :published_version_not_found
+          | :run_not_found
+          | :signal_not_implemented
           | :unauthenticated
           | :version_not_found
+          | [map()]
+          | term()
           | Ecto.Changeset.t()
 
   @spec create_definition(Scope.t() | nil, map()) ::
@@ -181,6 +204,157 @@ defmodule Fizz.Workflows do
     end
   end
 
+  @spec start_run(Scope.t() | nil, %WorkflowDefinitionVersion{} | String.t(), term()) ::
+          {:ok, %WorkflowRun{}} | {:error, error_reason()}
+  @doc """
+  Starts a new workflow run for a published definition version.
+
+  The run is created in `:pending`, a lease row is created and acquired, the
+  workflow is compiled, runtime context is attached, the SQLite checkpoint store
+  is initialized, and a worker is started. Once the worker is ready the run is
+  transitioned to `:running` and the initial input is dispatched.
+  """
+  def start_run(scope, version, input) do
+    with {:ok, version_record} <- fetch_version(scope, version),
+         {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
+      case create_pending_run(scope, version_record, input, compiled_hash) do
+        {:ok, run} ->
+          start_pending_run(scope, run, workflow, compiled_hash, input)
+
+        {:error, _reason} = error ->
+          error
+      end
+    end
+  end
+
+  @spec get_run(Scope.t() | nil, String.t()) :: {:ok, %WorkflowRun{}} | {:error, error_reason()}
+  @doc """
+  Fetches a single workflow run scoped to the current project.
+  """
+  def get_run(scope, run_id) when is_binary(run_id) do
+    with {:ok, project} <- project_from_scope(scope) do
+      run =
+        from(run in WorkflowRun,
+          where: run.project_id == ^project.id and run.id == ^run_id
+        )
+        |> Repo.one()
+
+      case run do
+        %WorkflowRun{} = workflow_run -> {:ok, workflow_run}
+        nil -> {:error, :run_not_found}
+      end
+    end
+  end
+
+  @spec list_runs(Scope.t() | nil, keyword()) ::
+          {:ok, [%WorkflowRun{}]} | {:error, error_reason()}
+  @doc """
+  Lists workflow runs for the current project.
+
+  Supported filters:
+
+  - `:status` - one status or a list of statuses
+  - `:definition_id` - workflow definition id
+  """
+  def list_runs(scope, opts \\ []) do
+    with {:ok, project} <- project_from_scope(scope) do
+      runs =
+        WorkflowRun
+        |> where([run], run.project_id == ^project.id)
+        |> maybe_filter_run_status(Keyword.get(opts, :status))
+        |> maybe_filter_definition_id(Keyword.get(opts, :definition_id))
+        |> order_by([run], desc: run.inserted_at)
+        |> Repo.all()
+
+      {:ok, runs}
+    end
+  end
+
+  @spec cancel_run(Scope.t() | nil, String.t()) ::
+          {:ok, %WorkflowRun{}} | {:error, error_reason()}
+  @doc """
+  Cancels a workflow run and stops its worker if one is active.
+
+  Timer cleanup is currently a stub. Signal routing is added in a later phase.
+  """
+  def cancel_run(scope, run_id) when is_binary(run_id) do
+    with {:ok, run} <- get_run(scope, run_id),
+         :ok <- maybe_stop_worker(run.id, persist: true),
+         {:ok, cancelled_run} <- transition_run_status(run.id, :cancelled) do
+      :ok = cancel_pending_timers(cancelled_run.id)
+      :ok = release_run_lease(cancelled_run.id)
+      {:ok, cancelled_run}
+    end
+  end
+
+  @spec signal_run(Scope.t() | nil, String.t(), String.t(), term(), String.t()) ::
+          {:error, error_reason()}
+  @doc """
+  Placeholder for durable signal delivery.
+
+  Signals are introduced in Phase 5, so this currently returns
+  `{:error, :signal_not_implemented}`.
+  """
+  def signal_run(_scope, _run_id, _signal_name, _payload, _signal_id) do
+    {:error, :signal_not_implemented}
+  end
+
+  @doc false
+  def touch_run_activity(run_id) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      run
+      |> WorkflowRun.touch_last_active()
+      |> Repo.update()
+    end
+  end
+
+  @doc false
+  def complete_run(run_id, output) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      run
+      |> WorkflowRun.transition_status(:completed)
+      |> Ecto.Changeset.change(output: normalize_payload(output), error: nil)
+      |> Repo.update()
+    end
+  end
+
+  @doc false
+  def fail_run(run_id, reason) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      run
+      |> WorkflowRun.transition_status(:failed)
+      |> Ecto.Changeset.change(error: normalize_payload(reason))
+      |> Repo.update()
+    end
+  end
+
+  @doc false
+  def passivate_run(run_id) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      run
+      |> WorkflowRun.transition_status(:passivated)
+      |> Repo.update()
+    end
+  end
+
+  @doc false
+  def list_passivation_candidates(%DateTime{} = idle_before) do
+    from(run in WorkflowRun,
+      where: run.status in ^[:running, :sleeping] and run.last_active_at < ^idle_before,
+      order_by: [asc: run.last_active_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc false
+  def release_run_lease(run_id) when is_binary(run_id) do
+    case Fizz.Workflows.LeaseManager.release(run_id) do
+      :ok -> :ok
+      {:error, :not_owner} -> :ok
+      {:error, _reason} -> :ok
+    end
+  end
+
   defp fetch_definition(scope, %WorkflowDefinition{id: id}), do: fetch_definition(scope, id)
 
   defp fetch_definition(scope, id) when is_binary(id) do
@@ -258,6 +432,177 @@ defmodule Fizz.Workflows do
     }
   end
 
+  defp create_pending_run(scope, version_record, input, compiled_hash) do
+    with {:ok, project} <- project_from_scope(scope) do
+      now = DateTime.utc_now()
+
+      run_attrs = %{
+        workflow_definition_id: version_record.workflow_definition_id,
+        workflow_definition_version_id: version_record.id,
+        project_id: project.id,
+        workos_organization_id: project.workos_organization_id,
+        status: :pending,
+        input: normalize_payload(input) || %{},
+        last_active_at: now,
+        compiled_hash: compiled_hash
+      }
+
+      Multi.new()
+      |> Multi.insert(:run, WorkflowRun.changeset(%WorkflowRun{}, run_attrs))
+      |> Multi.run(:lease, fn repo, %{run: run} ->
+        insert_run_lease(repo, run.id)
+      end)
+      |> Repo.transaction()
+      |> case do
+        {:ok, %{run: run}} -> {:ok, run}
+        {:error, _operation, reason, _changes} -> {:error, reason}
+      end
+    end
+  end
+
+  defp start_pending_run(scope, run, workflow, compiled_hash, input) do
+    with {:ok, fence_token} <- Fizz.Workflows.LeaseManager.acquire(run.id),
+         {:ok, store_state} <- SqliteStore.init(run.id, store_opts(run, fence_token)),
+         {:ok, running_run} <- transition_run_status(run.id, :running),
+         {:ok, pid} <-
+           WorkerSupervisor.start_worker(
+             run_id: run.id,
+             workflow:
+               Runic.Workflow.put_run_context(
+                 workflow,
+                 ContextBuilder.build_run_context(scope, %{
+                   running_run
+                   | compiled_hash: compiled_hash
+                 })
+               ),
+             run_context:
+               ContextBuilder.build_run_context(scope, %{
+                 running_run
+                 | compiled_hash: compiled_hash
+               }),
+             store: store_state,
+             fence_token: fence_token,
+             checkpoint_strategy: checkpoint_strategy(),
+             max_concurrency: max_run_concurrency()
+           ) do
+      :ok = Worker.run(pid, input)
+      {:ok, %{running_run | compiled_hash: compiled_hash}}
+    else
+      {:error, _reason} = error ->
+        cleanup_failed_start(run.id, error)
+        error
+    end
+  end
+
+  defp maybe_filter_run_status(query, nil), do: query
+
+  defp maybe_filter_run_status(query, statuses) do
+    normalized_statuses =
+      statuses
+      |> List.wrap()
+      |> Enum.map(&normalize_run_status/1)
+      |> Enum.reject(&is_nil/1)
+
+    case normalized_statuses do
+      [] -> query
+      values -> where(query, [run], run.status in ^values)
+    end
+  end
+
+  defp maybe_filter_definition_id(query, nil), do: query
+
+  defp maybe_filter_definition_id(query, definition_id) when is_binary(definition_id) do
+    where(query, [run], run.workflow_definition_id == ^definition_id)
+  end
+
+  defp maybe_filter_definition_id(query, _definition_id), do: query
+
+  defp transition_run_status(run_id, new_status, attrs \\ %{}) do
+    with {:ok, run} <- fetch_run(run_id) do
+      run
+      |> WorkflowRun.transition_status(new_status)
+      |> Ecto.Changeset.change(attrs)
+      |> Repo.update()
+    end
+  end
+
+  defp fetch_run(run_id) when is_binary(run_id) do
+    case Repo.get(WorkflowRun, run_id) do
+      %WorkflowRun{} = run -> {:ok, run}
+      nil -> {:error, :run_not_found}
+    end
+  end
+
+  defp insert_run_lease(repo, run_id) do
+    Ecto.Adapters.SQL.query(
+      repo,
+      """
+      INSERT INTO workflow_run_leases (run_id, owner_node, fence_token, checkpoint_seq, lease_expiry)
+      VALUES ($1, NULL, 0, 0, $2)
+      """,
+      [dump_uuid(run_id), DateTime.add(DateTime.utc_now(), -1, :second)]
+    )
+    |> case do
+      {:ok, _result} -> {:ok, :inserted}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp store_opts(run, fence_token) do
+    [
+      org_id: run.workos_organization_id,
+      project_id: run.project_id,
+      fence_token: fence_token,
+      repo: Repo
+    ]
+  end
+
+  defp checkpoint_strategy do
+    Application.get_env(:fizz, __MODULE__, []) |> Keyword.get(:checkpoint_strategy, :every_cycle)
+  end
+
+  defp max_run_concurrency do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:max_concurrency, System.schedulers_online())
+  end
+
+  defp cleanup_failed_start(run_id, reason) do
+    :ok = maybe_stop_worker(run_id, persist: false)
+    :ok = release_run_lease(run_id)
+
+    case Repo.get(WorkflowRun, run_id) do
+      %WorkflowRun{status: :pending} = run ->
+        _ = Repo.delete(run)
+        _ = delete_run_lease(run.id)
+        :ok
+
+      %WorkflowRun{} ->
+        _ = fail_run(run_id, reason)
+        :ok
+
+      nil ->
+        :ok
+    end
+  end
+
+  defp delete_run_lease(run_id) do
+    Ecto.Adapters.SQL.query(
+      Repo,
+      "DELETE FROM workflow_run_leases WHERE run_id = $1",
+      [dump_uuid(run_id)]
+    )
+  end
+
+  defp maybe_stop_worker(run_id, opts) do
+    case Worker.stop(run_id, opts) do
+      :ok -> :ok
+      {:error, :not_found} -> :ok
+      {:error, _reason} -> :ok
+    end
+  end
+
+  defp cancel_pending_timers(_run_id), do: :ok
+
   defp latest_draft_version(definition_id) do
     from(version in WorkflowDefinitionVersion,
       where: version.workflow_definition_id == ^definition_id and version.status == :draft,
@@ -307,4 +652,46 @@ defmodule Fizz.Workflows do
       Ecto.Changeset.add_error(acc, :steps, error.message)
     end)
   end
+
+  defp normalize_payload(nil), do: nil
+
+  defp normalize_payload(value) when is_map(value) do
+    normalize_json(value)
+  end
+
+  defp normalize_payload(value) do
+    %{"value" => normalize_json(value)}
+  end
+
+  defp normalize_json(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp normalize_json(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+
+  defp normalize_json(value) when is_map(value) do
+    Map.new(value, fn {key, nested_value} -> {to_string(key), normalize_json(nested_value)} end)
+  end
+
+  defp normalize_json(value) when is_list(value), do: Enum.map(value, &normalize_json/1)
+
+  defp normalize_json(value) when is_binary(value) or is_number(value) or is_boolean(value),
+    do: value
+
+  defp normalize_json(nil), do: nil
+  defp normalize_json(value), do: inspect(value)
+
+  defp normalize_run_status(status) when status in @run_statuses, do: status
+
+  defp normalize_run_status(status) when is_binary(status) do
+    status
+    |> String.trim()
+    |> case do
+      "" -> nil
+      value -> String.to_existing_atom(value)
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp normalize_run_status(_status), do: nil
+
+  defp dump_uuid(run_id), do: Ecto.UUID.dump!(run_id)
 end
