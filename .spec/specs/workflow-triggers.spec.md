@@ -65,7 +65,7 @@ surface:
   stability: stable
 
 - id: workflows.triggers.registration_sync_reconciliation
-  statement: A periodic Oban cron worker (RegistrationSyncWorker) reconciles the trigger_registrations table by creating missing registrations for published versions, deactivating registrations for unpublished or archived versions, and resetting errored registrations past their cooldown period.
+  statement: A periodic Oban cron worker (RegistrationSyncWorker) reconciles the trigger_registrations table by creating missing registrations for published versions, deactivating registrations for unpublished or archived versions, resetting errored registrations past their cooldown period, and re-enqueuing missing Oban scheduled jobs for active schedule registrations (safety net for lost job chains).
   priority: must
   stability: stable
 
@@ -93,6 +93,7 @@ surface:
     - two trigger_registrations rows are created with status active
     - the webhook registration has a generated webhook_path and webhook_secret
     - the schedule registration has a computed next_fire_at from the cron expression
+    - the schedule registration has a corresponding Oban TriggerFireWorker job enqueued with scheduled_at set to next_fire_at
     - both registrations reference the definition version and project
   covers:
     - workflows.triggers.definition_level_registration
@@ -118,13 +119,14 @@ surface:
 
 - id: workflows.triggers.schedule_fire_creates_run
   given:
-    - a schedule trigger registration is active with a due next_fire_at
+    - a schedule trigger registration is active with a pending Oban TriggerFireWorker job scheduled for next_fire_at
+    - the scheduled time arrives
   when:
-    - the SchedulePoller detects the timer is due
+    - Oban executes the TriggerFireWorker job
   then:
-    - a TriggerFireWorker job is enqueued with schedule metadata
-    - the worker creates a new workflow run
-    - next_fire_at is recomputed from the cron expression and updated
+    - the worker creates a new workflow run with schedule metadata
+    - next_fire_at is recomputed from the cron expression and updated on the registration
+    - a new TriggerFireWorker job is enqueued with scheduled_at set to the new next_fire_at (self-perpetuating chain)
   covers:
     - workflows.triggers.fire_routing
     - workflows.triggers.definition_level_registration

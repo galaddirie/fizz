@@ -115,7 +115,7 @@ end
 |------|--------------|----------------|
 | `:manual` | No external source. User-initiated via API/UI. | None — registration is a no-op marker |
 | `:webhook` | HTTP POST to a generated URL | `WebhookRouter` plug |
-| `:schedule` | Cron expression or interval | `SchedulePoller` GenServer |
+| `:schedule` | Cron expression or interval | Oban scheduled job chaining via `TriggerFireWorker` |
 | `:polling` | Periodic API polling with cursor | `EventStreamSupervisor` consumer |
 | `:subscription` | Push-based subscription (PubSub, reactive) | `EventStreamSupervisor` consumer |
 | `:chat` | Conversational session initiation | Chat UI integration |
@@ -140,7 +140,7 @@ Publish workflow definition version
   → Pollers / WebhookRouter / Consumers begin watching
 
 External event arrives
-  → Listener (WebhookRouter / SchedulePoller / StreamConsumer)
+  → Listener (WebhookRouter / Oban scheduled job / StreamConsumer)
   → match?(config, event) filter
   → normalize_event(config, event) shaping
   → Enqueue TriggerFireWorker (Oban)
@@ -348,14 +348,6 @@ Fizz.Application
 │   │   Subscribes to PG LISTEN/NOTIFY channel "trigger_registrations".
 │   │   Provides lookup APIs for WebhookRouter and pollers.
 │   │
-│   ├── Fizz.Triggers.SchedulePoller            (GenServer)
-│   │   Polls trigger_registrations WHERE kind='schedule'
-│   │     AND next_fire_at <= now() AND status = 'active'
-│   │   Uses FOR UPDATE SKIP LOCKED for multi-node safety.
-│   │   Computes next_fire_at from cron_expression after each fire.
-│   │   Enqueues TriggerFireWorker for each due schedule.
-│   │   Poll interval: 1s for near-term, 60s sweep.
-│   │
 │   └── Fizz.Triggers.EventStreamSupervisor     (DynamicSupervisor)
 │       Manages long-lived consumer processes for polling/subscription triggers.
 │       Each consumer is a GenServer that:
@@ -442,6 +434,7 @@ This worker:
 2. Finds registrations for unpublished/archived versions → deactivates them
 3. Finds errored registrations past cooldown → resets to active
 4. Finds active polling registrations without running consumers → signals EventStreamSupervisor to start them
+5. Finds active schedule registrations without a pending Oban job → enqueues the next scheduled TriggerFireWorker job (safety net for lost chains)
 
 ### WebhookRouter
 
@@ -512,7 +505,7 @@ end
 
 **What it is**: Time-based recurring execution — every N seconds, or a cron expression.
 
-**Mapping**: `trigger_registrations` with `kind = 'schedule'`, `cron_expression`, and `next_fire_at`. The `SchedulePoller` is structurally identical to the `TimerPoller` from the durable system design (Section 11), but operates on `trigger_registrations` instead of `durable_timers`.
+**Mapping**: `trigger_registrations` with `kind = 'schedule'`, `cron_expression`, and `next_fire_at`. Instead of a custom `SchedulePoller` GenServer, schedule triggers use **self-chaining Oban scheduled jobs** — Oban's existing SKIP LOCKED polling handles multi-node safety, and the `TriggerFireWorker` itself perpetuates the chain.
 
 **Registration spec**:
 ```elixir
@@ -529,24 +522,18 @@ def registration_spec(config, _context) do
 end
 ```
 
-**Schedule computation**: After each fire, compute next occurrence from cron expression. Store as `next_fire_at`. The poller query is:
+**Schedule computation via Oban job chaining**: When a schedule registration becomes active (at publish time), the `RegistrationManager` computes the first `next_fire_at` from the cron expression and inserts a `TriggerFireWorker` Oban job with `scheduled_at: next_fire_at`. When that job executes, the worker:
 
-```sql
-UPDATE trigger_registrations
-SET status = 'firing'  -- temporary lock
-WHERE id IN (
-    SELECT id FROM trigger_registrations
-    WHERE kind = 'schedule'
-      AND status = 'active'
-      AND next_fire_at <= now()
-    ORDER BY next_fire_at
-    LIMIT 50
-    FOR UPDATE SKIP LOCKED
-)
-RETURNING *;
-```
+1. Fires the trigger (creates a new workflow run with schedule metadata)
+2. Computes the next occurrence from the cron expression
+3. Updates `trigger_registrations.next_fire_at` (denormalized for UI display and RegistrationSyncWorker reconciliation)
+4. Enqueues the next `TriggerFireWorker` with `scheduled_at: new_next_fire_at`
 
-After enqueueing the `TriggerFireWorker`, update `next_fire_at` and reset status to `active`.
+This creates a self-perpetuating chain of Oban jobs. Oban's existing `FOR UPDATE SKIP LOCKED` polling handles multi-node safety. Oban's unique job constraints prevent double-scheduling.
+
+**Pause/Unpause**: Pausing a schedule registration cancels the pending Oban job via `Oban.cancel_job/1`. Unpausing computes the next fire time and enqueues a new job. The `RegistrationSyncWorker` acts as a safety net — if a schedule registration is active but has no pending Oban job (lost chain due to crash or cancellation error), it re-enqueues one.
+
+**Why not a custom SchedulePoller?** A dedicated GenServer polling `trigger_registrations WHERE kind = 'schedule' AND next_fire_at <= now()` would reimplement Oban's core mechanism (Postgres polling with SKIP LOCKED claiming). Schedule triggers don't need sub-second precision — a "every weekday at 9am" cron doesn't care about 1s of polling jitter. Using Oban directly eliminates a custom GenServer, consolidates DB polling, and gains Oban Web visibility into schedule fires.
 
 **Executor contract**: `execute(config, %{"scheduled_at" => iso8601, "occurrence" => n}, context)` → `{:ok, output}`
 
@@ -793,7 +780,7 @@ end
 | Concern | Mechanism |
 |---------|-----------|
 | Registration persistence | Postgres `trigger_registrations` — survives any deploy/failure |
-| Schedule firing | `SchedulePoller` uses `FOR UPDATE SKIP LOCKED` — multi-node safe, no double-fires |
+| Schedule firing | Oban scheduled jobs with unique constraints — multi-node safe via Oban's built-in `FOR UPDATE SKIP LOCKED`, no double-fires |
 | Stream consumers | Advisory lock per registration_id — prevents duplicate consumers across nodes |
 | Webhook routing | `Fizz.Triggers.Registry` loads from Postgres into ETS — any node handles any webhook |
 | Registry sync | LISTEN/NOTIFY for real-time + periodic full sync as fallback |
@@ -916,7 +903,7 @@ Every trigger fire produces a structured log entry with: `trigger_registration_i
 
 - Manual trigger: wire run creation API to trigger manifest
 - Webhook trigger: `WebhookController`, path generation, HMAC verification
-- Schedule trigger: `SchedulePoller`, cron expression parsing
+- Schedule trigger: Oban scheduled job chaining, cron expression parsing
 - Update existing trigger executors to implement `registration_spec/2` and `normalize_event/2`
 - Compiler integration: trigger_manifest extraction, publish hook
 
