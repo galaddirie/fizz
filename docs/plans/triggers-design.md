@@ -8,7 +8,7 @@
 
 The durable workflow platform has an execution kernel (Runic Runner, per-execution SQLite, Postgres control plane) but no mechanism to *start* or *wake* workflow executions from the outside world. Current trigger step executors (`manual_input`, `schedule_trigger`, `on_chat_trigger`) are thin stubs — they define metadata and a passthrough `execute/3`, but the registration, lifecycle, and routing machinery doesn't exist.
 
-This design covers the full trigger surface: basics (manual, webhook, schedule, chat) and advanced patterns (persistent connections, event streams, compound/multi-signal, reactive, presence). The durable execution model — cheap passivation, instant resumability, months-long sleep — unlocks trigger patterns impossible on conventional platforms.
+This design covers the full trigger surface: basics (manual, webhook, schedule, chat) and advanced patterns (persistent connections, event streams, reactive, presence). The durable execution model — cheap passivation, instant resumability, months-long sleep — unlocks trigger patterns impossible on conventional platforms.
 
 ### Fizz Repo Mapping
 
@@ -120,7 +120,7 @@ end
 | `:subscription` | Push-based subscription (PubSub, reactive) | `EventStreamSupervisor` consumer |
 | `:chat` | Conversational session initiation | Chat UI integration |
 
-**Note on composed patterns**: The advanced trigger patterns (persistent connection, compound/multi-signal, presence) do NOT get their own registration kinds. They compose from the kinds above: persistent connections use `:webhook` or `:subscription` plus signals; compound triggers are multiple registrations of any kind that converge at a Join; presence is composed from signals + durable timers. This is deliberate — keeping the kind enum small keeps the infrastructure simple.
+**Note on composed patterns**: The advanced trigger patterns (persistent connection, presence) do NOT get their own registration kinds. They compose from the kinds above: persistent connections use `:webhook` or `:subscription` plus signals; presence is composed from signals + durable timers. This is deliberate — keeping the kind enum small keeps the infrastructure simple.
 
 ---
 
@@ -203,39 +203,11 @@ Each trigger independently creates a new workflow run when it fires. The trigger
 
 **Example**: A "customer support" workflow has both a webhook trigger (from Zendesk) and a manual trigger (from the operator console). Either one can start a case. The workflow definition has two root trigger steps; each independently creates runs.
 
-### 5.2 All-Of (Compound Trigger via Join)
+### 5.2 Clarification: Triggers vs. Signals
 
-When multiple trigger root nodes converge at a Join step, the platform detects a compound trigger group at compile time. The semantics:
+Each trigger independently creates a new run. Multi-condition convergence patterns — where a workflow must wait for multiple external conditions before proceeding (e.g., "approval received AND payment confirmed AND identity verified") — belong to the **signal** system, not the trigger system.
 
-1. **First trigger fires** → creates a new workflow run in `SLEEPING` status. The trigger step's output is recorded as a fact in the workflow state. The run checkpoints and sleeps.
-2. **Subsequent triggers fire** → the `TriggerFireWorker` looks up the pending compound run for this definition + group key. Delivers each trigger's event as a signal to the sleeping run.
-3. **Join activates** → when all trigger inputs are present, the Join step fires and the workflow proceeds.
-
-```
-  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-  │  Webhook     │     │  Schedule    │     │  Feature     │
-  │  Trigger     │     │  Trigger     │     │  Flag Check  │
-  └──────┬──────┘     └──────┬──────┘     └──────┬──────┘
-         │                   │                   │
-         └───────────┬───────┴───────────────────┘
-                     │
-              ┌──────▼──────┐
-              │    Join      │  ← waits for all three
-              └──────┬──────┘
-                     │
-              ┌──────▼──────┐
-              │  Workflow    │
-              │  continues   │
-              └─────────────┘
-```
-
-**Detection at compile time**: The normalizer identifies trigger roots that share a downstream Join. It stores `compound_group_id` in the trigger manifest. The `TriggerFireWorker` uses this to route subsequent fires to the pending run instead of creating new ones.
-
-**Pending run lookup**: `workflow_runs` with `status = 'SLEEPING'` and `triggered_by->>'compound_group_id' = ?` and `workflow_definition_version_id = ?`. If no pending run exists, the first fire creates one.
-
-### 5.3 Mix-and-Match
-
-A single workflow can have both any-of triggers and compound trigger groups. The compiler validates each trigger root's convergence independently.
+A workflow started by a webhook trigger can subsequently wait for approval signals, timer signals, or other external events using signal wait steps. These blocking waits are signals delivered to an already-running workflow, not additional triggers. This keeps the trigger model simple: one trigger fires → one run starts.
 
 ---
 
@@ -276,9 +248,6 @@ CREATE TABLE trigger_registrations (
     poll_interval_ms        INTEGER,
     last_polled_at          TIMESTAMPTZ,
     batch_size              INTEGER DEFAULT 100,
-
-    -- Compound trigger group (NULL if not compound)
-    compound_group_id       TEXT,
 
     -- Error tracking
     error_message           TEXT,
@@ -330,7 +299,6 @@ ALTER TABLE workflow_runs
     --   "trigger_step_id": "step-id",
     --   "trigger_kind": "webhook",
     --   "event_id": "dedup-key",
-    --   "compound_group_id": "group-id" | null,
     --   "received_at": "2026-03-18T..."
     -- }
 ```
@@ -702,39 +670,7 @@ Polling loop:
 
 **Use cases**: Email processing (Gmail API polling), Slack message aggregation, IoT sensor data batching, log analysis pipelines, RSS/Atom feed monitoring.
 
-### 8.7 Compound / Multi-Signal Trigger
-
-**What it is**: A workflow that only starts when N different conditions are all true. Multiple trigger sources must all fire before the workflow proceeds.
-
-**Mapping**: Uses existing Runic Join step semantics. Multiple trigger roots converge at a Join node. The compiler detects this pattern and marks the trigger group with a `compound_group_id`.
-
-**How it works**:
-
-1. First trigger fires → `TriggerFireWorker` checks `compound_group_id` on the registration
-2. No pending compound run exists → create one in `SLEEPING` status with `triggered_by.compound_group_id`
-3. Record which trigger step fired in the run's state (via signal delivery)
-4. Run checkpoints and sleeps
-
-5. Second trigger fires → `TriggerFireWorker` looks up pending compound run:
-   ```sql
-   SELECT run_id FROM workflow_runs
-   WHERE workflow_definition_version_id = ?
-     AND status IN ('SLEEPING', 'RUNNING')
-     AND triggered_by->>'compound_group_id' = ?
-   ORDER BY created_at DESC
-   LIMIT 1
-   FOR UPDATE SKIP LOCKED
-   ```
-6. Delivers signal to the existing run
-7. If all triggers in the group have fired → Join step activates → workflow proceeds
-
-**Race condition prevention**: When two triggers in the same compound group fire simultaneously, both might try to create a pending run. The `TriggerFireWorker` uses a Postgres advisory lock on `pg_advisory_xact_lock(hashtext(compound_group_id))` before the lookup-or-create operation. This serializes compound run creation per group without blocking unrelated triggers.
-
-**Timeout**: Compound triggers should have a configurable timeout. If not all triggers fire within the window, the pending run is cancelled. Implemented as a durable timer created alongside the first trigger fire.
-
-**Use cases**: Deploy gate (code review approved AND tests pass AND deploy window open), compliance workflow (document submitted AND payment received AND identity verified), release pipeline (all platform builds succeed).
-
-### 8.8 Reactive Trigger
+### 8.7 Reactive Trigger
 
 **What it is**: A workflow that watches another workflow's state changes or completion.
 
@@ -770,7 +706,7 @@ Matching registrations fire via `TriggerFireWorker` with the completed run's met
 
 **Use cases**: Pipeline orchestration (workflow B starts when workflow A completes), error alerting (notification workflow triggers when any workflow fails), audit trail (logging workflow captures all workflow completions).
 
-### 8.9 Long-Poll / Presence Trigger
+### 8.8 Long-Poll / Presence Trigger
 
 **What it is**: A collaborative session where the workflow is shared state, kept warm by participant presence, passivated when everyone leaves.
 
@@ -795,8 +731,6 @@ Matching registrations fire via `TriggerFireWorker` with the completed run's met
 In the normalization phase (`lib/fizz/workflows/compiler/normalizer.ex`), after `find_entry_steps/2`:
 
 1. **Validate trigger placement**: All steps with `kind: :trigger` must be graph roots (in-degree zero). A trigger step with incoming connections is a compiler error.
-2. **Identify compound groups**: Walk from each trigger root. If multiple trigger roots converge at the same Join step, assign them a shared `compound_group_id`.
-3. **Validate compound compatibility**: Triggers in a compound group must have compatible timing semantics (e.g., don't mix a high-frequency polling trigger with a manual trigger — the manual trigger would block forever).
 
 ### 9.2 Assembler Changes
 
@@ -810,13 +744,11 @@ The assembler adds a `trigger_manifest` to the workflow's `fizz_metadata`:
       step_id: "uuid-1",
       type_id: "webhook_trigger",
       config: %{...},
-      compound_group_id: nil
     },
     %{
       step_id: "uuid-2",
       type_id: "schedule_trigger",
-      config: %{...},
-      compound_group_id: nil
+      config: %{...}
     }
   ]
 }
@@ -845,7 +777,6 @@ defmodule Fizz.Triggers.RegistrationManager do
         kind: spec.kind,
         registration_params: spec.params,
         config_digest: hash(spec),
-        compound_group_id: trigger.compound_group_id
       })
     end
 
@@ -894,9 +825,9 @@ A webhook-triggered workflow publishes and immediately sleeps. Its registration 
 
 ### 12.2 Cumulative Triggers
 
-A compound trigger that accumulates events over days or weeks. The first event creates a sleeping run. Each subsequent event delivers a signal, updating an Accumulator step. A timer fires weekly to check if the accumulation threshold is met. If yes, the workflow proceeds. If no, it resets the timer and sleeps again.
+A single trigger (e.g., webhook or polling) starts a workflow run that accumulates events over days or weeks. Subsequent events arrive as signals to the running workflow, updating an Accumulator step. A durable timer fires periodically to check if the accumulation threshold is met. If yes, the workflow proceeds. If no, it resets the timer and sleeps again.
 
-**Example**: "Alert me when total API errors from three different services exceed 1000 in a rolling 7-day window."
+**Example**: "Alert me when total API errors from three different services exceed 1000 in a rolling 7-day window." — a webhook trigger starts the run on the first error event; subsequent errors arrive as signals.
 
 ### 12.3 Session Resumption
 
@@ -960,7 +891,6 @@ fizz.triggers.webhook.response_time       (histogram)
 fizz.triggers.schedule.fire_lag           (histogram — scheduled_at vs actual)
 fizz.triggers.polling.events_per_poll     (histogram)
 fizz.triggers.polling.cursor_lag          (gauge — how far behind the consumer is)
-fizz.triggers.compound.pending_runs       (gauge — runs waiting for remaining triggers)
 fizz.triggers.error.count                 (counter, by kind + error_type)
 ```
 
@@ -993,7 +923,6 @@ Every trigger fire produces a structured log entry with: `trigger_registration_i
 ### Phase 3: Advanced Triggers
 
 - Event stream consumers: `EventStreamSupervisor`, `GenericPoller`, cursor management
-- Compound trigger detection and routing: compiler pass, pending run lookup
 - Run-level subscriptions: dynamic registration creation, signal delivery path
 - Chat trigger: session management, message-as-signal delivery
 - Reactive trigger: workflow lifecycle hooks, subscription matching
