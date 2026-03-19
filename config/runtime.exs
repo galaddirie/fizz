@@ -23,9 +23,45 @@ if System.get_env("PHX_SERVER") do
   config :fizz, FizzWeb.Endpoint, server: true
 end
 
+if config_env() == :dev do
+  System.put_env(
+    "LITESTREAM_ACCESS_KEY_ID",
+    System.get_env("LITESTREAM_ACCESS_KEY_ID", "minioadmin")
+  )
+
+  System.put_env(
+    "LITESTREAM_SECRET_ACCESS_KEY",
+    System.get_env("LITESTREAM_SECRET_ACCESS_KEY", "minioadmin")
+  )
+end
+
 config :fizz, FizzWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+workflow_data_dir_default =
+  case config_env() do
+    :dev -> "priv/workflow_data"
+    _ -> "priv/workflow_data"
+  end
+
+litestream_bucket_default =
+  case config_env() do
+    :dev -> "fizz-workflows-dev"
+    _ -> nil
+  end
+
+litestream_endpoint_default =
+  case config_env() do
+    :dev -> "http://127.0.0.1:9000"
+    _ -> nil
+  end
+
 config :fizz,
+  workflow_data_dir: System.get_env("WORKFLOW_DATA_DIR", workflow_data_dir_default),
+  litestream_s3_bucket: System.get_env("LITESTREAM_S3_BUCKET", litestream_bucket_default),
+  litestream_s3_prefix: System.get_env("LITESTREAM_S3_PREFIX", "workflows"),
+  litestream_aws_region: System.get_env("LITESTREAM_AWS_REGION", "us-east-1"),
+  litestream_s3_endpoint: System.get_env("LITESTREAM_S3_ENDPOINT", litestream_endpoint_default),
+  litestream_s3_skip_verify: System.get_env("LITESTREAM_S3_SKIP_VERIFY") in ~w(1 true TRUE),
   workos_sync_enabled: System.get_env("WORKOS_SYNC_ENABLED") in ~w(1 true TRUE),
   workos_authkit_provider: System.get_env("WORKOS_AUTHKIT_PROVIDER", "authkit"),
   workos_authkit_redirect_uri: System.get_env("WORKOS_AUTHKIT_REDIRECT_URI"),
