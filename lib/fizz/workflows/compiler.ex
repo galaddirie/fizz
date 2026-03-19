@@ -7,7 +7,7 @@ defmodule Fizz.Workflows.Compiler do
   alias Fizz.Workflows.Compiler.Normalizer
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
-  @compiler_version 2
+  @compiler_version 3
 
   def compiler_version, do: @compiler_version
 

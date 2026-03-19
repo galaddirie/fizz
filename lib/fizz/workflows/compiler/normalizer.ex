@@ -35,7 +35,8 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
           executor: executor,
           step_kind: type.step_kind,
           node_role: type.node_role,
-          config_schema: type.config_schema
+          config_schema: type.config_schema,
+          subnode_slots: type.subnode_slots
         }
 
         {:cont, {:ok, Map.put(acc, step.id, normalized_step)}}

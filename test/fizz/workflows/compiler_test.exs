@@ -156,6 +156,63 @@ defmodule Fizz.Workflows.CompilerTest do
     assert [%{"status" => "pending"}] = Workflow.raw_productions(workflow, ids.matched_step)
   end
 
+  test "root steps assemble slot-connected subnodes into runnable input payloads" do
+    {version, ids} = ai_agent_version()
+
+    assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
+
+    workflow =
+      workflow
+      |> Workflow.plan_eagerly(%{"name" => "Ada Lovelace", "topic" => "algebra"})
+      |> Workflow.react_until_satisfied()
+
+    [output] = Workflow.raw_productions(workflow, ids.agent)
+
+    assert output["_primary"] == %{"name" => "Ada Lovelace", "topic" => "algebra"}
+    assert output["provider"] == "openai_api_key"
+    assert output["model"] == "gpt-4.1-mini"
+
+    assert output["messages"] == [
+             %{"role" => "system", "content" => "Solve carefully."},
+             %{"role" => "user", "content" => "Hello Ada Lovelace"}
+           ]
+
+    assert output["tools"] == [
+             %{
+               "type" => "http",
+               "name" => "lookup_user",
+               "description" => "",
+               "request" => %{
+                 "method" => "GET",
+                 "url" => "https://example.com/users/ada-lovelace",
+                 "headers" => %{}
+               }
+             }
+           ]
+  end
+
+  test "compile rejects root steps missing required subnode slots" do
+    version = missing_required_subnode_slot_version()
+
+    assert {:error, [%{message: message}]} = Compiler.compile(version)
+    assert message =~ "missing required subnode slot `prompt`"
+  end
+
+  test "compile rejects subnodes whose type does not match the target slot" do
+    version = invalid_subnode_slot_type_version()
+
+    assert {:error, [%{message: message}]} = Compiler.compile(version)
+    assert message =~ "slot `model`"
+    assert message =~ "got `ai_tool_http`"
+  end
+
+  test "compile rejects unattached subnodes" do
+    version = unattached_subnode_version()
+
+    assert {:error, [%{message: message}]} = Compiler.compile(version)
+    assert message =~ "must be connected to a root slot"
+  end
+
   defp simple_version do
     entry_id = Ecto.UUID.generate()
     debug_id = Ecto.UUID.generate()
@@ -513,5 +570,273 @@ defmodule Fizz.Workflows.CompilerTest do
     }
 
     {version, %{matched_step: matched_id}}
+  end
+
+  defp ai_agent_version do
+    entry_id = Ecto.UUID.generate()
+    agent_id = Ecto.UUID.generate()
+    model_id = Ecto.UUID.generate()
+    prompt_id = Ecto.UUID.generate()
+    tool_id = Ecto.UUID.generate()
+
+    version = %WorkflowDefinitionVersion{
+      id: Ecto.UUID.generate(),
+      steps: [
+        %Step{
+          id: entry_id,
+          type_id: "manual_input",
+          name: "Entry",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: agent_id,
+          type_id: "ai_agent",
+          name: "Agent",
+          config: %{"mode" => "assemble_only"},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: model_id,
+          type_id: "openai_model",
+          name: "Model",
+          config: %{
+            "credential_ref" => credential_ref("openai_api_key"),
+            "model" => "gpt-4.1-mini",
+            "temperature" => 0.3,
+            "max_tokens" => 300
+          },
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: prompt_id,
+          type_id: "ai_prompt_template",
+          name: "Prompt",
+          config: %{
+            "system_prompt" => "Solve carefully.",
+            "user_prompt" => "Hello {{ input.name }}"
+          },
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: tool_id,
+          type_id: "ai_tool_http",
+          name: "Tool",
+          config: %{
+            "name" => "lookup_user",
+            "method" => "GET",
+            "url" => "https://example.com/users/{{ input.name | slugify }}"
+          },
+          position: %{},
+          notes: nil
+        }
+      ],
+      connections: [
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: entry_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "main"
+        },
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: model_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "model"
+        },
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: prompt_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "prompt"
+        },
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: tool_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "tools"
+        }
+      ],
+      step_groups: [],
+      viewport: %{},
+      settings: %{}
+    }
+
+    {version, %{agent: agent_id}}
+  end
+
+  defp missing_required_subnode_slot_version do
+    entry_id = Ecto.UUID.generate()
+    agent_id = Ecto.UUID.generate()
+    model_id = Ecto.UUID.generate()
+
+    %WorkflowDefinitionVersion{
+      id: Ecto.UUID.generate(),
+      steps: [
+        %Step{
+          id: entry_id,
+          type_id: "manual_input",
+          name: "Entry",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: agent_id,
+          type_id: "ai_agent",
+          name: "Agent",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: model_id,
+          type_id: "openai_model",
+          name: "Model",
+          config: %{"credential_ref" => credential_ref("openai_api_key")},
+          position: %{},
+          notes: nil
+        }
+      ],
+      connections: [
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: entry_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "main"
+        },
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: model_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "model"
+        }
+      ],
+      step_groups: [],
+      viewport: %{},
+      settings: %{}
+    }
+  end
+
+  defp invalid_subnode_slot_type_version do
+    entry_id = Ecto.UUID.generate()
+    agent_id = Ecto.UUID.generate()
+    tool_id = Ecto.UUID.generate()
+
+    %WorkflowDefinitionVersion{
+      id: Ecto.UUID.generate(),
+      steps: [
+        %Step{
+          id: entry_id,
+          type_id: "manual_input",
+          name: "Entry",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: agent_id,
+          type_id: "ai_agent",
+          name: "Agent",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: tool_id,
+          type_id: "ai_tool_http",
+          name: "Tool",
+          config: %{"name" => "wrong_slot", "url" => "https://example.com"},
+          position: %{},
+          notes: nil
+        }
+      ],
+      connections: [
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: entry_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "main"
+        },
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: tool_id,
+          source_output: "main",
+          target_step_id: agent_id,
+          target_input: "model"
+        }
+      ],
+      step_groups: [],
+      viewport: %{},
+      settings: %{}
+    }
+  end
+
+  defp unattached_subnode_version do
+    entry_id = Ecto.UUID.generate()
+    model_id = Ecto.UUID.generate()
+    debug_id = Ecto.UUID.generate()
+
+    %WorkflowDefinitionVersion{
+      id: Ecto.UUID.generate(),
+      steps: [
+        %Step{
+          id: entry_id,
+          type_id: "manual_input",
+          name: "Entry",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: debug_id,
+          type_id: "debug",
+          name: "Debug",
+          config: %{},
+          position: %{},
+          notes: nil
+        },
+        %Step{
+          id: model_id,
+          type_id: "openai_model",
+          name: "Model",
+          config: %{"credential_ref" => credential_ref("openai_api_key")},
+          position: %{},
+          notes: nil
+        }
+      ],
+      connections: [
+        %Connection{
+          id: Ecto.UUID.generate(),
+          source_step_id: entry_id,
+          source_output: "main",
+          target_step_id: debug_id,
+          target_input: "main"
+        }
+      ],
+      step_groups: [],
+      viewport: %{},
+      settings: %{}
+    }
+  end
+
+  defp credential_ref(provider) do
+    %{
+      "id" => Ecto.UUID.generate(),
+      "provider" => provider,
+      "auth_type" => "api_key",
+      "owner_user_id" => "user_123"
+    }
   end
 end
