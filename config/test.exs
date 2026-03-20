@@ -1,5 +1,6 @@
 import Config
 config :fizz, Oban, testing: :manual
+config :live_vue, ssr: false
 
 # Configure your database
 #

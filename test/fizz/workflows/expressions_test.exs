@@ -24,6 +24,20 @@ defmodule Fizz.Workflows.ExpressionsTest do
     assert Expressions.resolve(plan, context(%{"name" => "Ada"})) == "Hello Ada"
   end
 
+  test "preview renders value expressions with native types" do
+    orders = [%{"id" => 1}, %{"id" => 2}]
+
+    assert Expressions.preview("{{ input.orders }}", context(%{"orders" => orders})) ==
+             {:ok, orders}
+  end
+
+  test "preview returns parse errors for invalid expressions" do
+    assert {:error, message} =
+             Expressions.preview("{% if input.ok %}", context(%{"ok" => true}))
+
+    assert String.starts_with?(message, "Parse error: ")
+  end
+
   test "validate rejects unsupported filters in strict mode" do
     assert {:error, errors} =
              Expressions.validate("{{ input.name | concat: \"!\" }}",

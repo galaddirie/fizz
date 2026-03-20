@@ -8,8 +8,12 @@ defmodule Fizz.Application do
   @impl true
   def start(_type, _args) do
     children =
-      [
+      []
+      |> maybe_add_child(
         {NodeJS.Supervisor, [path: LiveVue.SSR.NodeJS.server_path(), pool_size: 4]},
+        Application.get_env(:live_vue, :ssr, true)
+      )
+      |> Kernel.++([
         FizzWeb.Telemetry,
         Fizz.Repo,
         Fizz.Workflows.LeaseManager,
@@ -23,7 +27,7 @@ defmodule Fizz.Application do
         {Registry, keys: :unique, name: Fizz.Workflows.Runner.Registry},
         {Task.Supervisor, name: Fizz.Workflows.Runner.TaskSupervisor},
         {Fizz.Workflows.Runner.WorkerSupervisor, name: Fizz.Workflows.Runner.WorkerSupervisor}
-      ]
+      ])
       |> maybe_add_child(
         Fizz.Workflows.TimerPoller,
         Application.get_env(:fizz, Fizz.Workflows.TimerPoller, [])

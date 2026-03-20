@@ -81,6 +81,20 @@ defmodule Fizz.Workflows.Expressions do
     end
   end
 
+  @spec preview(String.t(), map()) :: {:ok, term()} | {:error, String.t()}
+  def preview(expression_string, context) when is_binary(expression_string) and is_map(context) do
+    with {:ok, parsed} <- parse(expression_string),
+         {:ok, plan} <- preview_access_plan(parsed) do
+      {:ok, resolve(plan, context)}
+    else
+      {:error, reason} ->
+        {:error, format_preview_error(reason)}
+    end
+  rescue
+    error ->
+      {:error, "Render error: #{Exception.message(error)}"}
+  end
+
   @spec classify(term()) :: :literal | :value | :template | :predicate
   def classify(value) when not is_binary(value), do: :literal
 
@@ -322,6 +336,28 @@ defmodule Fizz.Workflows.Expressions do
   end
 
   defp classify_parsed(%Solid.Template{}), do: :template
+
+  defp preview_access_plan(parsed) do
+    case classify_parsed(parsed) do
+      :value ->
+        {:ok,
+         %AccessPlan.ValueExpression{
+           path: extract_literal_path(parsed),
+           parsed: parsed,
+           filters: single_object(parsed).filters
+         }}
+
+      :predicate ->
+        {:ok, %AccessPlan.PredicateExpression{parsed: parsed}}
+
+      :template ->
+        {:ok, %AccessPlan.TemplateExpression{parsed: parsed}}
+    end
+  end
+
+  defp format_preview_error("Parse error: " <> _ = message), do: message
+  defp format_preview_error("Render error: " <> _ = message), do: message
+  defp format_preview_error(reason), do: "Parse error: #{reason}"
 
   defp predicate_object?(%Object{filters: filters}) do
     Enum.any?(filters, &MapSet.member?(@predicate_filters, &1.function))

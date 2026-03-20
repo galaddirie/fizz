@@ -4,6 +4,7 @@ defmodule FizzWeb.WorkflowEditorLive do
   use FizzWeb, :verified_routes
 
   alias Fizz.Accounts
+  alias Fizz.Integrations.CredentialsResolver
   alias Fizz.Steps
   alias Fizz.Steps.Type
   alias Fizz.Workflows
@@ -18,7 +19,7 @@ defmodule FizzWeb.WorkflowEditorLive do
   alias Phoenix.Socket.Broadcast
 
   @presence_throttle_ms 60
-  @preview_debounce_ms 150
+  @preview_debounce_ms 300
 
   @structural_command_types ~w(
     add_step
@@ -106,6 +107,9 @@ defmodule FizzWeb.WorkflowEditorLive do
       "preview_expression" ->
         {:noreply, schedule_expression_preview(socket, payload)}
 
+      "search_credentials" ->
+        {:noreply, search_credentials(socket, payload)}
+
       "save_workflow" ->
         {:noreply, persist_draft(socket)}
 
@@ -138,6 +142,17 @@ defmodule FizzWeb.WorkflowEditorLive do
 
       _unsupported ->
         {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("resolve_field_options", payload, socket) do
+    case resolve_field_options(socket, payload) do
+      {:ok, socket, options} ->
+        {:reply, %{options: options}, socket}
+
+      {:error, socket, reason} ->
+        {:reply, %{options: [], error: encode_reason(reason)}, socket}
     end
   end
 
@@ -181,16 +196,30 @@ defmodule FizzWeb.WorkflowEditorLive do
   end
 
   def handle_info(
-        {:preview_expression, key, expression, ref},
+        {:preview_expression, key, step_id, expression, ref},
         %{assigns: %{preview_timers: preview_timers}} = socket
       ) do
-    if Map.get(preview_timers, key) == ref do
-      {:noreply,
-       socket
-       |> update(:preview_timers, &Map.delete(&1, key))
-       |> update(:expression_previews, &Map.put(&1, key, preview_expression_value(expression)))}
-    else
-      {:noreply, socket}
+    case Map.get(preview_timers, key) do
+      ^ref ->
+        preview_context =
+          build_preview_context(
+            step_id,
+            socket.assigns.draft,
+            socket.assigns.editor_state,
+            socket.assigns.step_executions
+          )
+          |> Map.put("workflow", workflow_preview_context(socket.assigns.definition))
+
+        {:noreply,
+         socket
+         |> update(:preview_timers, &Map.delete(&1, key))
+         |> update(
+           :expression_previews,
+           &Map.put(&1, key, preview_expression_value(expression, preview_context))
+         )}
+
+      _ ->
+        {:noreply, socket}
     end
   end
 
@@ -466,27 +495,62 @@ defmodule FizzWeb.WorkflowEditorLive do
   end
 
   defp schedule_expression_preview(socket, payload) do
-    key = preview_key(payload)
-
-    case key do
-      nil ->
-        socket
-
-      key ->
-        if timer_ref = Map.get(socket.assigns.preview_timers, key) do
-          Process.cancel_timer(timer_ref)
+    case preview_request(payload) do
+      {:ok, %{key: key, step_id: step_id, expression: expression}} ->
+        case Map.get(socket.assigns.preview_timers, key) do
+          nil -> :ok
+          timer_ref -> Process.cancel_timer(timer_ref)
         end
 
-        expression = Map.get(payload, "expression") || Map.get(payload, :expression) || ""
         timer_ref = make_ref()
 
         Process.send_after(
           self(),
-          {:preview_expression, key, expression, timer_ref},
+          {:preview_expression, key, step_id, expression, timer_ref},
           @preview_debounce_ms
         )
 
         assign(socket, :preview_timers, Map.put(socket.assigns.preview_timers, key, timer_ref))
+
+      :error ->
+        socket
+    end
+  end
+
+  defp resolve_field_options(socket, payload) do
+    with {:ok, resolver, params} <- field_resolver_request(socket.assigns.draft, payload),
+         {:ok, options} <-
+           resolver.resolve(%{
+             q: resolver_query(payload),
+             params: params,
+             context: resolver_context(socket)
+           }) do
+      {:ok, maybe_push_credential_results(socket, resolver, payload, options), options}
+    else
+      {:error, reason} ->
+        {:error, maybe_push_credential_results(socket, nil, payload, []), reason}
+    end
+  end
+
+  defp search_credentials(socket, payload) do
+    case CredentialsResolver.resolve(%{
+           q: resolver_query(payload),
+           params: search_credentials_params(payload),
+           context: resolver_context(socket)
+         }) do
+      {:ok, options} ->
+        maybe_push_credential_results(socket, CredentialsResolver, payload, options)
+
+      {:error, reason} ->
+        socket
+        |> assign(:credential_options, [])
+        |> push_event(
+          "credential_results",
+          Map.merge(credential_result_metadata(payload), %{
+            error: encode_reason(reason),
+            options: []
+          })
+        )
     end
   end
 
@@ -903,15 +967,378 @@ defmodule FizzWeb.WorkflowEditorLive do
     end
   end
 
-  defp preview_expression_value(expression) do
-    case Expressions.validate(expression) do
-      {:ok, _parsed} ->
-        ""
+  defp preview_request(payload) do
+    step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
+    expression = Map.get(payload, "expression") || Map.get(payload, :expression) || ""
 
-      {:error, errors} ->
+    case preview_key(payload) do
+      key when is_binary(step_id) and is_binary(key) ->
+        {:ok, %{key: key, step_id: step_id, expression: expression}}
+
+      _ ->
+        :error
+    end
+  end
+
+  defp build_preview_context(step_id, draft, editor_state, step_executions) do
+    %{
+      "steps" => build_preview_steps_context(step_id, draft, editor_state, step_executions),
+      "input" => build_preview_input_context(step_id, draft, editor_state, step_executions),
+      "env" => %{}
+    }
+  end
+
+  defp build_preview_steps_context(
+         step_id,
+         %WorkflowDefinitionVersion{} = draft,
+         editor_state,
+         step_executions
+       ) do
+    draft
+    |> upstream_step_ids(step_id)
+    |> Enum.reduce(%{}, fn upstream_step_id, acc ->
+      Map.put(
+        acc,
+        upstream_step_id,
+        preview_output_for_step(upstream_step_id, editor_state, step_executions)
+      )
+    end)
+  end
+
+  defp build_preview_steps_context(_step_id, _draft, _editor_state, _step_executions), do: %{}
+
+  defp build_preview_input_context(
+         step_id,
+         %WorkflowDefinitionVersion{} = draft,
+         editor_state,
+         step_executions
+       ) do
+    step_order = step_order_by_id(draft)
+
+    grouped_inputs =
+      draft
+      |> incoming_connections(step_id)
+      |> Enum.sort_by(&Map.get(step_order, &1.source_step_id, map_size(step_order)))
+      |> Enum.reduce(%{}, fn connection, acc ->
+        target_input =
+          case connection.target_input do
+            target_input when is_binary(target_input) and target_input != "" -> target_input
+            _ -> "main"
+          end
+
+        value = preview_output_for_step(connection.source_step_id, editor_state, step_executions)
+        Map.update(acc, target_input, [value], &(&1 ++ [value]))
+      end)
+
+    collapse_preview_input(grouped_inputs)
+  end
+
+  defp build_preview_input_context(_step_id, _draft, _editor_state, _step_executions), do: %{}
+
+  defp collapse_preview_input(grouped_inputs) do
+    case Map.keys(grouped_inputs) do
+      [] ->
+        %{}
+
+      ["main"] ->
+        collapse_preview_values(Map.fetch!(grouped_inputs, "main"))
+
+      _keys ->
+        Map.new(grouped_inputs, fn {key, values} -> {key, collapse_preview_values(values)} end)
+    end
+  end
+
+  defp collapse_preview_values([value]), do: value
+  defp collapse_preview_values(values), do: values
+
+  defp preview_output_for_step(step_id, editor_state, step_executions) do
+    case Map.fetch(editor_state.pinned_outputs, step_id) do
+      {:ok, pinned_output} ->
+        pinned_output
+
+      :error ->
+        case latest_step_output(step_executions, step_id) do
+          {:ok, output_data} -> output_data
+          :error -> %{}
+        end
+    end
+  end
+
+  defp latest_step_output(step_executions, step_id) do
+    executions =
+      Enum.filter(step_executions, fn step_execution ->
+        fetch_value(step_execution, :step_id) == step_id
+      end)
+
+    latest_execution =
+      executions
+      |> Enum.filter(&single_item_execution?/1)
+      |> pick_latest_execution()
+      |> case do
+        nil -> pick_latest_execution(executions)
+        execution -> execution
+      end
+
+    case latest_execution do
+      nil -> :error
+      execution -> {:ok, fetch_value(execution, :output_data)}
+    end
+  end
+
+  defp single_item_execution?(step_execution) do
+    case fetch_value(step_execution, :item_index) do
+      nil -> true
+      _ -> false
+    end
+  end
+
+  defp pick_latest_execution([]), do: nil
+
+  defp pick_latest_execution(step_executions) do
+    Enum.reduce(step_executions, nil, fn step_execution, latest ->
+      case latest do
+        nil ->
+          step_execution
+
+        latest ->
+          if execution_timestamp(step_execution) >= execution_timestamp(latest) do
+            step_execution
+          else
+            latest
+          end
+      end
+    end)
+  end
+
+  defp execution_timestamp(step_execution) do
+    [
+      fetch_value(step_execution, :completed_at),
+      fetch_value(step_execution, :started_at),
+      fetch_value(step_execution, :inserted_at)
+    ]
+    |> Enum.map(&timestamp_for/1)
+    |> Enum.max(fn -> 0 end)
+  end
+
+  defp timestamp_for(nil), do: 0
+  defp timestamp_for(%DateTime{} = value), do: DateTime.to_unix(value, :microsecond)
+  defp timestamp_for(%NaiveDateTime{} = value), do: NaiveDateTime.to_gregorian_seconds(value)
+  defp timestamp_for(value) when is_integer(value), do: value
+
+  defp timestamp_for(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, parsed, _offset} -> DateTime.to_unix(parsed, :microsecond)
+      _ -> 0
+    end
+  end
+
+  defp timestamp_for(_value), do: 0
+
+  defp incoming_connections(%WorkflowDefinitionVersion{} = draft, step_id) do
+    Enum.filter(draft.connections, &(&1.target_step_id == step_id))
+  end
+
+  defp step_order_by_id(%WorkflowDefinitionVersion{} = draft) do
+    draft.steps
+    |> Enum.with_index()
+    |> Map.new(fn {%Step{id: step_id}, index} -> {step_id, index} end)
+  end
+
+  defp upstream_step_ids(%WorkflowDefinitionVersion{} = draft, step_id) do
+    direct_parents =
+      Enum.reduce(draft.connections, %{}, fn connection, acc ->
+        Map.update(acc, connection.target_step_id, [connection.source_step_id], fn parent_ids ->
+          if connection.source_step_id in parent_ids do
+            parent_ids
+          else
+            parent_ids ++ [connection.source_step_id]
+          end
+        end)
+      end)
+
+    step_order = step_order_by_id(draft)
+
+    step_id
+    |> do_upstream_step_ids(direct_parents, MapSet.new())
+    |> MapSet.to_list()
+    |> Enum.sort_by(&Map.get(step_order, &1, map_size(step_order)))
+  end
+
+  defp do_upstream_step_ids(step_id, direct_parents, visited) do
+    direct_parents
+    |> Map.get(step_id, [])
+    |> Enum.reduce(visited, fn parent_step_id, acc ->
+      case MapSet.member?(acc, parent_step_id) do
+        true ->
+          acc
+
+        false ->
+          updated_visited = MapSet.put(acc, parent_step_id)
+          do_upstream_step_ids(parent_step_id, direct_parents, updated_visited)
+      end
+    end)
+  end
+
+  defp workflow_preview_context(%WorkflowDefinition{} = definition) do
+    %{"id" => definition.id, "name" => definition.name}
+  end
+
+  defp workflow_preview_context(_definition), do: %{}
+
+  defp field_resolver_request(%WorkflowDefinitionVersion{} = draft, payload) do
+    with {:ok, step_id} <- resolver_step_id(payload),
+         {:ok, field_key} <- resolver_field_key(payload),
+         {:ok, step} <- fetch_step(draft, step_id),
+         {:ok, type} <- Steps.get_type(step.type_id),
+         {:ok, field_schema} <- fetch_config_field_schema(type, field_key),
+         {:ok, resolver} <- fetch_field_resolver(field_schema) do
+      {:ok, resolver, merge_resolver_params(field_schema, payload)}
+    end
+  end
+
+  defp field_resolver_request(_draft, _payload), do: {:error, :draft_not_loaded}
+
+  defp resolver_step_id(payload) do
+    case Map.get(payload, "node_id") || Map.get(payload, :node_id) ||
+           Map.get(payload, "step_id") || Map.get(payload, :step_id) do
+      step_id when is_binary(step_id) -> {:ok, step_id}
+      _ -> {:error, :step_id_required}
+    end
+  end
+
+  defp resolver_field_key(payload) do
+    case Map.get(payload, "field_key") || Map.get(payload, :field_key) do
+      field_key when is_binary(field_key) -> {:ok, field_key}
+      _ -> {:error, :field_key_required}
+    end
+  end
+
+  defp fetch_step(%WorkflowDefinitionVersion{} = draft, step_id) do
+    case Enum.find(draft.steps, &(&1.id == step_id)) do
+      %Step{} = step -> {:ok, step}
+      nil -> {:error, :step_not_found}
+    end
+  end
+
+  defp fetch_config_field_schema(%Type{} = type, field_key) do
+    case get_in(type.config_schema, ["properties", field_key]) do
+      field_schema when is_map(field_schema) -> {:ok, field_schema}
+      _ -> {:error, :field_not_found}
+    end
+  end
+
+  defp fetch_field_resolver(field_schema) do
+    case get_in(field_schema, ["ui", "resolver"]) do
+      resolver when is_atom(resolver) ->
+        case Code.ensure_loaded(resolver) do
+          {:module, _module} ->
+            case function_exported?(resolver, :resolve, 1) do
+              true -> {:ok, resolver}
+              false -> {:error, :resolver_not_found}
+            end
+
+          _ ->
+            {:error, :resolver_not_found}
+        end
+
+      _ ->
+        {:error, :resolver_not_found}
+    end
+  end
+
+  defp merge_resolver_params(field_schema, payload) do
+    schema_resolver_params(field_schema)
+    |> Map.merge(payload_resolver_params(payload))
+  end
+
+  defp schema_resolver_params(field_schema) do
+    case get_in(field_schema, ["ui", "params"]) do
+      params when is_map(params) -> params
+      _ -> %{}
+    end
+  end
+
+  defp payload_resolver_params(payload) do
+    params =
+      case Map.get(payload, "params") || Map.get(payload, :params) do
+        params when is_map(params) -> params
+        _ -> %{}
+      end
+
+    params
+    |> maybe_put(
+      "provider_filter",
+      Map.get(payload, "provider_filter") || Map.get(payload, :provider_filter)
+    )
+    |> maybe_put("auth_types", Map.get(payload, "auth_types") || Map.get(payload, :auth_types))
+    |> maybe_put("provider", Map.get(payload, "provider") || Map.get(payload, :provider))
+    |> maybe_put("auth_type", Map.get(payload, "auth_type") || Map.get(payload, :auth_type))
+  end
+
+  defp search_credentials_params(payload) do
+    case payload_resolver_params(payload) do
+      params when is_map(params) -> params
+      _ -> %{}
+    end
+  end
+
+  defp resolver_query(payload) do
+    case Map.get(payload, "q") || Map.get(payload, :q) do
+      query when is_binary(query) -> query
+      _ -> ""
+    end
+  end
+
+  defp resolver_context(socket) do
+    %{current_scope: socket.assigns.current_scope}
+  end
+
+  defp maybe_push_credential_results(socket, CredentialsResolver, payload, options) do
+    socket
+    |> assign(:credential_options, options)
+    |> push_event(
+      "credential_results",
+      Map.merge(credential_result_metadata(payload), %{options: options})
+    )
+  end
+
+  defp maybe_push_credential_results(socket, _resolver, _payload, _options), do: socket
+
+  defp credential_result_metadata(payload) do
+    %{}
+    |> maybe_put(:node_id, Map.get(payload, "node_id") || Map.get(payload, :node_id))
+    |> maybe_put(:step_id, Map.get(payload, "step_id") || Map.get(payload, :step_id))
+    |> maybe_put(:field_key, Map.get(payload, "field_key") || Map.get(payload, :field_key))
+    |> maybe_put(:q, Map.get(payload, "q") || Map.get(payload, :q))
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp preview_expression_value(expression, context) do
+    case Expressions.preview(expression, context) do
+      {:ok, preview_result} ->
+        preview_result
+
+      {:error, "Parse error: " <> message} ->
         %{
           type: "parse_error",
-          errors: errors,
+          message: message,
+          errors: [message],
+          text: expression
+        }
+
+      {:error, "Render error: " <> message} ->
+        %{
+          type: "render_error",
+          message: message,
+          text: expression
+        }
+
+      {:error, message} ->
+        %{
+          type: "render_error",
+          message: message,
           text: expression
         }
     end
@@ -938,4 +1365,13 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp has_payload_key?(payload, string_key, atom_key) do
     Map.has_key?(payload, string_key) or Map.has_key?(payload, atom_key)
   end
+
+  defp fetch_value(map, key) when is_map(map) and is_atom(key) do
+    case Map.fetch(map, key) do
+      {:ok, value} -> value
+      :error -> Map.get(map, Atom.to_string(key))
+    end
+  end
+
+  defp fetch_value(_map, _key), do: nil
 end
