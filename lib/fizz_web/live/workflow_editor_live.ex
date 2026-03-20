@@ -485,6 +485,7 @@ defmodule FizzWeb.WorkflowEditorLive do
     draft = socket.assigns.draft
     scope = socket.assigns.current_scope
     trigger_impact = compute_trigger_impact(draft, scope)
+    execution_hash_changed = compute_execution_hash_changed(draft, socket.assigns.definition)
 
     case DraftValidator.validate_for_publish(draft, scope) do
       :ok ->
@@ -493,7 +494,8 @@ defmodule FizzWeb.WorkflowEditorLive do
         |> push_event("workflow:validation_result", %{
           valid: true,
           validation_errors: [],
-          trigger_impact: trigger_impact
+          trigger_impact: trigger_impact,
+          execution_hash_changed: execution_hash_changed
         })
 
       {:error, errors} ->
@@ -502,7 +504,8 @@ defmodule FizzWeb.WorkflowEditorLive do
         |> push_event("workflow:validation_result", %{
           valid: false,
           validation_errors: Enum.map(errors, &encode_validation_error/1),
-          trigger_impact: trigger_impact
+          trigger_impact: trigger_impact,
+          execution_hash_changed: execution_hash_changed
         })
     end
   end
@@ -514,6 +517,9 @@ defmodule FizzWeb.WorkflowEditorLive do
     with {:ok, draft, seq} <- DraftSession.persist_now(version_id),
          {:ok, persisted_draft} <- Workflows.get_version(scope, version_id) do
       trigger_impact = compute_trigger_impact(persisted_draft, scope)
+
+      execution_hash_changed =
+        compute_execution_hash_changed(persisted_draft, socket.assigns.definition)
 
       case DraftValidator.validate_for_publish(persisted_draft, scope) do
         :ok ->
@@ -545,7 +551,8 @@ defmodule FizzWeb.WorkflowEditorLive do
           |> push_event("workflow:publish_result", %{
             success: false,
             validation_errors: Enum.map(errors, &encode_validation_error/1),
-            trigger_impact: trigger_impact
+            trigger_impact: trigger_impact,
+            execution_hash_changed: execution_hash_changed
           })
       end
     else
@@ -1209,14 +1216,13 @@ defmodule FizzWeb.WorkflowEditorLive do
           project_id: definition.project_id,
           name: definition.name,
           description: definition.description,
-          status: workflow_status(definition),
-          public: false,
-          current_version_tag: version_tag(draft),
+          created_by_user_id: definition.created_by_user_id,
+          archived_at: encode_datetime(definition.archived_at),
+          latest_version: latest_version(definition, draft),
           published_version_id: published_version_id(definition),
-          user_id: definition.created_by_user_id,
           inserted_at: encode_datetime(definition.inserted_at),
           updated_at: encode_datetime(definition.updated_at),
-          draft: encode_draft(draft, definition.id),
+          draft: encode_draft(draft),
           project: %{name: Map.get(assigns, :project_name)}
         }
 
@@ -1225,18 +1231,25 @@ defmodule FizzWeb.WorkflowEditorLive do
     end
   end
 
-  defp workflow_status(%WorkflowDefinition{archived_at: nil}), do: "draft"
-  defp workflow_status(%WorkflowDefinition{}), do: "archived"
-
-  defp version_tag(%WorkflowDefinitionVersion{version: version}) when is_integer(version) do
-    Integer.to_string(version)
+  defp latest_version(
+         %WorkflowDefinition{versions: versions},
+         %WorkflowDefinitionVersion{} = draft
+       )
+       when is_list(versions) do
+    versions
+    |> Enum.map(& &1.version)
+    |> List.insert_at(0, draft.version)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(fn -> nil end)
   end
 
-  defp version_tag(_draft), do: nil
+  defp latest_version(_definition, %WorkflowDefinitionVersion{version: version}), do: version
+  defp latest_version(_definition, _draft), do: nil
 
   defp published_version_id(%WorkflowDefinition{versions: versions}) when is_list(versions) do
     versions
-    |> Enum.find(&(&1.status == :published))
+    |> Enum.filter(&(&1.status == :published))
+    |> Enum.max_by(& &1.version, fn -> nil end)
     |> case do
       %WorkflowDefinitionVersion{id: id} -> id
       nil -> nil
@@ -1245,20 +1258,27 @@ defmodule FizzWeb.WorkflowEditorLive do
 
   defp published_version_id(_definition), do: nil
 
-  defp encode_draft(%WorkflowDefinitionVersion{} = draft, workflow_id) do
+  defp encode_draft(%WorkflowDefinitionVersion{} = draft) do
     %{
       id: draft.id,
-      workflow_id: workflow_id,
+      workflow_definition_id: draft.workflow_definition_id,
+      version: draft.version,
+      status: encode_version_status(draft.status),
       steps: Enum.map(draft.steps, &encode_step/1),
       connections: Enum.map(draft.connections, &encode_connection/1),
-      groups: Enum.map(draft.step_groups, &encode_group/1),
-      triggers: [],
+      step_groups: Enum.map(draft.step_groups, &encode_group/1),
       settings: draft.settings || %{},
       viewport: draft.viewport || %{},
+      compiled_hash: draft.compiled_hash,
+      published_at: encode_datetime(draft.published_at),
+      published_by_user_id: draft.published_by_user_id,
       inserted_at: encode_datetime(draft.inserted_at),
       updated_at: encode_datetime(draft.updated_at)
     }
   end
+
+  defp encode_version_status(status) when is_atom(status), do: Atom.to_string(status)
+  defp encode_version_status(status) when is_binary(status), do: status
 
   defp encode_step(%Step{} = step) do
     %{
@@ -1286,7 +1306,6 @@ defmodule FizzWeb.WorkflowEditorLive do
       id: group.id,
       name: group.name,
       step_ids: group.step_ids || [],
-      output_step_id: List.first(group.step_ids),
       position: group.position || %{},
       color: group.color,
       font_size: group.font_size,
@@ -1325,18 +1344,20 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp encode_execution(%WorkflowRun{} = run) do
     %{
       id: run.id,
-      workflow_id: run.workflow_definition_id,
-      workflow_version_id: run.workflow_definition_version_id,
+      workflow_definition_id: run.workflow_definition_id,
+      workflow_definition_version_id: run.workflow_definition_version_id,
+      project_id: run.project_id,
       status: encode_execution_status(run.status),
-      execution_type: execution_type(run.triggered_by),
       trigger: %{
         type: trigger_type(run.triggered_by),
         data: run.triggered_by || %{}
       },
-      context: run.input || %{},
+      triggered_by: run.triggered_by || %{},
+      input: run.input || %{},
       output: run.output,
       error: encode_execution_error(run.error),
       metadata: %{},
+      compiled_hash: run.compiled_hash,
       triggered_by_user_id: triggered_by_user_id(run.triggered_by),
       started_at: encode_datetime(run.started_at),
       completed_at: encode_datetime(run.completed_at),
@@ -1355,16 +1376,6 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp encode_execution_status(:continued), do: "completed"
   defp encode_execution_status(status) when is_binary(status), do: status
   defp encode_execution_status(status), do: Atom.to_string(status)
-
-  defp execution_type(%{} = triggered_by) do
-    case Map.get(triggered_by, :kind) || Map.get(triggered_by, "kind") do
-      "editor_test" -> "preview"
-      :editor_test -> "preview"
-      _ -> "production"
-    end
-  end
-
-  defp execution_type(_triggered_by), do: "production"
 
   defp trigger_type(%{} = triggered_by) do
     Map.get(triggered_by, :type) ||
@@ -1920,6 +1931,7 @@ defmodule FizzWeb.WorkflowEditorLive do
     draft = socket.assigns.draft
     scope = socket.assigns.current_scope
     trigger_impact = compute_trigger_impact(draft, scope)
+    execution_hash_changed = compute_execution_hash_changed(draft, socket.assigns.definition)
 
     case DraftValidator.validate_for_publish(draft, scope) do
       {:error, errors} ->
@@ -1928,7 +1940,8 @@ defmodule FizzWeb.WorkflowEditorLive do
         |> push_event("workflow:publish_result", %{
           success: false,
           validation_errors: Enum.map(errors, &encode_validation_error/1),
-          trigger_impact: trigger_impact
+          trigger_impact: trigger_impact,
+          execution_hash_changed: execution_hash_changed
         })
 
       :ok ->
@@ -2011,6 +2024,37 @@ defmodule FizzWeb.WorkflowEditorLive do
         nil
     end
   end
+
+  defp compute_execution_hash_changed(
+         %WorkflowDefinitionVersion{} = draft,
+         %WorkflowDefinition{} = definition
+       ) do
+    case Compiler.compile(draft) do
+      {:ok, _workflow, compiled_hash} ->
+        case latest_published_compiled_hash(definition) do
+          nil -> true
+          published_hash -> published_hash != compiled_hash
+        end
+
+      {:error, _reason} ->
+        nil
+    end
+  end
+
+  defp compute_execution_hash_changed(_draft, _definition), do: nil
+
+  defp latest_published_compiled_hash(%WorkflowDefinition{versions: versions})
+       when is_list(versions) do
+    versions
+    |> Enum.filter(&(&1.status == :published))
+    |> Enum.max_by(& &1.version, fn -> nil end)
+    |> case do
+      %WorkflowDefinitionVersion{compiled_hash: compiled_hash} -> compiled_hash
+      nil -> nil
+    end
+  end
+
+  defp latest_published_compiled_hash(_definition), do: nil
 
   defp desired_trigger_registrations(trigger_manifest, draft, scope)
        when is_list(trigger_manifest) do

@@ -74,9 +74,93 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     assert vue.component == "WorkflowEditor"
     assert vue.props["workflow"]["id"] == definition.id
+    assert vue.props["workflow"]["project_id"] == definition.project_id
     assert vue.props["workflow"]["name"] == definition.name
+    assert vue.props["workflow"]["created_by_user_id"] == definition.created_by_user_id
     assert vue.props["workflow"]["draft"]["id"] == draft.id
-    assert vue.props["workflow"]["draft"]["workflow_id"] == definition.id
+    assert vue.props["workflow"]["draft"]["workflow_definition_id"] == definition.id
+    assert vue.props["workflow"]["draft"]["version"] == draft.version
+    assert vue.props["workflow"]["draft"]["status"] == "draft"
+    assert vue.props["workflow"]["draft"]["step_groups"] == []
+    refute Map.has_key?(vue.props["workflow"], "current_version_tag")
+    refute Map.has_key?(vue.props["workflow"], "public")
+    refute Map.has_key?(vue.props["workflow"], "user_id")
+    refute Map.has_key?(vue.props["workflow"]["draft"], "workflow_id")
+    refute Map.has_key?(vue.props["workflow"]["draft"], "groups")
+    refute Map.has_key?(vue.props["workflow"]["draft"], "triggers")
+  end
+
+  test "workflow editor props include draft steps and step groups from backend data", %{
+    conn: conn
+  } do
+    entry_step =
+      WorkflowsFixtures.step(%{
+        name: "Fetch Orders",
+        position: %{"x" => 140, "y" => 220}
+      })
+
+    grouped_step =
+      WorkflowsFixtures.step(%{
+        name: "Send Email",
+        position: %{"x" => 360, "y" => 220}
+      })
+
+    step_group = %{
+      id: Ecto.UUID.generate(),
+      name: "Fulfillment",
+      step_ids: [grouped_step.id],
+      position: %{"x" => 300, "y" => 180, "width" => 420, "height" => 240},
+      color: "#16A34A",
+      font_size: 16,
+      collapsed: false
+    }
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [entry_step, grouped_step],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: entry_step.id,
+            target_step_id: grouped_step.id
+          })
+        ],
+        step_groups: [step_group],
+        viewport: %{"x" => 32, "y" => 48, "zoom" => 1.2}
+      })
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    vue = get_vue(view, id: "workflow-editor")
+    draft = vue.props["workflow"]["draft"]
+
+    assert Enum.any?(draft["steps"], fn step ->
+             step["id"] == entry_step.id and
+               step["name"] == entry_step.name and
+               step["position"] == entry_step.position
+           end)
+
+    assert Enum.any?(draft["steps"], fn step ->
+             step["id"] == grouped_step.id and
+               step["name"] == grouped_step.name and
+               step["position"] == grouped_step.position
+           end)
+
+    assert draft["step_groups"] == [
+             %{
+               "id" => step_group.id,
+               "name" => step_group.name,
+               "step_ids" => step_group.step_ids,
+               "position" => step_group.position,
+               "color" => step_group.color,
+               "font_size" => step_group.font_size,
+               "collapsed" => step_group.collapsed
+             }
+           ]
+
+    refute Map.has_key?(hd(draft["step_groups"]), "output_step_id")
   end
 
   test "editor_command add_step applies an operation through DraftSession", %{conn: conn} do
@@ -153,8 +237,10 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     execution = live_socket(view).assigns.execution
 
-    assert execution.execution_type == "preview"
+    assert execution.workflow_definition_id == definition.id
+    assert execution.workflow_definition_version_id == view_version_id(view)
     assert execution.trigger.type == "editor_test"
+    assert execution.triggered_by["kind"] == "editor_test"
     assert {:ok, run} = Workflows.get_run(project_scope, execution.id)
     assert run.triggered_by["kind"] == "editor_test"
     assert run.triggered_by["user_id"] == user.id
@@ -189,12 +275,13 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     |> element("#workflow-editor")
     |> render_hook("editor_command", %{
       "type" => "publish_workflow",
-      "payload" => %{"version_tag" => "1.0.0", "changelog" => "test publish"}
+      "payload" => %{}
     })
 
     assert_push_event(view, "workflow:publish_result", %{
       success: false,
-      validation_errors: errors
+      validation_errors: errors,
+      execution_hash_changed: execution_hash_changed
     })
 
     assert Enum.any?(errors, fn error ->
@@ -204,10 +291,48 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
              code == "missing_required_field" and field == "url"
            end)
 
+    assert execution_hash_changed in [true, false, nil]
+
     assert {:ok, persisted_draft} = Workflows.get_version(project_scope, version_id)
     assert length(persisted_draft.steps) == 1
     assert persisted_draft.status == :draft
     assert persisted_draft.published_at == nil
+  end
+
+  test "validate_draft returns publish preview results for the publish modal", %{conn: conn} do
+    %{conn: conn, definition: definition} = editor_fixture(conn)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "add_step",
+      "payload" => %{
+        "type_id" => "http_request",
+        "position" => %{"x" => 240, "y" => 180}
+      }
+    })
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "validate_draft", "payload" => %{}})
+
+    assert_push_event(view, "workflow:validation_result", %{
+      valid: false,
+      validation_errors: errors,
+      execution_hash_changed: execution_hash_changed
+    })
+
+    assert Enum.any?(errors, fn error ->
+             code = Map.get(error, :code) || Map.get(error, "code")
+             field = Map.get(error, :field) || Map.get(error, "field")
+
+             code == "missing_required_field" and field == "url"
+           end)
+
+    assert execution_hash_changed in [true, false, nil]
   end
 
   test "publish_workflow publishes a valid draft", %{conn: conn} do
@@ -225,7 +350,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     |> element("#workflow-editor")
     |> render_hook("editor_command", %{
       "type" => "publish_workflow",
-      "payload" => %{"version_tag" => "1.0.0", "changelog" => "publish valid"}
+      "payload" => %{}
     })
 
     assert {:ok, published_version} = Workflows.get_version(project_scope, version_id)

@@ -61,6 +61,7 @@ function emitCommand(type: WorkflowEditorCommandType, payload?: unknown) {
     publishError.value = null;
     publishValidationErrors.value = [];
     publishTriggerImpact.value = null;
+    publishExecutionHashChanged.value = null;
     isValidatingPublish.value = false;
   }
 
@@ -243,11 +244,13 @@ const isValidatingPublish = ref(false);
 const publishError = ref<string | null>(null);
 const publishValidationErrors = ref<WorkflowValidationError[]>([]);
 const publishTriggerImpact = ref<TriggerImpact | null>(null);
+const publishExecutionHashChanged = ref<boolean | null>(null);
 
 function openPublishModal() {
   publishError.value = null;
   publishValidationErrors.value = [];
   publishTriggerImpact.value = null;
+  publishExecutionHashChanged.value = null;
   isValidatingPublish.value = true;
   isPublishModalOpen.value = true;
   emit('validate_draft');
@@ -260,10 +263,10 @@ function closePublishModal() {
   }
 }
 
-function handlePublish(payload: { version_tag: string; changelog: string }) {
+function handlePublish() {
   isPublishing.value = true;
   publishError.value = null;
-  emit('publish_workflow', payload);
+  emit('publish_workflow');
 }
 
 const toolbarValidationErrors = computed(() =>
@@ -370,16 +373,32 @@ const debugExitLink = computed(() => {
   if (!workflow?.id || !workflow?.project_id) return null;
   return `/projects/${workflow.project_id}/workflows/${workflow.id}/edit`;
 });
+const workflowStatus = computed<'draft' | 'active' | 'archived'>(() => {
+  const workflow = editor.workflow;
+
+  if (workflow?.archived_at) {
+    return 'archived';
+  }
+
+  if (workflow?.draft?.status === 'draft') {
+    return 'draft';
+  }
+
+  return 'active';
+});
+const publishVersionNumber = computed(() => editor.workflow?.draft?.version ?? null);
 
 useLiveEvent<{
   valid: boolean;
   validation_errors?: WorkflowValidationError[];
   trigger_impact?: TriggerImpact | null;
+  execution_hash_changed?: boolean | null;
   error?: string;
 }>('workflow:validation_result', payload => {
   isValidatingPublish.value = false;
   publishValidationErrors.value = payload.validation_errors ?? [];
   publishTriggerImpact.value = payload.trigger_impact ?? null;
+  publishExecutionHashChanged.value = payload.execution_hash_changed ?? null;
   publishError.value = payload.error ?? null;
 });
 
@@ -388,6 +407,7 @@ useLiveEvent<{
   error?: string;
   validation_errors?: WorkflowValidationError[];
   trigger_impact?: TriggerImpact | null;
+  execution_hash_changed?: boolean | null;
 }>(
   'workflow:publish_result',
   payload => {
@@ -396,12 +416,14 @@ useLiveEvent<{
       isPublishModalOpen.value = false;
       publishValidationErrors.value = [];
       publishTriggerImpact.value = null;
+      publishExecutionHashChanged.value = null;
       publishError.value = null;
       return;
     }
 
     publishValidationErrors.value = payload.validation_errors ?? [];
     publishTriggerImpact.value = payload.trigger_impact ?? null;
+    publishExecutionHashChanged.value = payload.execution_hash_changed ?? null;
     publishError.value =
       payload.error ??
       (publishValidationErrors.value.length > 0 ? 'Fix validation errors before publishing.' : null);
@@ -415,7 +437,7 @@ useLiveEvent<{
       v-if="!isNodeLibraryCollapsed"
       :library-items="editor.nodeLibraryItems"
       :workflow-name="editor.workflow?.name ?? 'Untitled Workflow'"
-      :workflow-status="editor.workflow?.status ?? 'draft'"
+      :workflow-status="workflowStatus"
       :style="{ width: `${nodeLibraryWidth}px` }"
       class="z-20 shrink-0 relative"
       @resize-start="handleNodeLibraryResizeStart"
@@ -643,12 +665,13 @@ useLiveEvent<{
       <PublishModal
         :is-open="isPublishModalOpen"
         :workflow-name="editor.workflow?.name ?? 'Workflow'"
-        :current-version-tag="editor.workflow?.current_version_tag"
+        :version-number="publishVersionNumber"
         :is-publishing="isPublishing"
         :is-validating="isValidatingPublish"
         :publish-error="publishError"
         :validation-errors="publishValidationErrors"
         :trigger-impact="publishTriggerImpact"
+        :execution-hash-changed="publishExecutionHashChanged"
         @close="closePublishModal"
         @publish="handlePublish"
       />

@@ -171,8 +171,8 @@ const noop = () => {};
                 Last updated {{ viewer.formatRevisionTimestamp(viewer.workflowUpdatedAt) }}
               </div>
             </div>
-            <span v-if="props.workflow.current_version_tag" class="badge badge-ghost badge-xs">
-              v{{ props.workflow.current_version_tag }}
+            <span v-if="props.draft.version" class="badge badge-ghost badge-xs">
+              v{{ props.draft.version }}
             </span>
           </button>
         </section>
@@ -237,13 +237,13 @@ const noop = () => {};
               @click="emit('select_revision', { kind: 'version', id: version.id })"
             >
               <div>
-                <div class="text-sm font-semibold text-base-content">v{{ version.version_tag }}</div>
+                <div class="text-sm font-semibold text-base-content">v{{ version.version }}</div>
                 <div class="text-[11px] text-base-content/50">
                   {{ viewer.formatRevisionTimestamp(version.published_at) }}
                 </div>
               </div>
               <span
-                v-if="props.workflow.current_version_tag === version.version_tag"
+                v-if="props.draft.version === version.version"
                 class="badge badge-xs"
               >
                 Current

@@ -48,7 +48,6 @@ export function useWorkflowNodeActions(options: UseWorkflowNodeActionsOptions) {
       name?: string;
       position?: { x?: number; y?: number; width?: number; height?: number };
       collapsed?: boolean;
-      output_step_id?: string;
       color?: string;
       font_size?: number;
     }

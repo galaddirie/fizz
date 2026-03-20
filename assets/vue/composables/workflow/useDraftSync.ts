@@ -28,7 +28,7 @@ export function useDraftSync(options: UseDraftSyncOptions) {
       draft?.updated_at ?? '',
       draft?.steps?.length ?? 0,
       draft?.connections?.length ?? 0,
-      draft?.groups?.length ?? 0,
+      draft?.step_groups?.length ?? 0,
     ].join(':');
   };
 

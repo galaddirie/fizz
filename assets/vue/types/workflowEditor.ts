@@ -105,7 +105,6 @@ export type WorkflowEditorEmits = {
         name?: string;
         position?: { x?: number; y?: number; width?: number; height?: number };
         collapsed?: boolean;
-        output_step_id?: string;
         color?: string;
         font_size?: number;
       };
@@ -177,7 +176,7 @@ export type WorkflowEditorEmits = {
   ): void;
   (e: 'save_workflow'): void;
   (e: 'validate_draft'): void;
-  (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
+  (e: 'publish_workflow'): void;
   (
     e: 'mouse_move',
     payload: {

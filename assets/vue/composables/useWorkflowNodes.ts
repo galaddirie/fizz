@@ -248,7 +248,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
 
   const nodes = computed<Node<WorkflowNodeData>[]>(() => {
     const steps = options.workflow().draft?.steps || [];
-    const groups = options.workflow().draft?.groups || [];
+    const groups = options.workflow().draft?.step_groups || [];
     const stepTypes = stepTypeById.value;
     const stepExecutions = stepExecutionByStepId.value;
     const itemStats = stepItemStatsByStepId.value;

@@ -12,7 +12,7 @@ export interface RevisionViewerProps {
   workflow: Workflow;
   draft: WorkflowDraft;
   revision: RevisionSelection;
-  versions: Array<{ id: string; version_tag: string; published_at?: string | null }>;
+  versions: Array<{ id: string; version: number; published_at?: string | null }>;
   undoStack: UndoEntrySummary[];
   stepTypes: StepType[];
   editorState?: EditorState;
