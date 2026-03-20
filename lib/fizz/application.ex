@@ -50,6 +50,8 @@ defmodule Fizz.Application do
         |> Keyword.get(:enabled?, true)
       )
       |> Kernel.++([
+        {DynamicSupervisor, name: Fizz.Workflows.DraftSessionSupervisor, strategy: :one_for_one},
+        {Registry, keys: :unique, name: Fizz.Workflows.DraftSessionRegistry},
         # Start a worker by calling: Fizz.Worker.start_link(arg)
         # {Fizz.Worker, arg},
         # Start to serve requests, typically the last entry

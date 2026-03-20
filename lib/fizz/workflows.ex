@@ -166,6 +166,12 @@ defmodule Fizz.Workflows do
     end
   end
 
+  @spec get_version(Scope.t() | nil, %WorkflowDefinitionVersion{} | String.t()) ::
+          {:ok, %WorkflowDefinitionVersion{}} | {:error, error_reason()}
+  def get_version(scope, version) do
+    fetch_version(scope, version)
+  end
+
   @spec archive_definition(Scope.t() | nil, %WorkflowDefinition{} | String.t()) ::
           {:ok, %WorkflowDefinition{}} | {:error, error_reason()}
   def archive_definition(scope, definition) do
