@@ -44,11 +44,32 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
   }
 
   @behaviour Fizz.Steps.Executors.Behaviour
+  alias Fizz.Triggers.RegistrationSpec
+
+  @impl true
+  def registration_spec(config, _context) do
+    {:ok,
+     %RegistrationSpec{
+       kind: :schedule,
+       params:
+         %{
+           "cron" => Map.get(config, "cron_expression"),
+           "interval_seconds" => Map.get(config, "interval_seconds"),
+           "timezone" => Map.get(config, "timezone", "UTC"),
+           "jitter_seconds" => Map.get(config, "jitter_seconds", 0)
+         }
+         |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+         |> Map.new()
+     }}
+  end
 
   @impl true
   def execute(_config, input, _context) do
     {:ok, input}
   end
+
+  @impl true
+  def normalize_event(_config, raw_event) when is_map(raw_event), do: {:ok, raw_event}
 
   @impl true
   def effective_output_schema(config) do

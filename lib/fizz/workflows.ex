@@ -19,6 +19,7 @@ defmodule Fizz.Workflows do
   alias Ecto.Multi
   alias Fizz.Accounts.{Project, Scope}
   alias Fizz.Repo
+  alias Fizz.Triggers.RegistrationManager
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
   alias Fizz.Workflows.Runtime.ContextBuilder
@@ -33,6 +34,8 @@ defmodule Fizz.Workflows do
   }
 
   alias Runic.Workflow
+
+  require Logger
 
   @default_snapshot_attrs %{
     steps: [],
@@ -128,6 +131,7 @@ defmodule Fizz.Workflows do
             changeset
             |> Ecto.Changeset.put_change(:compiled_hash, compiled_hash)
             |> Repo.update()
+            |> maybe_sync_trigger_registrations()
 
           {:error, errors} ->
             {:error, add_compile_errors(changeset, errors)}
@@ -212,7 +216,7 @@ defmodule Fizz.Workflows do
     end
   end
 
-  @spec start_run(Scope.t() | nil, %WorkflowDefinitionVersion{} | String.t(), term()) ::
+  @spec start_run(Scope.t() | nil, %WorkflowDefinitionVersion{} | String.t(), term(), keyword()) ::
           {:ok, %WorkflowRun{}} | {:error, error_reason()}
   @doc """
   Starts a new workflow run for a published definition version.
@@ -222,10 +226,10 @@ defmodule Fizz.Workflows do
   is initialized, and a worker is started. Once the worker is ready the run is
   transitioned to `:running` and the initial input is dispatched.
   """
-  def start_run(scope, version, input) do
+  def start_run(scope, version, input, opts \\ []) do
     with {:ok, version_record} <- fetch_version(scope, version),
          {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
-      case create_pending_run(scope, version_record, input, compiled_hash) do
+      case create_pending_run(scope, version_record, input, compiled_hash, opts) do
         {:ok, run} ->
           start_pending_run(scope, run, workflow, compiled_hash, input)
 
@@ -718,7 +722,7 @@ defmodule Fizz.Workflows do
     }
   end
 
-  defp create_pending_run(scope, version_record, input, compiled_hash) do
+  defp create_pending_run(scope, version_record, input, compiled_hash, opts) do
     with {:ok, project} <- project_from_scope(scope) do
       now = DateTime.utc_now()
 
@@ -730,7 +734,8 @@ defmodule Fizz.Workflows do
         status: :pending,
         input: normalize_payload(input) || %{},
         last_active_at: now,
-        compiled_hash: compiled_hash
+        compiled_hash: compiled_hash,
+        triggered_by: normalize_triggered_by(Keyword.get(opts, :triggered_by))
       }
 
       Multi.new()
@@ -745,6 +750,26 @@ defmodule Fizz.Workflows do
       end
     end
   end
+
+  defp maybe_sync_trigger_registrations({:ok, %WorkflowDefinitionVersion{} = version} = ok) do
+    case RegistrationManager.sync_on_publish(version) do
+      :ok ->
+        ok
+
+      {:error, reason} ->
+        Logger.error(
+          "trigger registration sync failed after publish for version #{version.id}: #{inspect(reason)}"
+        )
+
+        ok
+    end
+  end
+
+  defp maybe_sync_trigger_registrations(other), do: other
+
+  defp normalize_triggered_by(nil), do: nil
+  defp normalize_triggered_by(triggered_by) when is_map(triggered_by), do: triggered_by
+  defp normalize_triggered_by(_triggered_by), do: nil
 
   defp start_pending_run(scope, run, workflow, compiled_hash, input) do
     with {:ok, fence_token} <- Fizz.Workflows.LeaseManager.acquire(run.id),

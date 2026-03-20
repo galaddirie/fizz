@@ -42,8 +42,14 @@ defmodule Fizz.Application do
         FizzWeb.Presence,
 
         # Step type registry - must start before endpoint so types are available
-        Fizz.Steps.Registry,
-
+        Fizz.Steps.Registry
+      ])
+      |> maybe_add_child(
+        Fizz.Triggers.Supervisor,
+        Application.get_env(:fizz, Fizz.Triggers.Supervisor, [])
+        |> Keyword.get(:enabled?, true)
+      )
+      |> Kernel.++([
         # Start a worker by calling: Fizz.Worker.start_link(arg)
         # {Fizz.Worker, arg},
         # Start to serve requests, typically the last entry

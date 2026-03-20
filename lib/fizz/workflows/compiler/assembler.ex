@@ -21,7 +21,10 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     workflow =
       Workflow.new(name: ir.definition_version_id || "fizz_workflow")
-      |> Map.put(:fizz_metadata, %{compiler_version: ir.compiler_version})
+      |> Map.put(:fizz_metadata, %{
+        compiler_version: ir.compiler_version,
+        trigger_manifest: trigger_manifest(ir.steps)
+      })
       |> add_steps(ir, steps, accumulators, slot_assemblies)
       |> draw_meta_ref_edges(steps)
 
@@ -259,6 +262,20 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   defp add_component(workflow, component, parent_refs, _parent_mode) do
     Workflow.add(workflow, component, to: parent_refs, validate: :off)
+  end
+
+  defp trigger_manifest(steps) do
+    steps
+    |> Map.values()
+    |> Enum.filter(&(&1.step_kind == :trigger))
+    |> Enum.sort_by(& &1.id)
+    |> Enum.map(fn step ->
+      %{
+        step_id: step.id,
+        type_id: step.type_id,
+        config: step.config
+      }
+    end)
   end
 
   defp draw_meta_ref_edges(workflow, steps) do

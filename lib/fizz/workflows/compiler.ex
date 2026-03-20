@@ -20,7 +20,7 @@ defmodule Fizz.Workflows.Compiler do
   alias Fizz.Workflows.Compiler.Normalizer
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
-  @compiler_version 3
+  @compiler_version 4
 
   @doc """
   Returns the current compiler version used in compiled workflow metadata.

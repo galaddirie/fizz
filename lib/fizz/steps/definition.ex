@@ -92,6 +92,10 @@ defmodule Fizz.Steps.Definition do
     quote do
       @before_compile Fizz.Steps.Definition
 
+      if unquote(kind) == :trigger do
+        @behaviour Fizz.Triggers.Behaviour
+      end
+
       # Store the definition metadata
       Module.register_attribute(__MODULE__, :step_id, persist: true)
       Module.register_attribute(__MODULE__, :step_name, persist: true)
@@ -122,6 +126,19 @@ defmodule Fizz.Steps.Definition do
       Module.register_attribute(__MODULE__, :input_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :output_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :subnode_slots, accumulate: false)
+
+      if unquote(kind) == :trigger do
+        @impl true
+        def registration_spec(_config, _context), do: {:error, :not_implemented}
+
+        @impl true
+        def match?(_config, _incoming_event), do: true
+
+        @impl true
+        def normalize_event(_config, raw_event) when is_map(raw_event), do: {:ok, raw_event}
+
+        defoverridable registration_spec: 2, match?: 2, normalize_event: 2
+      end
     end
   end
 

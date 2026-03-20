@@ -15,10 +15,11 @@ config :fizz, Oban,
      crontab: [
        {"*/3 * * * *", Fizz.Workspaces.Workers.ReconcileStaleJobsWorker},
        {"*/5 * * * *", Fizz.Workspaces.Workers.ConsoleReaperWorker},
-       {"0 * * * *", Fizz.Workspaces.Workers.GCWorker}
+       {"0 * * * *", Fizz.Workspaces.Workers.GCWorker},
+       {"* * * * *", Fizz.Triggers.Workers.RegistrationSyncWorker}
      ]}
   ],
-  queues: [default: 10, workspaces: 20, workspaces_maintenance: 5],
+  queues: [default: 10, workspaces: 20, workspaces_maintenance: 5, triggers: 20],
   repo: Fizz.Repo
 
 config :live_vue, ssr: true

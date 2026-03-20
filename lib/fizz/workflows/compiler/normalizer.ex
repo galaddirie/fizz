@@ -10,6 +10,7 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
   def normalize(%WorkflowDefinitionVersion{} = version) do
     with {:ok, steps} <- normalize_steps(version.steps),
          {:ok, connections} <- normalize_connections(version.connections),
+         :ok <- validate_trigger_roots(steps, connections),
          {:ok, topo_order} <- topological_order(version.steps, version.connections) do
       {:ok,
        %{
@@ -89,6 +90,29 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
                "graph contains invalid edges: #{Enum.map_join(invalid_edges, ", ", fn {source, target} -> "#{source}->#{target}" end)}"
            }
          ]}
+    end
+  end
+
+  defp validate_trigger_roots(steps, connections) do
+    incoming_step_ids =
+      connections
+      |> Enum.map(& &1.target_step_id)
+      |> MapSet.new()
+
+    errors =
+      steps
+      |> Map.values()
+      |> Enum.filter(&(&1.step_kind == :trigger and MapSet.member?(incoming_step_ids, &1.id)))
+      |> Enum.map(fn step ->
+        %{
+          step_id: step.id,
+          message: "trigger steps must be graph roots with no incoming connections"
+        }
+      end)
+
+    case errors do
+      [] -> :ok
+      _ -> {:error, errors}
     end
   end
 end

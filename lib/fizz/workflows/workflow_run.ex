@@ -39,6 +39,7 @@ defmodule Fizz.Workflows.WorkflowRun do
     field :started_at, :utc_datetime_usec
     field :completed_at, :utc_datetime_usec
     field :compiled_hash, :string
+    field :triggered_by, :map
 
     belongs_to :workflow_definition, WorkflowDefinition
     belongs_to :workflow_definition_version, WorkflowDefinitionVersion
@@ -85,7 +86,8 @@ defmodule Fizz.Workflows.WorkflowRun do
       :started_at,
       :completed_at,
       :continued_from_run_id,
-      :compiled_hash
+      :compiled_hash,
+      :triggered_by
     ])
     |> validate_required([
       :workflow_definition_id,

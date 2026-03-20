@@ -25,11 +25,27 @@ defmodule Fizz.Steps.Executors.ManualInput do
   }
 
   @behaviour Fizz.Steps.Executors.Behaviour
+  alias Fizz.Triggers.RegistrationSpec
+
+  @impl true
+  def registration_spec(config, _context) do
+    {:ok,
+     %RegistrationSpec{
+       kind: :manual,
+       params: %{
+         "input_schema" => Map.get(config, "input_schema"),
+         "trigger_data" => Map.get(config, "trigger_data", "{}")
+       }
+     }}
+  end
 
   @impl true
   def execute(_config, input, _context) do
     {:ok, input}
   end
+
+  @impl true
+  def normalize_event(_config, raw_event) when is_map(raw_event), do: {:ok, raw_event}
 
   @impl true
   def effective_output_schema(config) do
