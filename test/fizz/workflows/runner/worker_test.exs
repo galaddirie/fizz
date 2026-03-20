@@ -102,6 +102,62 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     assert DateTime.compare(completed_run.last_active_at, last_active_at) == :gt
   end
 
+  test "broadcasts step lifecycle and run status events", %{
+    scope: scope,
+    registry: registry,
+    task_supervisor: task_supervisor,
+    tmp_dir: tmp_dir
+  } do
+    %{version: version} = published_version_fixture(scope)
+    {:ok, workflow, compiled_hash} = Compiler.compile(version)
+    run = insert_running_run(scope, version, %{compiled_hash: compiled_hash})
+    run_id = run.id
+
+    :ok = Phoenix.PubSub.subscribe(Fizz.PubSub, "workflow_run:#{run_id}")
+
+    pid =
+      start_worker!(
+        workflow,
+        run,
+        scope,
+        registry: registry,
+        task_supervisor: task_supervisor,
+        tmp_dir: tmp_dir
+      )
+
+    assert :ok = Worker.run(pid, %{"name" => "Toni"})
+
+    assert_receive {:run_status_changed,
+                    %{run_id: ^run_id, status: :running, timestamp: %DateTime{}}},
+                   2_000
+
+    assert_receive {:step_started,
+                    %{run_id: ^run_id, step_id: step_id, started_at: %DateTime{}, attempt: 0}},
+                   2_000
+
+    assert is_binary(step_id)
+
+    assert_receive {:step_completed,
+                    %{
+                      run_id: ^run_id,
+                      step_id: ^step_id,
+                      completed_at: %DateTime{},
+                      duration_us: duration_us,
+                      output_summary: output_summary
+                    }},
+                   2_000
+
+    assert is_integer(duration_us)
+    assert is_binary(output_summary)
+
+    assert_receive {:run_status_changed,
+                    %{run_id: ^run_id, status: :completed, timestamp: %DateTime{}}},
+                   2_000
+
+    assert %{status: :completed} = wait_for_run_status(scope, run_id, registry)
+    cleanup_worker(run_id, registry)
+  end
+
   test "transitions the run to completed when the workflow is satisfied", %{
     scope: scope,
     registry: registry,

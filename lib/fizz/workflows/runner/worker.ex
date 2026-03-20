@@ -34,6 +34,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   alias Runic.Workflow.SchedulerPolicy
 
   @default_idle_timeout_ms 60_000
+  @output_summary_limit 1_024
 
   defstruct [
     :run_id,
@@ -332,7 +333,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp dispatch_runnable(state, %Runnable{} = runnable) do
-    dispatched_at = System.monotonic_time(:millisecond)
+    dispatched_at_us = System.monotonic_time(:microsecond)
 
     task =
       Task.Supervisor.async_nolink(
@@ -343,7 +344,7 @@ defmodule Fizz.Workflows.Runner.Worker do
       )
 
     task_state = %{
-      dispatched_at: dispatched_at,
+      dispatched_at_us: dispatched_at_us,
       pid: task.pid,
       runnable: runnable
     }
@@ -353,16 +354,19 @@ defmodule Fizz.Workflows.Runner.Worker do
       node_name: Map.get(runnable.node, :name),
       node_hash: Map.get(runnable.node, :hash),
       input_fact: runnable.input_fact,
-      dispatched_at: dispatched_at,
+      dispatched_at: System.convert_time_unit(dispatched_at_us, :microsecond, :millisecond),
       policy: SchedulerPolicy.default_policy(),
       attempt: 0
     }
 
-    %{
+    state = %{
       state
       | workflow: Workflow.append_runnable_events(state.workflow, [event]),
         active_tasks: Map.put(state.active_tasks, task.ref, task_state)
     }
+
+    maybe_broadcast_step_started(state, runnable)
+    state
   end
 
   defp process_event(state, {:input, input}) do
@@ -604,17 +608,31 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp plan_workflow_input(state, input) do
-    %{state | workflow: Workflow.plan_eagerly(state.workflow, input), status: :running}
+    state
+    |> maybe_broadcast_status_change(:running)
+    |> then(fn next_state ->
+      %{
+        next_state
+        | workflow: Workflow.plan_eagerly(next_state.workflow, input),
+          status: :running
+      }
+    end)
   end
 
   defp ensure_running_state(state) do
     _ = Workflows.resume_run(state.run_id)
-    %{state | status: :running}
+
+    state
+    |> maybe_broadcast_status_change(:running)
+    |> Map.put(:status, :running)
   end
 
   defp mark_sleeping_state(state) do
     _ = Workflows.sleep_run(state.run_id)
-    %{state | status: :sleeping}
+
+    state
+    |> maybe_broadcast_status_change(:sleeping)
+    |> Map.put(:status, :sleeping)
   end
 
   defp signal_to_input(%SignalInbox{} = signal) do
@@ -627,14 +645,18 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp append_runnable_result_event(state, %Runnable{status: :completed} = runnable, task_state) do
+    duration_us = duration_us(task_state)
+
     event = %RunnableCompleted{
       runnable_id: runnable.id,
       node_hash: Map.get(runnable.node, :hash),
       result_fact: runnable.result,
       completed_at: System.monotonic_time(:millisecond),
       attempt: 0,
-      duration_ms: duration_ms(task_state.dispatched_at)
+      duration_ms: duration_ms(duration_us)
     }
+
+    maybe_broadcast_step_completed(state, runnable, duration_us)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end
@@ -642,8 +664,10 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp append_runnable_result_event(
          state,
          %Runnable{status: :failed, error: error} = runnable,
-         _task_state
+         task_state
        ) do
+    duration_us = duration_us(task_state)
+
     event = %RunnableFailed{
       runnable_id: runnable.id,
       node_hash: Map.get(runnable.node, :hash),
@@ -652,6 +676,8 @@ defmodule Fizz.Workflows.Runner.Worker do
       attempts: 1,
       failure_action: :halt
     }
+
+    maybe_broadcast_step_failed(state, runnable, duration_us)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end
@@ -667,6 +693,8 @@ defmodule Fizz.Workflows.Runner.Worker do
       attempt: 0,
       duration_ms: 0
     }
+
+    maybe_broadcast_step_completed(state, runnable, 0)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end
@@ -701,6 +729,10 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp complete_and_stop(state) do
     state = do_checkpoint(state)
     _ = Workflows.complete_run(state.run_id, Workflow.raw_productions(state.workflow))
+
+    _ =
+      broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, :completed)})
+
     _ = release_lease(state.run_id)
     state
   end
@@ -708,6 +740,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp fail_and_stop(state, reason) do
     state = do_checkpoint(state)
     _ = Workflows.fail_run(state.run_id, reason)
+    _ = broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, :failed)})
     _ = release_lease(state.run_id)
     state
   end
@@ -791,8 +824,179 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp normalize_max_concurrency(value) when is_integer(value) and value > 0, do: value
   defp normalize_max_concurrency(_value), do: max(System.schedulers_online(), 1)
 
-  defp duration_ms(dispatched_at) do
-    System.monotonic_time(:millisecond) - dispatched_at
+  defp maybe_broadcast_step_started(state, %Runnable{} = runnable) do
+    with {:ok, step_id} <- runnable_step_id(runnable) do
+      _ =
+        broadcast(
+          state.run_id,
+          {:step_started,
+           %{
+             run_id: state.run_id,
+             runnable_id: runnable.id,
+             step_id: step_id,
+             attempt: 0,
+             input: runnable.input_fact.value,
+             input_fact_hash: runnable.input_fact.hash,
+             started_at: DateTime.utc_now()
+           }}
+        )
+
+      :ok
+    end
+  end
+
+  defp maybe_broadcast_step_completed(state, %Runnable{} = runnable, duration_us) do
+    with {:ok, step_id} <- runnable_step_id(runnable) do
+      output = runnable_output(runnable)
+
+      _ =
+        broadcast(
+          state.run_id,
+          {:step_completed,
+           %{
+             run_id: state.run_id,
+             runnable_id: runnable.id,
+             step_id: step_id,
+             attempt: 0,
+             input: runnable.input_fact.value,
+             input_fact_hash: runnable.input_fact.hash,
+             output: output,
+             output_fact_hash: output_fact_hash(runnable),
+             output_summary: truncate_output(output),
+             duration_us: duration_us,
+             completed_at: DateTime.utc_now()
+           }}
+        )
+
+      :ok
+    end
+  end
+
+  defp maybe_broadcast_step_failed(state, %Runnable{} = runnable, duration_us) do
+    with {:ok, step_id} <- runnable_step_id(runnable) do
+      _ =
+        broadcast(
+          state.run_id,
+          {:step_failed,
+           %{
+             run_id: state.run_id,
+             runnable_id: runnable.id,
+             step_id: step_id,
+             attempt: 0,
+             input: runnable.input_fact.value,
+             input_fact_hash: runnable.input_fact.hash,
+             error: encode_error(runnable.error),
+             duration_us: duration_us,
+             failed_at: DateTime.utc_now()
+           }}
+        )
+
+      :ok
+    end
+  end
+
+  defp maybe_broadcast_status_change(%__MODULE__{status: status} = state, new_status)
+       when status == new_status,
+       do: state
+
+  defp maybe_broadcast_status_change(%__MODULE__{} = state, new_status) do
+    _ = broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, new_status)})
+    state
+  end
+
+  defp status_payload(run_id, status) do
+    %{
+      run_id: run_id,
+      status: status,
+      timestamp: DateTime.utc_now()
+    }
+  end
+
+  defp duration_ms(duration_us) when is_integer(duration_us) and duration_us >= 0,
+    do: div(duration_us, 1_000)
+
+  defp duration_ms(_duration_us), do: 0
+
+  defp duration_us(%{dispatched_at_us: dispatched_at_us}) when is_integer(dispatched_at_us) do
+    max(System.monotonic_time(:microsecond) - dispatched_at_us, 0)
+  end
+
+  defp duration_us(_task_state), do: 0
+
+  defp runnable_step_id(%Runnable{node: %{name: name}}), do: logical_step_id(name)
+  defp runnable_step_id(_runnable), do: :error
+
+  defp logical_step_id(name) when is_atom(name), do: name |> Atom.to_string() |> logical_step_id()
+
+  defp logical_step_id(name) when is_binary(name) do
+    cond do
+      String.contains?(name, "__") and not String.ends_with?(name, "__extract") ->
+        :error
+
+      String.ends_with?(name, "__extract") ->
+        {:ok, String.trim_trailing(name, "__extract")}
+
+      true ->
+        {:ok, name}
+    end
+  end
+
+  defp logical_step_id(_name), do: :error
+
+  defp runnable_output(%Runnable{result: %Fact{value: value}}), do: value
+  defp runnable_output(%Runnable{result: value}), do: value
+
+  defp output_fact_hash(%Runnable{result: %Fact{hash: hash}}), do: hash
+  defp output_fact_hash(_runnable), do: nil
+
+  defp truncate_output(output) do
+    rendered = inspect(output, pretty: true, limit: :infinity, printable_limit: :infinity)
+
+    if byte_size(rendered) <= @output_summary_limit do
+      rendered
+    else
+      binary_part(rendered, 0, @output_summary_limit) <> "..."
+    end
+  end
+
+  defp encode_error(%{__struct__: module} = error) do
+    %{
+      type: module |> Module.split() |> List.last() |> Macro.underscore(),
+      message: Exception.message(error),
+      details: %{inspect: inspect(error)}
+    }
+  end
+
+  defp encode_error({type, message, details}) do
+    %{
+      type: to_string(type),
+      message: inspect(message),
+      details: %{value: inspect(details)}
+    }
+  end
+
+  defp encode_error({type, message}) do
+    %{
+      type: to_string(type),
+      message: inspect(message),
+      details: %{}
+    }
+  end
+
+  defp encode_error(type) when is_atom(type) do
+    %{type: Atom.to_string(type), message: Atom.to_string(type), details: %{}}
+  end
+
+  defp encode_error(message) when is_binary(message) do
+    %{type: "runtime_error", message: message, details: %{}}
+  end
+
+  defp encode_error(error) do
+    %{type: "runtime_error", message: inspect(error), details: %{}}
+  end
+
+  defp broadcast(run_id, event) do
+    Phoenix.PubSub.broadcast(Fizz.PubSub, "workflow_run:#{run_id}", event)
   end
 
   defp via_tuple(registry, run_id) do

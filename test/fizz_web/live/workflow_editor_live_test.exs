@@ -104,6 +104,67 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert undo_state.undoLabel == "Add Step"
   end
 
+  test "run_test persists the current draft before compiling", %{conn: conn} do
+    %{conn: conn, definition: definition, project_scope: project_scope} = editor_fixture(conn)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "add_step",
+      "payload" => %{
+        "type_id" => "debug",
+        "position" => %{"x" => 420, "y" => 180}
+      }
+    })
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    assert {:ok, persisted_draft} = Workflows.get_version(project_scope, view_version_id(view))
+    assert length(persisted_draft.steps) == 1
+    assert live_socket(view).assigns.execution != nil
+
+    assert {:ok, %{status: :completed}} =
+             wait_for_run_status(
+               project_scope,
+               live_socket(view).assigns.execution.id,
+               :completed
+             )
+
+    assert :ok = wait_for_worker_exit(live_socket(view).assigns.execution.id)
+  end
+
+  test "run_test starts a workflow run tagged with editor_test", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.valid_snapshot_attrs()
+
+    %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    execution = live_socket(view).assigns.execution
+
+    assert execution.execution_type == "preview"
+    assert execution.trigger.type == "editor_test"
+    assert {:ok, run} = Workflows.get_run(project_scope, execution.id)
+    assert run.triggered_by["kind"] == "editor_test"
+    assert run.triggered_by["user_id"] == user.id
+
+    assert {:ok, %{status: :completed}} =
+             wait_for_run_status(project_scope, execution.id, :completed)
+
+    assert :ok = wait_for_worker_exit(execution.id)
+  end
+
   test "undo and redo commands work through DraftSession", %{conn: conn} do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)
@@ -350,6 +411,181 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert preview_value(view, key) == "Goodbye Alice"
   end
 
+  test "step execution events update step_executions assigns", %{conn: conn} do
+    step = WorkflowsFixtures.step(%{type_id: "debug", name: "Debug"})
+    step_id = step.id
+    snapshot_attrs = WorkflowsFixtures.snapshot_attrs(%{steps: [step]})
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    put_execution(view, %{id: "run-live", status: "running"})
+
+    started_at = DateTime.utc_now()
+
+    send(
+      view.pid,
+      {:step_started,
+       %{
+         run_id: "run-live",
+         runnable_id: 123,
+         step_id: step_id,
+         attempt: 0,
+         input: %{"name" => "Ada"},
+         input_fact_hash: "input-hash",
+         started_at: started_at
+       }}
+    )
+
+    render(view)
+
+    assert [
+             %{
+               id: "run-live:123:0",
+               step_id: ^step_id,
+               status: "running",
+               step_type_id: "debug",
+               input_data: %{"name" => "Ada"}
+             }
+           ] =
+             live_socket(view).assigns.step_executions
+
+    completed_at = DateTime.utc_now()
+
+    send(
+      view.pid,
+      {:step_completed,
+       %{
+         run_id: "run-live",
+         runnable_id: 123,
+         step_id: step_id,
+         attempt: 0,
+         input: %{"name" => "Ada"},
+         input_fact_hash: "input-hash",
+         output: %{"ok" => true},
+         output_fact_hash: "output-hash",
+         output_summary: "%{\"ok\" => true}",
+         duration_us: 12_000,
+         completed_at: completed_at
+       }}
+    )
+
+    render(view)
+
+    assert [
+             %{
+               id: "run-live:123:0",
+               status: "completed",
+               output_data: %{"ok" => true},
+               duration_us: 12_000
+             }
+           ] =
+             live_socket(view).assigns.step_executions
+  end
+
+  test "terminal status unsubscribes from the run topic", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.long_running_snapshot_attrs(5_000)
+
+    %{conn: conn, definition: definition, project_scope: project_scope} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    execution_id = live_socket(view).assigns.execution.id
+
+    send(
+      view.pid,
+      {:run_status_changed,
+       %{run_id: execution_id, status: :completed, timestamp: DateTime.utc_now()}}
+    )
+
+    render(view)
+
+    Phoenix.PubSub.broadcast(
+      Fizz.PubSub,
+      "workflow_run:#{execution_id}",
+      {:step_started,
+       %{
+         run_id: execution_id,
+         runnable_id: 999,
+         step_id: hd(Enum.map(snapshot_attrs.steps, & &1.id)),
+         attempt: 0,
+         started_at: DateTime.utc_now()
+       }}
+    )
+
+    _ = :sys.get_state(view.pid)
+
+    refute Enum.any?(
+             live_socket(view).assigns.step_executions,
+             &(&1.id == "#{execution_id}:999:0")
+           )
+
+    _ = Workflows.cancel_run(project_scope, execution_id)
+    assert :ok = wait_for_worker_exit(execution_id)
+  end
+
+  test "cancel_execution stops the active run", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.long_running_snapshot_attrs(5_000)
+
+    %{conn: conn, definition: definition, project_scope: project_scope} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    execution_id = live_socket(view).assigns.execution.id
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "cancel_execution", "payload" => %{}})
+
+    assert {:ok, %{status: :cancelled}} =
+             wait_for_run_status(project_scope, execution_id, :cancelled)
+
+    assert :ok = wait_for_worker_exit(execution_id)
+  end
+
+  test "compilation errors are pushed to the client", %{conn: conn} do
+    source_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Source"})
+    trigger_step = WorkflowsFixtures.step(%{type_id: "schedule_trigger", name: "Schedule"})
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [source_step, trigger_step],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: source_step.id,
+            target_step_id: trigger_step.id
+          })
+        ]
+      })
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    assert_push_event(view, "compilation_errors", %{errors: [%{message: message} | _rest]})
+    assert message =~ "trigger steps must be graph roots with no incoming connections"
+    assert live_socket(view).assigns.execution == nil
+  end
+
   test "resolve_field_options replies with credential options and pushes credential results", %{
     conn: conn
   } do
@@ -469,7 +705,51 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     end)
   end
 
+  defp put_execution(view, execution) do
+    :sys.replace_state(view.pid, fn state ->
+      put_in(state.socket.assigns.execution, execution)
+    end)
+  end
+
   defp live_socket(view), do: :sys.get_state(view.pid).socket
+
+  defp wait_for_run_status(scope, run_id, expected_status, attempts \\ 100)
+
+  defp wait_for_run_status(scope, run_id, expected_status, attempts) when attempts > 0 do
+    case Workflows.get_run(scope, run_id) do
+      {:ok, %{status: ^expected_status} = run} ->
+        {:ok, run}
+
+      _ ->
+        receive do
+        after
+          20 -> wait_for_run_status(scope, run_id, expected_status, attempts - 1)
+        end
+    end
+  end
+
+  defp wait_for_run_status(_scope, _run_id, _expected_status, 0) do
+    flunk("run did not reach the expected status")
+  end
+
+  defp wait_for_worker_exit(run_id, attempts \\ 100)
+
+  defp wait_for_worker_exit(run_id, attempts) when attempts > 0 do
+    case Fizz.Workflows.Runner.Worker.lookup(run_id) do
+      nil ->
+        :ok
+
+      _pid ->
+        receive do
+        after
+          20 -> wait_for_worker_exit(run_id, attempts - 1)
+        end
+    end
+  end
+
+  defp wait_for_worker_exit(_run_id, 0) do
+    flunk("worker did not exit")
+  end
 
   defp insert_api_credential!(user_id, organization_id, provider, provider_label) do
     unique = System.unique_integer([:positive])

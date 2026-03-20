@@ -8,6 +8,7 @@ defmodule FizzWeb.WorkflowEditorLive do
   alias Fizz.Steps
   alias Fizz.Steps.Type
   alias Fizz.Workflows
+  alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.DraftSession
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.WorkflowDefinition
@@ -117,13 +118,16 @@ defmodule FizzWeb.WorkflowEditorLive do
         {:noreply, put_flash(socket, :info, "Publishing is wired in Phase 5.")}
 
       "run_test" ->
-        {:noreply, put_flash(socket, :info, "Execution controls are wired in Phase 4.")}
+        {:noreply, run_test(socket)}
 
       "run_node" ->
         {:noreply, put_flash(socket, :info, "Execution controls are wired in Phase 4.")}
 
       "cancel_execution" ->
-        {:noreply, put_flash(socket, :info, "Execution controls are wired in Phase 4.")}
+        {:noreply, cancel_execution(socket)}
+
+      "load_step_io" ->
+        {:noreply, load_step_io(socket, payload)}
 
       "pin_output" ->
         {:noreply, pin_output(socket, payload)}
@@ -230,11 +234,27 @@ defmodule FizzWeb.WorkflowEditorLive do
     {:noreply, assign(socket, :presences, presence_entries(topic))}
   end
 
+  def handle_info({:step_started, %{run_id: run_id} = payload}, socket) do
+    {:noreply, maybe_apply_step_started(socket, run_id, payload)}
+  end
+
+  def handle_info({:step_completed, %{run_id: run_id} = payload}, socket) do
+    {:noreply, maybe_apply_step_completed(socket, run_id, payload)}
+  end
+
+  def handle_info({:step_failed, %{run_id: run_id} = payload}, socket) do
+    {:noreply, maybe_apply_step_failed(socket, run_id, payload)}
+  end
+
+  def handle_info({:run_status_changed, %{run_id: run_id, status: status} = payload}, socket) do
+    {:noreply, maybe_apply_run_status(socket, run_id, status, payload)}
+  end
+
   def handle_info(
         %Broadcast{topic: "workflow_run:" <> run_id},
         %{assigns: %{debug_execution_id: run_id}} = socket
       ) do
-    {:noreply, refresh_execution(socket)}
+    {:noreply, refresh_execution_state(socket, run_id)}
   end
 
   def handle_info(_message, socket), do: {:noreply, socket}
@@ -287,7 +307,8 @@ defmodule FizzWeb.WorkflowEditorLive do
            Accounts.build_scope_for_project(socket.assigns.current_scope, project_id),
          {:ok, definition} <- Workflows.get_definition(scope, definition_id),
          {:ok, draft} <- Workflows.edit_definition(scope, definition_id),
-         {:ok, execution} <- load_execution(scope, run_id, socket.assigns.live_action),
+         {:ok, execution, step_executions, debug_execution_id} <-
+           load_execution(scope, run_id, socket.assigns.live_action),
          {:ok, socket, draft, seq, undo_state, presences} <-
            maybe_connect_draft_session(socket, scope, draft, run_id) do
       step_types = Steps.list_types()
@@ -304,13 +325,10 @@ defmodule FizzWeb.WorkflowEditorLive do
       |> assign(:presences, presences)
       |> assign(:editor_state, initial_editor_state(definition.id))
       |> assign(:execution, execution)
-      |> assign(:step_executions, [])
+      |> assign(:step_executions, step_executions)
       |> assign(:undo_state, undo_state)
       |> assign(:credential_options, [])
-      |> assign(
-        :debug_execution_id,
-        if(socket.assigns.live_action == :debug, do: run_id, else: nil)
-      )
+      |> assign(:debug_execution_id, debug_execution_id)
       |> maybe_push_undo_state()
     else
       {:error, :project_not_found} ->
@@ -380,12 +398,14 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp maybe_subscribe_to_run_topic(nil), do: :ok
   defp maybe_subscribe_to_run_topic(topic), do: Phoenix.PubSub.subscribe(Fizz.PubSub, topic)
 
-  defp load_execution(_scope, _run_id, :edit), do: {:ok, nil}
-  defp load_execution(_scope, nil, :debug), do: {:ok, nil}
+  defp load_execution(_scope, _run_id, :edit), do: {:ok, nil, [], nil}
+  defp load_execution(_scope, nil, :debug), do: {:ok, nil, [], nil}
 
   defp load_execution(scope, run_id, :debug) when is_binary(run_id) do
-    case Workflows.get_run(scope, run_id) do
-      {:ok, run} -> {:ok, encode_execution(run)}
+    with {:ok, run} <- Workflows.get_run(scope, run_id),
+         {:ok, step_executions} <- Workflows.list_run_step_executions(scope, run_id) do
+      {:ok, encode_execution(run), step_executions, run_id}
+    else
       {:error, reason} -> {:error, reason}
     end
   end
@@ -451,6 +471,88 @@ defmodule FizzWeb.WorkflowEditorLive do
         put_flash(socket, :error, "Could not save workflow: #{inspect(reason)}")
     end
   end
+
+  defp run_test(socket) do
+    with {:ok, draft, seq} <- DraftSession.persist_now(socket.assigns.draft.id) do
+      socket =
+        socket
+        |> assign(:draft, draft)
+        |> assign(:collab_seq, seq)
+        |> cancel_existing_execution()
+
+      case Compiler.compile(draft) do
+        {:ok, _workflow, _hash} ->
+          start_editor_test_run(socket, draft)
+
+        {:error, errors} ->
+          push_event(socket, "compilation_errors", %{errors: format_compilation_errors(errors)})
+      end
+    else
+      {:error, reason} ->
+        put_flash(socket, :error, "Could not save workflow: #{inspect(reason)}")
+    end
+  end
+
+  defp start_editor_test_run(socket, %WorkflowDefinitionVersion{} = draft) do
+    case Workflows.start_run(
+           socket.assigns.current_scope,
+           draft,
+           %{},
+           triggered_by: %{
+             "kind" => "editor_test",
+             "user_id" => socket.assigns.current_user_id
+           }
+         ) do
+      {:ok, run} ->
+        :ok = maybe_subscribe_to_run_topic(run_topic(run.id))
+
+        socket
+        |> assign(:step_executions, [])
+        |> assign(:run_topic, run_topic(run.id))
+        |> assign(:debug_execution_id, run.id)
+        |> refresh_execution_state(run.id)
+        |> maybe_assign_started_execution(run)
+
+      {:error, reason} ->
+        put_flash(socket, :error, "Could not start test run: #{inspect(reason)}")
+    end
+  end
+
+  defp cancel_execution(%{assigns: %{execution: %{id: run_id}}} = socket)
+       when is_binary(run_id) do
+    case execution_terminal?(socket.assigns.execution) do
+      true ->
+        socket
+
+      false ->
+        case Workflows.cancel_run(socket.assigns.current_scope, run_id) do
+          {:ok, cancelled_run} ->
+            assign(socket, :execution, encode_execution(cancelled_run))
+
+          {:error, _reason} ->
+            socket
+        end
+    end
+  end
+
+  defp cancel_execution(socket), do: socket
+
+  defp load_step_io(%{assigns: %{execution: %{id: run_id}}} = socket, payload)
+       when is_binary(run_id) do
+    with {:ok, step_execution_id} <- step_execution_id_from_payload(socket, payload),
+         {:ok, step_io} <-
+           Workflows.load_run_step_io(socket.assigns.current_scope, run_id, step_execution_id) do
+      push_event(socket, "step_io_loaded", step_io)
+    else
+      _error ->
+        case inline_step_io(socket, payload) do
+          nil -> socket
+          step_io -> push_event(socket, "step_io_loaded", step_io)
+        end
+    end
+  end
+
+  defp load_step_io(socket, _payload), do: socket
 
   defp update_presence_cursor(socket, payload) do
     now = System.monotonic_time(:millisecond)
@@ -639,10 +741,341 @@ defmodule FizzWeb.WorkflowEditorLive do
     end
   end
 
-  defp refresh_execution(socket) do
-    case Workflows.get_run(socket.assigns.current_scope, socket.assigns.debug_execution_id) do
-      {:ok, run} -> assign(socket, :execution, encode_execution(run))
-      {:error, _reason} -> socket
+  defp cancel_existing_execution(%{assigns: %{execution: %{id: run_id}}} = socket)
+       when is_binary(run_id) do
+    if execution_terminal?(socket.assigns.execution) do
+      unsubscribe_from_run(run_id)
+      socket
+    else
+      _ = Workflows.cancel_run(socket.assigns.current_scope, run_id)
+      unsubscribe_from_run(run_id)
+      socket
+    end
+  end
+
+  defp cancel_existing_execution(socket), do: socket
+
+  defp refresh_execution_state(socket, run_id) when is_binary(run_id) do
+    case load_execution_snapshot(socket.assigns.current_scope, run_id) do
+      {:ok, execution, step_executions} ->
+        socket
+        |> assign(:execution, execution)
+        |> assign(:step_executions, step_executions)
+
+      {:error, _reason} ->
+        socket
+    end
+  end
+
+  defp refresh_execution_state(socket, _run_id), do: socket
+
+  defp load_execution_snapshot(scope, run_id) when is_binary(run_id) do
+    with {:ok, run} <- Workflows.get_run(scope, run_id),
+         {:ok, step_executions} <- Workflows.list_run_step_executions(scope, run_id) do
+      {:ok, encode_execution(run), step_executions}
+    end
+  end
+
+  defp maybe_assign_started_execution(
+         %{assigns: %{execution: nil}} = socket,
+         %WorkflowRun{} = run
+       ) do
+    assign(socket, :execution, encode_execution(run))
+  end
+
+  defp maybe_assign_started_execution(socket, _run), do: socket
+
+  defp maybe_apply_step_started(socket, run_id, payload) do
+    if current_execution_id(socket) == run_id do
+      assign(
+        socket,
+        :step_executions,
+        upsert_step_started(socket.assigns.step_executions, socket, payload)
+      )
+    else
+      socket
+    end
+  end
+
+  defp maybe_apply_step_completed(socket, run_id, payload) do
+    if current_execution_id(socket) == run_id do
+      assign(
+        socket,
+        :step_executions,
+        upsert_step_completed(socket.assigns.step_executions, socket, payload)
+      )
+    else
+      socket
+    end
+  end
+
+  defp maybe_apply_step_failed(socket, run_id, payload) do
+    if current_execution_id(socket) == run_id do
+      assign(
+        socket,
+        :step_executions,
+        upsert_step_failed(socket.assigns.step_executions, socket, payload)
+      )
+    else
+      socket
+    end
+  end
+
+  defp maybe_apply_run_status(socket, run_id, status, payload) do
+    if current_execution_id(socket) == run_id do
+      socket =
+        socket
+        |> refresh_terminal_execution(run_id, status)
+        |> update_execution_status(status, payload)
+        |> maybe_unsubscribe_terminal_run(run_id, status)
+
+      socket
+    else
+      socket
+    end
+  end
+
+  defp refresh_terminal_execution(socket, run_id, status) do
+    if terminal_status?(status) do
+      refresh_execution_state(socket, run_id)
+    else
+      socket
+    end
+  end
+
+  defp update_execution_status(%{assigns: %{execution: execution}} = socket, status, payload)
+       when is_map(execution) do
+    completed_at =
+      if terminal_status?(status) do
+        encode_datetime(Map.get(payload, :timestamp) || Map.get(payload, "timestamp"))
+      else
+        nil
+      end
+
+    execution =
+      execution
+      |> Map.put(:status, encode_execution_status(status))
+      |> maybe_put(:completed_at, completed_at)
+
+    assign(socket, :execution, execution)
+  end
+
+  defp update_execution_status(socket, _status, _payload), do: socket
+
+  defp maybe_unsubscribe_terminal_run(socket, run_id, status) do
+    if terminal_status?(status) do
+      unsubscribe_from_run(run_id)
+      assign(socket, :run_topic, nil)
+    else
+      socket
+    end
+  end
+
+  defp upsert_step_started(step_executions, socket, payload) do
+    step_execution =
+      base_step_execution(socket, payload)
+      |> Map.put(:status, "running")
+      |> Map.put(:input_data, payload_value(payload, "input"))
+      |> Map.put(:queued_at, encode_datetime(payload_value(payload, "started_at")))
+      |> Map.put(:started_at, encode_datetime(payload_value(payload, "started_at")))
+      |> Map.put(:inserted_at, encode_datetime(payload_value(payload, "started_at")))
+      |> put_step_execution_metadata(%{
+        input_fact_hash: payload_value(payload, "input_fact_hash"),
+        output_fact_hash: nil,
+        output_summary: nil
+      })
+
+    put_step_execution(step_executions, step_execution)
+  end
+
+  defp upsert_step_completed(step_executions, socket, payload) do
+    step_execution =
+      socket
+      |> base_step_execution(payload)
+      |> merge_existing_step_execution(step_executions)
+      |> Map.put(:status, "completed")
+      |> Map.put(:input_data, existing_or_payload(step_executions, payload, :input_data, "input"))
+      |> Map.put(:output_data, payload_value(payload, "output"))
+      |> Map.put(:duration_us, payload_value(payload, "duration_us"))
+      |> Map.put(:completed_at, encode_datetime(payload_value(payload, "completed_at")))
+      |> put_step_execution_metadata(%{
+        input_fact_hash: payload_value(payload, "input_fact_hash"),
+        output_fact_hash: payload_value(payload, "output_fact_hash"),
+        output_summary: payload_value(payload, "output_summary")
+      })
+
+    put_step_execution(step_executions, step_execution)
+  end
+
+  defp upsert_step_failed(step_executions, socket, payload) do
+    step_execution =
+      socket
+      |> base_step_execution(payload)
+      |> merge_existing_step_execution(step_executions)
+      |> Map.put(:status, "failed")
+      |> Map.put(:input_data, existing_or_payload(step_executions, payload, :input_data, "input"))
+      |> Map.put(:error, payload_value(payload, "error"))
+      |> Map.put(:duration_us, payload_value(payload, "duration_us"))
+      |> Map.put(:completed_at, encode_datetime(payload_value(payload, "failed_at")))
+      |> put_step_execution_metadata(%{
+        input_fact_hash: payload_value(payload, "input_fact_hash"),
+        output_fact_hash: nil,
+        output_summary: nil
+      })
+
+    put_step_execution(step_executions, step_execution)
+  end
+
+  defp base_step_execution(socket, payload) do
+    step_id = payload_value(payload, "step_id")
+    started_at = encode_datetime(payload_value(payload, "started_at"))
+    step_execution_id = step_execution_id(payload)
+
+    %{
+      id: step_execution_id,
+      execution_id: payload_value(payload, "run_id"),
+      step_id: step_id,
+      step_type_id: step_type_id(socket.assigns.draft, step_id),
+      status: "pending",
+      input_data: nil,
+      output_data: nil,
+      output_item_count: nil,
+      item_index: nil,
+      items_total: nil,
+      error: nil,
+      attempt: payload_value(payload, "attempt") || 0,
+      retry_of_id: nil,
+      duration_us: nil,
+      queued_at: started_at,
+      started_at: started_at,
+      completed_at: nil,
+      metadata: %{},
+      inserted_at: started_at || encode_datetime(DateTime.utc_now())
+    }
+  end
+
+  defp merge_existing_step_execution(step_execution, step_executions) do
+    case Enum.find(step_executions, &(&1.id == step_execution.id)) do
+      nil -> step_execution
+      existing -> Map.merge(step_execution, existing)
+    end
+  end
+
+  defp put_step_execution(step_executions, step_execution) do
+    remaining =
+      Enum.reject(step_executions, fn existing ->
+        existing.id == step_execution.id
+      end)
+
+    (remaining ++ [step_execution])
+    |> Enum.sort_by(&execution_timestamp/1)
+  end
+
+  defp put_step_execution_metadata(step_execution, additions) do
+    metadata =
+      step_execution
+      |> Map.get(:metadata, %{})
+      |> Map.merge(Enum.reject(additions, fn {_key, value} -> is_nil(value) end) |> Map.new())
+
+    Map.put(step_execution, :metadata, metadata)
+  end
+
+  defp existing_or_payload(step_executions, payload, field, payload_key) do
+    case Enum.find(step_executions, &(&1.id == step_execution_id(payload))) do
+      nil -> payload_value(payload, payload_key)
+      existing -> fetch_value(existing, field) || payload_value(payload, payload_key)
+    end
+  end
+
+  defp step_execution_id(payload) do
+    runnable_id = payload_value(payload, "runnable_id")
+    run_id = payload_value(payload, "run_id")
+    attempt = payload_value(payload, "attempt") || 0
+    "#{run_id}:#{runnable_id}:#{attempt}"
+  end
+
+  defp step_type_id(%WorkflowDefinitionVersion{} = draft, step_id) when is_binary(step_id) do
+    case Enum.find(draft.steps, &(&1.id == step_id)) do
+      %Step{type_id: type_id} -> type_id
+      _ -> "unknown"
+    end
+  end
+
+  defp step_type_id(_draft, _step_id), do: "unknown"
+
+  defp current_execution_id(%{assigns: %{execution: %{id: run_id}}}) when is_binary(run_id),
+    do: run_id
+
+  defp current_execution_id(%{assigns: %{debug_execution_id: run_id}}) when is_binary(run_id),
+    do: run_id
+
+  defp current_execution_id(_socket), do: nil
+
+  defp execution_terminal?(%{status: status}), do: terminal_status?(status)
+  defp execution_terminal?(_execution), do: false
+
+  defp terminal_status?(status) when is_atom(status),
+    do: status in [:completed, :failed, :cancelled]
+
+  defp terminal_status?(status) when is_binary(status) do
+    status in ["completed", "failed", "cancelled"]
+  end
+
+  defp terminal_status?(_status), do: false
+
+  defp unsubscribe_from_run(run_id) when is_binary(run_id) do
+    Phoenix.PubSub.unsubscribe(Fizz.PubSub, run_topic(run_id))
+  end
+
+  defp unsubscribe_from_run(_run_id), do: :ok
+
+  defp format_compilation_errors(errors) when is_list(errors) do
+    Enum.map(errors, fn error ->
+      %{
+        step_id: Map.get(error, :step_id) || Map.get(error, "step_id"),
+        message: Map.get(error, :message) || Map.get(error, "message") || inspect(error)
+      }
+    end)
+  end
+
+  defp format_compilation_errors(_errors), do: []
+
+  defp step_execution_id_from_payload(socket, payload) do
+    case payload_value(payload, "step_execution_id") do
+      step_execution_id when is_binary(step_execution_id) ->
+        {:ok, step_execution_id}
+
+      _ ->
+        case payload_value(payload, "step_id") do
+          step_id when is_binary(step_id) ->
+            socket.assigns.step_executions
+            |> Enum.filter(&(fetch_value(&1, :step_id) == step_id))
+            |> pick_latest_execution()
+            |> case do
+              %{id: id} -> {:ok, id}
+              _ -> {:error, :step_execution_not_found}
+            end
+
+          _ ->
+            {:error, :step_execution_not_found}
+        end
+    end
+  end
+
+  defp inline_step_io(socket, payload) do
+    with {:ok, step_execution_id} <- step_execution_id_from_payload(socket, payload),
+         %{} = step_execution <-
+           Enum.find(socket.assigns.step_executions, &(&1.id == step_execution_id)) do
+      %{
+        step_execution_id: step_execution.id,
+        execution_id: fetch_value(step_execution, :execution_id),
+        step_id: fetch_value(step_execution, :step_id),
+        attempt: fetch_value(step_execution, :attempt),
+        input_data: fetch_value(step_execution, :input_data),
+        output_data: fetch_value(step_execution, :output_data)
+      }
+    else
+      _ -> nil
     end
   end
 
@@ -808,7 +1241,7 @@ defmodule FizzWeb.WorkflowEditorLive do
       workflow_id: run.workflow_definition_id,
       workflow_version_id: run.workflow_definition_version_id,
       status: encode_execution_status(run.status),
-      execution_type: "production",
+      execution_type: execution_type(run.triggered_by),
       trigger: %{
         type: trigger_type(run.triggered_by),
         data: run.triggered_by || %{}
@@ -836,8 +1269,22 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp encode_execution_status(status) when is_binary(status), do: status
   defp encode_execution_status(status), do: Atom.to_string(status)
 
+  defp execution_type(%{} = triggered_by) do
+    case Map.get(triggered_by, :kind) || Map.get(triggered_by, "kind") do
+      "editor_test" -> "preview"
+      :editor_test -> "preview"
+      _ -> "production"
+    end
+  end
+
+  defp execution_type(_triggered_by), do: "production"
+
   defp trigger_type(%{} = triggered_by) do
-    Map.get(triggered_by, :type) || Map.get(triggered_by, "type") || "manual"
+    Map.get(triggered_by, :type) ||
+      Map.get(triggered_by, "type") ||
+      Map.get(triggered_by, :kind) ||
+      Map.get(triggered_by, "kind") ||
+      "manual"
   end
 
   defp trigger_type(_triggered_by), do: "manual"
