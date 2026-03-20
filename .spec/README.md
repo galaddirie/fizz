@@ -1,10 +1,10 @@
 # Spec Layer
 
-This directory captures the durable workflow runtime contracts that should stay
-true over time, along with the architectural decisions that shape those
-contracts.
+This directory captures the durable workflow runtime and editor contracts that
+should stay true over time, along with the architectural decisions that shape
+those contracts.
 
-## Specs
+## Specs — Workflow Runtime
 
 - `specs/workflow-definitions.spec.md`
   - Authored workflow definition/version shape and draft-to-published lifecycle.
@@ -35,7 +35,26 @@ contracts.
 - `specs/workflow-triggers.spec.md`
   - Trigger registration lifecycle, fire routing, event dedup, compiler integration, behaviour composition.
 
-## Decisions
+## Specs — Workflow Editor
+
+- `specs/editor.state-model.spec.md`
+  - State taxonomy (authored, published, runtime, ephemeral), ownership boundaries, LiveView assigns.
+- `specs/editor.draft-session.spec.md`
+  - DraftSession GenServer lifecycle, operation model, undo/redo, persistence contracts.
+- `specs/editor.collaboration.spec.md`
+  - Concurrency semantics (LWW, optimistic apply), presence metadata, PubSub topics.
+- `specs/editor.canvas.spec.md`
+  - Connection validation rules, node type visual contracts, keyboard shortcuts, layout constants.
+- `specs/editor.step-config.spec.md`
+  - Config schema to UI field mapping, expression editing, credential resolution, subnode slots.
+- `specs/editor.validation.spec.md`
+  - Three validation tiers (operation, persist, publish), error structure, per-tier rules.
+- `specs/editor.execution.spec.md`
+  - Test run lifecycle, PubSub execution events, debug mode, on-demand I/O loading.
+- `specs/editor.version-lifecycle.spec.md`
+  - Draft/published/archived transitions, publish pipeline, hash semantics, trigger impact.
+
+## Decisions — Workflow Runtime
 
 - `decisions/runic-as-execution-kernel.md`
   - The durable runtime is built around Runic as the execution kernel.
@@ -57,6 +76,13 @@ contracts.
   - Compiled workflows generate quoted Runic components with explicit meta references.
 - `decisions/trigger-registry-architecture.md`
   - ETS-backed trigger registration cache with LISTEN/NOTIFY sync for sub-millisecond webhook routing.
+
+## Decisions — Workflow Editor
+
+- `decisions/operation-based-collaboration.md`
+  - Operation-based editing over OT/CRDT and pessimistic locking; server-authoritative GenServer.
+- `decisions/periodic-persistence.md`
+  - DraftSession batches DB writes on a 5s timer instead of per-keystroke saves.
 
 ## Exclusions
 
