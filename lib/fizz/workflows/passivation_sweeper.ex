@@ -7,7 +7,7 @@ defmodule Fizz.Workflows.PassivationSweeper do
   have their workers stopped, their status updated to `:passivated`, and their
   lease released.
 
-  Cold-tier checkpoint upload is intentionally deferred to a later phase.
+  TODO: Cold-tier checkpoint upload
   """
 
   use GenServer
