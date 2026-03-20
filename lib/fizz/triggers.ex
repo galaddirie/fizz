@@ -7,7 +7,9 @@ defmodule Fizz.Triggers do
 
   alias Fizz.Accounts.Scope
   alias Fizz.Repo
+  alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Triggers.{TriggerEvent, TriggerRegistration}
+  alias Fizz.Workflows.WorkflowDefinitionVersion
 
   @notification_channel "trigger_registrations"
   @terminal_event_statuses ~w(fired skipped failed)
@@ -156,6 +158,45 @@ defmodule Fizz.Triggers do
       conflict_target: [:trigger_registration_id, :event_id],
       returning: true
     )
+  end
+
+  @spec resolve_registration_executor(TriggerRegistration.t()) ::
+          {:ok, module()} | {:error, term()}
+  def resolve_registration_executor(%TriggerRegistration{} = registration) do
+    with %WorkflowDefinitionVersion{} = version <-
+           Repo.get(WorkflowDefinitionVersion, registration.definition_version_id),
+         %{type_id: type_id} <- Enum.find(version.steps, &(&1.id == registration.step_id)),
+         {:ok, executor} <- StepExecutorBehaviour.resolve(type_id) do
+      {:ok, executor}
+    else
+      nil -> {:error, :definition_version_not_found}
+      {:error, _reason} = error -> error
+      _ -> {:error, :trigger_step_not_found}
+    end
+  end
+
+  @spec update_schedule_next_fire_at(TriggerRegistration.t(), DateTime.t()) ::
+          {:ok, TriggerRegistration.t()} | {:error, Ecto.Changeset.t()}
+  def update_schedule_next_fire_at(
+        %TriggerRegistration{} = registration,
+        %DateTime{} = next_fire_at
+      ) do
+    registration
+    |> TriggerRegistration.changeset(%{next_fire_at: next_fire_at})
+    |> Repo.update()
+  end
+
+  @spec mark_registration_errored(TriggerRegistration.t(), term()) ::
+          {:ok, TriggerRegistration.t()} | {:error, Ecto.Changeset.t()}
+  def mark_registration_errored(%TriggerRegistration{} = registration, reason) do
+    registration
+    |> TriggerRegistration.changeset(%{
+      status: "errored",
+      error_message: inspect(reason),
+      consecutive_errors: registration.consecutive_errors + 1,
+      last_error_at: DateTime.utc_now()
+    })
+    |> Repo.update()
   end
 
   defp find_existing_registration(%{run_id: run_id, step_id: step_id})

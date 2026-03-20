@@ -73,6 +73,7 @@ defmodule Fizz.MixProject do
       {:runic, path: "vendor/runic"},
       {:jsv, "~> 0.13.1"},
       {:oban, "~> 2.20"},
+      {:crontab, "~> 1.1"},
       {:exqlite, "~> 0.25"},
       {:sprites, git: "https://github.com/superfly/sprites-ex.git"},
       {:flame, "~> 0.5.3"},

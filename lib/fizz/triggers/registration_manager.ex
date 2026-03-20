@@ -8,11 +8,14 @@ defmodule Fizz.Triggers.RegistrationManager do
   alias Fizz.Repo
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Triggers
+  alias Fizz.Triggers.Webhook
   alias Fizz.Triggers.TriggerRegistration
+  alias Fizz.Triggers.Workers.TriggerFireWorker
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.WorkflowDefinition
   alias Fizz.Workflows.WorkflowDefinitionVersion
-  alias Oban.Cron.Expression
+  alias Crontab.CronExpression.Parser, as: CronParser
+  alias Crontab.Scheduler, as: CronScheduler
 
   require Logger
 
@@ -22,6 +25,8 @@ defmodule Fizz.Triggers.RegistrationManager do
   def sync_on_publish(%WorkflowDefinitionVersion{} = definition_version) do
     with {:ok, workflow, _compiled_hash} <- Compiler.compile(definition_version),
          {:ok, context} <- load_definition_context(definition_version) do
+      _ = deactivate_stale_registrations(definition_version)
+
       errors =
         workflow.fizz_metadata
         |> Map.get(:trigger_manifest, [])
@@ -32,8 +37,6 @@ defmodule Fizz.Triggers.RegistrationManager do
           end
         end)
         |> Enum.reverse()
-
-      _ = deactivate_stale_registrations(definition_version)
 
       case errors do
         [] -> :ok
@@ -74,27 +77,17 @@ defmodule Fizz.Triggers.RegistrationManager do
 
   def next_fire_at(%{"cron" => cron, "timezone" => timezone}, %DateTime{} = from)
       when is_binary(cron) and is_binary(timezone) do
-    cron
-    |> parse_cron()
-    |> case do
-      {:ok, expression} ->
-        from
-        |> DateTime.shift_zone!(timezone)
-        |> then(&Expression.next_at(expression, &1))
-        |> normalize_next_fire_at()
-
-      :error ->
-        nil
+    with {:ok, expression} <- parse_cron(cron),
+         {:ok, timezone_now} <- shift_to_timezone(from, timezone),
+         {:ok, next_run} <- CronScheduler.get_next_run_date(expression, timezone_now) do
+      normalize_next_fire_at(next_run, timezone)
+    else
+      {:error, _reason} -> nil
     end
   end
 
   def next_fire_at(%{"cron" => cron}, %DateTime{} = from) when is_binary(cron) do
-    cron
-    |> parse_cron()
-    |> case do
-      {:ok, expression} -> normalize_next_fire_at(Expression.next_at(expression, from))
-      :error -> nil
-    end
+    next_fire_at(%{"cron" => cron, "timezone" => "UTC"}, from)
   end
 
   def next_fire_at(_params, _from), do: nil
@@ -103,10 +96,37 @@ defmodule Fizz.Triggers.RegistrationManager do
     with {:ok, executor} <- StepExecutorBehaviour.resolve(trigger.type_id),
          {:ok, spec} <- executor.registration_spec(trigger.config, context),
          attrs <- registration_attrs(trigger, spec, context),
-         {:ok, _registration} <- Triggers.upsert_registration(attrs) do
+         {:ok, registration} <- Triggers.upsert_registration(attrs) do
+      maybe_enqueue_initial_schedule(registration, executor)
       :ok
     end
   end
+
+  defp maybe_enqueue_initial_schedule(
+         %TriggerRegistration{kind: "schedule", next_fire_at: %DateTime{} = fire_at} =
+           registration,
+         executor
+       ) do
+    event_id = "sched_#{registration.id}_#{DateTime.to_unix(fire_at)}"
+
+    normalized_data =
+      case executor.normalize_event(registration.registration_params, %{}) do
+        {:ok, data} -> Map.put(data, "scheduled_at", DateTime.to_iso8601(fire_at))
+        {:error, _} -> %{"scheduled_at" => DateTime.to_iso8601(fire_at)}
+      end
+
+    %{
+      "trigger_registration_id" => registration.id,
+      "event_id" => event_id,
+      "normalized_data" => normalized_data
+    }
+    |> TriggerFireWorker.new(scheduled_at: fire_at)
+    |> Oban.insert()
+
+    :ok
+  end
+
+  defp maybe_enqueue_initial_schedule(_registration, _executor), do: :ok
 
   defp load_definition_context(%WorkflowDefinitionVersion{} = definition_version) do
     case Repo.one(
@@ -130,7 +150,10 @@ defmodule Fizz.Triggers.RegistrationManager do
   defp registration_attrs(trigger, spec, context) do
     params = spec.params || %{}
     now = DateTime.utc_now()
-    existing = existing_registration(context.definition_version_id, trigger.step_id)
+    existing = current_registration(context.definition_version_id, trigger.step_id)
+
+    existing_webhook =
+      webhook_registration(existing, context.workflow_definition_id, trigger, spec)
 
     %{
       workflow_definition_id: context.workflow_definition_id,
@@ -143,8 +166,8 @@ defmodule Fizz.Triggers.RegistrationManager do
       status: "active",
       registration_params: params,
       config_digest: digest_for(spec),
-      webhook_path: webhook_path(existing, spec),
-      webhook_secret: webhook_secret(existing, spec),
+      webhook_path: webhook_path(existing_webhook, spec),
+      webhook_secret: webhook_secret(existing_webhook, spec),
       cron_expression: cron_expression(spec, trigger.config),
       next_fire_at: schedule_next_fire_at(existing, spec, now),
       cursor: polling_cursor(spec),
@@ -157,7 +180,7 @@ defmodule Fizz.Triggers.RegistrationManager do
     }
   end
 
-  defp existing_registration(definition_version_id, step_id) do
+  defp current_registration(definition_version_id, step_id) do
     TriggerRegistration
     |> where(
       [registration],
@@ -166,6 +189,30 @@ defmodule Fizz.Triggers.RegistrationManager do
     )
     |> Repo.one()
   end
+
+  defp prior_webhook_registration(workflow_definition_id, step_id) do
+    TriggerRegistration
+    |> where(
+      [registration],
+      registration.workflow_definition_id == ^workflow_definition_id and
+        registration.step_id == ^step_id and registration.kind == "webhook" and
+        is_nil(registration.run_id)
+    )
+    |> order_by([registration], desc: registration.inserted_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp webhook_registration(%TriggerRegistration{} = existing, _definition_id, _trigger, %{
+         kind: :webhook
+       }),
+       do: existing
+
+  defp webhook_registration(nil, workflow_definition_id, trigger, %{kind: :webhook}) do
+    prior_webhook_registration(workflow_definition_id, trigger.step_id)
+  end
+
+  defp webhook_registration(_existing, _definition_id, _trigger, _spec), do: nil
 
   defp digest_for(spec) do
     %{
@@ -183,7 +230,7 @@ defmodule Fizz.Triggers.RegistrationManager do
        do: path
 
   defp webhook_path(_existing, %{kind: :webhook}) do
-    "wh_" <> Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+    Webhook.generate_path()
   end
 
   defp webhook_path(_existing, _spec), do: nil
@@ -192,9 +239,7 @@ defmodule Fizz.Triggers.RegistrationManager do
        when is_binary(secret) and secret != "",
        do: secret
 
-  defp webhook_secret(_existing, %{kind: :webhook}) do
-    Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
-  end
+  defp webhook_secret(_existing, %{kind: :webhook}), do: Webhook.generate_secret()
 
   defp webhook_secret(_existing, _spec), do: nil
 
@@ -231,13 +276,37 @@ defmodule Fizz.Triggers.RegistrationManager do
   end
 
   defp parse_cron(cron) do
-    {:ok, Expression.parse!(cron)}
-  rescue
-    _error -> :error
+    CronParser.parse(cron)
   end
 
-  defp normalize_next_fire_at(:unknown), do: nil
-  defp normalize_next_fire_at(%DateTime{} = datetime), do: datetime
+  defp shift_to_timezone(%DateTime{} = from, "UTC"), do: {:ok, DateTime.to_naive(from)}
+  defp shift_to_timezone(%DateTime{} = from, "Etc/UTC"), do: {:ok, DateTime.to_naive(from)}
+
+  defp shift_to_timezone(%DateTime{} = from, timezone) do
+    case DateTime.shift_zone(from, timezone) do
+      {:ok, shifted} -> {:ok, DateTime.to_naive(shifted)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp normalize_next_fire_at(%NaiveDateTime{} = naive_datetime, "UTC") do
+    DateTime.from_naive!(naive_datetime, "Etc/UTC")
+  end
+
+  defp normalize_next_fire_at(%NaiveDateTime{} = naive_datetime, "Etc/UTC") do
+    DateTime.from_naive!(naive_datetime, "Etc/UTC")
+  end
+
+  defp normalize_next_fire_at(%NaiveDateTime{} = naive_datetime, timezone) do
+    with {:ok, datetime} <- DateTime.from_naive(naive_datetime, timezone),
+         {:ok, utc_datetime} <- DateTime.shift_zone(datetime, "Etc/UTC") do
+      utc_datetime
+    else
+      {:error, _reason} -> nil
+      {:ambiguous, _first, _second} -> nil
+      {:gap, _before, _after} -> nil
+    end
+  end
 
   defp notify_stale_registrations(_workflow_definition_id) do
     case Ecto.Adapters.SQL.query(

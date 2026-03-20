@@ -161,6 +161,69 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorkerTest do
     assert_worker_shutdown(run.id)
   end
 
+  test "schedule trigger self-chains by enqueuing next TriggerFireWorker after firing" do
+    scope = project_scope_fixture()
+
+    %{version: version} =
+      published_version_fixture(scope, schedule_trigger_snapshot_attrs())
+
+    registration =
+      Repo.one!(
+        from(reg in TriggerRegistration,
+          where: reg.definition_version_id == ^version.id and reg.kind == "schedule"
+        )
+      )
+
+    due_at = DateTime.add(DateTime.utc_now(), -1, :second)
+
+    registration =
+      registration
+      |> TriggerRegistration.changeset(%{next_fire_at: due_at})
+      |> Repo.update!()
+
+    event_id = "sched_#{registration.id}_#{DateTime.to_unix(due_at)}"
+
+    assert :ok =
+             perform_job(TriggerFireWorker, %{
+               trigger_registration_id: registration.id,
+               event_id: event_id,
+               normalized_data: %{"scheduled_at" => DateTime.to_iso8601(due_at)}
+             })
+
+    # Verify self-chaining: a new job should be enqueued with a future scheduled_at
+    next_jobs =
+      all_enqueued(worker: TriggerFireWorker)
+      |> Enum.filter(fn job ->
+        job.args["trigger_registration_id"] == registration.id and
+          job.args["event_id"] != event_id
+      end)
+
+    assert length(next_jobs) >= 1
+    [next_job] = next_jobs
+    assert next_job.scheduled_at != nil
+
+    # The registration's next_fire_at should be updated
+    updated_registration = Repo.get!(TriggerRegistration, registration.id)
+    assert DateTime.compare(updated_registration.next_fire_at, due_at) == :gt
+  end
+
+  defp schedule_trigger_snapshot_attrs do
+    trigger =
+      step(%{
+        id: Ecto.UUID.generate(),
+        type_id: "schedule_trigger",
+        name: "Schedule Trigger",
+        config: %{"interval_seconds" => 60}
+      })
+
+    debug = step(%{id: Ecto.UUID.generate(), type_id: "debug", name: "Debug"})
+
+    snapshot_attrs(%{
+      steps: [trigger, debug],
+      connections: [connection(%{source_step_id: trigger.id, target_step_id: debug.id})]
+    })
+  end
+
   defp manual_trigger_snapshot_attrs do
     snapshot_attrs(%{
       steps: [step(%{id: Ecto.UUID.generate(), type_id: "manual_input", name: "Manual"})]

@@ -11,6 +11,7 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorker do
   alias Fizz.Accounts.Project
   alias Fizz.Accounts.Scope
   alias Fizz.Triggers
+  alias Fizz.Triggers.RegistrationManager
   alias Fizz.Triggers.TriggerRegistration
   alias Fizz.Workflows
 
@@ -42,6 +43,7 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorker do
           end
         end)
 
+      maybe_chain_schedule(registration, DateTime.utc_now())
       :ok
     else
       {:duplicate, _event} ->
@@ -131,4 +133,42 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorker do
 
   defp event_status_attrs({:run, run_id}), do: [run_id: run_id]
   defp event_status_attrs({:signal, run_id}), do: [run_id: run_id]
+
+  defp maybe_chain_schedule(%TriggerRegistration{kind: "schedule"} = registration, now) do
+    case RegistrationManager.next_fire_at(registration.registration_params, now) do
+      %DateTime{} = next_fire_at ->
+        {:ok, _} = Triggers.update_schedule_next_fire_at(registration, next_fire_at)
+        event_id = "sched_#{registration.id}_#{DateTime.to_unix(next_fire_at)}"
+
+        {:ok, _job} =
+          %{
+            "trigger_registration_id" => registration.id,
+            "event_id" => event_id,
+            "normalized_data" => schedule_normalized_data(registration, next_fire_at)
+          }
+          |> __MODULE__.new(scheduled_at: next_fire_at)
+          |> Oban.insert()
+
+        :ok
+
+      nil ->
+        _ = Triggers.mark_registration_errored(registration, :next_fire_at_unavailable)
+        :ok
+    end
+  end
+
+  defp maybe_chain_schedule(_registration, _now), do: :ok
+
+  defp schedule_normalized_data(registration, fire_at) do
+    case Triggers.resolve_registration_executor(registration) do
+      {:ok, executor} ->
+        case executor.normalize_event(registration.registration_params, %{}) do
+          {:ok, data} -> Map.put(data, "scheduled_at", DateTime.to_iso8601(fire_at))
+          {:error, _} -> %{"scheduled_at" => DateTime.to_iso8601(fire_at)}
+        end
+
+      {:error, _} ->
+        %{"scheduled_at" => DateTime.to_iso8601(fire_at)}
+    end
+  end
 end

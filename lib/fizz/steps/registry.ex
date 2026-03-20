@@ -58,6 +58,22 @@ defmodule Fizz.Steps.Registry do
   end
 
   @doc """
+  Registers a step type dynamically.
+  """
+  @spec register(Type.t()) :: :ok
+  def register(%Type{} = type) do
+    GenServer.call(__MODULE__, {:register, type})
+  end
+
+  @doc """
+  Removes a previously registered step type.
+  """
+  @spec unregister(String.t()) :: :ok
+  def unregister(type_id) when is_binary(type_id) do
+    GenServer.call(__MODULE__, {:unregister, type_id})
+  end
+
+  @doc """
   Returns all registered step types.
   """
   @spec all() :: [Type.t()]
@@ -205,6 +221,18 @@ defmodule Fizz.Steps.Registry do
 
     Logger.info("Step Registry reloaded with #{length(types)} step types")
 
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call({:register, %Type{} = type}, _from, state) do
+    :ets.insert(@ets_table, {type.id, type})
+    {:reply, :ok, state}
+  end
+
+  @impl true
+  def handle_call({:unregister, type_id}, _from, state) do
+    :ets.delete(@ets_table, type_id)
     {:reply, :ok, state}
   end
 

@@ -8,9 +8,11 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorker do
   import Ecto.Query
 
   alias Fizz.Repo
+  alias Fizz.Triggers
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Triggers.TriggerEvent
   alias Fizz.Triggers.TriggerRegistration
+  alias Fizz.Triggers.Workers.TriggerFireWorker
   alias Fizz.Workflows.WorkflowDefinition
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
@@ -24,6 +26,7 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorker do
     sync_published_versions()
     deactivate_unpublished_registrations()
     reset_errored_registrations()
+    recover_broken_schedule_chains()
     prune_terminal_events()
     :ok
   end
@@ -106,6 +109,57 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorker do
       )
 
     count
+  end
+
+  defp recover_broken_schedule_chains do
+    now = DateTime.utc_now()
+
+    overdue_registrations =
+      TriggerRegistration
+      |> where(
+        [registration],
+        registration.kind == "schedule" and registration.status == "active" and
+          not is_nil(registration.next_fire_at) and registration.next_fire_at <= ^now
+      )
+      |> Repo.all()
+
+    Enum.each(overdue_registrations, fn registration ->
+      pending_job_exists? =
+        Oban.Job
+        |> where(
+          [job],
+          job.worker == "Fizz.Triggers.Workers.TriggerFireWorker" and
+            job.state in ["available", "scheduled", "executing", "retryable"] and
+            fragment("?->>'trigger_registration_id' = ?", job.args, ^registration.id)
+        )
+        |> Repo.exists?()
+
+      unless pending_job_exists? do
+        event_id = "sched_#{registration.id}_#{DateTime.to_unix(now)}"
+
+        normalized_data =
+          case Triggers.resolve_registration_executor(registration) do
+            {:ok, executor} ->
+              case executor.normalize_event(registration.registration_params, %{}) do
+                {:ok, data} -> Map.put(data, "scheduled_at", DateTime.to_iso8601(now))
+                {:error, _} -> %{"scheduled_at" => DateTime.to_iso8601(now)}
+              end
+
+            {:error, _} ->
+              %{"scheduled_at" => DateTime.to_iso8601(now)}
+          end
+
+        %{
+          "trigger_registration_id" => registration.id,
+          "event_id" => event_id,
+          "normalized_data" => normalized_data
+        }
+        |> TriggerFireWorker.new()
+        |> Oban.insert()
+
+        Logger.info("recovered broken schedule chain for registration #{registration.id}")
+      end
+    end)
   end
 
   defp prune_terminal_events do

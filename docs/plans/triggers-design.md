@@ -231,7 +231,7 @@ CREATE TABLE trigger_registrations (
                             CHECK (kind IN ('manual','webhook','schedule',
                                             'polling','subscription','chat')),
     status                  TEXT NOT NULL DEFAULT 'active'
-                            CHECK (status IN ('active','paused','errored','inactive','firing')),
+                            CHECK (status IN ('active','paused','errored','inactive')),
     registration_params     JSONB NOT NULL DEFAULT '{}',
     config_digest           TEXT NOT NULL,
 
@@ -346,7 +346,8 @@ Fizz.Application
 │   │   Loads active trigger_registrations into ETS on init.
 │   │   Indexes by webhook_path, by project_id, by kind.
 │   │   Subscribes to PG LISTEN/NOTIFY channel "trigger_registrations".
-│   │   Provides lookup APIs for WebhookRouter and pollers.
+│   │   Provides lookup APIs for WebhookRouter and consumers.
+│   │   (Schedule triggers use Oban job chaining, not a dedicated poller.)
 │   │
 │   └── Fizz.Triggers.EventStreamSupervisor     (DynamicSupervisor)
 │       Manages long-lived consumer processes for polling/subscription triggers.
@@ -433,8 +434,8 @@ This worker:
 1. Finds published definition versions with missing registrations → creates them
 2. Finds registrations for unpublished/archived versions → deactivates them
 3. Finds errored registrations past cooldown → resets to active
-4. Finds active polling registrations without running consumers → signals EventStreamSupervisor to start them
-5. Finds active schedule registrations without a pending Oban job → enqueues the next scheduled TriggerFireWorker job (safety net for lost chains)
+4. Recovers broken schedule chains: finds active schedule registrations with overdue `next_fire_at` and no pending/executing Oban job → enqueues a TriggerFireWorker immediately
+5. Finds active polling registrations without running consumers → signals EventStreamSupervisor to start them
 
 ### WebhookRouter
 

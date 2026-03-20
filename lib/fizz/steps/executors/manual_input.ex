@@ -14,12 +14,6 @@ defmodule Fizz.Steps.Executors.ManualInput do
         "type" => "object",
         "title" => "Input Schema",
         "description" => "JSON Schema describing expected input data"
-      },
-      "trigger_data" => %{
-        "type" => "string",
-        "title" => "Trigger Data (JSON)",
-        "format" => "json",
-        "default" => "{}"
       }
     }
   }
@@ -32,10 +26,7 @@ defmodule Fizz.Steps.Executors.ManualInput do
     {:ok,
      %RegistrationSpec{
        kind: :manual,
-       params: %{
-         "input_schema" => Map.get(config, "input_schema"),
-         "trigger_data" => Map.get(config, "trigger_data", "{}")
-       }
+       params: %{"input_schema" => Map.get(config, "input_schema")}
      }}
   end
 

@@ -9,7 +9,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun}
 
   @kinds ~w(manual webhook schedule polling subscription chat)
-  @statuses ~w(active paused errored inactive firing)
+  @statuses ~w(active paused errored inactive)
 
   schema "trigger_registrations" do
     field :step_id, :string

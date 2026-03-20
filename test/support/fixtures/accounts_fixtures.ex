@@ -7,9 +7,9 @@ defmodule Fizz.AccountsFixtures do
   alias Fizz.Accounts
   alias Fizz.Accounts.{Scope, User}
 
-  def unique_user_email, do: "user#{System.unique_integer([:positive])}@example.com"
+  def unique_user_email, do: "user-#{unique_suffix()}@example.com"
 
-  def unique_workos_user_id, do: "user_workos_#{System.unique_integer([:positive])}"
+  def unique_workos_user_id, do: "user_workos_#{unique_suffix()}"
 
   def valid_user_attributes(attrs \\ %{}) do
     Enum.into(attrs, %{
@@ -68,9 +68,13 @@ defmodule Fizz.AccountsFixtures do
     {:ok, project} =
       Accounts.create_project(
         scope,
-        Map.merge(%{name: "Project #{System.unique_integer()}"}, attrs)
+        Map.merge(%{name: "Project #{unique_suffix()}"}, attrs)
       )
 
     project
+  end
+
+  defp unique_suffix do
+    Ecto.UUID.generate()
   end
 end

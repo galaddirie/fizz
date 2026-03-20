@@ -20,13 +20,22 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["interval_seconds"],
     "properties" => %{
+      "cron_expression" => %{
+        "type" => "string",
+        "title" => "Cron Expression",
+        "description" => "Cron syntax for recurring runs, e.g. 0 9 * * MON-FRI"
+      },
       "interval_seconds" => %{
         "type" => "integer",
         "title" => "Interval (seconds)",
-        "minimum" => 60,
+        "minimum" => 1,
         "default" => 3600
+      },
+      "timezone" => %{
+        "type" => "string",
+        "title" => "Timezone",
+        "default" => "UTC"
       },
       "output_schema" => %{
         "type" => "object",
@@ -55,8 +64,7 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
          %{
            "cron" => Map.get(config, "cron_expression"),
            "interval_seconds" => Map.get(config, "interval_seconds"),
-           "timezone" => Map.get(config, "timezone", "UTC"),
-           "jitter_seconds" => Map.get(config, "jitter_seconds", 0)
+           "timezone" => Map.get(config, "timezone", "UTC")
          }
          |> Enum.reject(fn {_key, value} -> is_nil(value) end)
          |> Map.new()
@@ -69,7 +77,9 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
   end
 
   @impl true
-  def normalize_event(_config, raw_event) when is_map(raw_event), do: {:ok, raw_event}
+  def normalize_event(_config, _raw_event) do
+    {:ok, %{"scheduled_at" => DateTime.utc_now() |> DateTime.to_iso8601()}}
+  end
 
   @impl true
   def effective_output_schema(config) do
@@ -79,11 +89,32 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
   @impl true
   def validate_config(config) do
     interval = Map.get(config, "interval_seconds")
+    cron_expression = Map.get(config, "cron_expression")
 
-    if is_integer(interval) and interval >= 1 do
-      :ok
-    else
-      {:error, [interval_seconds: "must be a positive integer"]}
+    cond do
+      valid_cron_expression?(cron_expression) ->
+        :ok
+
+      is_integer(interval) and interval > 0 ->
+        :ok
+
+      present?(cron_expression) ->
+        {:error, [cron_expression: "must be a valid cron expression"]}
+
+      true ->
+        {:error, [schedule: "must provide cron_expression or interval_seconds"]}
     end
   end
+
+  defp valid_cron_expression?(cron_expression) when is_binary(cron_expression) do
+    case Crontab.CronExpression.Parser.parse(cron_expression) do
+      {:ok, _expression} -> true
+      _ -> false
+    end
+  end
+
+  defp valid_cron_expression?(_cron_expression), do: false
+
+  defp present?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present?(_value), do: false
 end
