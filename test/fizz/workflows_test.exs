@@ -252,6 +252,7 @@ defmodule Fizz.WorkflowsTest do
 
     assert completed_run.status == :completed
     assert completed_run.output != nil
+    assert_worker_shutdown(run.id)
   end
 
   test "cancel_run transitions the run to cancelled and stops the worker" do
@@ -267,18 +268,12 @@ defmodule Fizz.WorkflowsTest do
 
     pid =
       eventually(fn ->
-        case Worker.lookup(run.id) do
-          nil ->
+        case {Worker.lookup(run.id), Workflows.get_run(scope, run.id)} do
+          {worker_pid, {:ok, %{status: :sleeping}}} when is_pid(worker_pid) ->
+            {:ok, worker_pid}
+
+          _ ->
             :retry
-
-          worker_pid ->
-            state = :sys.get_state(worker_pid)
-
-            if map_size(state.active_tasks) > 0 do
-              {:ok, worker_pid}
-            else
-              :retry
-            end
         end
       end)
 
@@ -384,4 +379,15 @@ defmodule Fizz.WorkflowsTest do
   end
 
   defp eventually(_fun, 0), do: flunk("condition was not met in time")
+
+  defp assert_worker_shutdown(run_id) do
+    case Worker.lookup(run_id) do
+      nil ->
+        :ok
+
+      pid ->
+        ref = Process.monitor(pid)
+        assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+    end
+  end
 end

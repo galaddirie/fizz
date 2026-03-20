@@ -797,7 +797,12 @@ defmodule Fizz.Workflows.Compiler.Assembler do
             env: %{}
           })
 
-        execute_executor(^executor, config, input, executor_context(input, %{}, ^step_context))
+        __MODULE__.execute_executor(
+          ^executor,
+          config,
+          input,
+          __MODULE__.executor_context(input, %{}, ^step_context)
+        )
       end,
       name: ^name
     )
@@ -811,14 +816,14 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     Runic.step(
       fn input, meta_ctx ->
-        resolution_context = resolution_context(input, meta_ctx, ^dependencies)
+        resolution_context = __MODULE__.resolution_context(input, meta_ctx, ^dependencies)
         config = ConfigResolver.resolve_config(^compiled_config, resolution_context)
 
-        execute_executor(
+        __MODULE__.execute_executor(
           ^executor,
           config,
           input,
-          executor_context(input, resolution_context, ^step_context)
+          __MODULE__.executor_context(input, resolution_context, ^step_context)
         )
       end,
       name: ^name
@@ -846,11 +851,11 @@ defmodule Fizz.Workflows.Compiler.Assembler do
             env: %{}
           })
 
-        execute_executor(
+        __MODULE__.execute_executor(
           ^executor,
           config,
           executor_input,
-          executor_context(executor_input, %{}, ^step_context)
+          __MODULE__.executor_context(executor_input, %{}, ^step_context)
         )
       end,
       name: ^name
@@ -870,14 +875,16 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         {resolution_input, executor_input} =
           __MODULE__.assemble_root_input(input, ^slot_specs, ^parent_count)
 
-        resolution_context = resolution_context(resolution_input, meta_ctx, ^dependencies)
+        resolution_context =
+          __MODULE__.resolution_context(resolution_input, meta_ctx, ^dependencies)
+
         config = ConfigResolver.resolve_config(^compiled_config, resolution_context)
 
-        execute_executor(
+        __MODULE__.execute_executor(
           ^executor,
           config,
           executor_input,
-          executor_context(executor_input, resolution_context, ^step_context)
+          __MODULE__.executor_context(executor_input, resolution_context, ^step_context)
         )
       end,
       name: ^name
@@ -1421,7 +1428,8 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     }
   end
 
-  defp resolution_context(input, meta_ctx, dependencies) do
+  @doc false
+  def resolution_context(input, meta_ctx, dependencies) do
     %{
       input: input,
       steps:
@@ -1435,7 +1443,8 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     }
   end
 
-  defp executor_context(input, resolution_context, step_context) do
+  @doc false
+  def executor_context(input, resolution_context, step_context) do
     Map.merge(step_context, %{
       input: input,
       steps: Map.get(resolution_context, :steps, %{}),
@@ -1444,7 +1453,8 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     })
   end
 
-  defp execute_executor(executor, config, input, context) do
+  @doc false
+  def execute_executor(executor, config, input, context) do
     case executor.execute(config, input, context) do
       {:ok, output} -> output
       {:skip, reason} -> {:skip, reason}

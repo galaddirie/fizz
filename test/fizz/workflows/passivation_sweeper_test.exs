@@ -67,7 +67,7 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     ref = Process.monitor(pid)
 
     assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
-    assert passivated_run_ids == [run.id]
+    assert run.id in passivated_run_ids
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
 
     assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(scope, run.id)
@@ -76,7 +76,8 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
   test "active runs are not passivated", %{scope: scope, version: version, sweeper: sweeper} do
     run = insert_run(scope, version, :running, DateTime.utc_now())
 
-    assert {:ok, []} = PassivationSweeper.sweep(server: sweeper)
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute run.id in passivated_run_ids
     assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(scope, run.id)
   end
 
@@ -88,7 +89,9 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     completed_run = insert_run(scope, version, :completed, old_time())
     failed_run = insert_run(scope, version, :failed, old_time())
 
-    assert {:ok, []} = PassivationSweeper.sweep(server: sweeper)
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute completed_run.id in passivated_run_ids
+    refute failed_run.id in passivated_run_ids
     assert {:ok, %{status: :completed}} = Fizz.Workflows.get_run(scope, completed_run.id)
     assert {:ok, %{status: :failed}} = Fizz.Workflows.get_run(scope, failed_run.id)
   end

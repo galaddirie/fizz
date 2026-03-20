@@ -18,10 +18,10 @@ defmodule Fizz.Workflows.WorkflowRun do
   @statuses ~w(pending running sleeping passivated completed failed cancelled continued)a
   @terminal_statuses ~w(completed failed cancelled continued)a
   @transition_graph %{
-    pending: MapSet.new([:running]),
+    pending: MapSet.new([:running, :cancelled]),
     running: MapSet.new([:sleeping, :passivated, :completed, :failed, :cancelled, :continued]),
     sleeping: MapSet.new([:running, :passivated, :cancelled]),
-    passivated: MapSet.new([:running]),
+    passivated: MapSet.new([:running, :cancelled]),
     completed: MapSet.new(),
     failed: MapSet.new(),
     cancelled: MapSet.new(),

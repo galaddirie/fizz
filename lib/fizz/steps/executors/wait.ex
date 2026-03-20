@@ -61,14 +61,11 @@ defmodule Fizz.Steps.Executors.Wait do
     duration = Map.get(config, "duration", 1000)
     unit = Map.get(config, "unit", "milliseconds")
 
-    # Convert to milliseconds
     milliseconds = convert_to_milliseconds(duration, unit)
 
-    Logger.info("Wait step: sleeping for #{milliseconds}ms (#{duration} #{unit})")
+    Logger.info("Wait step: scheduling durable sleep for #{milliseconds}ms (#{duration} #{unit})")
 
-    Process.sleep(milliseconds)
-
-    {:ok, input}
+    {:ok, {:sleep, milliseconds, input}}
   end
 
   @impl true

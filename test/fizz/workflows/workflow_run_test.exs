@@ -9,6 +9,7 @@ defmodule Fizz.Workflows.WorkflowRunTest do
     assert WorkflowRun.transition_status(build_run(:running), :completed).valid?
     assert WorkflowRun.transition_status(build_run(:sleeping), :passivated).valid?
     assert WorkflowRun.transition_status(build_run(:passivated), :running).valid?
+    assert WorkflowRun.transition_status(build_run(:passivated), :cancelled).valid?
   end
 
   test "invalid transitions are rejected" do

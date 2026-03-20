@@ -23,7 +23,16 @@ defmodule Fizz.Workflows do
   alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
   alias Fizz.Workflows.Runtime.ContextBuilder
   alias Fizz.Workflows.Store.SqliteStore
-  alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun}
+
+  alias Fizz.Workflows.{
+    DurableTimer,
+    SignalInbox,
+    WorkflowDefinition,
+    WorkflowDefinitionVersion,
+    WorkflowRun
+  }
+
+  alias Runic.Workflow
 
   @default_snapshot_attrs %{
     steps: [],
@@ -40,7 +49,6 @@ defmodule Fizz.Workflows do
           | :project_scope_required
           | :published_version_not_found
           | :run_not_found
-          | :signal_not_implemented
           | :unauthenticated
           | :version_not_found
           | [map()]
@@ -273,9 +281,8 @@ defmodule Fizz.Workflows do
   @spec cancel_run(Scope.t() | nil, String.t()) ::
           {:ok, %WorkflowRun{}} | {:error, error_reason()}
   @doc """
-  Cancels a workflow run and stops its worker if one is active.
-
-  Timer cleanup is currently a stub. Signal routing is added in a later phase.
+  Cancels a workflow run, cancels any pending timers, and stops its worker if
+  one is active.
   """
   def cancel_run(scope, run_id) when is_binary(run_id) do
     with {:ok, run} <- get_run(scope, run_id),
@@ -288,15 +295,268 @@ defmodule Fizz.Workflows do
   end
 
   @spec signal_run(Scope.t() | nil, String.t(), String.t(), term(), String.t()) ::
-          {:error, error_reason()}
+          {:ok, %SignalInbox{}} | {:error, error_reason()}
   @doc """
-  Placeholder for durable signal delivery.
-
-  Signals are introduced in Phase 5, so this currently returns
-  `{:error, :signal_not_implemented}`.
+  Accepts an external signal into the durable inbox and attempts delivery.
   """
-  def signal_run(_scope, _run_id, _signal_name, _payload, _signal_id) do
-    {:error, :signal_not_implemented}
+  def signal_run(scope, run_id, signal_name, payload, signal_id) do
+    with {:ok, run} <- get_run(scope, run_id) do
+      Fizz.Workflows.SignalRouter.accept_signal(run.id, signal_id, signal_name, payload)
+    end
+  end
+
+  @doc false
+  def create_timer(run_id, step_id, fire_at, opts \\ [])
+
+  def create_timer(run_id, step_id, %DateTime{} = fire_at, opts)
+      when is_binary(run_id) and is_binary(step_id) and is_list(opts) do
+    with {:ok, run} <- fetch_run(run_id) do
+      attrs = %{
+        run_id: run.id,
+        step_id: step_id,
+        timer_name: Keyword.get(opts, :timer_name, step_id),
+        project_id: run.project_id,
+        workos_organization_id: run.workos_organization_id,
+        fire_at: fire_at,
+        status: :pending,
+        payload: Keyword.get(opts, :payload)
+      }
+
+      %DurableTimer{}
+      |> DurableTimer.changeset(attrs)
+      |> Repo.insert()
+    end
+  end
+
+  @doc false
+  def claim_due_timers(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    limit = Keyword.get(opts, :limit, 50)
+    claimed_by = Keyword.get(opts, :claimed_by, owner_node())
+
+    Repo.transaction(fn ->
+      DurableTimer
+      |> where([timer], timer.status == :pending and timer.fire_at <= ^now)
+      |> order_by([timer], asc: timer.fire_at)
+      |> limit(^limit)
+      |> lock("FOR UPDATE SKIP LOCKED")
+      |> Repo.all()
+      |> Enum.map(fn timer ->
+        timer
+        |> DurableTimer.changeset(%{
+          status: :firing,
+          claimed_at: now,
+          claimed_by: claimed_by
+        })
+        |> Repo.update!()
+      end)
+    end)
+  end
+
+  @doc false
+  def claim_timer(timer_id, opts \\ []) when is_binary(timer_id) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    claimed_by = Keyword.get(opts, :claimed_by, owner_node())
+
+    Repo.transaction(fn ->
+      case DurableTimer
+           |> where([timer], timer.id == ^timer_id and timer.status == :pending)
+           |> lock("FOR UPDATE")
+           |> Repo.one() do
+        nil ->
+          Repo.rollback(:not_found)
+
+        timer ->
+          timer
+          |> DurableTimer.changeset(%{
+            status: :firing,
+            claimed_at: now,
+            claimed_by: claimed_by
+          })
+          |> Repo.update!()
+      end
+    end)
+    |> case do
+      {:ok, timer} -> {:ok, timer}
+      {:error, :not_found} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc false
+  def recover_stale_timers(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    claim_ttl_ms = Keyword.get(opts, :claim_ttl_ms, 30_000)
+    cutoff = DateTime.add(now, -claim_ttl_ms, :millisecond)
+
+    {count, _rows} =
+      DurableTimer
+      |> where([timer], timer.status == :firing and timer.claimed_at < ^cutoff)
+      |> Repo.update_all(
+        set: [status: :pending, claimed_at: nil, claimed_by: nil, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
+  @doc false
+  def get_timer(timer_id) when is_binary(timer_id) do
+    case Repo.get(DurableTimer, timer_id) do
+      %DurableTimer{} = timer -> {:ok, timer}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc false
+  def mark_timer_fired(timer_id) when is_binary(timer_id) do
+    now = DateTime.utc_now()
+
+    {count, _rows} =
+      DurableTimer
+      |> where([timer], timer.id == ^timer_id and timer.status == :firing)
+      |> Repo.update_all(set: [status: :fired, updated_at: now])
+
+    case count do
+      1 ->
+        :ok
+
+      _ ->
+        case Repo.get(DurableTimer, timer_id) do
+          %DurableTimer{status: :fired} -> :ok
+          _ -> {:error, :not_found}
+        end
+    end
+  end
+
+  @doc false
+  def run_has_pending_timers?(run_id) when is_binary(run_id) do
+    DurableTimer
+    |> where([timer], timer.run_id == ^run_id and timer.status in ^[:pending, :firing])
+    |> Repo.exists?()
+  end
+
+  @doc false
+  def sleep_run(run_id) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      case run.status do
+        :running ->
+          run
+          |> WorkflowRun.transition_status(:sleeping)
+          |> Repo.update()
+
+        :sleeping ->
+          {:ok, run}
+
+        _ ->
+          {:error, :invalid_transition}
+      end
+    end
+  end
+
+  @doc false
+  def resume_run(run_id) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      case run.status do
+        :running ->
+          {:ok, run}
+
+        status when status in [:sleeping, :passivated] ->
+          run
+          |> WorkflowRun.transition_status(:running)
+          |> Repo.update()
+
+        _ ->
+          {:error, :invalid_transition}
+      end
+    end
+  end
+
+  @doc false
+  def create_signal_inbox(run_id, signal_id, signal_name, payload)
+      when is_binary(run_id) and is_binary(signal_id) and is_binary(signal_name) do
+    with {:ok, run} <- fetch_run(run_id) do
+      attrs = %{
+        run_id: run.id,
+        signal_id: signal_id,
+        signal_name: signal_name,
+        payload: normalize_payload(payload) || %{},
+        status: :pending,
+        project_id: run.project_id,
+        workos_organization_id: run.workos_organization_id
+      }
+
+      %SignalInbox{}
+      |> SignalInbox.changeset(attrs)
+      |> Repo.insert(
+        on_conflict: [set: [signal_id: signal_id]],
+        conflict_target: [:run_id, :signal_id],
+        returning: true
+      )
+    end
+  end
+
+  @doc false
+  def list_pending_signal_ids(limit \\ 50) do
+    SignalInbox
+    |> where([signal], signal.status == :pending)
+    |> order_by([signal], asc: signal.inserted_at)
+    |> limit(^limit)
+    |> select([signal], signal.id)
+    |> Repo.all()
+  end
+
+  @doc false
+  def get_signal(signal_id) when is_binary(signal_id) do
+    case Repo.get(SignalInbox, signal_id) do
+      %SignalInbox{} = signal -> {:ok, signal}
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc false
+  def mark_signal_delivered(signal_id) when is_binary(signal_id) do
+    now = DateTime.utc_now()
+
+    {count, _rows} =
+      SignalInbox
+      |> where([signal], signal.id == ^signal_id and signal.status == :pending)
+      |> Repo.update_all(set: [status: :delivered, delivered_at: now, updated_at: now])
+
+    case count do
+      1 -> :ok
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc false
+  def mark_signal_skipped(signal_id) when is_binary(signal_id) do
+    now = DateTime.utc_now()
+
+    {count, _rows} =
+      SignalInbox
+      |> where([signal], signal.id == ^signal_id and signal.status == :pending)
+      |> Repo.update_all(set: [status: :skipped, delivered_at: now, updated_at: now])
+
+    case count do
+      1 -> :ok
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc false
+  def deliver_run_event(run_id, event, opts \\ []) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      case WorkflowRun.terminal?(run) do
+        true ->
+          {:ok, :skipped}
+
+        false ->
+          with {:ok, pid} <- ensure_run_worker(run, opts),
+               :ok <- Worker.deliver_event(pid, event) do
+            :ok
+          end
+      end
+    end
   end
 
   @doc false
@@ -311,29 +571,55 @@ defmodule Fizz.Workflows do
   @doc false
   def complete_run(run_id, output) when is_binary(run_id) do
     with {:ok, run} <- fetch_run(run_id) do
-      run
-      |> WorkflowRun.transition_status(:completed)
-      |> Ecto.Changeset.change(output: normalize_payload(output), error: nil)
-      |> Repo.update()
+      case run.status do
+        :completed ->
+          {:ok, run}
+
+        _ ->
+          run
+          |> WorkflowRun.transition_status(:completed)
+          |> Ecto.Changeset.change(output: normalize_payload(output), error: nil)
+          |> Repo.update()
+          |> tap(fn
+            {:ok, completed_run} -> :ok = cancel_pending_timers(completed_run.id)
+            _ -> :ok
+          end)
+      end
     end
   end
 
   @doc false
   def fail_run(run_id, reason) when is_binary(run_id) do
     with {:ok, run} <- fetch_run(run_id) do
-      run
-      |> WorkflowRun.transition_status(:failed)
-      |> Ecto.Changeset.change(error: normalize_payload(reason))
-      |> Repo.update()
+      case run.status do
+        :failed ->
+          {:ok, run}
+
+        _ ->
+          run
+          |> WorkflowRun.transition_status(:failed)
+          |> Ecto.Changeset.change(error: normalize_payload(reason))
+          |> Repo.update()
+          |> tap(fn
+            {:ok, failed_run} -> :ok = cancel_pending_timers(failed_run.id)
+            _ -> :ok
+          end)
+      end
     end
   end
 
   @doc false
   def passivate_run(run_id) when is_binary(run_id) do
     with {:ok, run} <- fetch_run(run_id) do
-      run
-      |> WorkflowRun.transition_status(:passivated)
-      |> Repo.update()
+      case run.status do
+        :passivated ->
+          {:ok, run}
+
+        _ ->
+          run
+          |> WorkflowRun.transition_status(:passivated)
+          |> Repo.update()
+      end
     end
   end
 
@@ -462,28 +748,25 @@ defmodule Fizz.Workflows do
 
   defp start_pending_run(scope, run, workflow, compiled_hash, input) do
     with {:ok, fence_token} <- Fizz.Workflows.LeaseManager.acquire(run.id),
-         {:ok, store_state} <- SqliteStore.init(run.id, store_opts(run, fence_token)),
+         {:ok, store_state} <- SqliteStore.init(run.id, store_opts(run, fence_token, [])),
          {:ok, running_run} <- transition_run_status(run.id, :running),
+         run_context <-
+           ContextBuilder.build_run_context(scope, %{running_run | compiled_hash: compiled_hash}),
          {:ok, pid} <-
            WorkerSupervisor.start_worker(
-             run_id: run.id,
-             workflow:
-               Runic.Workflow.put_run_context(
-                 workflow,
-                 ContextBuilder.build_run_context(scope, %{
-                   running_run
-                   | compiled_hash: compiled_hash
-                 })
-               ),
-             run_context:
-               ContextBuilder.build_run_context(scope, %{
-                 running_run
-                 | compiled_hash: compiled_hash
-               }),
-             store: store_state,
-             fence_token: fence_token,
-             checkpoint_strategy: checkpoint_strategy(),
-             max_concurrency: max_run_concurrency()
+             Keyword.merge(
+               [
+                 run_id: run.id,
+                 workflow: Workflow.put_run_context(workflow, run_context),
+                 run_context: run_context,
+                 store: store_state,
+                 fence_token: fence_token,
+                 checkpoint_strategy: checkpoint_strategy(),
+                 max_concurrency: max_run_concurrency(),
+                 idle_timeout_ms: worker_idle_timeout_ms()
+               ],
+               worker_process_opts([])
+             )
            ) do
       :ok = Worker.run(pid, input)
       {:ok, %{running_run | compiled_hash: compiled_hash}}
@@ -548,13 +831,16 @@ defmodule Fizz.Workflows do
     end
   end
 
-  defp store_opts(run, fence_token) do
-    [
-      org_id: run.workos_organization_id,
-      project_id: run.project_id,
-      fence_token: fence_token,
-      repo: Repo
-    ]
+  defp store_opts(run, fence_token, opts) do
+    Keyword.merge(
+      [
+        org_id: run.workos_organization_id,
+        project_id: run.project_id,
+        fence_token: fence_token,
+        repo: Repo
+      ],
+      Keyword.get(opts, :store_opts, [])
+    )
   end
 
   defp checkpoint_strategy do
@@ -564,6 +850,82 @@ defmodule Fizz.Workflows do
   defp max_run_concurrency do
     Application.get_env(:fizz, __MODULE__, [])
     |> Keyword.get(:max_concurrency, System.schedulers_online())
+  end
+
+  defp worker_idle_timeout_ms do
+    Application.get_env(:fizz, __MODULE__, []) |> Keyword.get(:idle_timeout_ms, 60_000)
+  end
+
+  defp ensure_run_worker(run, opts) do
+    case Worker.lookup(run.id, worker_lookup_opts(opts)) do
+      nil -> start_run_worker(run, opts)
+      pid -> {:ok, pid}
+    end
+  end
+
+  defp start_run_worker(run, opts) do
+    with {:ok, fence_token} <-
+           Fizz.Workflows.LeaseManager.acquire(run.id, lease_manager_opts(opts)),
+         {:ok, store_state} <- SqliteStore.init(run.id, store_opts(run, fence_token, opts)),
+         {:ok, workflow} <- restore_workflow(run, store_state),
+         run_context <- ContextBuilder.build_run_context(Keyword.get(opts, :scope), run),
+         {:ok, pid} <-
+           WorkerSupervisor.start_worker(
+             Keyword.merge(
+               [
+                 run_id: run.id,
+                 workflow: Workflow.put_run_context(workflow, run_context),
+                 run_context: run_context,
+                 store: store_state,
+                 fence_token: fence_token,
+                 checkpoint_strategy: checkpoint_strategy(),
+                 max_concurrency: max_run_concurrency(),
+                 idle_timeout_ms: worker_idle_timeout_ms()
+               ],
+               worker_process_opts(opts)
+             )
+           ) do
+      {:ok, pid}
+    else
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      {:error, reason} = error ->
+        _ = release_run_lease(run.id)
+
+        case reason do
+          {:already_started, pid} -> {:ok, pid}
+          _ -> error
+        end
+    end
+  end
+
+  defp restore_workflow(run, store_state) do
+    case SqliteStore.load(run.id, store_state) do
+      {:ok, event_log} ->
+        {:ok, Workflow.from_events(event_log)}
+
+      {:error, :not_found} ->
+        {:error, :checkpoint_not_found}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp worker_process_opts(opts) do
+    opts
+    |> Keyword.take([:registry, :task_supervisor, :supervisor])
+  end
+
+  defp worker_lookup_opts(opts) do
+    opts
+    |> Keyword.take([:registry])
+  end
+
+  defp lease_manager_opts(opts) do
+    opts
+    |> Keyword.take([:server])
   end
 
   defp cleanup_failed_start(run_id, reason) do
@@ -601,7 +963,16 @@ defmodule Fizz.Workflows do
     end
   end
 
-  defp cancel_pending_timers(_run_id), do: :ok
+  defp cancel_pending_timers(run_id) do
+    now = DateTime.utc_now()
+
+    _ =
+      DurableTimer
+      |> where([timer], timer.run_id == ^run_id and timer.status == :pending)
+      |> Repo.update_all(set: [status: :cancelled, updated_at: now])
+
+    :ok
+  end
 
   defp latest_draft_version(definition_id) do
     from(version in WorkflowDefinitionVersion,
@@ -692,6 +1063,10 @@ defmodule Fizz.Workflows do
   end
 
   defp normalize_run_status(_status), do: nil
+
+  defp owner_node do
+    Atom.to_string(node())
+  end
 
   defp dump_uuid(run_id), do: Ecto.UUID.dump!(run_id)
 end

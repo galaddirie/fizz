@@ -30,6 +30,9 @@ config :swoosh, :api_client, false
 # Print only warnings and errors during test
 config :logger, level: :warning
 
+config :fizz, Fizz.Workflows.TimerPoller, enabled?: false
+config :fizz, Fizz.Workflows.SignalRouter, enabled?: false
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 

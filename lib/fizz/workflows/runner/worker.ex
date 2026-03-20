@@ -16,11 +16,13 @@ defmodule Fizz.Workflows.Runner.Worker do
   use GenServer
 
   alias Fizz.Workflows
+  alias Fizz.Workflows.{DurableTimer, SignalInbox}
   alias Fizz.Workflows.LeaseManager
   alias Fizz.Workflows.Store.{CheckpointStrategy, SqliteStore}
   alias Runic.Workflow
 
   alias Runic.Workflow.{
+    Fact,
     Invokable,
     Runnable,
     RunnableCompleted,
@@ -28,6 +30,7 @@ defmodule Fizz.Workflows.Runner.Worker do
     RunnableFailed
   }
 
+  alias Runic.Workflow.Events.{ActivationConsumed, FactProduced, MapReduceTracked}
   alias Runic.Workflow.SchedulerPolicy
 
   @default_idle_timeout_ms 60_000
@@ -45,7 +48,8 @@ defmodule Fizz.Workflows.Runner.Worker do
     :idle_timer_ref,
     :status,
     cycle_count: 0,
-    active_tasks: %{}
+    active_tasks: %{},
+    local_timers: %{}
   ]
 
   def child_spec(opts) do
@@ -83,6 +87,24 @@ defmodule Fizz.Workflows.Runner.Worker do
 
       pid ->
         run(pid, input)
+    end
+  end
+
+  @doc """
+  Delivers an external workflow event to a running worker and waits for it to be
+  incorporated into the in-memory workflow state.
+  """
+  def deliver_event(pid, event) when is_pid(pid) do
+    GenServer.call(pid, {:deliver_event, event}, :infinity)
+  end
+
+  def deliver_event(run_id, event) when is_binary(run_id) do
+    case lookup(run_id) do
+      nil ->
+        {:error, :not_found}
+
+      pid ->
+        deliver_event(pid, event)
     end
   end
 
@@ -152,21 +174,12 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   @impl true
-  def handle_cast({:run, input}, %__MODULE__{status: :idle} = state) do
-    state =
-      state
-      |> cancel_idle_timeout()
-      |> Map.put(:workflow, Workflow.plan_eagerly(state.workflow, input))
-      |> Map.put(:status, :running)
-
-    case dispatch_cycle(state) do
+  def handle_cast({:run, input}, state) do
+    case process_event(state, {:input, input}) do
       {:continue, next_state} -> {:noreply, next_state}
       {:stop, next_state} -> {:stop, :normal, next_state}
+      {:error, reason, next_state} -> {:stop, :normal, fail_and_stop(next_state, reason)}
     end
-  end
-
-  def handle_cast({:run, _input}, state) do
-    {:noreply, state}
   end
 
   @impl true
@@ -174,10 +187,24 @@ defmodule Fizz.Workflows.Runner.Worker do
     state =
       state
       |> cancel_idle_timeout()
+      |> cancel_local_timers()
       |> maybe_checkpoint_before_stop(opts)
       |> shutdown_active_tasks()
 
     {:stop, :normal, :ok, state}
+  end
+
+  def handle_call({:deliver_event, event}, _from, state) do
+    case process_event(state, event) do
+      {:continue, next_state} ->
+        {:reply, :ok, next_state}
+
+      {:stop, next_state} ->
+        {:stop, :normal, :ok, next_state}
+
+      {:error, reason, next_state} ->
+        {:reply, {:error, reason}, schedule_idle_timeout(next_state)}
+    end
   end
 
   @impl true
@@ -189,26 +216,10 @@ defmodule Fizz.Workflows.Runner.Worker do
         {:noreply, state}
 
       {task_state, active_tasks} ->
-        state =
-          state
-          |> Map.put(:active_tasks, active_tasks)
-          |> append_runnable_result_event(executed, task_state)
-          |> apply_runnable(executed)
-          |> bump_cycle_count()
-
-        _ = Workflows.touch_run_activity(state.run_id)
-
-        case executed.status do
-          :failed ->
-            {:stop, :normal, fail_and_stop(state, executed.error)}
-
-          _ ->
-            state = maybe_checkpoint(state, %{cycle_count: state.cycle_count, status: :running})
-
-            case dispatch_cycle(state) do
-              {:continue, next_state} -> {:noreply, next_state}
-              {:stop, next_state} -> {:stop, :normal, next_state}
-            end
+        case handle_completed_task(%{state | active_tasks: active_tasks}, executed, task_state) do
+          {:continue, next_state} -> {:noreply, next_state}
+          {:stop, next_state} -> {:stop, :normal, next_state}
+          {:error, reason, next_state} -> {:stop, :normal, fail_and_stop(next_state, reason)}
         end
     end
   end
@@ -237,17 +248,44 @@ defmodule Fizz.Workflows.Runner.Worker do
   def handle_info(:timeout, state) do
     state =
       case {state.status, map_size(state.active_tasks)} do
-        {:running, 0} -> do_checkpoint(state)
+        {status, 0} when status in [:running, :sleeping] -> do_checkpoint(state)
         _ -> state
       end
 
     {:noreply, schedule_idle_timeout(state)}
   end
 
+  def handle_info({:local_timer_due, timer_id}, state) do
+    state = drop_local_timer(state, timer_id)
+
+    case Workflows.claim_timer(timer_id, claimed_by: local_timer_owner(state)) do
+      {:ok, %DurableTimer{} = timer} ->
+        case process_event(state, {:timer_fired, timer}) do
+          {:continue, next_state} ->
+            :ok = Workflows.mark_timer_fired(timer.id)
+            {:noreply, next_state}
+
+          {:stop, next_state} ->
+            :ok = Workflows.mark_timer_fired(timer.id)
+            {:stop, :normal, next_state}
+
+          {:error, _reason, next_state} ->
+            {:noreply, schedule_idle_timeout(next_state)}
+        end
+
+      {:error, :not_found} ->
+        {:noreply, state}
+
+      {:error, _reason} ->
+        {:noreply, state}
+    end
+  end
+
   @impl true
   def terminate(_reason, state) do
     state
     |> cancel_idle_timeout()
+    |> cancel_local_timers()
     |> shutdown_active_tasks()
 
     :ok
@@ -267,7 +305,11 @@ defmodule Fizz.Workflows.Runner.Worker do
         {:continue, state}
 
       Workflow.is_runnable?(state.workflow) ->
-        {:continue, schedule_idle_timeout(state)}
+        {:continue, schedule_idle_timeout(%{state | status: :running})}
+
+      Workflows.run_has_pending_timers?(state.run_id) ->
+        _ = Workflows.sleep_run(state.run_id)
+        {:continue, schedule_idle_timeout(%{state | status: :sleeping})}
 
       state.status == :running ->
         {:stop, complete_and_stop(state)}
@@ -323,6 +365,267 @@ defmodule Fizz.Workflows.Runner.Worker do
     }
   end
 
+  defp process_event(state, {:input, input}) do
+    state =
+      state
+      |> cancel_idle_timeout()
+      |> ensure_running_state()
+      |> plan_workflow_input(input)
+
+    _ = Workflows.touch_run_activity(state.run_id)
+
+    dispatch_cycle(state)
+  end
+
+  defp process_event(state, {:signal, %SignalInbox{} = signal}) do
+    process_event(state, {:input, signal_to_input(signal)})
+  end
+
+  defp process_event(state, {:timer_fired, %DurableTimer{} = timer}) do
+    with {:ok, runnable} <- delayed_timer_runnable(state.workflow, timer) do
+      state =
+        state
+        |> cancel_idle_timeout()
+        |> ensure_running_state()
+        |> drop_local_timer(timer.id)
+        |> append_delayed_runnable_result_event(runnable)
+        |> apply_runnable(runnable)
+        |> bump_cycle_count()
+
+      _ = Workflows.touch_run_activity(state.run_id)
+
+      state = maybe_checkpoint(state, %{cycle_count: state.cycle_count, status: :running})
+      :ok = Workflows.mark_timer_fired(timer.id)
+
+      dispatch_cycle(state)
+    else
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
+
+  defp process_event(state, _event), do: {:error, :unsupported_event, state}
+
+  defp handle_completed_task(state, %Runnable{status: :failed} = executed, task_state) do
+    state =
+      state
+      |> append_runnable_result_event(executed, task_state)
+      |> apply_runnable(executed)
+      |> bump_cycle_count()
+
+    _ = Workflows.touch_run_activity(state.run_id)
+
+    {:stop, fail_and_stop(state, executed.error)}
+  end
+
+  defp handle_completed_task(state, %Runnable{status: :completed} = executed, task_state) do
+    case timer_intent(executed) do
+      {:ok, timer_spec} ->
+        handle_timer_intent(state, executed, timer_spec)
+
+      :none ->
+        state =
+          state
+          |> append_runnable_result_event(executed, task_state)
+          |> apply_runnable(executed)
+          |> bump_cycle_count()
+
+        _ = Workflows.touch_run_activity(state.run_id)
+
+        state = maybe_checkpoint(state, %{cycle_count: state.cycle_count, status: :running})
+
+        dispatch_cycle(state)
+    end
+  end
+
+  defp handle_completed_task(state, %Runnable{} = executed, task_state) do
+    state =
+      state
+      |> append_runnable_result_event(executed, task_state)
+      |> apply_runnable(executed)
+      |> bump_cycle_count()
+
+    _ = Workflows.touch_run_activity(state.run_id)
+
+    state = maybe_checkpoint(state, %{cycle_count: state.cycle_count, status: :running})
+
+    dispatch_cycle(state)
+  end
+
+  defp handle_timer_intent(state, executed, timer_spec) do
+    payload = delayed_timer_payload(executed, timer_spec.output)
+
+    with {:ok, timer} <-
+           Workflows.create_timer(
+             state.run_id,
+             timer_spec.step_id,
+             timer_spec.fire_at,
+             timer_name: timer_spec.timer_name,
+             payload: payload
+           ) do
+      state =
+        state
+        |> apply_runnable(timer_placeholder_runnable(executed))
+        |> bump_cycle_count()
+        |> maybe_schedule_local_timer(timer)
+        |> mark_sleeping_state()
+
+      _ = Workflows.touch_run_activity(state.run_id)
+
+      state = maybe_checkpoint(state, %{cycle_count: state.cycle_count, status: :sleeping})
+
+      dispatch_cycle(state)
+    else
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
+
+  defp timer_intent(%Runnable{result: %Fact{value: {:sleep, duration_ms, output}}, node: node})
+       when is_integer(duration_ms) and duration_ms >= 0 do
+    fire_at = DateTime.add(DateTime.utc_now(), duration_ms, :millisecond)
+    step_id = to_string(Map.get(node, :name))
+
+    {:ok, %{fire_at: fire_at, output: output, step_id: step_id, timer_name: step_id}}
+  end
+
+  defp timer_intent(%Runnable{
+         result: %Fact{value: {:schedule_at, %DateTime{} = fire_at, output}},
+         node: node
+       }) do
+    step_id = to_string(Map.get(node, :name))
+
+    {:ok,
+     %{
+       fire_at: DateTime.from_unix!(DateTime.to_unix(fire_at, :microsecond), :microsecond),
+       output: output,
+       step_id: step_id,
+       timer_name: step_id
+     }}
+  end
+
+  defp timer_intent(_runnable), do: :none
+
+  defp delayed_timer_payload(%Runnable{} = runnable, output) do
+    %{
+      "format" => "erlang_term_v1",
+      "data" =>
+        runnable
+        |> delayed_timer_data(output)
+        |> :erlang.term_to_binary([:compressed])
+        |> Base.encode64()
+    }
+  end
+
+  defp delayed_timer_data(%Runnable{} = runnable, output) do
+    %{
+      node_hash: Map.get(runnable.node, :hash),
+      input_fact_hash: runnable.input_fact.hash,
+      ancestry_depth: Map.get(runnable.context, :ancestry_depth, 0),
+      tracks: timer_tracks(runnable.context),
+      output: output
+    }
+  end
+
+  defp timer_tracks(%{fan_out_context: %{tracks: tracks}}) when is_list(tracks), do: tracks
+  defp timer_tracks(_context), do: []
+
+  defp delayed_timer_runnable(workflow, %DurableTimer{payload: payload}) do
+    with %{"format" => "erlang_term_v1", "data" => encoded} <- payload || %{},
+         {:ok, binary} <- Base.decode64(encoded),
+         %{node_hash: node_hash, input_fact_hash: input_fact_hash} = data <-
+           :erlang.binary_to_term(binary),
+         %{} = node <- Map.get(workflow.graph.vertices, node_hash),
+         %Fact{} = input_fact <- Map.get(workflow.graph.vertices, input_fact_hash) do
+      result_fact = Fact.new(value: data.output, ancestry: {node.hash, input_fact.hash})
+
+      runnable = %Runnable{
+        id: Runnable.runnable_id(node, input_fact),
+        status: :completed,
+        node: node,
+        input_fact: input_fact,
+        result: result_fact,
+        events:
+          delayed_timer_events(
+            node,
+            result_fact,
+            Map.get(data, :ancestry_depth, 0),
+            Map.get(data, :tracks, [])
+          )
+      }
+
+      {:ok, runnable}
+    else
+      _ -> {:error, :invalid_timer_payload}
+    end
+  end
+
+  defp delayed_timer_events(node, result_fact, ancestry_depth, tracks) do
+    produced = %FactProduced{
+      hash: result_fact.hash,
+      value: result_fact.value,
+      ancestry: result_fact.ancestry,
+      producer_label: :produced,
+      weight: ancestry_depth + 1
+    }
+
+    tracked =
+      Enum.map(tracks, fn %{
+                            source_fact_hash: source_fact_hash,
+                            fan_out_hash: fan_out_hash,
+                            fan_out_fact_hash: fan_out_fact_hash
+                          } ->
+        %MapReduceTracked{
+          source_fact_hash: source_fact_hash,
+          fan_out_hash: fan_out_hash,
+          fan_out_fact_hash: fan_out_fact_hash,
+          step_hash: node.hash,
+          result_fact_hash: result_fact.hash
+        }
+      end)
+
+    [produced | tracked]
+  end
+
+  defp timer_placeholder_runnable(%Runnable{} = runnable) do
+    %Runnable{
+      runnable
+      | result: :waiting,
+        events: [activation_consumed_event(runnable)]
+    }
+  end
+
+  defp activation_consumed_event(%Runnable{input_fact: input_fact, node: node}) do
+    %ActivationConsumed{
+      fact_hash: input_fact.hash,
+      node_hash: Map.get(node, :hash),
+      from_label: :runnable
+    }
+  end
+
+  defp plan_workflow_input(state, input) do
+    %{state | workflow: Workflow.plan_eagerly(state.workflow, input), status: :running}
+  end
+
+  defp ensure_running_state(state) do
+    _ = Workflows.resume_run(state.run_id)
+    %{state | status: :running}
+  end
+
+  defp mark_sleeping_state(state) do
+    _ = Workflows.sleep_run(state.run_id)
+    %{state | status: :sleeping}
+  end
+
+  defp signal_to_input(%SignalInbox{} = signal) do
+    %{
+      "type" => "signal",
+      "signal_id" => signal.signal_id,
+      "signal_name" => signal.signal_name,
+      "payload" => signal.payload
+    }
+  end
+
   defp append_runnable_result_event(state, %Runnable{status: :completed} = runnable, task_state) do
     event = %RunnableCompleted{
       runnable_id: runnable.id,
@@ -354,6 +657,19 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp append_runnable_result_event(state, _runnable, _task_state), do: state
+
+  defp append_delayed_runnable_result_event(state, %Runnable{} = runnable) do
+    event = %RunnableCompleted{
+      runnable_id: runnable.id,
+      node_hash: Map.get(runnable.node, :hash),
+      result_fact: runnable.result,
+      completed_at: System.monotonic_time(:millisecond),
+      attempt: 0,
+      duration_ms: 0
+    }
+
+    %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
+  end
 
   defp apply_runnable(state, %Runnable{} = runnable) do
     %{state | workflow: Workflow.apply_runnable(state.workflow, runnable)}
@@ -412,6 +728,50 @@ defmodule Fizz.Workflows.Runner.Worker do
     end)
 
     %{state | active_tasks: %{}}
+  end
+
+  defp maybe_schedule_local_timer(%__MODULE__{} = state, %DurableTimer{} = timer) do
+    if hot_timer?(state, timer.fire_at) do
+      delay_ms = max(DateTime.diff(timer.fire_at, DateTime.utc_now(), :millisecond), 0)
+      ref = Process.send_after(self(), {:local_timer_due, timer.id}, delay_ms)
+
+      state
+      |> drop_local_timer(timer.id)
+      |> put_local_timer(timer.id, ref)
+    else
+      state
+    end
+  end
+
+  defp hot_timer?(%__MODULE__{idle_timeout_ms: timeout_ms}, %DateTime{} = fire_at)
+       when is_integer(timeout_ms) and timeout_ms > 0 do
+    DateTime.diff(fire_at, DateTime.utc_now(), :millisecond) <= timeout_ms
+  end
+
+  defp hot_timer?(_state, _fire_at), do: false
+
+  defp put_local_timer(%__MODULE__{local_timers: local_timers} = state, timer_id, ref) do
+    %{state | local_timers: Map.put(local_timers, timer_id, ref)}
+  end
+
+  defp drop_local_timer(%__MODULE__{local_timers: local_timers} = state, timer_id) do
+    case Map.pop(local_timers, timer_id) do
+      {nil, timers} ->
+        %{state | local_timers: timers}
+
+      {ref, timers} ->
+        Process.cancel_timer(ref)
+        %{state | local_timers: timers}
+    end
+  end
+
+  defp cancel_local_timers(%__MODULE__{local_timers: local_timers} = state) do
+    Enum.each(local_timers, fn {_timer_id, ref} -> Process.cancel_timer(ref) end)
+    %{state | local_timers: %{}}
+  end
+
+  defp local_timer_owner(state) do
+    "#{Atom.to_string(node())}:worker:#{state.run_id}"
   end
 
   defp schedule_idle_timeout(%__MODULE__{idle_timeout_ms: timeout_ms} = state)
