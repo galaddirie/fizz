@@ -17,6 +17,7 @@ import type {
   WorkflowEditorLiveEmits,
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
+import type { TriggerImpact, WorkflowValidationError } from '@/types/workflow';
 import { BugAntIcon, SlashIcon, ChevronDoubleRightIcon } from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
@@ -31,11 +32,38 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   expressionPreviews: () => ({}),
   credentialOptions: () => [],
   debugExecutionId: null,
+  validationErrors: () => ({}),
 });
 
 const emitToLiveView = defineEmits<WorkflowEditorLiveEmits>();
+const publishStateResetCommands = new Set<WorkflowEditorCommandType>([
+  'add_step',
+  'add_group',
+  'update_group',
+  'remove_group',
+  'set_group_membership',
+  'commit_drag_layout',
+  'duplicate_steps',
+  'update_step',
+  'remove_step',
+  'move_step',
+  'move_steps',
+  'add_connection',
+  'remove_connection',
+  'undo',
+  'redo',
+  'tidy_layout',
+  'save_workflow',
+]);
 
 function emitCommand(type: WorkflowEditorCommandType, payload?: unknown) {
+  if (publishStateResetCommands.has(type)) {
+    publishError.value = null;
+    publishValidationErrors.value = [];
+    publishTriggerImpact.value = null;
+    isValidatingPublish.value = false;
+  }
+
   const normalizedPayload =
     payload !== null && typeof payload === 'object'
       ? (payload as Record<string, unknown>)
@@ -211,16 +239,24 @@ onBeforeUnmount(() => {
 // Publish modal state
 const isPublishModalOpen = ref(false);
 const isPublishing = ref(false);
+const isValidatingPublish = ref(false);
 const publishError = ref<string | null>(null);
+const publishValidationErrors = ref<WorkflowValidationError[]>([]);
+const publishTriggerImpact = ref<TriggerImpact | null>(null);
 
 function openPublishModal() {
   publishError.value = null;
+  publishValidationErrors.value = [];
+  publishTriggerImpact.value = null;
+  isValidatingPublish.value = true;
   isPublishModalOpen.value = true;
+  emit('validate_draft');
 }
 
 function closePublishModal() {
   if (!isPublishing.value) {
     isPublishModalOpen.value = false;
+    isValidatingPublish.value = false;
   }
 }
 
@@ -229,6 +265,13 @@ function handlePublish(payload: { version_tag: string; changelog: string }) {
   publishError.value = null;
   emit('publish_workflow', payload);
 }
+
+const toolbarValidationErrors = computed(() =>
+  publishValidationErrors.value.map(error => {
+    const location = error.field ? `${error.field}: ` : '';
+    return `${location}${error.message}`;
+  })
+);
 
 const isDebugMode = computed(() => !!props.debugExecutionId);
 
@@ -328,15 +371,40 @@ const debugExitLink = computed(() => {
   return `/projects/${workflow.project_id}/workflows/${workflow.id}/edit`;
 });
 
-useLiveEvent<{ success: boolean; error?: string }>(
+useLiveEvent<{
+  valid: boolean;
+  validation_errors?: WorkflowValidationError[];
+  trigger_impact?: TriggerImpact | null;
+  error?: string;
+}>('workflow:validation_result', payload => {
+  isValidatingPublish.value = false;
+  publishValidationErrors.value = payload.validation_errors ?? [];
+  publishTriggerImpact.value = payload.trigger_impact ?? null;
+  publishError.value = payload.error ?? null;
+});
+
+useLiveEvent<{
+  success: boolean;
+  error?: string;
+  validation_errors?: WorkflowValidationError[];
+  trigger_impact?: TriggerImpact | null;
+}>(
   'workflow:publish_result',
   payload => {
     isPublishing.value = false;
     if (payload.success) {
       isPublishModalOpen.value = false;
-    } else if (payload.error) {
-      publishError.value = payload.error;
+      publishValidationErrors.value = [];
+      publishTriggerImpact.value = null;
+      publishError.value = null;
+      return;
     }
+
+    publishValidationErrors.value = payload.validation_errors ?? [];
+    publishTriggerImpact.value = payload.trigger_impact ?? null;
+    publishError.value =
+      payload.error ??
+      (publishValidationErrors.value.length > 0 ? 'Fix validation errors before publishing.' : null);
   }
 );
 </script>
@@ -394,6 +462,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
           :undo-tooltip="editor.undoStore.undoTooltip"
           :redo-tooltip="editor.undoStore.redoTooltip"
           :is-undo-pending="editor.undoStore.isPending"
+          :validation-errors="toolbarValidationErrors"
           @save="editor.handleSave"
           @undo="editor.handleUndo"
           @redo="editor.handleRedo"
@@ -576,7 +645,10 @@ useLiveEvent<{ success: boolean; error?: string }>(
         :workflow-name="editor.workflow?.name ?? 'Workflow'"
         :current-version-tag="editor.workflow?.current_version_tag"
         :is-publishing="isPublishing"
+        :is-validating="isValidatingPublish"
         :publish-error="publishError"
+        :validation-errors="publishValidationErrors"
+        :trigger-impact="publishTriggerImpact"
         @close="closePublishModal"
         @publish="handlePublish"
       />

@@ -6,9 +6,12 @@ defmodule FizzWeb.WorkflowEditorLive do
   alias Fizz.Accounts
   alias Fizz.Integrations.CredentialsResolver
   alias Fizz.Steps
+  alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Type
+  alias Fizz.Triggers
   alias Fizz.Workflows
   alias Fizz.Workflows.Compiler
+  alias Fizz.Workflows.DraftValidator
   alias Fizz.Workflows.DraftSession
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.WorkflowDefinition
@@ -70,6 +73,7 @@ defmodule FizzWeb.WorkflowEditorLive do
           presences={@presences}
           currentUserId={@current_user_id}
           collabSeq={@collab_seq}
+          validationErrors={@validation_errors}
           expressionPreviews={@expression_previews}
           credentialOptions={@credential_options}
           debugExecutionId={@debug_execution_id}
@@ -114,8 +118,11 @@ defmodule FizzWeb.WorkflowEditorLive do
       "save_workflow" ->
         {:noreply, persist_draft(socket)}
 
+      "validate_draft" ->
+        {:noreply, validate_draft(socket)}
+
       "publish_workflow" ->
-        {:noreply, put_flash(socket, :info, "Publishing is wired in Phase 5.")}
+        {:noreply, publish_workflow(socket)}
 
       "run_test" ->
         {:noreply, run_test(socket)}
@@ -291,6 +298,7 @@ defmodule FizzWeb.WorkflowEditorLive do
     |> assign(:expression_previews, %{})
     |> assign(:undo_state, empty_undo_state())
     |> assign(:credential_options, [])
+    |> assign(:validation_errors, %{})
     |> assign(:debug_execution_id, nil)
     |> assign(:current_user_id, current_user_id)
     |> assign(:last_presence_update_at_ms, 0)
@@ -465,10 +473,84 @@ defmodule FizzWeb.WorkflowEditorLive do
         socket
         |> assign(:draft, draft)
         |> assign(:collab_seq, seq)
+        |> clear_validation_errors()
         |> push_event("workflow:operation_ack", %{type: "save_workflow", seq: seq})
 
       {:error, reason} ->
         put_flash(socket, :error, "Could not save workflow: #{inspect(reason)}")
+    end
+  end
+
+  defp validate_draft(socket) do
+    draft = socket.assigns.draft
+    scope = socket.assigns.current_scope
+    trigger_impact = compute_trigger_impact(draft, scope)
+
+    case DraftValidator.validate_for_publish(draft, scope) do
+      :ok ->
+        socket
+        |> clear_validation_errors()
+        |> push_event("workflow:validation_result", %{
+          valid: true,
+          validation_errors: [],
+          trigger_impact: trigger_impact
+        })
+
+      {:error, errors} ->
+        socket
+        |> assign(:validation_errors, validation_error_map(errors))
+        |> push_event("workflow:validation_result", %{
+          valid: false,
+          validation_errors: Enum.map(errors, &encode_validation_error/1),
+          trigger_impact: trigger_impact
+        })
+    end
+  end
+
+  defp publish_workflow(socket) do
+    version_id = socket.assigns.draft.id
+    scope = socket.assigns.current_scope
+
+    with {:ok, draft, seq} <- DraftSession.persist_now(version_id),
+         {:ok, persisted_draft} <- Workflows.get_version(scope, version_id) do
+      trigger_impact = compute_trigger_impact(persisted_draft, scope)
+
+      case DraftValidator.validate_for_publish(persisted_draft, scope) do
+        :ok ->
+          case Workflows.publish_draft(scope, version_id) do
+            {:ok, _published} ->
+              socket
+              |> assign(:draft, draft)
+              |> assign(:collab_seq, seq)
+              |> clear_validation_errors()
+              |> put_flash(:info, "Workflow published")
+              |> push_event("workflow:publish_result", %{success: true})
+              |> redirect(to: edit_workflow_path(socket))
+
+            {:error, reason} ->
+              socket
+              |> assign(:draft, draft)
+              |> assign(:collab_seq, seq)
+              |> push_event("workflow:publish_result", %{
+                success: false,
+                error: publish_error_message(reason)
+              })
+          end
+
+        {:error, errors} ->
+          socket
+          |> assign(:draft, draft)
+          |> assign(:collab_seq, seq)
+          |> assign(:validation_errors, validation_error_map(errors))
+          |> push_event("workflow:publish_result", %{
+            success: false,
+            validation_errors: Enum.map(errors, &encode_validation_error/1),
+            trigger_impact: trigger_impact
+          })
+      end
+    else
+      {:error, reason} ->
+        handle_publish_persist_error(socket, reason)
     end
   end
 
@@ -1084,7 +1166,12 @@ defmodule FizzWeb.WorkflowEditorLive do
     |> assign(:draft, draft)
     |> assign(:collab_seq, seq)
     |> assign(:undo_state, undo_state)
+    |> clear_validation_errors()
     |> maybe_push_undo_state()
+  end
+
+  defp clear_validation_errors(socket) do
+    assign(socket, :validation_errors, %{})
   end
 
   defp maybe_push_undo_state(socket) do
@@ -1337,6 +1424,10 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp draft_topic(version_id), do: "draft:#{version_id}"
   defp run_topic(nil), do: nil
   defp run_topic(run_id), do: "workflow_run:#{run_id}"
+
+  defp edit_workflow_path(socket) do
+    ~p"/projects/#{socket.assigns.project_id}/workflows/#{socket.assigns.definition_id}/edit"
+  end
 
   defp initial_presence_meta(user) do
     %{
@@ -1808,6 +1899,219 @@ defmodule FizzWeb.WorkflowEditorLive do
   defp encode_reason(reason) when is_binary(reason), do: reason
   defp encode_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp encode_reason(reason), do: inspect(reason)
+
+  defp encode_validation_error(%DraftValidator.ValidationError{} = error) do
+    %{
+      step_id: error.step_id,
+      field: error.field,
+      message: error.message,
+      severity: Atom.to_string(error.severity),
+      code: Atom.to_string(error.code)
+    }
+  end
+
+  defp validation_error_map(errors) do
+    errors
+    |> Enum.reject(&is_nil(&1.step_id))
+    |> Enum.group_by(& &1.step_id, & &1)
+  end
+
+  defp handle_publish_persist_error(socket, %Ecto.Changeset{} = changeset) do
+    draft = socket.assigns.draft
+    scope = socket.assigns.current_scope
+    trigger_impact = compute_trigger_impact(draft, scope)
+
+    case DraftValidator.validate_for_publish(draft, scope) do
+      {:error, errors} ->
+        socket
+        |> assign(:validation_errors, validation_error_map(errors))
+        |> push_event("workflow:publish_result", %{
+          success: false,
+          validation_errors: Enum.map(errors, &encode_validation_error/1),
+          trigger_impact: trigger_impact
+        })
+
+      :ok ->
+        push_event(socket, "workflow:publish_result", %{
+          success: false,
+          error: publish_error_message(changeset)
+        })
+    end
+  end
+
+  defp handle_publish_persist_error(socket, reason) do
+    push_event(socket, "workflow:publish_result", %{
+      success: false,
+      error: publish_error_message(reason)
+    })
+  end
+
+  defp publish_error_message(%Ecto.Changeset{} = changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(&translate_changeset_error/1)
+    |> collect_changeset_messages()
+    |> List.first()
+    |> case do
+      nil -> "Publish failed"
+      message -> message
+    end
+  end
+
+  defp publish_error_message(reason), do: encode_reason(reason)
+
+  defp translate_changeset_error({message, opts}) do
+    Enum.reduce(opts, message, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", to_string(value))
+    end)
+  end
+
+  defp collect_changeset_messages(errors) when is_map(errors) do
+    errors
+    |> Enum.flat_map(fn {_field, value} -> collect_changeset_messages(value) end)
+  end
+
+  defp collect_changeset_messages(errors) when is_list(errors) do
+    Enum.flat_map(errors, fn
+      value when is_binary(value) ->
+        [value]
+
+      value when is_list(value) or is_map(value) ->
+        collect_changeset_messages(value)
+
+      _value ->
+        []
+    end)
+  end
+
+  defp collect_changeset_messages(_errors), do: []
+
+  defp compute_trigger_impact(%WorkflowDefinitionVersion{} = draft, scope) do
+    case Compiler.compile(draft) do
+      {:ok, workflow, _hash} ->
+        with {:ok, registrations} <-
+               Triggers.list_registrations(scope,
+                 definition_id: draft.workflow_definition_id,
+                 status: :active
+               ),
+             {:ok, desired_registrations} <-
+               desired_trigger_registrations(
+                 Map.get(workflow.fizz_metadata, :trigger_manifest, []),
+                 draft,
+                 scope
+               ) do
+          compare_trigger_registrations(
+            desired_registrations,
+            Enum.filter(registrations, &is_nil(&1.run_id))
+          )
+        else
+          {:error, _reason} -> nil
+        end
+
+      {:error, _} ->
+        nil
+    end
+  end
+
+  defp desired_trigger_registrations(trigger_manifest, draft, scope)
+       when is_list(trigger_manifest) do
+    context = trigger_sync_context(draft, scope)
+
+    Enum.reduce_while(trigger_manifest, {:ok, []}, fn trigger, {:ok, acc} ->
+      with {:ok, executor} <- StepExecutorBehaviour.resolve(trigger.type_id),
+           {:ok, spec} <- executor.registration_spec(trigger.config, context) do
+        {:cont,
+         {:ok,
+          [
+            %{
+              step_id: trigger.step_id,
+              type_id: trigger.type_id,
+              kind: Atom.to_string(spec.kind),
+              config_digest: trigger_registration_digest(spec)
+            }
+            | acc
+          ]}}
+      else
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, registrations} ->
+        {:ok, Enum.sort_by(registrations, & &1.step_id)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp trigger_sync_context(draft, scope) do
+    %{
+      workflow_definition_id: draft.workflow_definition_id,
+      definition_version_id: draft.id,
+      project_id: socket_project_id(scope),
+      workos_organization_id: socket_organization_id(scope)
+    }
+  end
+
+  defp socket_project_id(%{project: %{id: project_id}}), do: project_id
+  defp socket_project_id(_scope), do: nil
+
+  defp socket_organization_id(%{project: %{workos_organization_id: organization_id}}),
+    do: organization_id
+
+  defp socket_organization_id(%{organization_id: organization_id}), do: organization_id
+  defp socket_organization_id(_scope), do: nil
+
+  defp trigger_registration_digest(spec) do
+    %{
+      "kind" => spec.kind,
+      "params" => spec.params,
+      "dedup_key" => spec.dedup_key
+    }
+    |> Jason.encode!()
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  defp compare_trigger_registrations(desired_registrations, current_registrations) do
+    current_by_step_id = Map.new(current_registrations, &{&1.step_id, &1})
+    desired_by_step_id = Map.new(desired_registrations, &{&1.step_id, &1})
+
+    added =
+      desired_registrations
+      |> Enum.reject(&Map.has_key?(current_by_step_id, &1.step_id))
+      |> Enum.sort_by(& &1.step_id)
+
+    updated =
+      desired_registrations
+      |> Enum.filter(fn desired ->
+        case Map.get(current_by_step_id, desired.step_id) do
+          nil ->
+            false
+
+          current ->
+            current.kind != desired.kind or current.config_digest != desired.config_digest
+        end
+      end)
+      |> Enum.sort_by(& &1.step_id)
+
+    removed =
+      current_registrations
+      |> Enum.reject(&Map.has_key?(desired_by_step_id, &1.step_id))
+      |> Enum.map(fn registration ->
+        %{
+          step_id: registration.step_id,
+          kind: registration.kind
+        }
+      end)
+      |> Enum.sort_by(& &1.step_id)
+
+    %{
+      added: added,
+      updated: updated,
+      removed: removed,
+      unchanged_count: max(length(desired_registrations) - length(added) - length(updated), 0)
+    }
+  end
 
   defp has_payload_key?(payload, string_key, atom_key) do
     Map.has_key?(payload, string_key) or Map.has_key?(payload, atom_key)

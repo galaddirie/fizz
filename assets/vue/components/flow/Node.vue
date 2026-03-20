@@ -5,7 +5,12 @@ import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
-import type { StepHandleQuickAddRequest, StepNodeData, StepSubnodeSlot } from '@/types/workflow';
+import type {
+  StepHandleQuickAddRequest,
+  StepNodeData,
+  StepSubnodeSlot,
+  WorkflowValidationError,
+} from '@/types/workflow';
 import {
   GlobeAltIcon,
   ServerIcon,
@@ -177,6 +182,17 @@ const statusConfig = computed(() => {
 });
 
 const currentStatusStyle = computed(() => statusConfig.value[effectiveStatus.value]);
+const validationErrors = computed<WorkflowValidationError[]>(() => props.data.validation_errors ?? []);
+const hasValidationErrors = computed(() => validationErrors.value.length > 0);
+const validationErrorCount = computed(() => validationErrors.value.length);
+const validationTooltip = computed(() =>
+  validationErrors.value
+    .map(error => {
+      const location = error.field ? `${error.field}: ` : '';
+      return `${location}${error.message}`;
+    })
+    .join('\n')
+);
 
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.replace('#', '');
@@ -247,6 +263,15 @@ const nodeStyle = computed(() => {
     style.borderColor = props.selected
       ? oklchToHex(colorMap[effectiveStatus.value])
       : currentStatusStyle.value.border;
+  }
+
+  if (hasValidationErrors.value) {
+    const errorColor = oklchToHex(colorMap.failed);
+    shadow += `, 0 0 0 2px ${hexToRgba(errorColor, isDark ? 0.22 : 0.14)}`;
+
+    if (!hasStatusStyle.value) {
+      style.borderColor = hexToRgba(errorColor, isDark ? 0.7 : 0.5);
+    }
   }
 
   if (props.data.selected_by?.length) {
@@ -512,6 +537,17 @@ const handleNameKeydown = (event: KeyboardEvent) => {
           </div>
 
           <div class="flex items-center gap-1">
+            <div
+              v-if="hasValidationErrors"
+              class="tooltip tooltip-left"
+              :data-tip="validationTooltip"
+            >
+              <div class="flex min-w-8 items-center justify-center gap-1 rounded-full border border-error/25 bg-error/10 px-2 py-0.5 text-[10px] font-semibold text-error shadow-sm">
+                <ExclamationCircleIcon class="size-3.5" />
+                <span>{{ validationErrorCount }}</span>
+              </div>
+            </div>
+
             <!-- Lock indicator -->
             <div
               v-if="data.locked_by"

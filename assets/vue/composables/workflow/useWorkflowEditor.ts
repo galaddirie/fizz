@@ -116,6 +116,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     stepTypes: () => props.stepTypes ?? [],
     stepExecutions: () => props.stepExecutions ?? [],
     editorState: () => props.editorState,
+    validationErrors: () => props.validationErrors ?? {},
     presences: () => props.presences ?? [],
     currentUserId: () => props.currentUserId,
     canEdit: () => canEdit.value,

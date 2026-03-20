@@ -185,6 +185,7 @@ export interface StepNodeData {
   disabled?: boolean;
   pinned?: boolean;
   locked_by?: string;
+  validation_errors?: WorkflowValidationError[];
   selected_by?: Array<{
     id: string;
     name: string;
@@ -370,6 +371,30 @@ export interface EditorState {
   pinned_outputs?: Record<string, unknown>;
   disabled_steps?: string[];
   step_locks?: Record<string, string>;
+}
+
+export interface WorkflowValidationError {
+  step_id?: string | null;
+  field?: string | null;
+  message: string;
+  severity: 'error' | 'warning';
+  code: string;
+}
+
+export interface TriggerImpactEntry {
+  step_id: string;
+  type_id?: string | null;
+  kind: string;
+}
+
+export interface TriggerImpact {
+  added: TriggerImpactEntry[];
+  updated: TriggerImpactEntry[];
+  removed: Array<{
+    step_id: string;
+    kind: string;
+  }>;
+  unchanged_count: number;
 }
 
 // =============================================================================

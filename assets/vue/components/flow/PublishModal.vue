@@ -6,6 +6,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline';
+import type { TriggerImpact, WorkflowValidationError } from '@/types/workflow';
 
 // =============================================================================
 // Props & Emits
@@ -16,14 +17,20 @@ interface Props {
   workflowName?: string;
   currentVersionTag?: string | null;
   isPublishing?: boolean;
+  isValidating?: boolean;
   publishError?: string | null;
+  validationErrors?: WorkflowValidationError[];
+  triggerImpact?: TriggerImpact | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   workflowName: 'Workflow',
   currentVersionTag: null,
   isPublishing: false,
+  isValidating: false,
   publishError: null,
+  validationErrors: () => [],
+  triggerImpact: null,
 });
 
 const emit = defineEmits<{
@@ -69,12 +76,26 @@ const isFormValid = computed(() => {
   return versionTag.value.trim().length > 0;
 });
 
+const blockingErrors = computed(() =>
+  props.validationErrors.filter(error => error.severity !== 'warning')
+);
+
+const hasBlockingErrors = computed(() => blockingErrors.value.length > 0);
+const hasValidationErrors = computed(() => props.validationErrors.length > 0);
+
+const impactCounts = computed(() => ({
+  added: props.triggerImpact?.added.length ?? 0,
+  updated: props.triggerImpact?.updated.length ?? 0,
+  removed: props.triggerImpact?.removed.length ?? 0,
+  unchanged: props.triggerImpact?.unchanged_count ?? 0,
+}));
+
 // =============================================================================
 // Handlers
 // =============================================================================
 
 function handlePublish() {
-  if (!isFormValid.value || props.isPublishing) return;
+  if (!isFormValid.value || props.isPublishing || props.isValidating || hasBlockingErrors.value) return;
   
   emit('publish', {
     version_tag: versionTag.value.trim(),
@@ -138,7 +159,7 @@ function handleClose() {
                 type="text"
                 placeholder="e.g., 1.0.0"
                 class="input input-bordered w-full"
-                :disabled="isPublishing"
+                :disabled="isPublishing || isValidating"
                 @keydown.enter="handlePublish"
               />
               <label v-if="currentVersionTag" class="label">
@@ -158,8 +179,106 @@ function handleClose() {
                 v-model="changelog"
                 placeholder="Describe what changed in this version..."
                 class="textarea textarea-bordered h-24 w-full resize-none"
-                :disabled="isPublishing"
+                :disabled="isPublishing || isValidating"
               />
+            </div>
+
+            <div class="rounded-xl border border-base-300/60 bg-base-200/40 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-sm font-semibold text-base-content">Publish checklist</h3>
+                  <p class="mt-1 text-xs text-base-content/60">
+                    Review publish-time validation before creating the immutable version.
+                  </p>
+                </div>
+                <span
+                  v-if="isValidating"
+                  class="loading loading-spinner loading-sm text-primary"
+                />
+                <div
+                  v-else
+                  class="rounded-full px-3 py-1 text-xs font-semibold"
+                  :class="
+                    hasBlockingErrors
+                      ? 'bg-error/10 text-error'
+                      : 'bg-success/10 text-success'
+                  "
+                >
+                  {{ hasBlockingErrors ? `${blockingErrors.length} issue(s)` : 'Ready to publish' }}
+                </div>
+              </div>
+
+              <div v-if="isValidating" class="mt-4 text-sm text-base-content/60">
+                Running publish-time validation…
+              </div>
+
+              <div v-else-if="hasValidationErrors" class="mt-4 space-y-2">
+                <div
+                  v-for="(error, index) in validationErrors"
+                  :key="`${error.code}-${error.step_id ?? 'global'}-${error.field ?? 'field'}-${index}`"
+                  class="rounded-xl border px-3 py-2"
+                  :class="
+                    error.severity === 'warning'
+                      ? 'border-warning/20 bg-warning/5'
+                      : 'border-error/20 bg-error/5'
+                  "
+                >
+                  <div class="flex items-start gap-2">
+                    <ExclamationTriangleIcon
+                      class="mt-0.5 h-4 w-4 shrink-0"
+                      :class="error.severity === 'warning' ? 'text-warning' : 'text-error'"
+                    />
+                    <div class="min-w-0">
+                      <p class="text-sm font-medium text-base-content">{{ error.message }}</p>
+                      <p class="mt-1 text-[11px] uppercase tracking-[0.12em] text-base-content/45">
+                        <span v-if="error.step_id">Step {{ error.step_id }}</span>
+                        <span v-if="error.step_id && error.field"> · </span>
+                        <span v-if="error.field">{{ error.field }}</span>
+                        <span v-if="error.code"> · {{ error.code.replace(/_/g, ' ') }}</span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                v-else
+                class="mt-4 flex items-center gap-2 rounded-xl border border-success/20 bg-success/5 px-3 py-2 text-sm text-success"
+              >
+                <CheckCircleIcon class="h-4 w-4 shrink-0" />
+                <span>No publish blockers detected.</span>
+              </div>
+            </div>
+
+            <div
+              v-if="triggerImpact"
+              class="rounded-xl border border-base-300/60 bg-base-100/70 p-4"
+            >
+              <div>
+                <h3 class="text-sm font-semibold text-base-content">Trigger impact</h3>
+                <p class="mt-1 text-xs text-base-content/60">
+                  Active trigger registrations that will change when this version is published.
+                </p>
+              </div>
+
+              <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div class="rounded-xl border border-success/20 bg-success/5 px-3 py-2">
+                  <div class="text-[11px] uppercase tracking-[0.12em] text-base-content/45">Added</div>
+                  <div class="mt-1 text-lg font-semibold text-success">{{ impactCounts.added }}</div>
+                </div>
+                <div class="rounded-xl border border-warning/20 bg-warning/5 px-3 py-2">
+                  <div class="text-[11px] uppercase tracking-[0.12em] text-base-content/45">Updated</div>
+                  <div class="mt-1 text-lg font-semibold text-warning">{{ impactCounts.updated }}</div>
+                </div>
+                <div class="rounded-xl border border-error/20 bg-error/5 px-3 py-2">
+                  <div class="text-[11px] uppercase tracking-[0.12em] text-base-content/45">Removed</div>
+                  <div class="mt-1 text-lg font-semibold text-error">{{ impactCounts.removed }}</div>
+                </div>
+                <div class="rounded-xl border border-base-300/60 bg-base-200/40 px-3 py-2">
+                  <div class="text-[11px] uppercase tracking-[0.12em] text-base-content/45">Unchanged</div>
+                  <div class="mt-1 text-lg font-semibold text-base-content">{{ impactCounts.unchanged }}</div>
+                </div>
+              </div>
             </div>
 
             <!-- Error Message -->
@@ -192,12 +311,13 @@ function handleClose() {
             </button>
             <button
               class="btn btn-primary gap-2"
-              :disabled="!isFormValid || isPublishing"
+              :disabled="!isFormValid || isPublishing || isValidating || hasBlockingErrors"
               @click="handlePublish"
             >
               <span v-if="isPublishing" class="loading loading-spinner loading-sm" />
+              <span v-else-if="isValidating" class="loading loading-spinner loading-sm" />
               <RocketLaunchIcon v-else class="h-4 w-4" />
-              {{ isPublishing ? 'Publishing...' : 'Publish' }}
+              {{ isPublishing ? 'Publishing...' : isValidating ? 'Validating...' : 'Publish' }}
             </button>
           </div>
         </div>

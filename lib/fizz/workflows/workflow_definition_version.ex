@@ -2,10 +2,9 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
   use Fizz.Schema
 
   alias Fizz.Graph
-  alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
-  alias Fizz.Workflows.Compiler.ExpressionCompiler
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
+  alias Fizz.Workflows.PublishValidation
   alias Fizz.Workflows.WorkflowDefinition
 
   @statuses [:draft, :published, :archived]
@@ -280,18 +279,13 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
   defp validate_step_configs(changeset) do
     changeset
     |> get_field(:steps, [])
-    |> Enum.reduce(changeset, fn step, acc ->
-      case StepExecutorBehaviour.validate_config(step.type_id, step.config) do
-        :ok ->
-          acc
-
-        {:error, errors} ->
-          add_error(
-            acc,
-            :steps,
-            "step #{step.id} has invalid config: #{format_executor_errors(errors)}"
-          )
-      end
+    |> PublishValidation.step_config_issues()
+    |> Enum.reduce(changeset, fn issue, acc ->
+      add_error(
+        acc,
+        :steps,
+        "step #{issue.step_id} has invalid config: #{PublishValidation.format_step_config_issue(issue)}"
+      )
     end)
   end
 
@@ -299,25 +293,25 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
     steps = get_field(changeset, :steps, [])
     connections = get_field(changeset, :connections, [])
 
-    case Graph.from_workflow(steps, connections) do
-      {:ok, graph} ->
-        case Graph.roots(graph) do
-          [] -> add_error(changeset, :steps, "must include at least one entry step")
-          _entry_steps -> changeset
-        end
-
-      {:error, _reason} ->
+    case PublishValidation.has_entry_step_issues(steps, connections) do
+      [] ->
         changeset
+
+      [_issue | _rest] ->
+        add_error(changeset, :steps, PublishValidation.has_entry_step_message())
     end
   end
 
   defp validate_expression_integrity(changeset) do
-    steps = get_field(changeset, :steps, [])
-    known_step_ids = Enum.map(steps, & &1.id)
-
-    ExpressionCompiler.validate_step_configs(steps, known_step_ids)
-    |> Enum.reduce(changeset, fn error, acc ->
-      add_error(acc, :steps, error.message)
+    changeset
+    |> get_field(:steps, [])
+    |> PublishValidation.expression_issues()
+    |> Enum.reduce(changeset, fn issue, acc ->
+      add_error(
+        acc,
+        :steps,
+        "step #{issue.step_id} #{PublishValidation.format_expression_issue(issue)}"
+      )
     end)
   end
 
@@ -347,15 +341,4 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
     |> Enum.map(fn {source_step_id, target_step_id} -> "#{source_step_id}->#{target_step_id}" end)
     |> Enum.join(", ")
   end
-
-  defp format_executor_errors(errors) when is_list(errors) do
-    errors
-    |> Enum.map(fn
-      {field, message} -> "#{field} #{message}"
-      error -> inspect(error)
-    end)
-    |> Enum.join(", ")
-  end
-
-  defp format_executor_errors(error), do: inspect(error)
 end

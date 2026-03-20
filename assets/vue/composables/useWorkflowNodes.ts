@@ -17,6 +17,7 @@ import type {
   StepHandleQuickAddRequest,
   GroupNodeData,
   WorkflowNodeData,
+  WorkflowValidationError,
 } from '@/types/workflow';
 
 interface UseWorkflowNodesOptions {
@@ -24,6 +25,7 @@ interface UseWorkflowNodesOptions {
   stepTypes: () => StepType[];
   stepExecutions: () => StepExecution[];
   editorState: () => EditorState | undefined;
+  validationErrors: () => Record<string, WorkflowValidationError[]>;
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
   canEdit?: () => boolean;
@@ -116,9 +118,23 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
 
     const utcOffset = typeof record.utc_offset === 'number' ? record.utc_offset : 0;
     const stdOffset = typeof record.std_offset === 'number' ? record.std_offset : 0;
+    const yearNumber = year as number;
+    const monthNumber = month as number;
+    const dayNumber = day as number;
+    const hourNumber = hour as number;
+    const minuteNumber = minute as number;
+    const secondNumber = second as number;
 
     return (
-      Date.UTC(year, month - 1, day, hour, minute, second, millisecond) -
+      Date.UTC(
+        yearNumber,
+        monthNumber - 1,
+        dayNumber,
+        hourNumber,
+        minuteNumber,
+        secondNumber,
+        millisecond
+      ) -
       (utcOffset + stdOffset) * 1000
     );
   };
@@ -237,6 +253,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const stepExecutions = stepExecutionByStepId.value;
     const itemStats = stepItemStatsByStepId.value;
     const editorState = options.editorState();
+    const validationErrors = options.validationErrors();
     const presences = options.presences();
     const currentUserId = options.currentUserId();
     const canEdit = options.canEdit?.() ?? true;
@@ -323,6 +340,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
+      const stepValidationErrors = validationErrors[step.id] || [];
       const parentGroupId = groupByStepId.get(step.id);
       const isGroupingCandidate = groupingStepIds.has(step.id);
 
@@ -412,6 +430,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           disabled: isDisabled,
           pinned: isPinned,
           locked_by: lockedBy,
+          validation_errors: stepValidationErrors,
           selected_by: selectedBy,
           isGroupingCandidate,
           groupingColor: isGroupingCandidate ? groupingColor : undefined,

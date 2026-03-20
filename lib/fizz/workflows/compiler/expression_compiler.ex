@@ -27,12 +27,21 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
 
   @spec validate_step_configs([map()], [String.t()]) :: [map()]
   def validate_step_configs(steps, known_step_ids) when is_list(steps) do
+    validate_step_configs_detailed(steps, known_step_ids)
+    |> Enum.map(fn error ->
+      %{
+        message: "step #{error.step_id} #{format_validation_error(error)}",
+        step_id: error.step_id
+      }
+    end)
+  end
+
+  @spec validate_step_configs_detailed([map()], [String.t()]) :: [map()]
+  def validate_step_configs_detailed(steps, known_step_ids) when is_list(steps) do
     Enum.flat_map(steps, fn step ->
       step.config
-      |> validate_tree(known_step_ids, [])
-      |> Enum.map(fn error ->
-        %{message: "step #{step.id} #{error}", step_id: step.id}
-      end)
+      |> validate_tree_detailed(known_step_ids, [])
+      |> Enum.map(&Map.put(&1, :step_id, step.id))
     end)
   end
 
@@ -116,33 +125,46 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     {%AccessPlan.Literal{value: value}, empty_dependencies(), []}
   end
 
-  defp validate_tree(map, known_step_ids, path) when is_map(map) do
+  defp validate_tree_detailed(map, known_step_ids, path) when is_map(map) do
     Enum.flat_map(map, fn {key, value} ->
-      validate_tree(value, known_step_ids, path ++ [to_string(key)])
+      validate_tree_detailed(value, known_step_ids, path ++ [to_string(key)])
     end)
   end
 
-  defp validate_tree(list, known_step_ids, path) when is_list(list) do
+  defp validate_tree_detailed(list, known_step_ids, path) when is_list(list) do
     Enum.flat_map(Enum.with_index(list), fn {value, index} ->
-      validate_tree(value, known_step_ids, path ++ [Integer.to_string(index)])
+      validate_tree_detailed(value, known_step_ids, path ++ [Integer.to_string(index)])
     end)
   end
 
-  defp validate_tree(value, known_step_ids, path) when is_binary(value) do
+  defp validate_tree_detailed(value, known_step_ids, path) when is_binary(value) do
     if Expressions.classify(value) == :literal do
       []
     else
       case Expressions.validate(value, strict_filters: true, known_step_ids: known_step_ids) do
-        {:ok, _parsed} -> []
-        {:error, errors} -> Enum.map(errors, &format_path_error(path, &1))
+        {:ok, _parsed} ->
+          []
+
+        {:error, errors} ->
+          Enum.map(errors, fn message ->
+            %{field: format_field_path(path), message: message}
+          end)
       end
     end
   end
 
-  defp validate_tree(_value, _known_step_ids, _path), do: []
+  defp validate_tree_detailed(_value, _known_step_ids, _path), do: []
 
   defp format_path_error([], message), do: message
   defp format_path_error(path, message), do: "config.#{Enum.join(path, ".")}: #{message}"
+
+  defp format_validation_error(%{field: nil, message: message}), do: message
+
+  defp format_validation_error(%{field: field, message: message}),
+    do: "config.#{field}: #{message}"
+
+  defp format_field_path([]), do: nil
+  defp format_field_path(path), do: Enum.join(path, ".")
 
   defp empty_dependencies do
     %{step_ids: MapSet.new(), runtime_keys: MapSet.new()}

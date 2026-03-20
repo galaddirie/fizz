@@ -33,6 +33,7 @@ export function useRevisionViewer(props: RevisionViewerProps) {
     stepTypes: () => props.stepTypes,
     stepExecutions: () => [],
     editorState: () => props.editorState,
+    validationErrors: () => ({}),
     presences: () => [],
     currentUserId: () => undefined,
     canEdit: () => false,

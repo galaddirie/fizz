@@ -165,6 +165,74 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert :ok = wait_for_worker_exit(execution.id)
   end
 
+  test "publish_workflow persists before validation and blocks on validation errors", %{
+    conn: conn
+  } do
+    %{conn: conn, definition: definition, project_scope: project_scope} = editor_fixture(conn)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "add_step",
+      "payload" => %{
+        "type_id" => "http_request",
+        "position" => %{"x" => 240, "y" => 180}
+      }
+    })
+
+    version_id = view_version_id(view)
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "publish_workflow",
+      "payload" => %{"version_tag" => "1.0.0", "changelog" => "test publish"}
+    })
+
+    assert_push_event(view, "workflow:publish_result", %{
+      success: false,
+      validation_errors: errors
+    })
+
+    assert Enum.any?(errors, fn error ->
+             code = Map.get(error, :code) || Map.get(error, "code")
+             field = Map.get(error, :field) || Map.get(error, "field")
+
+             code == "missing_required_field" and field == "url"
+           end)
+
+    assert {:ok, persisted_draft} = Workflows.get_version(project_scope, version_id)
+    assert length(persisted_draft.steps) == 1
+    assert persisted_draft.status == :draft
+    assert persisted_draft.published_at == nil
+  end
+
+  test "publish_workflow publishes a valid draft", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.valid_snapshot_attrs()
+
+    %{conn: conn, definition: definition, project_scope: project_scope} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    version_id = view_version_id(view)
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "publish_workflow",
+      "payload" => %{"version_tag" => "1.0.0", "changelog" => "publish valid"}
+    })
+
+    assert {:ok, published_version} = Workflows.get_version(project_scope, version_id)
+    assert published_version.status == :published
+    assert %DateTime{} = published_version.published_at
+  end
+
   test "undo and redo commands work through DraftSession", %{conn: conn} do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)

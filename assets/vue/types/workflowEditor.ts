@@ -11,6 +11,7 @@ import type {
   StepExecution,
   EditorState,
   UserPresence,
+  WorkflowValidationError,
 } from '@/types/workflow';
 
 import { useUndoStore } from '@/stores/undoStore';
@@ -30,6 +31,7 @@ export interface WorkflowEditorProps {
   expressionPreviews?: Record<string, unknown>;
   credentialOptions?: CredentialOption[];
   debugExecutionId?: string | null;
+  validationErrors?: Record<string, WorkflowValidationError[]>;
 }
 
 export type WorkflowEditorCommandType =
@@ -57,6 +59,7 @@ export type WorkflowEditorCommandType =
   | 'redo'
   | 'tidy_layout'
   | 'save_workflow'
+  | 'validate_draft'
   | 'publish_workflow'
   | 'mouse_move'
   | 'selection_changed'
@@ -173,6 +176,7 @@ export type WorkflowEditorEmits = {
     }
   ): void;
   (e: 'save_workflow'): void;
+  (e: 'validate_draft'): void;
   (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
   (
     e: 'mouse_move',
