@@ -1,4 +1,4 @@
-defmodule FizzWeb.WorkflowEditorLive do
+defmodule FizzWeb.WorkflowsLive.Editor do
   use Phoenix.LiveView
   use LiveVue, :live_view
   use FizzWeb, :verified_routes
@@ -18,7 +18,6 @@ defmodule FizzWeb.WorkflowEditorLive do
   alias Fizz.Workflows.WorkflowDefinitionVersion
   alias Fizz.Workflows.WorkflowRun
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
-  alias FizzWeb.Layouts
   alias FizzWeb.Presence
   alias Phoenix.Socket.Broadcast
 
@@ -57,31 +56,29 @@ defmodule FizzWeb.WorkflowEditorLive do
     assigns = assign(assigns, :workflow, workflow_prop(assigns))
 
     ~H"""
-    <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <%= if @workflow do %>
-        <.vue
-          id="workflow-editor"
-          v-component="WorkflowEditor"
-          v-socket={@socket}
-          workflow={@workflow}
-          stepTypes={@step_types}
-          nodeLibraryItems={@node_library_items}
-          execution={@execution}
-          stepExecutions={@step_executions}
-          editorState={@editor_state}
-          undoState={@undo_state}
-          presences={@presences}
-          currentUserId={@current_user_id}
-          collabSeq={@collab_seq}
-          validationErrors={@validation_errors}
-          expressionPreviews={@expression_previews}
-          credentialOptions={@credential_options}
-          debugExecutionId={@debug_execution_id}
-        />
-      <% else %>
-        <div id="workflow-editor-loading" />
-      <% end %>
-    </Layouts.app>
+    <%= if @workflow do %>
+      <.vue
+        id="workflow-editor"
+        v-component="WorkflowEditor"
+        v-socket={@socket}
+        workflow={@workflow}
+        stepTypes={@step_types}
+        nodeLibraryItems={@node_library_items}
+        execution={@execution}
+        stepExecutions={@step_executions}
+        editorState={@editor_state}
+        undoState={@undo_state}
+        presences={@presences}
+        currentUserId={@current_user_id}
+        collabSeq={@collab_seq}
+        validationErrors={@validation_errors}
+        expressionPreviews={@expression_previews}
+        credentialOptions={@credential_options}
+        debugExecutionId={@debug_execution_id}
+      />
+    <% else %>
+      <div id="workflow-editor-loading" />
+    <% end %>
     """
   end
 

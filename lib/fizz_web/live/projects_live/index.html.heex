@@ -75,6 +75,13 @@
                 Open
               </.link>
               <.link
+                id={"project-workflows-#{project.id}"}
+                navigate={~p"/projects/#{project.id}/workflows"}
+                class="btn btn-ghost btn-sm"
+              >
+                Workflows
+              </.link>
+              <.link
                 id={"project-workspaces-#{project.id}"}
                 navigate={~p"/projects/#{project.id}/workspaces"}
                 class="btn btn-ghost btn-sm"

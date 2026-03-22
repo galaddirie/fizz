@@ -54,11 +54,18 @@
 
         <div class="mt-4 space-y-2">
           <.link
-            id="project-show-open-workspaces"
-            navigate={~p"/projects/#{@project.id}/workspaces"}
+            id="project-show-open-workflows"
+            navigate={~p"/projects/#{@project.id}/workflows"}
             class="btn btn-primary btn-sm w-full"
           >
-            Open Workspaces
+            Workflows
+          </.link>
+          <.link
+            id="project-show-open-workspaces"
+            navigate={~p"/projects/#{@project.id}/workspaces"}
+            class="btn btn-outline btn-sm w-full"
+          >
+            Workspaces
           </.link>
           <.link
             id="project-show-back"
