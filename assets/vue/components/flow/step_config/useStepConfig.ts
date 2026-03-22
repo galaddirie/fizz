@@ -43,6 +43,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
     // --- Core state ---
     const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
     const fieldValues = ref<Record<string, unknown>>({});
+    const fieldErrors = ref<Record<string, string>>({});
     const isEditingName = ref(false);
     const editName = ref('');
     const canEdit = computed(() => props.canEdit ?? true);
@@ -51,6 +52,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
     const originalValues = ref<Record<string, unknown>>({});
     const originalName = ref('');
     const showCloseConfirmation = ref(false);
+    const hasFieldErrors = computed(() => Object.keys(fieldErrors.value).length > 0);
 
     const hasUnsavedChanges = computed(() => {
         if (!canEdit.value) return false;
@@ -94,6 +96,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
 
                 fieldModes.value = modes;
                 fieldValues.value = values;
+                fieldErrors.value = {};
                 editName.value = newNode.data.name || '';
                 isEditingName.value = false;
 
@@ -155,6 +158,8 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             closeModal();
             return;
         }
+        if (hasFieldErrors.value) return;
+
         emit('save', {
             id: props.node?.id,
             name: editName.value,
@@ -172,6 +177,18 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         fieldModes.value[field] = mode;
     };
 
+    const handleFieldValidationUpdate = (fieldKey: string, error: string | null) => {
+        if (error) {
+            fieldErrors.value[fieldKey] = error;
+            return;
+        }
+
+        delete fieldErrors.value[fieldKey];
+    };
+
+    const isStructuredValue = (value: unknown) =>
+        Array.isArray(value) || (value !== null && typeof value === 'object');
+
     const fields = computed<ConfigField[]>(() => {
         if (!props.node || !props.node.data) return [];
 
@@ -184,12 +201,21 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             const uiComponent = (schemaField as any).ui?.component;
             const format = schemaField.format;
             const typeStr = schemaField.type;
+            const rawValue = config[key] ?? schemaField.default;
 
-            let inferredType = 'text';
+            let inferredType: ExtendedFieldType = 'text';
             if (uiComponent === 'search') inferredType = 'search';
             else if (uiComponent === 'select') inferredType = 'select';
+            else if (uiComponent === 'json') inferredType = 'json';
             else if (schemaField.enum && schemaField.enum.length > 0) inferredType = 'select';
-            else if (format === 'json') inferredType = 'json';
+            else if (
+                format === 'json' ||
+                typeStr === 'object' ||
+                typeStr === 'array' ||
+                isStructuredValue(rawValue)
+            ) {
+                inferredType = 'json';
+            }
             else if (typeStr === 'string' && format === 'textarea') inferredType = 'textarea';
             else if (typeStr === 'number' || typeStr === 'integer') inferredType = 'number';
             else if (typeStr === 'boolean') inferredType = 'boolean';
@@ -293,18 +319,21 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         // Core (inline)
         fieldModes,
         fieldValues,
+        fieldErrors,
         isEditingName,
         editName,
         canEdit,
         originalValues,
         originalName,
         showCloseConfirmation,
+        hasFieldErrors,
         hasUnsavedChanges,
         closeModal,
         confirmClose,
         cancelClose,
         saveConfig,
         setFieldMode,
+        handleFieldValidationUpdate,
         fields,
         fieldByKey,
         handleFieldValueUpdate,

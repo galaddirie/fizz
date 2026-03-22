@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported UI component types for field rendering. */
-export type UIComponent = 'select' | 'search' | 'string' | 'number';
+export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json';
 
 /** Resolver-based configuration for dynamic option loading. */
 export interface UIResolverConfig {

@@ -85,6 +85,7 @@ const state = inject(StepConfigKey)!;
           <FieldWrapper
             :modelValue="state.fieldValues.value[field.key]"
             @update:modelValue="value => state.handleFieldValueUpdate(field.key, value)"
+            @validation="error => state.handleFieldValidationUpdate(field.key, error)"
             :mode="state.fieldModes.value[field.key] || 'literal'"
             :field="field"
             :nodeId="state.nodeId.value"

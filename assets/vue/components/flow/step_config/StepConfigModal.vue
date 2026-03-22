@@ -142,11 +142,15 @@ onBeforeUnmount(() => {
       <div class="border-base-200 bg-base-100 flex items-center justify-end border-t px-8 py-5">
         <div class="flex items-center gap-4">
           <template v-if="state.canEdit.value">
+            <p v-if="state.hasFieldErrors.value" class="text-error/75 text-xs font-medium">
+              Fix invalid JSON before saving.
+            </p>
             <button class="btn btn-ghost btn-sm text-base-content/60 font-bold" @click="state.closeModal()">
               Discard Changes
             </button>
             <button
-              class="btn btn-primary shadow-primary/20 rounded-xl px-8 font-bold shadow-lg"
+              class="btn btn-primary shadow-primary/20 rounded-xl px-8 font-bold shadow-lg disabled:shadow-none"
+              :disabled="state.hasFieldErrors.value"
               @click="state.saveConfig()"
             >
               Save Configuration
