@@ -123,3 +123,7 @@ workflow example idea
 A bot that starts an a/b experiment and updates the experiments based on events and signals from Google Analytics or the website itself updating the experiment continuously.
 
  bot that can detect errors, triage them, and update the website, then emails the user the issue and the fix.
+
+
+
+ - [ ] Users should be able to pin data without needing to run a node. they should be able to paste a payload of their shape 
