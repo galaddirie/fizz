@@ -135,3 +135,6 @@ A bot that starts an a/b experiment and updates the experiments based on events 
  - stopping workflows does not seem to brodcast changes 
 - no items numbers on edges
 - for draft workflows visting /edit/runs/<id> does not rebuild the graph from the logs, it shows the current draft model ( have not tested with published workflows)
+
+
+how will users debug and pin workflows on published versions if they drift significantly from the latest draft?
