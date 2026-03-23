@@ -5,6 +5,7 @@ defmodule Runic.Workflow.RunnableCompleted do
   Fields:
 
   - `duration_ms` — wall-clock execution time in milliseconds (monotonic)
+  - `duration_us` — wall-clock execution time in microseconds when preserved by the producer
   - `attempt` — zero-based attempt index (0 = first try, 1 = first retry, etc.)
   - `result_fact` — the `%Fact{}` produced by the step
   """
@@ -15,7 +16,8 @@ defmodule Runic.Workflow.RunnableCompleted do
           result_fact: Runic.Workflow.Fact.t(),
           completed_at: integer(),
           attempt: non_neg_integer(),
-          duration_ms: non_neg_integer()
+          duration_ms: non_neg_integer(),
+          duration_us: non_neg_integer() | nil
         }
 
   defstruct [
@@ -24,6 +26,7 @@ defmodule Runic.Workflow.RunnableCompleted do
     :result_fact,
     :completed_at,
     :attempt,
-    :duration_ms
+    :duration_ms,
+    :duration_us
   ]
 end

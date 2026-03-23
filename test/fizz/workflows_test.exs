@@ -4,9 +4,13 @@ defmodule Fizz.WorkflowsTest do
   import Fizz.AccountsFixtures
 
   alias Fizz.Accounts.Scope
+  alias Fizz.Repo
   alias Fizz.Workflows
   alias Fizz.Workflows.Runner.Worker
+  alias Fizz.Workflows.Store.SqliteStore
+  alias Fizz.Workflows.WorkflowRun
   alias Fizz.WorkflowsFixtures
+  alias Runic.Workflow.{Fact, RunnableCompleted, RunnableDispatched, RunnableFailed}
 
   test "create definition with initial empty draft" do
     scope = project_scope_fixture()
@@ -285,6 +289,122 @@ defmodule Fizz.WorkflowsTest do
     assert {:ok, %{status: :cancelled}} = Workflows.get_run(scope, run.id)
   end
 
+  test "list_run_step_executions preserves microsecond durations from persisted completed events" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+    step = WorkflowsFixtures.step(%{type_id: "debug", name: "Fast Step"})
+
+    %{version: version} =
+      WorkflowsFixtures.published_version_fixture(
+        scope,
+        WorkflowsFixtures.snapshot_attrs(%{steps: [step]})
+      )
+
+    run = insert_completed_run(scope, version)
+    tmp_dir = unique_tmp_dir("step-execution-duration")
+    configure_workflow_data_dir(tmp_dir)
+    insert_lease(run.id, 1)
+
+    {:ok, store_state} =
+      SqliteStore.init(run.id,
+        data_dir: tmp_dir,
+        org_id: scope.project.workos_organization_id,
+        project_id: scope.project.id,
+        fence_token: 1,
+        repo: Repo
+      )
+
+    input_fact = %Fact{hash: 101, value: %{"email" => "test"}}
+
+    output_fact = %Fact{
+      hash: 202,
+      value: %{"email" => "test"},
+      ancestry: {303, input_fact.hash}
+    }
+
+    event_log = [
+      %RunnableDispatched{
+        runnable_id: 123,
+        node_name: step.id,
+        node_hash: 303,
+        input_fact: input_fact,
+        dispatched_at: 0,
+        policy: nil,
+        attempt: 0
+      },
+      %RunnableCompleted{
+        runnable_id: 123,
+        node_hash: 303,
+        result_fact: output_fact,
+        completed_at: 0,
+        attempt: 0,
+        duration_ms: 0,
+        duration_us: 713
+      }
+    ]
+
+    assert :ok = SqliteStore.save(run.id, event_log, store_state)
+
+    assert {:ok, [%{duration_us: 713, status: "completed", step_id: step_id}]} =
+             Workflows.list_run_step_executions(scope, run.id)
+
+    assert step_id == step.id
+  end
+
+  test "list_run_step_executions preserves microsecond durations from persisted failed events" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+    step = WorkflowsFixtures.step(%{type_id: "debug", name: "Fast Failure"})
+
+    %{version: version} =
+      WorkflowsFixtures.published_version_fixture(
+        scope,
+        WorkflowsFixtures.snapshot_attrs(%{steps: [step]})
+      )
+
+    run = insert_failed_run(scope, version)
+    tmp_dir = unique_tmp_dir("step-execution-failure-duration")
+    configure_workflow_data_dir(tmp_dir)
+    insert_lease(run.id, 1)
+
+    {:ok, store_state} =
+      SqliteStore.init(run.id,
+        data_dir: tmp_dir,
+        org_id: scope.project.workos_organization_id,
+        project_id: scope.project.id,
+        fence_token: 1,
+        repo: Repo
+      )
+
+    input_fact = %Fact{hash: 404, value: %{"email" => "test"}}
+
+    event_log = [
+      %RunnableDispatched{
+        runnable_id: 456,
+        node_name: step.id,
+        node_hash: 505,
+        input_fact: input_fact,
+        dispatched_at: 0,
+        policy: nil,
+        attempt: 0
+      },
+      %RunnableFailed{
+        runnable_id: 456,
+        node_hash: 505,
+        error: :boom,
+        failed_at: 0,
+        duration_us: 811,
+        attempts: 1,
+        failure_action: :halt
+      }
+    ]
+
+    assert :ok = SqliteStore.save(run.id, event_log, store_state)
+
+    assert {:ok, [%{duration_us: 811, status: "failed", step_id: step_id}]} =
+             Workflows.list_run_step_executions(scope, run.id)
+
+    assert step_id == step.id
+  end
+
   defp definition_fixture(scope) do
     {:ok, %{definition: definition, draft: draft}} =
       Workflows.create_definition(scope, %{
@@ -389,5 +509,72 @@ defmodule Fizz.WorkflowsTest do
         ref = Process.monitor(pid)
         assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
     end
+  end
+
+  defp insert_completed_run(scope, version) do
+    now = DateTime.utc_now()
+
+    %WorkflowRun{}
+    |> WorkflowRun.changeset(%{
+      workflow_definition_id: version.workflow_definition_id,
+      workflow_definition_version_id: version.id,
+      project_id: scope.project.id,
+      workos_organization_id: scope.project.workos_organization_id,
+      status: :completed,
+      input: %{},
+      output: %{},
+      last_active_at: now,
+      started_at: now,
+      completed_at: now
+    })
+    |> Repo.insert!()
+  end
+
+  defp insert_failed_run(scope, version) do
+    now = DateTime.utc_now()
+
+    %WorkflowRun{}
+    |> WorkflowRun.changeset(%{
+      workflow_definition_id: version.workflow_definition_id,
+      workflow_definition_version_id: version.id,
+      project_id: scope.project.id,
+      workos_organization_id: scope.project.workos_organization_id,
+      status: :failed,
+      input: %{},
+      error: %{"message" => "boom"},
+      last_active_at: now,
+      started_at: now,
+      completed_at: now
+    })
+    |> Repo.insert!()
+  end
+
+  defp insert_lease(run_id, fence_token) do
+    assert {:ok, _result} =
+             Ecto.Adapters.SQL.query(
+               Repo,
+               """
+               INSERT INTO workflow_run_leases (run_id, owner_node, fence_token, checkpoint_seq, lease_expiry)
+               VALUES ($1, NULL, $2, 0, NOW() + interval '30 seconds')
+               """,
+               [dump_uuid(run_id), fence_token]
+             )
+  end
+
+  defp dump_uuid(run_id), do: Ecto.UUID.dump!(run_id)
+
+  defp unique_tmp_dir(prefix) do
+    tmp_dir = Path.join(System.tmp_dir!(), "#{prefix}-#{System.unique_integer([:positive])}")
+    on_exit(fn -> File.rm_rf(tmp_dir) end)
+    tmp_dir
+  end
+
+  defp configure_workflow_data_dir(tmp_dir) do
+    previous = Application.get_env(:fizz, :workflow_data_dir)
+    Application.put_env(:fizz, :workflow_data_dir, tmp_dir)
+
+    on_exit(fn ->
+      Application.put_env(:fizz, :workflow_data_dir, previous)
+    end)
   end
 end

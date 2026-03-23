@@ -653,7 +653,8 @@ defmodule Fizz.Workflows.Runner.Worker do
       result_fact: runnable.result,
       completed_at: System.monotonic_time(:millisecond),
       attempt: 0,
-      duration_ms: duration_ms(duration_us)
+      duration_ms: duration_ms(duration_us),
+      duration_us: duration_us
     }
 
     maybe_broadcast_step_completed(state, runnable, duration_us)
@@ -673,6 +674,7 @@ defmodule Fizz.Workflows.Runner.Worker do
       node_hash: Map.get(runnable.node, :hash),
       error: error,
       failed_at: System.monotonic_time(:millisecond),
+      duration_us: duration_us,
       attempts: 1,
       failure_action: :halt
     }
@@ -691,7 +693,8 @@ defmodule Fizz.Workflows.Runner.Worker do
       result_fact: runnable.result,
       completed_at: System.monotonic_time(:millisecond),
       attempt: 0,
-      duration_ms: 0
+      duration_ms: 0,
+      duration_us: 0
     }
 
     maybe_broadcast_step_completed(state, runnable, 0)

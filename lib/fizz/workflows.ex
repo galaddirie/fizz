@@ -1174,7 +1174,7 @@ defmodule Fizz.Workflows do
         error: nil,
         attempt: event.attempt,
         retry_of_id: nil,
-        duration_us: duration_us_from_ms(event.duration_ms),
+        duration_us: event_duration_us(event),
         queued_at: existing_timestamp(existing, :queued_at, started_at),
         started_at: encode_datetime(started_at),
         completed_at: encode_datetime(completed_at),
@@ -1220,7 +1220,7 @@ defmodule Fizz.Workflows do
         error: inspect(event.error),
         attempt: max(event.attempts - 1, 0),
         retry_of_id: nil,
-        duration_us: Map.get(existing || %{}, :duration_us),
+        duration_us: event_duration_us(event) || Map.get(existing || %{}, :duration_us),
         queued_at: existing_timestamp(existing, :queued_at, started_at),
         started_at: encode_datetime(started_at),
         completed_at: encode_datetime(approximate_event_time(run, index)),
@@ -1369,6 +1369,23 @@ defmodule Fizz.Workflows do
     do: duration_ms * 1_000
 
   defp duration_us_from_ms(_duration_ms), do: nil
+
+  defp event_duration_us(%RunnableCompleted{} = event) do
+    case Map.get(event, :duration_us) do
+      duration_us when is_integer(duration_us) and duration_us >= 0 ->
+        duration_us
+
+      _ ->
+        duration_us_from_ms(event.duration_ms)
+    end
+  end
+
+  defp event_duration_us(%RunnableFailed{} = event) do
+    case Map.get(event, :duration_us) do
+      duration_us when is_integer(duration_us) and duration_us >= 0 -> duration_us
+      _ -> nil
+    end
+  end
 
   defp truncate_output(output) do
     rendered = inspect(output, pretty: true, limit: :infinity, printable_limit: :infinity)
