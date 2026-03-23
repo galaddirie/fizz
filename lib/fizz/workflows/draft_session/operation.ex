@@ -28,7 +28,8 @@ defmodule Fizz.Workflows.DraftSession.Operation do
     "duplicate_steps" => :duplicate_steps,
     "tidy_layout" => :tidy_layout,
     "remove_steps" => :remove_steps,
-    "restore_steps" => :restore_steps
+    "restore_steps" => :restore_steps,
+    "restore_snapshot" => :restore_snapshot
   }
 
   @step_update_fields [:type_id, :name, :config, :position, :notes]
@@ -65,6 +66,7 @@ defmodule Fizz.Workflows.DraftSession.Operation do
   defp apply_operation(draft, :tidy_layout, params), do: tidy_layout(draft, params)
   defp apply_operation(draft, :remove_steps, params), do: remove_steps(draft, params)
   defp apply_operation(draft, :restore_steps, params), do: restore_steps(draft, params)
+  defp apply_operation(draft, :restore_snapshot, params), do: restore_snapshot(draft, params)
 
   defp add_step(%WorkflowDefinitionVersion{} = draft, params) do
     with {:ok, step} <- build_step_for_add(params),
@@ -462,6 +464,27 @@ defmodule Fizz.Workflows.DraftSession.Operation do
     end
   end
 
+  defp restore_snapshot(%WorkflowDefinitionVersion{} = draft, params) do
+    with snapshot when is_map(snapshot) <- get_param(params, :snapshot),
+         attrs <- snapshot_attrs(snapshot, draft),
+         {:ok, updated_draft} <- apply_draft_changeset(draft, attrs) do
+      label = snapshot_label(params)
+
+      {:ok, updated_draft,
+       %{
+         type: :restore_snapshot,
+         params: %{snapshot: snapshot_attrs(draft), label: label},
+         label: label
+       }}
+    else
+      nil ->
+        {:error, :invalid_snapshot}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   defp normalize_type(%{type: type}), do: normalize_type(type)
   defp normalize_type(%{"type" => type}), do: normalize_type(type)
   defp normalize_type(type) when is_atom(type), do: {:ok, type}
@@ -595,6 +618,12 @@ defmodule Fizz.Workflows.DraftSession.Operation do
     |> normalize_group_attrs()
     |> then(&StepGroup.changeset(%StepGroup{}, &1))
     |> apply_group_changeset()
+  end
+
+  defp apply_draft_changeset(%WorkflowDefinitionVersion{} = draft, attrs) when is_map(attrs) do
+    draft
+    |> WorkflowDefinitionVersion.save_changeset(attrs)
+    |> apply_draft_version_changeset()
   end
 
   defp build_connections_for_added_step(%WorkflowDefinitionVersion{} = draft, step, params) do
@@ -1306,6 +1335,33 @@ defmodule Fizz.Workflows.DraftSession.Operation do
     |> Enum.map(fn {step_id, position} -> %{step_id: step_id, position: position} end)
   end
 
+  defp snapshot_attrs(snapshot, %WorkflowDefinitionVersion{} = draft) when is_map(snapshot) do
+    %{
+      steps: get_param(snapshot, :steps, []),
+      connections: get_param(snapshot, :connections, []),
+      step_groups: get_param(snapshot, :step_groups, []),
+      viewport: get_param(snapshot, :viewport, draft.viewport || %{}),
+      settings: get_param(snapshot, :settings, draft.settings || %{})
+    }
+  end
+
+  defp snapshot_attrs(%WorkflowDefinitionVersion{} = draft) do
+    %{
+      steps: Enum.map(draft.steps, &embed_attrs/1),
+      connections: Enum.map(draft.connections, &embed_attrs/1),
+      step_groups: Enum.map(draft.step_groups, &embed_attrs/1),
+      viewport: draft.viewport,
+      settings: draft.settings
+    }
+  end
+
+  defp snapshot_label(params) do
+    case get_param(params, :label) do
+      label when is_binary(label) and label != "" -> label
+      _ -> "Apply Revision"
+    end
+  end
+
   defp position_value(position, key) when is_map(position) do
     case fetch_map_value(position, key) do
       {:ok, value} when is_number(value) -> value
@@ -1339,6 +1395,13 @@ defmodule Fizz.Workflows.DraftSession.Operation do
     case Changeset.apply_action(changeset, :insert) do
       {:ok, group} -> {:ok, group}
       {:error, invalid_changeset} -> {:error, {:invalid_group, invalid_changeset}}
+    end
+  end
+
+  defp apply_draft_version_changeset(changeset) do
+    case Changeset.apply_action(changeset, :update) do
+      {:ok, draft} -> {:ok, draft}
+      {:error, invalid_changeset} -> {:error, {:invalid_snapshot, invalid_changeset}}
     end
   end
 end

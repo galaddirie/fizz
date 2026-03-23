@@ -152,7 +152,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         {:noreply, enable_step(socket, payload)}
 
       "navigate_revisions" ->
-        {:noreply, put_flash(socket, :info, "Revision navigation is not wired yet.")}
+        {:noreply, push_navigate(socket, to: revisions_workflow_path(socket))}
 
       _unsupported ->
         {:noreply, socket}
@@ -1698,6 +1698,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp edit_workflow_path(socket) do
     ~p"/projects/#{socket.assigns.project_id}/workflows/#{socket.assigns.definition_id}/edit"
+  end
+
+  defp revisions_workflow_path(socket) do
+    ~p"/projects/#{socket.assigns.project_id}/workflows/#{socket.assigns.definition_id}/edit/revisions"
   end
 
   defp initial_presence_meta(user) do

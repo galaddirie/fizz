@@ -13,6 +13,11 @@ export type RevisionSelection =
   | { kind: 'undo'; label: string; depth: number }
   | { kind: 'version'; label: string; id: string };
 
+export type RevisionSelectionPayload =
+  | { kind: 'current' }
+  | { kind: 'undo'; depth: number }
+  | { kind: 'version'; id: string };
+
 export interface RevisionViewerProps {
   workflow: Workflow;
   draft: WorkflowDraft;
@@ -22,11 +27,3 @@ export interface RevisionViewerProps {
   stepTypes: StepType[];
   editorState?: EditorState;
 }
-
-export type RevisionViewerEmits = {
-  (e: 'select_revision', payload: { kind: 'current' }): void;
-  (e: 'select_revision', payload: { kind: 'undo'; depth: number }): void;
-  (e: 'select_revision', payload: { kind: 'version'; id: string }): void;
-  (e: 'apply_revision'): void;
-  (e: 'navigate_back'): void;
-};

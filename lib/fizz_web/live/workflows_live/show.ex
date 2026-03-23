@@ -192,9 +192,13 @@ defmodule FizzWeb.WorkflowsLive.Show do
     |> Map.drop([:__meta__])
     |> Map.new(fn {k, v} -> {k, sanitize_for_json(v)} end)
   end
+
   defp sanitize_for_json(%{} = map), do: Map.new(map, fn {k, v} -> {k, sanitize_for_json(v)} end)
   defp sanitize_for_json(list) when is_list(list), do: Enum.map(list, &sanitize_for_json/1)
-  defp sanitize_for_json(tuple) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> sanitize_for_json()
+
+  defp sanitize_for_json(tuple) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> sanitize_for_json()
+
   defp sanitize_for_json(pid) when is_pid(pid), do: inspect(pid)
   defp sanitize_for_json(ref) when is_reference(ref), do: inspect(ref)
   defp sanitize_for_json(fun) when is_function(fun), do: inspect(fun)

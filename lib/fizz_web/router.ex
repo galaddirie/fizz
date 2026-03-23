@@ -85,6 +85,10 @@ defmodule FizzWeb.Router do
            WorkflowsLive.Editor,
            :edit
 
+      live "/projects/:project_id/workflows/:definition_id/edit/revisions",
+           WorkflowsLive.Revisions,
+           :show
+
       live "/projects/:project_id/workflows/:definition_id/edit/runs/:run_id",
            WorkflowsLive.Editor,
            :debug

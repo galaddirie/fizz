@@ -32,7 +32,16 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert Enum.map(joined_draft.steps, & &1.id) == Enum.map(draft.steps, & &1.id)
     assert Enum.map(joined_draft.connections, & &1.id) == Enum.map(draft.connections, & &1.id)
     assert Enum.map(joined_draft.step_groups, & &1.id) == Enum.map(draft.step_groups, & &1.id)
-    assert undo_state == %{canUndo: false, canRedo: false, undoLabel: nil, redoLabel: nil}
+
+    assert undo_state == %{
+             canUndo: false,
+             canRedo: false,
+             undoLabel: nil,
+             redoLabel: nil,
+             undoStack: [],
+             redoStack: []
+           }
+
     assert session_pid(draft.id)
     refute_received {:draft_updated, _seq, _summary}
   end
@@ -425,6 +434,97 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert undo_state_after_redo.undoLabel == "Add Step"
   end
 
+  test "undo state exposes revision summaries and preview_revision replays undo depth" do
+    scope = project_scope_fixture()
+    %{draft: draft} = draft_fixture(scope)
+
+    register_session_cleanup(draft.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, first_draft, 1, _undo_state_after_first_add} =
+             DraftSession.apply_operation(draft.id, scope.user.id, %{
+               type: :add_step,
+               params: %{type_id: "debug", position: %{x: 10, y: 20}}
+             })
+
+    first_added_step = hd(first_draft.steps)
+
+    assert {:ok, second_draft, 2, undo_state_after_second_add} =
+             DraftSession.apply_operation(draft.id, scope.user.id, %{
+               type: :add_step,
+               params: %{type_id: "debug", position: %{x: 40, y: 50}}
+             })
+
+    second_added_step =
+      Enum.find(second_draft.steps, fn step -> step.id != first_added_step.id end)
+
+    [latest_revision, previous_revision] = undo_state_after_second_add.undoStack
+
+    assert latest_revision.depth == 1
+    assert latest_revision.label == "Add Step"
+    assert is_binary(latest_revision.id)
+    assert is_binary(latest_revision.timestamp)
+
+    assert previous_revision.depth == 2
+    assert previous_revision.label == "Add Step"
+
+    assert {:ok, preview_after_one_undo} =
+             DraftSession.preview_revision(draft.id, scope.user.id, {:undo, 1})
+
+    assert length(preview_after_one_undo.steps) == 1
+    refute Enum.any?(preview_after_one_undo.steps, &(&1.id == second_added_step.id))
+
+    assert {:ok, preview_after_two_undos} =
+             DraftSession.preview_revision(draft.id, scope.user.id, {:undo, 2})
+
+    assert preview_after_two_undos.steps == []
+    refute Enum.any?(preview_after_two_undos.steps, &(&1.id == first_added_step.id))
+  end
+
+  test "restore_snapshot applies a revision as a single undoable operation" do
+    scope = project_scope_fixture()
+    %{draft: draft} = draft_fixture(scope)
+
+    register_session_cleanup(draft.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    snapshot = %{
+      steps: [
+        step(%{
+          name: "Restored Step",
+          position: %{"x" => 200, "y" => 220}
+        })
+      ],
+      connections: [],
+      step_groups: [],
+      viewport: %{"x" => 12, "y" => 24, "zoom" => 1.25},
+      settings: %{"mode" => "restored"}
+    }
+
+    assert {:ok, restored_draft, 1, undo_state_after_restore} =
+             DraftSession.apply_operation(draft.id, scope.user.id, %{
+               type: :restore_snapshot,
+               params: %{snapshot: snapshot, label: "Apply v1"}
+             })
+
+    assert Enum.map(restored_draft.steps, & &1.name) == ["Restored Step"]
+    assert restored_draft.viewport == %{"x" => 12, "y" => 24, "zoom" => 1.25}
+    assert restored_draft.settings == %{"mode" => "restored"}
+    assert undo_state_after_restore.undoLabel == "Apply v1"
+
+    assert {:ok, reverted_draft, 2, undo_state_after_undo} =
+             DraftSession.undo(draft.id, scope.user.id)
+
+    assert reverted_draft.steps == []
+    assert reverted_draft.viewport == %{"x" => 0, "y" => 0, "zoom" => 1.0}
+    assert reverted_draft.settings == %{}
+    assert undo_state_after_undo.redoLabel == "Apply v1"
+  end
+
   test "undo conflict pops stack and rejects" do
     scope = project_scope_fixture()
     second_scope = secondary_scope(scope)
@@ -458,7 +558,15 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert_receive {:undo_rejected, ^first_user_id, :step_not_found}
 
     assert {:ok, undo_state} = DraftSession.get_undo_state(draft.id, first_user_id)
-    assert undo_state == %{canUndo: false, canRedo: false, undoLabel: nil, redoLabel: nil}
+
+    assert undo_state == %{
+             canUndo: false,
+             canRedo: false,
+             undoLabel: nil,
+             redoLabel: nil,
+             undoStack: [],
+             redoStack: []
+           }
   end
 
   test "new operation clears redo stack" do
@@ -741,7 +849,15 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert current_seq == 0
     assert current_draft.steps == joined_draft.steps
     assert current_draft.connections == joined_draft.connections
-    assert undo_state == %{canUndo: false, canRedo: false, undoLabel: nil, redoLabel: nil}
+
+    assert undo_state == %{
+             canUndo: false,
+             canRedo: false,
+             undoLabel: nil,
+             redoLabel: nil,
+             undoStack: [],
+             redoStack: []
+           }
   end
 
   test "editor_state is shared across users and survives reconnection" do

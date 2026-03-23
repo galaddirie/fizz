@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { reactive } from 'vue';
+import { useLiveVue } from 'live_vue';
 import type { Connection, Edge, GraphNode, NodeMouseEvent } from '@vue-flow/core';
 
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import { useRevisionViewer } from '@/composables/workflow/useRevisionViewer';
 import { GRID_SIZE } from '@/constants/layout';
-import type { RevisionViewerEmits, RevisionViewerProps } from '@/types/revisionViewer';
+import type { RevisionSelectionPayload, RevisionViewerProps } from '@/types/revisionViewer';
 import type { EdgeData, WorkflowNodeData } from '@/types/workflow';
 import { ArrowLeftIcon, SlashIcon } from '@heroicons/vue/24/outline';
 
@@ -16,8 +17,20 @@ const props = withDefaults(defineProps<RevisionViewerProps>(), {
   stepTypes: () => [],
 });
 
-const emit = defineEmits<RevisionViewerEmits>();
+const live = useLiveVue();
 const viewer = reactive(useRevisionViewer(props));
+
+const selectRevision = (payload: RevisionSelectionPayload) => {
+  live.pushEvent('select_revision', payload);
+};
+
+const applyRevision = () => {
+  live.pushEvent('apply_revision', {});
+};
+
+const navigateBack = () => {
+  live.pushEvent('navigate_back', {});
+};
 
 const noopMouse = (_event: MouseEvent) => {};
 const noopDrag = (_event: DragEvent) => {};
@@ -45,7 +58,7 @@ const noop = () => {};
       <div class="px-4 pt-1">
         <button
           class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-base-content/60 transition-colors hover:bg-base-200/80 hover:text-base-content"
-          @click="emit('navigate_back')"
+          @click="navigateBack"
         >
           <ArrowLeftIcon class="h-3.5 w-3.5" />
           Back to Editor
@@ -61,7 +74,7 @@ const noop = () => {};
           <button
             class="btn btn-primary btn-xs rounded-xl px-4 shadow-sm"
             :disabled="!viewer.canApply"
-            @click="emit('apply_revision')"
+            @click="applyRevision"
           >
             Apply
           </button>
@@ -163,7 +176,7 @@ const noop = () => {};
                 ? 'border-primary/40 bg-primary/10 text-primary'
                 : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
             ]"
-            @click="emit('select_revision', { kind: 'current' })"
+            @click="selectRevision({ kind: 'current' })"
           >
             <div>
               <div class="text-sm font-semibold text-base-content">Current draft</div>
@@ -197,7 +210,7 @@ const noop = () => {};
                   ? 'border-primary/40 bg-primary/10 text-primary'
                   : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
               ]"
-              @click="emit('select_revision', { kind: 'undo', depth: entry.depth })"
+              @click="selectRevision({ kind: 'undo', depth: entry.depth })"
             >
               <div>
                 <div class="text-sm font-semibold text-base-content">
@@ -234,7 +247,7 @@ const noop = () => {};
                   ? 'border-primary/40 bg-primary/10 text-primary'
                   : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
               ]"
-              @click="emit('select_revision', { kind: 'version', id: version.id })"
+              @click="selectRevision({ kind: 'version', id: version.id })"
             >
               <div>
                 <div class="text-sm font-semibold text-base-content">v{{ version.version }}</div>

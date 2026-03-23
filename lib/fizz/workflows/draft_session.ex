@@ -140,6 +140,19 @@ defmodule Fizz.Workflows.DraftSession do
     end
   end
 
+  @spec preview_revision(
+          String.t(),
+          String.t(),
+          :current | {:undo, pos_integer()} | {:version, String.t()}
+        ) ::
+          {:ok, WorkflowDefinitionVersion.t()} | {:error, term()}
+  def preview_revision(version_id, user_id, revision)
+      when is_binary(version_id) and is_binary(user_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, {:preview_revision, user_id, revision}, :infinity)
+    end
+  end
+
   @spec pin_output(String.t(), String.t(), term()) :: {:ok, map()} | {:error, term()}
   def pin_output(version_id, step_id, output_data)
       when is_binary(version_id) and is_binary(step_id) do
@@ -326,6 +339,10 @@ defmodule Fizz.Workflows.DraftSession do
 
   def handle_call(:get_editor_state, _from, state) do
     {:reply, {:ok, state.editor_state}, state}
+  end
+
+  def handle_call({:preview_revision, user_id, revision}, _from, state) do
+    {:reply, preview_revision_state(state, user_id, revision), state}
   end
 
   def handle_call({:pin_output, step_id, output_data}, _from, state) do
@@ -596,7 +613,8 @@ defmodule Fizz.Workflows.DraftSession do
     %{
       operation: operation,
       label: label || Map.get(operation, :label),
-      seq: seq
+      seq: seq,
+      timestamp: DateTime.utc_now()
     }
   end
 
@@ -704,6 +722,7 @@ defmodule Fizz.Workflows.DraftSession do
       "tidy_layout" -> :tidy_layout
       "remove_steps" -> :remove_steps
       "restore_steps" -> :restore_steps
+      "restore_snapshot" -> :restore_snapshot
       _ -> :unknown
     end
   end
@@ -716,12 +735,74 @@ defmodule Fizz.Workflows.DraftSession do
       canUndo: undo_stack != [],
       canRedo: redo_stack != [],
       undoLabel: stack_label(undo_stack),
-      redoLabel: stack_label(redo_stack)
+      redoLabel: stack_label(redo_stack),
+      undoStack: stack_entries(undo_stack),
+      redoStack: stack_entries(redo_stack)
     }
   end
 
   defp stack_label([entry | _rest]), do: entry.label
   defp stack_label([]), do: nil
+
+  defp stack_entries(entries) do
+    entries
+    |> Enum.with_index(1)
+    |> Enum.map(fn {entry, depth} ->
+      %{
+        id: "revision-#{entry.seq}-#{depth}",
+        label: entry.label,
+        depth: depth,
+        timestamp: encode_datetime(entry.timestamp)
+      }
+    end)
+  end
+
+  defp preview_revision_state(%__MODULE__{} = state, _user_id, :current), do: {:ok, state.draft}
+
+  defp preview_revision_state(%__MODULE__{} = state, user_id, {:undo, depth})
+       when is_binary(user_id) and is_integer(depth) and depth > 0 do
+    undo_stack = Map.get(state.undo_stacks, user_id, [])
+
+    case Enum.take(undo_stack, depth) do
+      entries when length(entries) == depth ->
+        Enum.reduce_while(entries, {:ok, state.draft}, fn entry, {:ok, draft} ->
+          case Operation.apply(draft, entry.operation) do
+            {:ok, preview_draft, _inverse_operation} ->
+              {:cont, {:ok, preview_draft}}
+
+            {:error, _reason} = error ->
+              {:halt, error}
+          end
+        end)
+
+      _entries ->
+        {:error, :revision_not_found}
+    end
+  end
+
+  defp preview_revision_state(%__MODULE__{} = state, _user_id, {:version, revision_id})
+       when is_binary(revision_id) do
+    with {:ok, version} <- Workflows.get_version(state.scope, revision_id),
+         :ok <- ensure_same_definition(state.draft, version),
+         :ok <- ensure_published(version) do
+      {:ok, version}
+    end
+  end
+
+  defp preview_revision_state(%__MODULE__{}, _user_id, _revision),
+    do: {:error, :invalid_revision}
+
+  defp ensure_same_definition(
+         %WorkflowDefinitionVersion{workflow_definition_id: workflow_definition_id},
+         %WorkflowDefinitionVersion{workflow_definition_id: workflow_definition_id}
+       ),
+       do: :ok
+
+  defp ensure_same_definition(%WorkflowDefinitionVersion{}, %WorkflowDefinitionVersion{}),
+    do: {:error, :revision_not_found}
+
+  defp ensure_published(%WorkflowDefinitionVersion{status: :published}), do: :ok
+  defp ensure_published(%WorkflowDefinitionVersion{}), do: {:error, :revision_not_found}
 
   defp persistence_state(%__MODULE__{} = state) do
     %{status: state.save_status, error: state.save_error}
@@ -750,6 +831,11 @@ defmodule Fizz.Workflows.DraftSession do
 
     %{type: type, params: params}
   end
+
+  defp encode_datetime(nil), do: nil
+  defp encode_datetime(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp encode_datetime(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp encode_datetime(value), do: value
 
   defp draft_snapshot_attrs(%WorkflowDefinitionVersion{} = draft) do
     %{

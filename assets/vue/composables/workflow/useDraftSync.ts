@@ -5,7 +5,7 @@ import type { EdgeData, WorkflowDraft, WorkflowNodeData } from '@/types/workflow
 
 interface UseDraftSyncOptions {
   activeDraft: () => WorkflowDraft | undefined;
-  collabSeq?: () => number;
+  collabSeq?: () => number | string;
   nodes: () => Node<WorkflowNodeData>[];
   edges: () => Edge<EdgeData>[];
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
@@ -22,7 +22,7 @@ export function useDraftSync(options: UseDraftSyncOptions) {
 
   const buildSyncKey = () => {
     if (options.collabSeq) {
-      return `seq:${options.collabSeq() ?? 0}`;
+      return `seq:${String(options.collabSeq() ?? 0)}`;
     }
 
     const draft = options.activeDraft();

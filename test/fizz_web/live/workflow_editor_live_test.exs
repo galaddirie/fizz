@@ -171,6 +171,151 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     refute Map.has_key?(hd(draft["step_groups"]), "output_step_id")
   end
 
+  test "navigate_revisions opens the dedicated revision viewer page", %{conn: conn} do
+    %{conn: conn, definition: definition} = editor_fixture(conn)
+
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    {:ok, revision_view, _html} =
+      view
+      |> element("#workflow-editor")
+      |> render_hook("editor_command", %{"type" => "navigate_revisions"})
+      |> follow_redirect(
+        conn,
+        ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit/revisions"
+      )
+
+    register_revision_cleanup(revision_view)
+
+    assert has_element?(revision_view, "#workflow-revision-viewer")
+
+    vue = get_vue(revision_view, id: "workflow-revision-viewer")
+
+    assert vue.component == "RevisionViewer"
+    assert vue.props["workflow"]["id"] == definition.id
+    assert vue.props["revision"]["kind"] == "current"
+    assert vue.props["revision"]["label"] == "Current draft"
+  end
+
+  test "revision viewer selects an undo preview via patch params", %{conn: conn} do
+    %{conn: conn, definition: definition} = editor_fixture(conn)
+
+    {:ok, editor_view, _html} = live_editor(conn, definition)
+
+    editor_view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "add_step",
+      "payload" => %{
+        "type_id" => "debug",
+        "position" => %{"x" => 420, "y" => 180}
+      }
+    })
+
+    {:ok, revision_view, _html} = live_revisions(conn, definition)
+
+    revision_view
+    |> element("#workflow-revision-viewer")
+    |> render_hook("select_revision", %{"kind" => "undo", "depth" => 1})
+
+    path = assert_patch(revision_view)
+
+    assert path =~
+             ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit/revisions"
+
+    assert path =~ "kind=undo"
+    assert path =~ "depth=1"
+
+    socket = live_socket(revision_view)
+
+    assert socket.assigns.selected_revision["kind"] == "undo"
+    assert socket.assigns.selected_revision["depth"] == 1
+    assert socket.assigns.undo_stack != []
+    assert socket.assigns.selected_draft.steps == []
+  end
+
+  test "revision viewer applies a published version back into the current draft", %{conn: conn} do
+    entry_step =
+      WorkflowsFixtures.step(%{
+        name: "Published Step",
+        position: %{"x" => 140, "y" => 220}
+      })
+
+    published_snapshot =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [entry_step],
+        connections: [],
+        step_groups: []
+      })
+
+    %{
+      conn: conn,
+      definition: definition,
+      draft: draft,
+      project_scope: project_scope
+    } = editor_fixture(conn, published_snapshot)
+
+    assert {:ok, published_version} = Workflows.publish_draft(project_scope, draft)
+
+    {:ok, editor_view, _html} = live_editor(conn, definition)
+    current_draft_id = view_version_id(editor_view)
+
+    editor_view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "add_step",
+      "payload" => %{
+        "type_id" => "debug",
+        "position" => %{"x" => 420, "y" => 180}
+      }
+    })
+
+    {:ok, revision_view, _html} = live_revisions(conn, definition)
+
+    revision_view
+    |> element("#workflow-revision-viewer")
+    |> render_hook("select_revision", %{"kind" => "version", "id" => published_version.id})
+
+    path = assert_patch(revision_view)
+
+    assert path =~
+             ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit/revisions"
+
+    assert path =~ "kind=version"
+    assert path =~ "id=#{published_version.id}"
+
+    socket = live_socket(revision_view)
+
+    assert socket.assigns.selected_revision["kind"] == "version"
+    assert socket.assigns.selected_revision["id"] == published_version.id
+    assert socket.assigns.selected_draft.id == published_version.id
+
+    {:ok, redirected_view, _html} =
+      revision_view
+      |> element("#workflow-revision-viewer")
+      |> render_hook("apply_revision", %{})
+      |> follow_redirect(
+        conn,
+        ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit"
+      )
+
+    register_editor_cleanup(redirected_view)
+
+    assert has_element?(redirected_view, "#workflow-editor")
+
+    assert :ok =
+             wait_until(fn ->
+               case Workflows.get_version(project_scope, current_draft_id) do
+                 {:ok, persisted_draft} ->
+                   Enum.map(persisted_draft.steps, & &1.name) == ["Published Step"] and
+                     persisted_draft.connections == []
+
+                 {:error, _reason} ->
+                   false
+               end
+             end)
+  end
+
   test "editor_command add_step applies an operation through DraftSession", %{conn: conn} do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)
@@ -1176,20 +1321,52 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     {:ok, view, html}
   end
 
+  defp live_revisions(conn, definition) do
+    {:ok, view, html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit/revisions")
+
+    register_revision_cleanup(view)
+    {:ok, view, html}
+  end
+
   defp register_editor_cleanup(view) do
     version_id = view_version_id(view)
 
     on_exit(fn ->
-      case Registry.lookup(Fizz.Workflows.DraftSessionRegistry, version_id) do
-        [{pid, _value}] -> GenServer.stop(pid, :normal)
-        [] -> :ok
-      end
+      stop_draft_session(version_id)
+    end)
+  end
+
+  defp register_revision_cleanup(view) do
+    version_id = revision_view_version_id(view)
+
+    on_exit(fn ->
+      stop_draft_session(version_id)
     end)
   end
 
   defp view_version_id(view) do
     vue = get_vue(view, id: "workflow-editor")
     vue.props["workflow"]["draft"]["id"]
+  end
+
+  defp revision_view_version_id(view) do
+    vue = get_vue(view, id: "workflow-revision-viewer")
+    vue.props["workflow"]["draft"]["id"]
+  end
+
+  defp stop_draft_session(version_id) do
+    case Registry.lookup(Fizz.Workflows.DraftSessionRegistry, version_id) do
+      [{pid, _value}] ->
+        try do
+          GenServer.stop(pid, :normal)
+        catch
+          :exit, _reason -> :ok
+        end
+
+      [] ->
+        :ok
+    end
   end
 
   defp preview_expression(view, step_id, field_key, expression) do
