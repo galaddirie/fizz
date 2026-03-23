@@ -38,27 +38,56 @@ The third argument `%{}` is the trigger input — always empty. There is no moda
 
 ## Proposed Solution
 
-1. **Pre-run modal** — When "Run Test" is clicked:
-   - Identify the trigger step from the draft
-   - If it's a manual trigger with an `input_schema`, show a modal with a JSON form or JSON editor pre-populated with the schema's default values
-   - Allow the user to fill in test data
-   - On "Run", pass the input to `start_editor_test_run/2` → `Workflows.start_run/4`
+**Scope:** Manual triggers only. Other trigger types (webhook, schedule, etc.) will be addressed separately.
 
-2. **Schema-driven form** — Generate form fields from the JSON Schema `input_schema`:
-   - String fields → text inputs
-   - Number fields → number inputs
-   - Boolean fields → toggles
-   - Object/array → nested forms or a raw JSON editor as fallback
+### Approach: Test Data in the Context Panel (n8n-style)
 
-3. **Fallback raw JSON editor** — For complex schemas, allow the user to paste/edit raw JSON input
+Instead of a pre-run modal that interrupts the execute flow, repurpose the **left-side context panel** (`StepConfigContextPane.vue`) when a manual trigger step is open. This panel is currently unused for trigger steps (they have no upstream input), making it the natural place for test data configuration.
 
-4. **For non-manual triggers** — Webhook triggers could show a sample payload editor; schedule triggers could use a "run now" button with no input needed.
+#### How it works
+
+1. **Context panel becomes a test data editor for manual triggers** — When the user opens a manual trigger step's config modal, the left panel (which normally shows "Input Data", "Trigger Data", "Upstream Steps") instead renders a JSON editor for test input data.
+
+2. **Test data is persisted on the step** — The entered test data is saved as part of the step's configuration (e.g. `step.config["test_data"]`), so it survives page reloads and is always ready. This means:
+   - No modal interruption when clicking "Run Test" or "Run to here"
+   - Works for full workflow execution AND partial "run to here" execution
+   - Supports fast iteration — edit data, run, see results, tweak, repeat
+   - Works regardless of how many triggers/paths the workflow has (each trigger stores its own test data)
+
+3. **Schema-aware defaults** — If the trigger has an `input_schema`, the editor can pre-populate with example values matching the schema. If no schema is configured, the editor starts with an empty `{}` that the user can fill in freely.
+
+4. **Server reads test data at run time** — When `start_editor_test_run/2` fires, instead of hardcoding `%{}`, it reads the trigger step's `config["test_data"]` from the draft and passes it to `Workflows.start_run/4`.
+
+#### UX flow
+
+1. User adds a Manual Trigger step to the workflow
+2. User opens the trigger step config (click or double-click)
+3. Left panel shows "Test Data" with a JSON editor (instead of the usual input/context explorer)
+4. User enters test data (e.g. `{"name": "Jane", "email": "jane@example.com"}`)
+5. Data auto-saves to the step config (same as any other config field)
+6. User clicks "Run Test" (toolbar) or "Run to here" (node menu) — execution starts immediately using the saved test data
+7. Results appear in the output panel — user tweaks test data and re-runs as needed
+
+#### Why not a pre-run modal?
+
+- **Interrupts flow** — A modal on every "Run Test" click adds friction, especially during fast iteration
+- **Doesn't scale** — Workflows with multiple trigger paths (e.g. manual + webhook) would need the modal to ask "which trigger?" then show the right form
+- **Disconnected from the step** — Test data logically belongs to the trigger node, not to a transient modal
+- **No persistence** — Modal data is lost on page reload unless separately persisted anyway
+
+### Non-goals (for this issue)
+
+- Webhook trigger test payloads (separate issue)
+- Schedule trigger "run now" behavior (separate issue)
+- Schema-driven form generation (nice-to-have follow-up — raw JSON editor is sufficient for v1)
 
 ## Relevant Files
 
-- `lib/fizz/steps/executors/manual_input.ex` — Manual trigger executor with `input_schema` support
-- `lib/fizz_web/live/workflows_live/editor.ex` — `start_editor_test_run/2` (line 582), `run_test/1` (line 561)
-- `assets/vue/components/flow/step_config/` — Step config modal (could be extended for input form)
+- `lib/fizz/steps/executors/manual_input.ex` — Manual trigger executor with `input_schema` and `test_data` config
+- `lib/fizz_web/live/workflows_live/editor.ex` — `start_editor_test_run/2` — needs to read `test_data` from the trigger step instead of hardcoding `%{}`
+- `assets/vue/components/flow/step_config/StepConfigContextPane.vue` — Left panel, needs trigger-specific test data editor mode
+- `assets/vue/components/flow/step_config/useInputData.ts` — Input state logic, knows whether current step is a trigger
+- `assets/vue/components/flow/step_config/useStepConfig.ts` — Step config state management
 - `assets/vue/types/configSchema.ts` — Config schema types
 
 ## Steps to Reproduce
@@ -72,13 +101,13 @@ The third argument `%{}` is the trigger input — always empty. There is no moda
 
 ## Expected Behavior
 
-Clicking "Run Test" on a workflow with a manual trigger should prompt the user with a form (driven by the trigger's `input_schema`) to enter test input data before starting the execution.
+Opening a manual trigger step shows a test data JSON editor in the left context panel. Data entered here is persisted on the step and automatically used when running test executions — no interrupting modal, no lost data on reload.
 
 ## Acceptance Criteria
 
-- [ ] "Run Test" detects the trigger type and shows an input form for manual triggers
-- [ ] Input form is generated from the trigger's `input_schema` JSON Schema
-- [ ] User can enter test data and submit to start the execution
-- [ ] Input data is passed to `Workflows.start_run/4` as the trigger event
-- [ ] Raw JSON editor is available as a fallback for complex schemas
-- [ ] For triggers without `input_schema`, the run starts immediately with no prompt
+- [ ] Manual trigger steps show a "Test Data" JSON editor in the left context panel (replacing the usual input/context explorer)
+- [ ] Test data is persisted as `step.config["test_data"]` and survives page reloads
+- [ ] `start_editor_test_run/2` reads the trigger step's `test_data` config and passes it to `Workflows.start_run/4`
+- [ ] If no test data is configured, execution starts with `%{}` (current behavior, no regression)
+- [ ] Works for both "Run Test" (full workflow) and "Run to here" (partial execution)
+- [ ] Non-manual triggers are unaffected (context panel shows normal input/context data)
