@@ -13,6 +13,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.DraftValidator
   alias Fizz.Workflows.DraftSession
+  alias Fizz.Workflows.DraftSession.Operation
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.WorkflowDefinition
   alias Fizz.Workflows.WorkflowDefinitionVersion
@@ -71,6 +72,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         presences={@presences}
         currentUserId={@current_user_id}
         collabSeq={@collab_seq}
+        saveStatus={@save_status}
+        saveError={@save_error}
         validationErrors={@validation_errors}
         expressionPreviews={@expression_previews}
         credentialOptions={@credential_options}
@@ -102,6 +105,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
       "mouse_move" ->
         {:noreply, update_presence_cursor(socket, payload)}
+
+      "mouse_leave" ->
+        {:noreply, clear_presence_cursor(socket)}
 
       "selection_changed" ->
         {:noreply, update_presence_selection(socket, payload)}
@@ -165,16 +171,20 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   @impl true
-  def handle_info({:draft_updated, seq, _summary}, socket) do
+  def handle_info({:draft_updated, seq, summary}, socket) do
     if seq > socket.assigns.collab_seq do
-      {:noreply, refresh_draft_state(socket)}
+      {:noreply, apply_remote_draft_update(socket, seq, summary)}
     else
       {:noreply, socket}
     end
   end
 
-  def handle_info({:draft_persisted, _seq}, socket) do
-    {:noreply, refresh_draft_state(socket)}
+  def handle_info({:draft_persisted, _seq, persisted_at}, socket) do
+    {:noreply, assign_persisted_at(socket, persisted_at)}
+  end
+
+  def handle_info({:save_status, persistence}, socket) do
+    {:noreply, assign_save_status(socket, persistence)}
   end
 
   def handle_info(
@@ -294,11 +304,13 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> assign(:step_executions, [])
     |> assign(:expression_previews, %{})
     |> assign(:undo_state, empty_undo_state())
+    |> assign(:save_status, "saved")
+    |> assign(:save_error, nil)
     |> assign(:credential_options, [])
     |> assign(:validation_errors, %{})
     |> assign(:debug_execution_id, nil)
     |> assign(:current_user_id, current_user_id)
-    |> assign(:last_presence_update_at_ms, 0)
+    |> assign(:last_presence_update_at_ms, nil)
     |> assign(:preview_timers, %{})
   end
 
@@ -314,7 +326,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
          {:ok, draft} <- Workflows.edit_definition(scope, definition_id),
          {:ok, execution, step_executions, debug_execution_id} <-
            load_execution(scope, run_id, socket.assigns.live_action),
-         {:ok, socket, draft, seq, undo_state, presences} <-
+         {:ok, socket, draft, seq, undo_state, presences, persistence} <-
            maybe_connect_draft_session(socket, scope, draft, run_id) do
       step_types = Steps.list_types()
 
@@ -332,6 +344,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       |> assign(:execution, execution)
       |> assign(:step_executions, step_executions)
       |> assign(:undo_state, undo_state)
+      |> assign(:save_status, encode_save_status(Map.get(persistence, :status)))
+      |> assign(:save_error, encode_optional_reason(Map.get(persistence, :error)))
       |> assign(:credential_options, [])
       |> assign(:debug_execution_id, debug_execution_id)
       |> maybe_push_undo_state()
@@ -375,28 +389,33 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       run_topic = run_topic(run_id)
 
       with {:ok, joined_draft, seq, undo_state} <- DraftSession.join(draft.id, scope, user_id),
+           {:ok, persistence} <- DraftSession.get_persistence_state(draft.id),
            :ok <- Phoenix.PubSub.subscribe(Fizz.PubSub, draft_topic),
-           :ok <- maybe_subscribe_to_run_topic(run_topic),
-           {:ok, _meta} <-
-             Presence.track(self(), draft_topic, user_id, initial_presence_meta(scope.user)) do
-        {:ok,
-         socket
-         |> assign(:draft_topic, draft_topic)
-         |> assign(:run_topic, run_topic), joined_draft, seq, undo_state,
-         presence_entries(draft_topic)}
-      else
-        {:error, {:already_tracked, _pid}} ->
-          {:ok,
-           socket
-           |> assign(:draft_topic, draft_topic)
-           |> assign(:run_topic, run_topic), draft, 0, empty_undo_state(),
-           presence_entries(draft_topic)}
+           :ok <- maybe_subscribe_to_run_topic(run_topic) do
+        case Presence.track(self(), draft_topic, user_id, initial_presence_meta(scope.user)) do
+          {:ok, _meta} ->
+            {:ok,
+             socket
+             |> assign(:draft_topic, draft_topic)
+             |> assign(:run_topic, run_topic), joined_draft, seq, undo_state,
+             presence_entries(draft_topic), persistence}
 
+          {:error, {:already_tracked, _pid}} ->
+            {:ok,
+             socket
+             |> assign(:draft_topic, draft_topic)
+             |> assign(:run_topic, run_topic), joined_draft, seq, undo_state,
+             presence_entries(draft_topic), persistence}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+      else
         {:error, reason} ->
           {:error, reason}
       end
     else
-      {:ok, socket, draft, 0, empty_undo_state(), []}
+      {:ok, socket, draft, 0, empty_undo_state(), [], %{status: :saved, error: nil}}
     end
   end
 
@@ -427,7 +446,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
            ) do
       socket
       |> assign_draft_state(draft, seq, undo_state)
-      |> push_event("workflow:operation_ack", %{type: type, seq: seq})
+      |> assign(:save_status, "saving")
+      |> assign(:save_error, nil)
+      |> push_event("workflow:operation_ack", operation_ack_payload(type, seq, payload))
     else
       {:error, _reason} ->
         socket
@@ -439,6 +460,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       {:ok, draft, seq, undo_state} ->
         socket
         |> assign_draft_state(draft, seq, undo_state)
+        |> assign(:save_status, "saving")
+        |> assign(:save_error, nil)
         |> push_event("workflow:undo_applied", %{})
         |> push_event("workflow:operation_ack", %{type: "undo", seq: seq})
 
@@ -454,6 +477,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       {:ok, draft, seq, undo_state} ->
         socket
         |> assign_draft_state(draft, seq, undo_state)
+        |> assign(:save_status, "saving")
+        |> assign(:save_error, nil)
         |> push_event("workflow:redo_applied", %{})
         |> push_event("workflow:operation_ack", %{type: "redo", seq: seq})
 
@@ -470,6 +495,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         socket
         |> assign(:draft, draft)
         |> assign(:collab_seq, seq)
+        |> assign(:save_status, "saved")
+        |> assign(:save_error, nil)
         |> clear_validation_errors()
         |> push_event("workflow:operation_ack", %{type: "save_workflow", seq: seq})
 
@@ -525,6 +552,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
               socket
               |> assign(:draft, draft)
               |> assign(:collab_seq, seq)
+              |> assign(:save_status, "saved")
+              |> assign(:save_error, nil)
               |> clear_validation_errors()
               |> put_flash(:info, "Workflow published")
               |> push_event("workflow:publish_result", %{success: true})
@@ -534,6 +563,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
               socket
               |> assign(:draft, draft)
               |> assign(:collab_seq, seq)
+              |> assign(:save_status, "saved")
+              |> assign(:save_error, nil)
               |> push_event("workflow:publish_result", %{
                 success: false,
                 error: publish_error_message(reason)
@@ -544,6 +575,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
           socket
           |> assign(:draft, draft)
           |> assign(:collab_seq, seq)
+          |> assign(:save_status, "saved")
+          |> assign(:save_error, nil)
           |> assign(:validation_errors, validation_error_map(errors))
           |> push_event("workflow:publish_result", %{
             success: false,
@@ -564,6 +597,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         socket
         |> assign(:draft, draft)
         |> assign(:collab_seq, seq)
+        |> assign(:save_status, "saved")
+        |> assign(:save_error, nil)
         |> cancel_existing_execution()
 
       case Compiler.compile(draft) do
@@ -642,17 +677,31 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp update_presence_cursor(socket, payload) do
     now = System.monotonic_time(:millisecond)
+    last_update_at_ms = socket.assigns.last_presence_update_at_ms
 
-    if now - socket.assigns.last_presence_update_at_ms < @presence_throttle_ms do
-      socket
-    else
-      update_presence(socket, %{
-        cursor: cursor_from_payload(payload),
-        dragging_steps: payload_value(payload, "dragging_steps"),
-        dragging_groups: payload_value(payload, "dragging_groups")
-      })
-      |> assign(:last_presence_update_at_ms, now)
+    case last_update_at_ms do
+      last_update_at_ms
+      when is_integer(last_update_at_ms) and now - last_update_at_ms < @presence_throttle_ms ->
+        socket
+
+      _other ->
+        update_presence(socket, %{
+          cursor: cursor_from_payload(payload),
+          dragging_steps: payload_value(payload, "dragging_steps"),
+          dragging_groups: payload_value(payload, "dragging_groups")
+        })
+        |> assign(:last_presence_update_at_ms, now)
     end
+  end
+
+  defp clear_presence_cursor(socket) do
+    socket
+    |> update_presence(%{
+      cursor: nil,
+      dragging_steps: nil,
+      dragging_groups: nil
+    })
+    |> assign(:last_presence_update_at_ms, nil)
   end
 
   defp update_presence_selection(socket, payload) do
@@ -668,12 +717,21 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp update_presence(socket, changes) do
-    case Presence.update(
-           self(),
-           socket.assigns.draft_topic,
-           socket.assigns.current_user_id,
-           &Map.merge(&1, changes)
-         ) do
+    current_meta =
+      case Presence.get_by_key(socket.assigns.draft_topic, socket.assigns.current_user_id) do
+        %{metas: metas} -> List.last(metas) || %{}
+        _ -> %{}
+      end
+
+    result =
+      Presence.update(
+        self(),
+        socket.assigns.draft_topic,
+        socket.assigns.current_user_id,
+        Map.merge(current_meta, changes)
+      )
+
+    case result do
       {:ok, _meta} ->
         assign(socket, :presences, presence_entries(socket.assigns.draft_topic))
 
@@ -800,20 +858,55 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp refresh_draft_state(socket) do
-    case DraftSession.join(
-           socket.assigns.draft.id,
-           socket.assigns.current_scope,
-           socket.assigns.current_user_id
-         ) do
-      {:ok, draft, seq, undo_state} ->
+    case DraftSession.snapshot(socket.assigns.draft.id, socket.assigns.current_user_id) do
+      {:ok, %{draft: draft, seq: seq, undo_state: undo_state, persistence: persistence}} ->
         socket
         |> assign_draft_state(draft, seq, undo_state)
         |> assign(:presences, presence_entries(socket.assigns.draft_topic))
+        |> assign(:save_status, encode_save_status(Map.get(persistence, :status)))
+        |> assign(:save_error, encode_optional_reason(Map.get(persistence, :error)))
 
       {:error, _reason} ->
         socket
     end
   end
+
+  defp apply_remote_draft_update(
+         socket,
+         seq,
+         %{operation: operation}
+       )
+       when seq == socket.assigns.collab_seq + 1 do
+    case Operation.apply(socket.assigns.draft, operation) do
+      {:ok, draft, _inverse_operation} ->
+        socket
+        |> assign(:draft, draft)
+        |> assign(:collab_seq, seq)
+        |> clear_validation_errors()
+
+      {:error, _reason} ->
+        refresh_draft_state(socket)
+    end
+  end
+
+  defp apply_remote_draft_update(socket, _seq, _summary), do: refresh_draft_state(socket)
+
+  defp assign_persisted_at(
+         %{assigns: %{draft: %WorkflowDefinitionVersion{} = draft}} = socket,
+         persisted_at
+       ) do
+    assign(socket, :draft, %{draft | updated_at: persisted_at})
+  end
+
+  defp assign_persisted_at(socket, _persisted_at), do: socket
+
+  defp assign_save_status(socket, persistence) when is_map(persistence) do
+    socket
+    |> assign(:save_status, encode_save_status(Map.get(persistence, :status)))
+    |> assign(:save_error, encode_optional_reason(Map.get(persistence, :error)))
+  end
+
+  defp assign_save_status(socket, _persistence), do: socket
 
   defp refresh_undo_state(socket) do
     case DraftSession.get_undo_state(socket.assigns.draft.id, socket.assigns.current_user_id) do
@@ -1186,15 +1279,42 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     end
   end
 
+  defp operation_ack_payload(type, seq, payload) do
+    %{type: type, seq: seq}
+    |> maybe_put_operation_txn_id(payload)
+  end
+
+  defp maybe_put_operation_txn_id(ack_payload, payload) do
+    case Map.get(payload, "txn_id") || Map.get(payload, :txn_id) do
+      txn_id when is_binary(txn_id) -> Map.put(ack_payload, :txn_id, txn_id)
+      _ -> ack_payload
+    end
+  end
+
   defp maybe_leave_draft_session(%{
          assigns: %{draft: %WorkflowDefinitionVersion{id: version_id}, current_user_id: user_id}
        })
        when is_binary(version_id) and is_binary(user_id) do
+    maybe_persist_before_leave(version_id, user_id)
     _ = DraftSession.leave(version_id, user_id)
     :ok
   end
 
   defp maybe_leave_draft_session(_socket), do: :ok
+
+  defp maybe_persist_before_leave(version_id, _user_id) do
+    case DraftSession.get_persistence_state(version_id) do
+      {:ok, %{status: :saved}} ->
+        :ok
+
+      {:ok, _persistence} ->
+        _ = DraftSession.persist_now(version_id)
+        :ok
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
 
   defp redirect_with_error(socket, message, to) do
     socket
@@ -1907,6 +2027,15 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp encode_reason(reason) when is_binary(reason), do: reason
   defp encode_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
   defp encode_reason(reason), do: inspect(reason)
+
+  defp encode_optional_reason(nil), do: nil
+  defp encode_optional_reason(reason), do: encode_reason(reason)
+
+  defp encode_save_status(:saved), do: "saved"
+  defp encode_save_status(:saving), do: "saving"
+  defp encode_save_status(:error), do: "error"
+  defp encode_save_status(status) when is_binary(status), do: status
+  defp encode_save_status(_status), do: "saved"
 
   defp encode_validation_error(%DraftValidator.ValidationError{} = error) do
     %{

@@ -16,7 +16,8 @@ import {
 // =============================================================================
 
 interface Props {
-  isSaving?: boolean;
+  saveStatus?: 'saved' | 'saving' | 'error';
+  saveError?: string | null;
   canUndo?: boolean;
   canRedo?: boolean;
   undoTooltip?: string;
@@ -27,7 +28,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  isSaving: false,
+  saveStatus: 'saved',
+  saveError: null,
   canUndo: false,
   canRedo: false,
   undoTooltip: 'Undo (⌘Z)',
@@ -57,6 +59,36 @@ const emit = defineEmits<{
 
 
 const hasErrors = computed(() => props.validationErrors.length > 0);
+const saveIndicatorLabel = computed(() => {
+  switch (props.saveStatus) {
+    case 'saving':
+      return 'Saving...';
+    case 'error':
+      return 'Save error';
+    default:
+      return 'All changes saved';
+  }
+});
+const saveIndicatorTitle = computed(() => {
+  switch (props.saveStatus) {
+    case 'saving':
+      return 'Changes are being saved automatically';
+    case 'error':
+      return props.saveError ?? 'Saving failed. Retrying automatically.';
+    default:
+      return 'Workflow draft is fully synced';
+  }
+});
+const saveIndicatorClasses = computed(() => {
+  switch (props.saveStatus) {
+    case 'saving':
+      return 'border-amber-200 bg-amber-50 text-amber-700';
+    case 'error':
+      return 'border-rose-200 bg-rose-50 text-rose-700';
+    default:
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+});
 </script>
 
 <template>
@@ -117,16 +149,19 @@ const hasErrors = computed(() => props.validationErrors.length > 0);
         <ClockIcon class="h-5 w-5" />
       </button>
 
-      <!-- Save Button -->
-      <button
-        class="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200 text-base-content/70 flex gap-2 rounded-xl border px-5 text-sm font-semibold transition-all"
-        :disabled="isSaving"
-        @click="emit('save')"
+      <div
+        class="flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition-all"
+        :class="saveIndicatorClasses"
+        :title="saveIndicatorTitle"
       >
-        <span v-if="isSaving" class="loading loading-spinner loading-xs text-primary"></span>
+        <span
+          v-if="saveStatus === 'saving'"
+          class="loading loading-spinner loading-xs"
+        ></span>
+        <ExclamationCircleIcon v-else-if="saveStatus === 'error'" class="h-5 w-5" />
         <CloudArrowUpIcon v-else class="h-5 w-5" />
-        {{ isSaving ? 'Saving...' : 'Save' }}
-      </button>
+        {{ saveIndicatorLabel }}
+      </div>
 
       <!-- Publish Button -->
       <button

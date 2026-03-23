@@ -1,8 +1,8 @@
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue';
 import type { VNodeRef } from 'vue';
 import { useLiveEvent } from 'live_vue';
 import { VueFlow, useVueFlow } from '@vue-flow/core';
-import type { EdgeTypesObject, NodeTypesObject } from '@vue-flow/core';
+import type { EdgeTypesObject, NodeTypesObject, XYPosition } from '@vue-flow/core';
 import WorkflowStepNode from '@/components/flow/Node.vue';
 import WorkflowSubNode from '@/components/flow/SubNode.vue';
 import GroupNode from '@/components/flow/GroupNode.vue';
@@ -39,10 +39,32 @@ import type {
   Workflow,
   WorkflowDraft,
 } from '@/types/workflow';
-import type { WorkflowEditorEmits, WorkflowEditorProps } from '@/types/workflowEditor';
+import type {
+  WorkflowEditorCommandType,
+  WorkflowEditorEmits,
+  WorkflowEditorProps,
+} from '@/types/workflowEditor';
 
 const SUBNODE_FALLBACK_DIMENSIONS = { width: 112, height: 96 };
 const QUICK_ADD_OUTPUT_X_OFFSET = GRID_SIZE * 3;
+
+type GroupBounds = { x: number; y: number; width: number; height: number };
+
+type CommitDragLayoutPayload = {
+  txn_id: string;
+  base_seq?: number;
+  groups: Array<{ group_id: string; position: GroupBounds }>;
+  step_positions: Record<string, XYPosition>;
+  group_id_by_step_id: Record<string, string | null>;
+};
+
+type OptimisticLayoutState = {
+  txnId: string;
+  targetSeq: number | null;
+  stepPositions: Record<string, XYPosition>;
+  groupBoundsById: Record<string, GroupBounds>;
+  groupIdByStepId: Record<string, string | null>;
+};
 
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
   const store = useClientStore();
@@ -89,14 +111,36 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const activeWorkflow = computed<Workflow>(() => props.workflow);
   const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
   const collabSeq = computed(() => props.collabSeq ?? 0);
+  const optimisticLayout = ref<OptimisticLayoutState | null>(null);
   const activeExpressionPreviews = computed(() => props.expressionPreviews ?? {});
   const activeExecution = computed(() => props.execution ?? null);
   const activeStepExecutions = computed(() => props.stepExecutions ?? []);
   const activeEditorState = computed(() => props.editorState);
   const activePresences = computed(() => props.presences ?? []);
   const activeCurrentUserId = computed(() => props.currentUserId);
-  const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, emit });
-  const pins = useWorkflowPins({ stepExecutions: () => props.stepExecutions ?? [], emit });
+  const setOptimisticLayout = (payload: CommitDragLayoutPayload) => {
+    optimisticLayout.value = {
+      txnId: payload.txn_id,
+      targetSeq: null,
+      stepPositions: { ...payload.step_positions },
+      groupBoundsById: Object.fromEntries(
+        payload.groups.map(({ group_id, position }) => [group_id, { ...position }])
+      ),
+      groupIdByStepId: { ...payload.group_id_by_step_id },
+    };
+  };
+  const emitEditor = ((event: WorkflowEditorCommandType, payload?: unknown) => {
+    if (event === 'commit_drag_layout' && payload) {
+      setOptimisticLayout(payload as CommitDragLayoutPayload);
+    }
+
+    emit(event as never, payload as never);
+  }) as WorkflowEditorEmits;
+  const nodeActions = useWorkflowNodeActions({ canEdit: () => canEdit.value, emit: emitEditor });
+  const pins = useWorkflowPins({
+    stepExecutions: () => props.stepExecutions ?? [],
+    emit: emitEditor,
+  });
   const grouping = useGrouping({
     workflow: () => props.workflow,
     activeDraft: () => activeDraft.value,
@@ -104,7 +148,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     getNodes: () => getNodes.value,
     getSelectedNodes: () => getSelectedNodes.value,
     updateNodeData,
-    emit,
+    emit: emitEditor,
   });
 
   function handleNodeHandleQuickAdd(request: StepHandleQuickAddRequest) {
@@ -126,8 +170,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     onMoveSteps: nodeActions.handleMoveSteps,
     onEmitInteraction: (cursor, dragging_steps, dragging_groups) =>
       collaboration.emitInteraction(cursor?.x, cursor?.y, dragging_steps, dragging_groups),
-    onCommitDragLayout: payload => emit('commit_drag_layout', payload),
+    onCommitDragLayout: payload => emitEditor('commit_drag_layout', payload),
     collabSeq: () => collabSeq.value,
+    optimisticLayout: () => optimisticLayout.value,
     onToggleDisabled: nodeActions.handleToggleDisabled,
     onTogglePin: pins.handleTogglePin,
     onHandleQuickAdd: handleNodeHandleQuickAdd,
@@ -137,6 +182,22 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     workflow: () => activeWorkflow.value,
     stepExecutions: () => props.stepExecutions ?? [],
   });
+
+  // Prevent the :nodes prop from overwriting Vue Flow's internal drag positions.
+  // When any node is being dragged, freeze the nodes array passed to <VueFlow>
+  // so that recomputations triggered by presence updates etc. don't snap nodes back.
+  const isDragging = computed(() => getNodes.value.some(n => n.dragging));
+  const displayNodes = shallowRef(nodes.value);
+  watch(
+    [isDragging, nodes],
+    ([dragging, currentNodes]) => {
+      if (!dragging) {
+        displayNodes.value = currentNodes;
+      }
+    },
+    { immediate: true }
+  );
+
   const draftSync = useDraftSync({
     activeDraft: () => activeDraft.value,
     collabSeq: () => collabSeq.value,
@@ -144,6 +205,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     edges: () => edges.value,
     setNodes,
     setEdges,
+    isDragging: () => isDragging.value,
     onSyncComplete: () => syncResetRef.value(),
   });
   const {
@@ -160,7 +222,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     canEdit: () => canEdit.value,
     getNodes: () => getNodes.value,
     setNodes,
-    emit,
+    emit: emitEditor,
     store,
   });
   const syncSelectionState = () => {
@@ -188,9 +250,10 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     project,
     getNodes: () => getNodes.value,
     getSelectedNodes: () => getSelectedNodes.value,
+    clearInteraction: collaboration.clearInteraction,
     emitInteraction: collaboration.emitInteraction,
     updateGroupingPreview: grouping.updateGroupingPreview,
-    onAddStep: payload => emit('add_step', payload),
+    onAddStep: payload => emitEditor('add_step', payload),
   });
   const setCanvasRef: VNodeRef = (element) => {
     if (typeof HTMLElement !== 'undefined' && element instanceof HTMLElement) {
@@ -218,7 +281,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     getNodes: () => getNodes.value,
     groupByStepId: () => grouping.groupByStepId.value,
     updateNode,
-    emit,
+    emit: emitEditor,
     emitInteraction: collaboration.emitInteraction,
     updateGroupingPreview: grouping.updateGroupingPreview,
     clearGroupingPreview: grouping.clearGroupingPreview,
@@ -240,7 +303,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     project,
     canvasRef: canvas.canvasRef,
     vueFlowRef,
-    emit,
+    emit: emitEditor,
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
   const handleNodeClick = (
@@ -264,7 +327,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     setNodes,
     groupByStepId: () => grouping.groupByStepId.value,
     store,
-    emit,
+    emit: emitEditor,
     requestNodeRemoval: nodeInteraction.requestNodeRemoval,
     withSelectionLock: collaboration.withSelectionLock,
   });
@@ -274,7 +337,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     getEdges: () => getEdges.value,
     getSelectedNodes: () => getSelectedNodes.value,
     updateNode,
-    emit,
+    emit: emitEditor,
   });
   const edgeInteraction = useEdgeInteraction({
     canEdit: () => canEdit.value,
@@ -285,7 +348,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     applyEdgeChanges,
     setEdges,
     getConnections: () => activeDraft.value?.connections ?? [],
-    emit,
+    emit: emitEditor,
     isSyncingDraft: () => draftSync.isSyncingDraft.value,
   });
   syncResetRef.value = () => { nodeInteraction.resetPendingNodeRemovals(); edgeInteraction.resetPendingEdgeRemovals(); };
@@ -410,7 +473,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
       addStepPayload.group_id = targetGroup.id;
     }
 
-    emit('add_step', addStepPayload);
+    emitEditor('add_step', addStepPayload);
     closeAddStepPicker();
   };
   const contextMenu = useContextMenu({
@@ -452,7 +515,12 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     sendUndo,
     sendRedo,
   });
-  const actions = useWorkflowActions({ canEdit: () => canEdit.value, emit, requestNodeRemoval: nodeInteraction.requestNodeRemoval, selectNode: store.selectNode });
+  const actions = useWorkflowActions({
+    canEdit: () => canEdit.value,
+    emit: emitEditor,
+    requestNodeRemoval: nodeInteraction.requestNodeRemoval,
+    selectNode: store.selectNode,
+  });
   const selection = useWorkflowSelection({ nodes: () => nodes.value, selectedNodeId: () => store.selectedNodeId, stepTypes: () => props.stepTypes ?? ([] as StepType[]) });
   const executionState = useWorkflowExecutionState({ execution: () => props.execution });
   const miniMap = useMiniMapNodeColor();
@@ -466,7 +534,29 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   useLiveEvent('workflow:redo_conflict', () => undoStore.handleRedoConflict());
   useLiveEvent<any>('workflow:operation_ack', payload => {
     workflowTrace('server_ack', payload ?? {});
+
+    if (payload?.type !== 'commit_drag_layout' || !optimisticLayout.value) return;
+
+    const seq = Number(payload?.seq);
+    if (!Number.isFinite(seq)) return;
+
+    const txnId = typeof payload?.txn_id === 'string' ? payload.txn_id : null;
+    if (txnId && optimisticLayout.value.txnId !== txnId) return;
+
+    optimisticLayout.value = { ...optimisticLayout.value, targetSeq: seq };
+
+    if (collabSeq.value >= seq) {
+      optimisticLayout.value = null;
+    }
   });
+  watch(
+    [collabSeq, () => optimisticLayout.value?.targetSeq ?? null],
+    ([currentSeq, targetSeq]) => {
+      if (targetSeq !== null && currentSeq >= targetSeq) {
+        optimisticLayout.value = null;
+      }
+    }
+  );
 
   const syncSnapModifierState = (event: KeyboardEvent) => {
     isSnapModifierPressed.value = event.metaKey || event.ctrlKey;
@@ -503,7 +593,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   return {
     store,
     undoStore,
-    nodes,
+    nodes: displayNodes,
     edges,
     nodeTypes,
     edgeTypes,
@@ -526,6 +616,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     otherUserPresences: collaboration.otherUserPresences,
     canvasRef: canvas.canvasRef,
     handlePaneMouseMove: canvas.handlePaneMouseMove,
+    handlePaneMouseLeave: canvas.handlePaneMouseLeave,
     handleDragOver: canvas.handleDragOver,
     handleDrop: canvas.handleDrop,
     handleNodeClick,

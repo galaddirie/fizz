@@ -28,6 +28,8 @@ export interface WorkflowEditorProps {
   presences?: UserPresence[];
   currentUserId?: string;
   collabSeq?: number;
+  saveStatus?: 'saved' | 'saving' | 'error';
+  saveError?: string | null;
   expressionPreviews?: Record<string, unknown>;
   credentialOptions?: CredentialOption[];
   debugExecutionId?: string | null;
@@ -62,6 +64,7 @@ export type WorkflowEditorCommandType =
   | 'validate_draft'
   | 'publish_workflow'
   | 'mouse_move'
+  | 'mouse_leave'
   | 'selection_changed'
   | 'preview_expression'
   | 'navigate_revisions';
@@ -189,6 +192,7 @@ export type WorkflowEditorEmits = {
       > | null;
     }
   ): void;
+  (e: 'mouse_leave'): void;
   (e: 'selection_changed', payload: { step_ids: string[] }): void;
   (
     e: 'preview_expression',

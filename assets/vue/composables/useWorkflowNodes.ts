@@ -60,6 +60,18 @@ interface UseWorkflowNodesOptions {
     group_id_by_step_id: Record<string, string | null>;
   }) => void;
   collabSeq?: () => number | undefined;
+  optimisticLayout?: () =>
+    | {
+        txnId: string;
+        targetSeq: number | null;
+        stepPositions: Record<string, XYPosition>;
+        groupBoundsById: Record<
+          string,
+          { x: number; y: number; width: number; height: number }
+        >;
+        groupIdByStepId: Record<string, string | null>;
+      }
+    | null;
   onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
   onHandleQuickAdd?: (request: StepHandleQuickAddRequest) => void;
@@ -263,11 +275,54 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const groupingTargetId = groupingPreview.groupId ?? null;
     const groupingColor = groupingPreview.color ?? undefined;
     const previewGroupBoundsById = transientGroupBounds.value;
+    const optimisticLayout = options.optimisticLayout?.();
+    const optimisticLayoutActive =
+      optimisticLayout &&
+      (optimisticLayout.targetSeq === null ||
+        (options.collabSeq?.() ?? 0) < optimisticLayout.targetSeq)
+        ? optimisticLayout
+        : null;
+    const optimisticStepPositions = optimisticLayoutActive?.stepPositions ?? {};
+    const optimisticGroupBoundsById = optimisticLayoutActive?.groupBoundsById ?? {};
+    const optimisticGroupIdByStepId = optimisticLayoutActive?.groupIdByStepId ?? {};
 
     const groupByStepId = new Map<string, string>();
+    const groupStepIdsByGroupId = new Map<string, Set<string>>();
+
+    groups.forEach(group => {
+      const stepIds = new Set(group.step_ids || []);
+      groupStepIdsByGroupId.set(group.id, stepIds);
+
+      stepIds.forEach(stepId => {
+        groupByStepId.set(stepId, group.id);
+      });
+    });
+
+    Object.entries(optimisticGroupIdByStepId).forEach(([stepId, groupId]) => {
+      const previousGroupId = groupByStepId.get(stepId);
+
+      if (previousGroupId) {
+        groupStepIdsByGroupId.get(previousGroupId)?.delete(stepId);
+      }
+
+      if (groupId) {
+        groupByStepId.set(stepId, groupId);
+
+        if (!groupStepIdsByGroupId.has(groupId)) {
+          groupStepIdsByGroupId.set(groupId, new Set());
+        }
+
+        groupStepIdsByGroupId.get(groupId)?.add(stepId);
+        return;
+      }
+
+      groupByStepId.delete(stepId);
+    });
+
     const groupNodes = groups.map(group => {
       const position = group.position || {};
-      const previewBounds = previewGroupBoundsById[group.id];
+      const previewBounds =
+        optimisticGroupBoundsById[group.id] ?? previewGroupBoundsById[group.id];
       const previewX = previewBounds?.x;
       const previewY = previewBounds?.y;
       const previewWidth = previewBounds?.width;
@@ -290,10 +345,6 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           ? group.font_size
           : DEFAULT_GROUP_NAME_FONT_SIZE;
 
-      for (const stepId of group.step_ids || []) {
-        groupByStepId.set(stepId, group.id);
-      }
-
       const node = {
         id: group.id,
         type: 'group',
@@ -305,7 +356,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         data: {
           id: group.id,
           name: group.name || 'Group',
-          step_ids: group.step_ids || [],
+          step_ids: Array.from(groupStepIdsByGroupId.get(group.id) ?? []),
           collapsed: !!group.collapsed,
           color,
           font_size: fontSize,
@@ -405,7 +456,10 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         id: step.id,
         type: isSubnode ? 'subnode' : 'step',
         class: 'nopan',
-        position: transientPositions.value[step.id] || step.position,
+        position:
+          optimisticStepPositions[step.id] ||
+          transientPositions.value[step.id] ||
+          step.position,
         parentNode: parentGroupId,
         zIndex: parentGroupId ? 20 : 10,
         data: {

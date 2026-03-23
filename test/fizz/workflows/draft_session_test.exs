@@ -491,11 +491,42 @@ defmodule Fizz.Workflows.DraftSessionTest do
                params: %{type_id: "debug", position: %{x: 10, y: 20}}
              })
 
+    assert_receive {:save_status, %{status: :saving, error: nil}}
     assert_receive {:draft_updated, 1, %{type: :add_step, user_id: ^user_id}}
-    assert_receive {:draft_persisted, 1}
+    assert_receive {:draft_persisted, 1, %DateTime{}}
+    assert_receive {:save_status, %{status: :saved, error: nil}}
 
     assert {:ok, persisted_draft} = Workflows.get_version(scope, draft.id)
     assert length(persisted_draft.steps) == 1
+  end
+
+  test "persistence state reports saving while debounce is pending" do
+    previous_env = Application.get_env(:fizz, DraftSession, [])
+
+    Application.put_env(:fizz, DraftSession,
+      persist_debounce_ms: 500,
+      idle_timeout_ms: 75,
+      persist_retry_base_ms: 25,
+      persist_retry_max_ms: 50
+    )
+
+    on_exit(fn ->
+      Application.put_env(:fizz, DraftSession, previous_env)
+    end)
+
+    scope = project_scope_fixture()
+    %{draft: draft} = draft_fixture(scope)
+
+    register_session_cleanup(draft.id)
+    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft_after_add, 1, _undo_state_after_add} =
+             DraftSession.apply_operation(draft.id, scope.user.id, %{
+               type: :add_step,
+               params: %{type_id: "debug", position: %{x: 10, y: 20}}
+             })
+
+    assert {:ok, %{status: :saving, error: nil}} = DraftSession.get_persistence_state(draft.id)
   end
 
   test "idle timeout shuts down after last user leaves" do
@@ -522,7 +553,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
              })
 
     assert :ok = DraftSession.leave(draft.id, scope.user.id)
-    assert_receive {:draft_persisted, 1}
+    assert_receive {:draft_persisted, 1, %DateTime{}}
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}
     assert {:ok, persisted_draft} = Workflows.get_version(scope, draft.id)
     assert length(persisted_draft.steps) == 1

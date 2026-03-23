@@ -4,6 +4,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   import LiveVue.Test
   import Phoenix.LiveViewTest
 
+  alias Fizz.Accounts
   alias Fizz.Accounts.{ApiCredential, Scope}
   alias Fizz.Workflows
   alias Fizz.Workflows.DraftSession
@@ -43,8 +44,16 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   setup do
     previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
     previous_workos_client = Application.get_env(:workos, WorkOS.Client)
+    previous_draft_session = Application.get_env(:fizz, DraftSession, [])
 
     Application.put_env(:fizz, :workos_http_client_module, ReqMock)
+
+    Application.put_env(:fizz, DraftSession,
+      persist_debounce_ms: 25,
+      idle_timeout_ms: 75,
+      persist_retry_base_ms: 25,
+      persist_retry_max_ms: 50
+    )
 
     Application.put_env(:workos, WorkOS.Client,
       api_key: "sk_test_123",
@@ -54,6 +63,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     on_exit(fn ->
       restore_env(:fizz, :workos_http_client_module, previous_http_client)
+      Application.put_env(:fizz, DraftSession, previous_draft_session)
       restore_env(:workos, WorkOS.Client, previous_workos_client)
     end)
 
@@ -186,6 +196,91 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert length(draft.steps) == 1
     assert undo_state.canUndo
     assert undo_state.undoLabel == "Add Step"
+  end
+
+  test "commit_drag_layout acknowledgements include the drag transaction id", %{conn: conn} do
+    moved_step =
+      WorkflowsFixtures.step(%{
+        name: "Fetch Orders",
+        position: %{"x" => 140, "y" => 220}
+      })
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [moved_step]
+      })
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    txn_id = "txn_drag_commit"
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "commit_drag_layout",
+      "payload" => %{
+        "txn_id" => txn_id,
+        "base_seq" => 0,
+        "groups" => [],
+        "step_positions" => %{
+          moved_step.id => %{"x" => 320, "y" => 260}
+        },
+        "group_id_by_step_id" => %{}
+      }
+    })
+
+    assert_push_event(view, "workflow:operation_ack", %{
+      type: "commit_drag_layout",
+      seq: 1,
+      txn_id: ^txn_id
+    })
+
+    updated_step = Enum.find(live_socket(view).assigns.draft.steps, &(&1.id == moved_step.id))
+
+    assert updated_step.position["x"] == 320
+    assert updated_step.position["y"] == 260
+    assert live_socket(view).assigns.collab_seq == 1
+  end
+
+  test "draft changes autosave and update the save status indicator", %{conn: conn} do
+    %{conn: conn, definition: definition, project_scope: project_scope} = editor_fixture(conn)
+
+    {:ok, view, _html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    initial_updated_at = live_socket(view).assigns.draft.updated_at
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "add_step",
+      "payload" => %{
+        "type_id" => "debug",
+        "position" => %{"x" => 420, "y" => 180}
+      }
+    })
+
+    assert live_socket(view).assigns.save_status == "saving"
+
+    assert :ok =
+             wait_until(fn ->
+               render(view)
+
+               with {:ok, persisted_draft} <-
+                      Workflows.get_version(project_scope, view_version_id(view)) do
+                 live_socket(view).assigns.save_status == "saved" and
+                   length(persisted_draft.steps) == 1 and
+                   persisted_draft.updated_at != initial_updated_at
+               else
+                 {:error, _reason} -> false
+               end
+             end)
+
+    vue = get_vue(view, id: "workflow-editor")
+    assert vue.props["saveStatus"] == "saved"
   end
 
   test "run_test persists the current draft before compiling", %{conn: conn} do
@@ -411,6 +506,80 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert meta.user_id == user.id
     assert meta.user_email == user.email
     assert meta.selected_steps == []
+  end
+
+  test "cursor presence updates propagate to collaborators and clear on leave", %{conn: conn} do
+    %{conn: owner_conn, definition: definition, project_scope: project_scope, user: owner_user} =
+      editor_fixture(conn)
+
+    owner_user_id = owner_user.id
+
+    %{conn: collaborator_conn, user: collaborator_user} =
+      collaborator_fixture(project_scope)
+
+    {:ok, owner_view, _html} =
+      live(owner_conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    {:ok, collaborator_view, _html} =
+      live(
+        collaborator_conn,
+        ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit"
+      )
+
+    draft_topic = "draft:#{view_version_id(owner_view)}"
+
+    owner_view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "mouse_move",
+      "payload" => %{"x" => 128, "y" => 256}
+    })
+
+    assert :ok =
+             wait_until(fn ->
+               case Presence.list(draft_topic) do
+                 %{^owner_user_id => %{metas: [meta | _rest]}} ->
+                   meta.cursor == %{x: 128, y: 256}
+
+                 _other ->
+                   false
+               end
+             end)
+
+    send(
+      collaborator_view.pid,
+      %Phoenix.Socket.Broadcast{event: "presence_diff", topic: draft_topic, payload: %{}}
+    )
+
+    render(collaborator_view)
+
+    assert %{cursor: %{x: 128, y: 256}} = collaborator_presence(collaborator_view, owner_user_id)
+
+    owner_view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "mouse_leave", "payload" => %{}})
+
+    assert :ok =
+             wait_until(fn ->
+               case Presence.list(draft_topic) do
+                 %{^owner_user_id => %{metas: [meta | _rest]}} ->
+                   is_nil(meta.cursor)
+
+                 _other ->
+                   false
+               end
+             end)
+
+    send(
+      collaborator_view.pid,
+      %Phoenix.Socket.Broadcast{event: "presence_diff", topic: draft_topic, payload: %{}}
+    )
+
+    render(collaborator_view)
+
+    assert %{cursor: nil} = collaborator_presence(collaborator_view, owner_user_id)
+
+    assert live_socket(collaborator_view).assigns.current_user_id == collaborator_user.id
   end
 
   test "unauthenticated users are redirected", %{conn: conn} do
@@ -854,6 +1023,31 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     }
   end
 
+  defp collaborator_fixture(project_scope) do
+    user = Fizz.AccountsFixtures.user_fixture()
+
+    organization_scope =
+      Fizz.AccountsFixtures.organization_scope_fixture(
+        user: user,
+        organization_id: project_scope.organization_id,
+        organization_role: :member
+      )
+
+    {:ok, _membership} =
+      Accounts.add_project_member(project_scope, project_scope.project.id, user, %{role: :member})
+
+    collaborator_scope =
+      organization_scope
+      |> Scope.with_project(project_scope.project)
+      |> Scope.with_project_role(:member)
+
+    %{
+      conn: log_in_user(build_conn(), user),
+      user: user,
+      project_scope: collaborator_scope
+    }
+  end
+
   defp view_version_id(view) do
     vue = get_vue(view, id: "workflow-editor")
     vue.props["workflow"]["draft"]["id"]
@@ -890,6 +1084,13 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
   defp expression_previews(view) do
     live_socket(view).assigns.expression_previews
+  end
+
+  defp collaborator_presence(view, user_id) do
+    live_socket(view).assigns.presences
+    |> Enum.find(fn presence ->
+      get_in(presence, [:user, :id]) == user_id
+    end)
   end
 
   defp put_step_executions(view, step_executions) do
@@ -942,6 +1143,25 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
   defp wait_for_worker_exit(_run_id, 0) do
     flunk("worker did not exit")
+  end
+
+  defp wait_until(fun, attempts \\ 50)
+
+  defp wait_until(fun, attempts) when attempts > 0 do
+    case fun.() do
+      true ->
+        :ok
+
+      _other ->
+        receive do
+        after
+          20 -> wait_until(fun, attempts - 1)
+        end
+    end
+  end
+
+  defp wait_until(_fun, 0) do
+    flunk("condition was not met in time")
   end
 
   defp insert_api_credential!(user_id, organization_id, provider, provider_label) do

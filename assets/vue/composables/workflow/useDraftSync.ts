@@ -10,6 +10,7 @@ interface UseDraftSyncOptions {
   edges: () => Edge<EdgeData>[];
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
   setEdges: (edges: Edge<EdgeData>[]) => void;
+  isDragging?: () => boolean;
   onSyncComplete?: () => void;
 }
 
@@ -17,6 +18,7 @@ export function useDraftSync(options: UseDraftSyncOptions) {
   const isMounted = ref(false);
   const isSyncingDraft = ref(false);
   const lastSyncKey = ref<string | null>(null);
+  const pendingSync = ref(false);
 
   const buildSyncKey = () => {
     if (options.collabSeq) {
@@ -35,11 +37,17 @@ export function useDraftSync(options: UseDraftSyncOptions) {
   const syncDraftState = async () => {
     if (!isMounted.value) return;
 
+    if (options.isDragging?.()) {
+      pendingSync.value = true;
+      return;
+    }
+
     const syncKey = buildSyncKey();
     if (lastSyncKey.value === syncKey) return;
     lastSyncKey.value = syncKey;
 
     isSyncingDraft.value = true;
+    pendingSync.value = false;
     options.setNodes(options.nodes());
     options.setEdges(options.edges());
     await nextTick();
@@ -53,6 +61,18 @@ export function useDraftSync(options: UseDraftSyncOptions) {
       syncDraftState();
     }
   );
+
+  // Flush any deferred sync once dragging ends
+  if (options.isDragging) {
+    watch(
+      () => options.isDragging!(),
+      (dragging) => {
+        if (!dragging && pendingSync.value) {
+          syncDraftState();
+        }
+      }
+    );
+  }
 
   onMounted(() => {
     isMounted.value = true;

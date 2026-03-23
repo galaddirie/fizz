@@ -2,7 +2,7 @@
 
 **Priority:** Medium
 **Component:** Workflow Editor / Presence / CollaborativeCursors
-**Status:** Open
+**Status:** Resolved
 
 ## Summary
 
@@ -47,10 +47,16 @@ The issue is likely on the **client side**: the Vue editor component is not emit
 
 Each user's cursor position should be visible to all other connected users as a colored cursor indicator with their name, updating smoothly as they move their mouse over the canvas.
 
+## Resolution
+
+- Fixed presence metadata updates so cursor fields are merged into the tracked metadata instead of being dropped
+- Fixed the initial server throttle bug caused by using a `0` baseline with monotonic time, which suppressed the first cursor update
+- Added explicit cursor clearing on canvas leave and after a short inactivity timeout so stale cursors disappear cleanly
+
 ## Acceptance Criteria
 
-- [ ] Mouse movement on the canvas emits `mouse_move` events with canvas-space coordinates
-- [ ] Presence data with cursor positions is passed to CollaborativeCursors.vue
-- [ ] Other users' cursors render at the correct position, accounting for zoom/pan
-- [ ] Cursor updates are smooth (sub-100ms latency perceived)
-- [ ] Cursors disappear when a user leaves or goes idle
+- [x] Mouse movement on the canvas emits `mouse_move` events with canvas-space coordinates
+- [x] Presence data with cursor positions is passed to CollaborativeCursors.vue
+- [x] Other users' cursors render at the correct position, accounting for zoom/pan
+- [x] Cursor updates are smooth (sub-100ms latency perceived)
+- [x] Cursors disappear when a user leaves or goes idle

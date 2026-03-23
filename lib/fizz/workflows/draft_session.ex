@@ -9,7 +9,9 @@ defmodule Fizz.Workflows.DraftSession do
 
   require Logger
 
-  @default_persist_interval_ms 5_000
+  @default_persist_debounce_ms 1_000
+  @default_persist_retry_base_ms 1_000
+  @default_persist_retry_max_ms 30_000
   @default_idle_timeout_ms :timer.minutes(5)
 
   defstruct [
@@ -22,9 +24,16 @@ defmodule Fizz.Workflows.DraftSession do
     :last_persisted_seq,
     :connected_users,
     :persist_timer_ref,
+    :persist_retry_timer_ref,
+    :persist_retry_attempt,
     :idle_timer_ref,
-    :scope
+    :scope,
+    :save_status,
+    :save_error
   ]
+
+  @type save_status :: :saved | :saving | :error
+  @type persistence_state :: %{status: save_status(), error: term() | nil}
 
   @type t :: %__MODULE__{
           version_id: String.t(),
@@ -36,8 +45,12 @@ defmodule Fizz.Workflows.DraftSession do
           last_persisted_seq: non_neg_integer(),
           connected_users: MapSet.t(String.t()),
           persist_timer_ref: reference() | nil,
+          persist_retry_timer_ref: reference() | nil,
+          persist_retry_attempt: non_neg_integer(),
           idle_timer_ref: reference() | nil,
-          scope: term()
+          scope: term(),
+          save_status: save_status(),
+          save_error: term() | nil
         }
 
   @spec child_spec(keyword()) :: Supervisor.child_spec()
@@ -115,6 +128,28 @@ defmodule Fizz.Workflows.DraftSession do
     end
   end
 
+  @spec get_persistence_state(String.t()) :: {:ok, persistence_state()} | {:error, term()}
+  def get_persistence_state(version_id) when is_binary(version_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, :get_persistence_state, :infinity)
+    end
+  end
+
+  @spec snapshot(String.t(), String.t()) ::
+          {:ok,
+           %{
+             draft: WorkflowDefinitionVersion.t(),
+             seq: non_neg_integer(),
+             undo_state: map(),
+             persistence: persistence_state()
+           }}
+          | {:error, term()}
+  def snapshot(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, {:snapshot, user_id}, :infinity)
+    end
+  end
+
   @impl true
   def init(opts) do
     version_id = Keyword.fetch!(opts, :version_id)
@@ -133,10 +168,13 @@ defmodule Fizz.Workflows.DraftSession do
           last_persisted_seq: 0,
           connected_users: MapSet.new(),
           persist_timer_ref: nil,
+          persist_retry_timer_ref: nil,
+          persist_retry_attempt: 0,
           idle_timer_ref: nil,
-          scope: scope
+          scope: scope,
+          save_status: :saved,
+          save_error: nil
         }
-        |> schedule_persist_tick()
 
       {:ok, state}
     else
@@ -159,6 +197,7 @@ defmodule Fizz.Workflows.DraftSession do
     next_state =
       state
       |> remove_connected_user(user_id)
+      |> maybe_persist_after_leave()
       |> maybe_schedule_idle_timeout()
 
     {:reply, :ok, next_state}
@@ -171,6 +210,7 @@ defmodule Fizz.Workflows.DraftSession do
           state
           |> put_draft_update(user_id, inverse_operation, draft)
           |> clear_redo_stack(user_id)
+          |> schedule_persist_after_change()
 
         summary = summary(operation, inverse_operation, user_id)
         broadcast(state.version_id, {:draft_updated, next_state.seq, summary})
@@ -221,7 +261,7 @@ defmodule Fizz.Workflows.DraftSession do
   end
 
   def handle_call(:persist_now, _from, state) do
-    case persist_to_db(state) do
+    case persist_immediately(state) do
       {:ok, next_state} ->
         {:reply, {:ok, next_state.draft, next_state.seq}, next_state}
 
@@ -234,12 +274,37 @@ defmodule Fizz.Workflows.DraftSession do
     {:reply, {:ok, undo_state(state, user_id)}, state}
   end
 
+  def handle_call(:get_persistence_state, _from, state) do
+    {:reply, {:ok, persistence_state(state)}, state}
+  end
+
+  def handle_call({:snapshot, user_id}, _from, state) do
+    {:reply,
+     {:ok,
+      %{
+        draft: state.draft,
+        seq: state.seq,
+        undo_state: undo_state(state, user_id),
+        persistence: persistence_state(state)
+      }}, state}
+  end
+
   @impl true
-  def handle_info({:persist_tick, ref}, %{persist_timer_ref: ref} = state) do
+  def handle_info({:persist_after_debounce, ref}, %{persist_timer_ref: ref} = state) do
     next_state =
       state
+      |> Map.put(:persist_timer_ref, nil)
       |> persist_if_dirty()
-      |> schedule_persist_tick()
+
+    {:noreply, next_state}
+  end
+
+  def handle_info({:persist_retry, ref}, %{persist_retry_timer_ref: ref} = state) do
+    next_state =
+      state
+      |> Map.put(:persist_retry_timer_ref, nil)
+      |> put_save_status(:saving, nil)
+      |> persist_if_dirty()
 
     {:noreply, next_state}
   end
@@ -248,7 +313,7 @@ defmodule Fizz.Workflows.DraftSession do
     next_state =
       state
       |> Map.put(:idle_timer_ref, nil)
-      |> persist_if_dirty()
+      |> persist_if_dirty_for_shutdown()
 
     {:stop, :normal, next_state}
   end
@@ -257,7 +322,7 @@ defmodule Fizz.Workflows.DraftSession do
 
   @impl true
   def terminate(_reason, state) do
-    _ = persist_if_dirty(state)
+    _ = persist_if_dirty_for_shutdown(state)
     :ok
   end
 
@@ -298,31 +363,86 @@ defmodule Fizz.Workflows.DraftSession do
   defp persist_if_dirty(%__MODULE__{dirty?: false} = state), do: state
 
   defp persist_if_dirty(%__MODULE__{} = state) do
+    case persist_with_retry(state) do
+      {:ok, next_state} -> next_state
+      {:error, _reason, next_state} -> next_state
+    end
+  end
+
+  defp persist_if_dirty_for_shutdown(%__MODULE__{dirty?: false} = state), do: state
+
+  defp persist_if_dirty_for_shutdown(%__MODULE__{} = state) do
     case persist_to_db(state) do
       {:ok, next_state} -> next_state
       {:error, _reason, next_state} -> next_state
     end
   end
 
-  defp persist_to_db(%__MODULE__{} = state) do
-    attrs = draft_snapshot_attrs(state.draft)
+  defp persist_immediately(%__MODULE__{} = state) do
+    state
+    |> cancel_persist_timer()
+    |> cancel_persist_retry_timer()
+    |> Map.put(:persist_retry_attempt, 0)
+    |> persist_with_retry()
+  end
 
-    case Workflows.save_draft(state.scope, state.draft.id, attrs) do
-      {:ok, draft} ->
-        broadcast(state.version_id, {:draft_persisted, state.seq})
+  defp persist_with_retry(%__MODULE__{dirty?: false} = state) do
+    {:ok,
+     state
+     |> cancel_persist_retry_timer()
+     |> Map.put(:persist_retry_attempt, 0)
+     |> put_save_status(:saved, nil)}
+  end
 
+  defp persist_with_retry(%__MODULE__{} = state) do
+    state = put_save_status(state, :saving, nil)
+
+    case persist_to_db(state) do
+      {:ok, next_state} ->
         {:ok,
-         %{
-           state
-           | draft: draft,
-             dirty?: false,
-             last_persisted_seq: state.seq
-         }}
+         next_state
+         |> cancel_persist_retry_timer()
+         |> Map.put(:persist_retry_attempt, 0)
+         |> put_save_status(:saved, nil)}
 
-      {:error, reason} ->
-        Logger.warning("draft persist failed for version #{state.version_id}: #{inspect(reason)}")
+      {:error, reason, next_state} ->
+        failed_state =
+          next_state
+          |> put_save_status(:error, reason)
+          |> schedule_persist_retry(reason)
 
-        {:error, reason, state}
+        {:error, reason, failed_state}
+    end
+  end
+
+  defp persist_to_db(%__MODULE__{} = state) do
+    try do
+      attrs = draft_snapshot_attrs(state.draft)
+
+      case Workflows.save_draft(state.scope, state.draft.id, attrs) do
+        {:ok, draft} ->
+          broadcast(state.version_id, {:draft_persisted, state.seq, draft.updated_at})
+
+          {:ok,
+           %{
+             state
+             | draft: draft,
+               dirty?: false,
+               last_persisted_seq: state.seq,
+               save_error: nil
+           }}
+
+        {:error, reason} ->
+          Logger.warning(
+            "draft persist failed for version #{state.version_id}: #{inspect(reason)}"
+          )
+
+          {:error, reason, state}
+      end
+    catch
+      :exit, reason ->
+        Logger.warning("draft persist exited for version #{state.version_id}: #{inspect(reason)}")
+        {:error, {:exit, reason}, state}
     end
   end
 
@@ -356,6 +476,7 @@ defmodule Fizz.Workflows.DraftSession do
           |> Map.put(:dirty?, true)
           |> put_stack(direction, user_id, updated_stack)
           |> push_inverse_stack_entry(direction, user_id, next_entry)
+          |> schedule_persist_after_change()
 
         summary =
           entry.operation
@@ -402,16 +523,62 @@ defmodule Fizz.Workflows.DraftSession do
     }
   end
 
-  defp schedule_persist_tick(state) do
+  defp schedule_persist_after_change(state) do
+    state
+    |> cancel_persist_retry_timer()
+    |> put_save_status(:saving, nil)
+    |> schedule_persist_after_debounce()
+  end
+
+  defp schedule_persist_after_debounce(state) do
+    next_state = cancel_persist_timer(state)
     timer_ref = make_ref()
-    Process.send_after(self(), {:persist_tick, timer_ref}, persist_interval_ms())
-    %{state | persist_timer_ref: timer_ref}
+    Process.send_after(self(), {:persist_after_debounce, timer_ref}, persist_debounce_ms())
+    %{next_state | persist_timer_ref: timer_ref}
+  end
+
+  defp schedule_persist_retry(%__MODULE__{} = state, reason) do
+    case retryable_persist_error?(reason) do
+      true ->
+        next_state =
+          state
+          |> cancel_persist_retry_timer()
+          |> Map.update!(:persist_retry_attempt, &(&1 + 1))
+
+        timer_ref = make_ref()
+
+        Process.send_after(
+          self(),
+          {:persist_retry, timer_ref},
+          persist_retry_delay_ms(next_state.persist_retry_attempt)
+        )
+
+        %{next_state | persist_retry_timer_ref: timer_ref}
+
+      false ->
+        state
+        |> cancel_persist_retry_timer()
+        |> Map.put(:persist_retry_attempt, 0)
+    end
   end
 
   defp maybe_schedule_idle_timeout(%__MODULE__{connected_users: connected_users} = state) do
     case MapSet.size(connected_users) do
       0 -> schedule_idle_timeout(state)
       _count -> cancel_idle_timeout(state)
+    end
+  end
+
+  defp maybe_persist_after_leave(%__MODULE__{connected_users: connected_users} = state) do
+    case MapSet.size(connected_users) do
+      0 ->
+        case persist_immediately(state) do
+          {:ok, next_state} -> next_state
+          {:error, _reason, next_state} -> next_state
+        end
+
+      _count ->
+        state
     end
   end
 
@@ -427,6 +594,20 @@ defmodule Fizz.Workflows.DraftSession do
   defp cancel_idle_timeout(%__MODULE__{idle_timer_ref: timer_ref} = state) do
     _ = Process.cancel_timer(timer_ref)
     %{state | idle_timer_ref: nil}
+  end
+
+  defp cancel_persist_timer(%__MODULE__{persist_timer_ref: nil} = state), do: state
+
+  defp cancel_persist_timer(%__MODULE__{persist_timer_ref: timer_ref} = state) do
+    _ = Process.cancel_timer(timer_ref)
+    %{state | persist_timer_ref: nil}
+  end
+
+  defp cancel_persist_retry_timer(%__MODULE__{persist_retry_timer_ref: nil} = state), do: state
+
+  defp cancel_persist_retry_timer(%__MODULE__{persist_retry_timer_ref: timer_ref} = state) do
+    _ = Process.cancel_timer(timer_ref)
+    %{state | persist_retry_timer_ref: nil}
   end
 
   defp put_connected_user(state, user_id) do
@@ -450,7 +631,8 @@ defmodule Fizz.Workflows.DraftSession do
     base_summary = %{
       type: type,
       user_id: user_id,
-      label: Map.get(inverse_operation, :label)
+      label: Map.get(inverse_operation, :label),
+      operation: operation_payload(operation, type)
     }
 
     case {type, Map.get(inverse_operation, :params, %{})} do
@@ -510,6 +692,34 @@ defmodule Fizz.Workflows.DraftSession do
   defp stack_label([entry | _rest]), do: entry.label
   defp stack_label([]), do: nil
 
+  defp persistence_state(%__MODULE__{} = state) do
+    %{status: state.save_status, error: state.save_error}
+  end
+
+  defp put_save_status(%__MODULE__{} = state, status, error) do
+    next_state = %{state | save_status: status, save_error: error}
+
+    case {state.save_status, state.save_error} do
+      {^status, ^error} ->
+        next_state
+
+      _previous ->
+        broadcast(state.version_id, {:save_status, persistence_state(next_state)})
+        next_state
+    end
+  end
+
+  defp operation_payload(operation, type) when is_map(operation) do
+    params =
+      case operation do
+        %{params: params} when is_map(params) -> params
+        %{"params" => params} when is_map(params) -> params
+        _ -> %{}
+      end
+
+    %{type: type, params: params}
+  end
+
   defp draft_snapshot_attrs(%WorkflowDefinitionVersion{} = draft) do
     %{
       steps: Enum.map(draft.steps, &embed_attrs/1),
@@ -530,15 +740,50 @@ defmodule Fizz.Workflows.DraftSession do
     Phoenix.PubSub.broadcast(Fizz.PubSub, "draft:#{version_id}", message)
   end
 
-  defp persist_interval_ms do
+  defp persist_debounce_ms do
     Application.get_env(:fizz, __MODULE__, [])
-    |> Keyword.get(:persist_interval_ms, @default_persist_interval_ms)
+    |> Keyword.get(:persist_debounce_ms)
+    |> case do
+      nil ->
+        Application.get_env(:fizz, __MODULE__, [])
+        |> Keyword.get(:persist_interval_ms, @default_persist_debounce_ms)
+
+      debounce_ms ->
+        debounce_ms
+    end
+  end
+
+  defp persist_retry_delay_ms(attempt) do
+    base_ms = persist_retry_base_ms()
+    max_ms = persist_retry_max_ms()
+    exponent = max(attempt - 1, 0)
+
+    base_ms
+    |> Kernel.*(Integer.pow(2, exponent))
+    |> min(max_ms)
   end
 
   defp idle_timeout_ms do
     Application.get_env(:fizz, __MODULE__, [])
     |> Keyword.get(:idle_timeout_ms, @default_idle_timeout_ms)
   end
+
+  defp persist_retry_base_ms do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:persist_retry_base_ms, @default_persist_retry_base_ms)
+  end
+
+  defp persist_retry_max_ms do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:persist_retry_max_ms, @default_persist_retry_max_ms)
+  end
+
+  defp retryable_persist_error?(%Ecto.Changeset{}), do: false
+  defp retryable_persist_error?(:not_a_draft), do: false
+  defp retryable_persist_error?(:project_scope_required), do: false
+  defp retryable_persist_error?(:version_not_found), do: false
+  defp retryable_persist_error?(errors) when is_list(errors), do: false
+  defp retryable_persist_error?(_reason), do: true
 
   defp via_tuple(registry, version_id) do
     {:via, Registry, {registry, version_id}}

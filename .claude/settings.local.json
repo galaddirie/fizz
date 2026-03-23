@@ -21,7 +21,8 @@
       "WebFetch(domain:hexdocs.pm)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:litestream.io)",
-      "WebFetch(domain:hex.pm)"
+      "WebFetch(domain:hex.pm)",
+      "Bash(find /home/galad/code/fizz/deps/live_vue -name *.ex -o -name *.js -o -name *.ts)"
     ]
   }
 }

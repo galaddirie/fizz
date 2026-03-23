@@ -10,6 +10,7 @@ interface UseCanvasInteractionOptions {
   project: (point: XYPosition) => XYPosition;
   getNodes: () => GraphNode<WorkflowNodeData>[];
   getSelectedNodes: () => GraphNode<WorkflowNodeData>[];
+  clearInteraction: () => void;
   emitInteraction: (
     x?: number | null,
     y?: number | null,
@@ -56,6 +57,11 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     }
   };
 
+  const handlePaneMouseLeave = () => {
+    options.clearInteraction();
+    options.updateGroupingPreview(options.getNodes().filter(node => node.dragging), null);
+  };
+
   const handleDragOver = (event: DragEvent) => {
     if (!options.canEdit()) return;
     event.preventDefault();
@@ -90,6 +96,7 @@ export function useCanvasInteraction(options: UseCanvasInteractionOptions) {
     canvasRef,
     getFlowPositionFromEvent,
     handlePaneMouseMove,
+    handlePaneMouseLeave,
     handleDragOver,
     handleDrop,
   };

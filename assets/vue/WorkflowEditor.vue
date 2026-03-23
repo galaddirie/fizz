@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { useLiveEvent } from 'live_vue';
+import { useLiveEvent, useLiveVue } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import AddStepPicker from '@/components/flow/AddStepPicker.vue';
@@ -14,7 +14,6 @@ import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
 import type {
   WorkflowEditorCommandType,
   WorkflowEditorEmits,
-  WorkflowEditorLiveEmits,
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
 import type { TriggerImpact, WorkflowValidationError } from '@/types/workflow';
@@ -29,13 +28,15 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   presences: () => [],
   currentUserId: undefined,
   collabSeq: 0,
+  saveStatus: 'saved',
+  saveError: null,
   expressionPreviews: () => ({}),
   credentialOptions: () => [],
   debugExecutionId: null,
   validationErrors: () => ({}),
 });
 
-const emitToLiveView = defineEmits<WorkflowEditorLiveEmits>();
+const live = useLiveVue();
 const publishStateResetCommands = new Set<WorkflowEditorCommandType>([
   'add_step',
   'add_group',
@@ -70,7 +71,7 @@ function emitCommand(type: WorkflowEditorCommandType, payload?: unknown) {
       ? (payload as Record<string, unknown>)
       : {};
 
-  emitToLiveView('editor_command', { type, payload: normalizedPayload });
+  live.pushEvent('editor_command', { type, payload: normalizedPayload });
 }
 
 const emit = ((event: WorkflowEditorCommandType, payload?: unknown) => {
@@ -206,6 +207,12 @@ const handleEditorResize = () => {
   nodeLibraryWidth.value = clampNodeLibraryWidth(nodeLibraryWidth.value);
 };
 
+const handleBeforeUnload = () => {
+  if ((props.saveStatus ?? 'saved') !== 'saved') {
+    emit('save_workflow');
+  }
+};
+
 onMounted(() => {
   if (typeof window === 'undefined') return;
 
@@ -220,6 +227,7 @@ onMounted(() => {
   isNodeLibraryCollapsed.value = storedCollapsed;
 
   window.addEventListener('resize', handleEditorResize);
+  window.addEventListener('beforeunload', handleBeforeUnload);
   lastSavedClock.value = Date.now();
   lastSavedTimer = window.setInterval(() => {
     lastSavedClock.value = Date.now();
@@ -229,6 +237,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', handleEditorResize);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
     if (lastSavedTimer !== null) {
       window.clearInterval(lastSavedTimer);
       lastSavedTimer = null;
@@ -331,6 +340,48 @@ const lastSavedExact = computed(() => {
   const date = lastSavedAt.value;
   if (!date) return 'Saved just now';
   return `Saved ${date.toLocaleString(undefined, exactTimestampFormat)}`;
+});
+
+const saveStatus = computed(() => props.saveStatus ?? 'saved');
+const saveIndicatorLabel = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'Saving...';
+    case 'error':
+      return 'Save error';
+    default:
+      return 'All changes saved';
+  }
+});
+const saveIndicatorDetail = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'Changes are syncing automatically';
+    case 'error':
+      return 'Retrying automatically';
+    default:
+      return `Last saved ${lastSaved.value}`;
+  }
+});
+const saveIndicatorTitle = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'Saving workflow draft';
+    case 'error':
+      return props.saveError ?? 'Saving failed. Retrying automatically.';
+    default:
+      return lastSavedExact.value;
+  }
+});
+const saveIndicatorDotClass = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'bg-amber-500 animate-pulse';
+    case 'error':
+      return 'bg-rose-500';
+    default:
+      return 'bg-emerald-500';
+  }
 });
 
 const debugExecutionShortId = computed(() => {
@@ -484,8 +535,9 @@ useLiveEvent<{
           :undo-tooltip="editor.undoStore.undoTooltip"
           :redo-tooltip="editor.undoStore.redoTooltip"
           :is-undo-pending="editor.undoStore.isPending"
+          :save-status="saveStatus"
+          :save-error="props.saveError"
           :validation-errors="toolbarValidationErrors"
-          @save="editor.handleSave"
           @undo="editor.handleUndo"
           @redo="editor.handleRedo"
           @run-test="editor.handleRunTest"
@@ -516,13 +568,15 @@ useLiveEvent<{
             </div>
           </div>
 
-          <button
-            class="pointer-events-auto ml-1 inline-flex select-none items-center gap-1 px-0.5 py-0 text-[10px] font-medium text-base-content/45 transition-colors hover:text-base-content/70"
-            :title="lastSavedExact"
-            @click="emit('save_workflow')"
+          <div
+            class="pointer-events-auto ml-1 inline-flex select-none items-center gap-2 rounded-full border border-base-300/60 bg-base-100/75 px-2.5 py-1 text-[10px] font-medium text-base-content/55 shadow-sm backdrop-blur-sm"
+            :title="saveIndicatorTitle"
           >
-            Last saved: {{ lastSaved }}
-          </button>
+            <span class="inline-block h-1.5 w-1.5 rounded-full" :class="saveIndicatorDotClass"></span>
+            <span>{{ saveIndicatorLabel }}</span>
+            <span class="text-base-content/30">&middot;</span>
+            <span class="text-base-content/45">{{ saveIndicatorDetail }}</span>
+          </div>
 
           <!-- Debug Mode Floating Pill -->
           <div
@@ -588,6 +642,7 @@ useLiveEvent<{
               :set-canvas-ref="editor.setCanvasRef"
               :set-vue-flow-ref="editor.setVueFlowRef"
               :handle-pane-mouse-move="editor.handlePaneMouseMove"
+              :handle-pane-mouse-leave="editor.handlePaneMouseLeave"
               :handle-node-click="editor.handleNodeClick"
               :handle-node-double-click="editor.handleNodeDoubleClick"
               :handle-node-context-menu="editor.handleNodeContextMenu"

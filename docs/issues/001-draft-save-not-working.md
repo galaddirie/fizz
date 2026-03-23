@@ -2,7 +2,7 @@
 
 **Priority:** High
 **Component:** Workflow Editor / DraftSession
-**Status:** Open
+**Status:** Resolved
 
 ## Summary
 
@@ -93,16 +93,23 @@ Fixing this requires:
 
 Changes should be automatically and continuously saved. Users should see a "All changes saved" indicator and never need to manually save. On page refresh, all changes should be intact.
 
+## Resolution
+
+- Replaced the periodic `persist_tick` model with debounced persistence and retry/backoff inside `DraftSession`
+- Added shared save-state broadcasting so every connected editor sees `saved` / `saving` / `error`
+- Swapped the manual save button for save-status UI and kept explicit persist points for unload, run test, publish, and last-user disconnect
+- Changed collaborative sync to apply incremental operations locally and only fall back to full snapshot refresh on recovery paths
+
 ## Acceptance Criteria
 
-- [ ] Fix the immediate save bug — `persist_now` must successfully write to the database
-- [ ] Replace fixed 5s `persist_tick` with debounced persistence (1-2s after last operation)
-- [ ] Remove the manual "Save" button; replace with a save status indicator
-- [ ] Save status indicator shows "All changes saved" / "Saving..." / "Error"
-- [ ] Force-persist on navigation away, run test, publish, and last user disconnect
-- [ ] Retry failed persistence with backoff; surface persistent failures to users
-- [ ] Save errors are surfaced to all connected users, not just the one who triggered the save
-- [ ] New user joining does not trigger full state refresh for existing users
-- [ ] Operations broadcast incrementally (not full state replacement)
-- [ ] Local UI state (viewport, scroll, selection) is preserved across peer updates
-- [ ] Full state refresh only on reconnect or error recovery
+- [x] Fix the immediate save bug — `persist_now` must successfully write to the database
+- [x] Replace fixed 5s `persist_tick` with debounced persistence (1-2s after last operation)
+- [x] Remove the manual "Save" button; replace with a save status indicator
+- [x] Save status indicator shows "All changes saved" / "Saving..." / "Error"
+- [x] Force-persist on navigation away, run test, publish, and last user disconnect
+- [x] Retry failed persistence with backoff; surface persistent failures to users
+- [x] Save errors are surfaced to all connected users, not just the one who triggered the save
+- [x] New user joining does not trigger full state refresh for existing users
+- [x] Operations broadcast incrementally (not full state replacement)
+- [x] Local UI state (viewport, scroll, selection) is preserved across peer updates
+- [x] Full state refresh only on reconnect or error recovery
