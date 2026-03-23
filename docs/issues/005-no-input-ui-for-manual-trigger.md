@@ -65,7 +65,7 @@ Instead of a pre-run modal that interrupts the execute flow, repurpose the **lef
 3. Left panel shows "Test Data" with a JSON editor (instead of the usual input/context explorer)
 4. User enters test data (e.g. `{"name": "Jane", "email": "jane@example.com"}`)
 5. Data auto-saves to the step config (same as any other config field)
-6. User clicks "Run Test" (toolbar) or "Run to here" (node menu) — execution starts immediately using the saved test data
+6. User clicks "Execute workflow"  or "Run to here" (node menu) — execution starts immediately using the saved test data
 7. Results appear in the output panel — user tweaks test data and re-runs as needed
 
 #### Why not a pre-run modal?
