@@ -127,3 +127,4 @@ A bot that starts an a/b experiment and updates the experiments based on events 
 
 
  - [ ] Users should be able to pin data without needing to run a node. they should be able to paste a payload of their shape 
+ - [ ] add loop zone like ui from blender to spliter aggregate pairs. add ux that lets user paginate through the iterations 
