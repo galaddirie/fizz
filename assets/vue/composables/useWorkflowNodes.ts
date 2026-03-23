@@ -275,13 +275,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const groupingTargetId = groupingPreview.groupId ?? null;
     const groupingColor = groupingPreview.color ?? undefined;
     const previewGroupBoundsById = transientGroupBounds.value;
-    const optimisticLayout = options.optimisticLayout?.();
-    const optimisticLayoutActive =
-      optimisticLayout &&
-      (optimisticLayout.targetSeq === null ||
-        (options.collabSeq?.() ?? 0) < optimisticLayout.targetSeq)
-        ? optimisticLayout
-        : null;
+    const optimisticLayoutActive = options.optimisticLayout?.() ?? null;
     const optimisticStepPositions = optimisticLayoutActive?.stepPositions ?? {};
     const optimisticGroupBoundsById = optimisticLayoutActive?.groupBoundsById ?? {};
     const optimisticGroupIdByStepId = optimisticLayoutActive?.groupIdByStepId ?? {};

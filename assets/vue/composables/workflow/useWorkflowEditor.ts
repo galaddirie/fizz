@@ -66,6 +66,65 @@ type OptimisticLayoutState = {
   groupIdByStepId: Record<string, string | null>;
 };
 
+const readNumberField = (value: unknown, key: string): number | null => {
+  if (!value || typeof value !== 'object') return null;
+
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'number' && Number.isFinite(field) ? field : null;
+};
+
+const positionsMatch = (value: unknown, expected: XYPosition) => {
+  return readNumberField(value, 'x') === expected.x && readNumberField(value, 'y') === expected.y;
+};
+
+const boundsMatch = (value: unknown, expected: GroupBounds) => {
+  return (
+    readNumberField(value, 'x') === expected.x &&
+    readNumberField(value, 'y') === expected.y &&
+    readNumberField(value, 'width') === expected.width &&
+    readNumberField(value, 'height') === expected.height
+  );
+};
+
+const groupMembershipByStepId = (draft: WorkflowDraft | undefined) => {
+  const memberships = new Map<string, string | null>();
+
+  for (const group of draft?.step_groups ?? []) {
+    for (const stepId of group.step_ids ?? []) {
+      memberships.set(stepId, group.id);
+    }
+  }
+
+  return memberships;
+};
+
+const draftMatchesOptimisticLayout = (
+  draft: WorkflowDraft | undefined,
+  layout: OptimisticLayoutState | null
+) => {
+  if (!draft || !layout) return false;
+
+  const stepsById = new Map((draft.steps ?? []).map(step => [step.id, step]));
+  const groupsById = new Map((draft.step_groups ?? []).map(group => [group.id, group]));
+  const memberships = groupMembershipByStepId(draft);
+
+  for (const [stepId, position] of Object.entries(layout.stepPositions)) {
+    const step = stepsById.get(stepId);
+    if (!step || !positionsMatch(step.position, position)) return false;
+  }
+
+  for (const [groupId, bounds] of Object.entries(layout.groupBoundsById)) {
+    const group = groupsById.get(groupId);
+    if (!group || !boundsMatch(group.position, bounds)) return false;
+  }
+
+  for (const [stepId, groupId] of Object.entries(layout.groupIdByStepId)) {
+    if ((memberships.get(stepId) ?? null) !== groupId) return false;
+  }
+
+  return true;
+};
+
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
   const store = useClientStore();
   const undoStore = useUndoStore();
@@ -128,6 +187,18 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
       ),
       groupIdByStepId: { ...payload.group_id_by_step_id },
     };
+  };
+  const maybeClearOptimisticLayout = (layout: OptimisticLayoutState | null = optimisticLayout.value) => {
+    if (!layout) return;
+
+    if (draftMatchesOptimisticLayout(activeDraft.value, layout)) {
+      optimisticLayout.value = null;
+      return;
+    }
+
+    if (layout.targetSeq !== null && collabSeq.value > layout.targetSeq) {
+      optimisticLayout.value = null;
+    }
   };
   const emitEditor = ((event: WorkflowEditorCommandType, payload?: unknown) => {
     if (event === 'commit_drag_layout' && payload) {
@@ -543,18 +614,14 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     const txnId = typeof payload?.txn_id === 'string' ? payload.txn_id : null;
     if (txnId && optimisticLayout.value.txnId !== txnId) return;
 
-    optimisticLayout.value = { ...optimisticLayout.value, targetSeq: seq };
-
-    if (collabSeq.value >= seq) {
-      optimisticLayout.value = null;
-    }
+    const nextLayout = { ...optimisticLayout.value, targetSeq: seq };
+    optimisticLayout.value = nextLayout;
+    maybeClearOptimisticLayout(nextLayout);
   });
   watch(
-    [collabSeq, () => optimisticLayout.value?.targetSeq ?? null],
-    ([currentSeq, targetSeq]) => {
-      if (targetSeq !== null && currentSeq >= targetSeq) {
-        optimisticLayout.value = null;
-      }
+    [collabSeq, activeDraft, () => optimisticLayout.value?.targetSeq ?? null],
+    () => {
+      maybeClearOptimisticLayout();
     }
   );
 

@@ -604,6 +604,86 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert second_user_undo_state_after_first_undo.canUndo
   end
 
+  test "overlapping commit_drag_layout operations converge by applied seq order" do
+    scope = project_scope_fixture()
+    second_scope = secondary_scope(scope)
+    %{draft: draft} = draft_fixture(scope, grouped_snapshot_attrs())
+
+    register_session_cleanup(draft.id)
+    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state} =
+             DraftSession.join(draft.id, second_scope, second_scope.user.id)
+
+    group = Enum.at(joined_draft.step_groups, 0)
+    step = Enum.at(joined_draft.steps, 0)
+
+    first_payload = %{
+      type: :commit_drag_layout,
+      params: %{
+        txn_id: "txn_commit_one",
+        groups: [
+          %{
+            group_id: group.id,
+            position: %{x: 120, y: 140, width: 420, height: 300}
+          }
+        ],
+        step_positions: %{
+          step.id => %{x: 20, y: 25}
+        },
+        group_id_by_step_id: %{}
+      }
+    }
+
+    second_payload = %{
+      type: :commit_drag_layout,
+      params: %{
+        txn_id: "txn_commit_two",
+        groups: [
+          %{
+            group_id: group.id,
+            position: %{x: 180, y: 220, width: 460, height: 340}
+          }
+        ],
+        step_positions: %{
+          step.id => %{x: 65, y: 70}
+        },
+        group_id_by_step_id: %{}
+      }
+    }
+
+    task_one =
+      Task.async(fn ->
+        DraftSession.apply_operation(draft.id, scope.user.id, first_payload)
+      end)
+
+    task_two =
+      Task.async(fn ->
+        DraftSession.apply_operation(draft.id, second_scope.user.id, second_payload)
+      end)
+
+    assert {:ok, _draft_after_first, seq_one, _undo_state_after_first} = Task.await(task_one)
+    assert {:ok, _draft_after_second, seq_two, _undo_state_after_second} = Task.await(task_two)
+    assert seq_one != seq_two
+
+    {expected_group_position, expected_step_position} =
+      if seq_one > seq_two do
+        {%{"x" => 120, "y" => 140, "width" => 420, "height" => 300}, %{"x" => 20, "y" => 25}}
+      else
+        {%{"x" => 180, "y" => 220, "width" => 460, "height" => 340}, %{"x" => 65, "y" => 70}}
+      end
+
+    assert {:ok, current_draft, current_seq, _undo_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    current_group = Enum.find(current_draft.step_groups, &(&1.id == group.id))
+    current_step = Enum.find(current_draft.steps, &(&1.id == step.id))
+
+    assert current_seq == max(seq_one, seq_two)
+    assert current_group.position == expected_group_position
+    assert current_step.position == expected_step_position
+  end
+
   test "operation rejection does not modify state or increment seq" do
     scope = project_scope_fixture()
     %{draft: draft} = draft_fixture(scope, base_snapshot_attrs())

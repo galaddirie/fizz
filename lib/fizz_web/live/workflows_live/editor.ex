@@ -22,7 +22,6 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias FizzWeb.Presence
   alias Phoenix.Socket.Broadcast
 
-  @presence_throttle_ms 60
   @preview_debounce_ms 300
 
   @structural_command_types ~w(
@@ -242,10 +241,13 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   def handle_info(
-        %Broadcast{event: "presence_diff", topic: topic},
-        %{assigns: %{draft_topic: topic}} = socket
+        %Broadcast{event: "presence_diff", topic: topic, payload: diff},
+        %{assigns: %{draft_topic: topic, current_user_id: current_user_id}} = socket
       ) do
-    {:noreply, assign(socket, :presences, presence_entries(topic))}
+    case remote_presence_diff?(diff, current_user_id) do
+      true -> {:noreply, assign(socket, :presences, presence_entries(topic))}
+      false -> {:noreply, socket}
+    end
   end
 
   def handle_info({:step_started, %{run_id: run_id} = payload}, socket) do
@@ -310,7 +312,6 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> assign(:validation_errors, %{})
     |> assign(:debug_execution_id, nil)
     |> assign(:current_user_id, current_user_id)
-    |> assign(:last_presence_update_at_ms, nil)
     |> assign(:preview_timers, %{})
   end
 
@@ -676,22 +677,11 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp load_step_io(socket, _payload), do: socket
 
   defp update_presence_cursor(socket, payload) do
-    now = System.monotonic_time(:millisecond)
-    last_update_at_ms = socket.assigns.last_presence_update_at_ms
-
-    case last_update_at_ms do
-      last_update_at_ms
-      when is_integer(last_update_at_ms) and now - last_update_at_ms < @presence_throttle_ms ->
-        socket
-
-      _other ->
-        update_presence(socket, %{
-          cursor: cursor_from_payload(payload),
-          dragging_steps: payload_value(payload, "dragging_steps"),
-          dragging_groups: payload_value(payload, "dragging_groups")
-        })
-        |> assign(:last_presence_update_at_ms, now)
-    end
+    update_presence(socket, %{
+      cursor: cursor_from_payload(payload),
+      dragging_steps: payload_value(payload, "dragging_steps"),
+      dragging_groups: payload_value(payload, "dragging_groups")
+    })
   end
 
   defp clear_presence_cursor(socket) do
@@ -701,7 +691,6 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       dragging_steps: nil,
       dragging_groups: nil
     })
-    |> assign(:last_presence_update_at_ms, nil)
   end
 
   defp update_presence_selection(socket, payload) do
@@ -732,11 +721,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       )
 
     case result do
-      {:ok, _meta} ->
-        assign(socket, :presences, presence_entries(socket.assigns.draft_topic))
-
-      {:error, _reason} ->
-        socket
+      {:ok, _meta} -> socket
+      {:error, _reason} -> socket
     end
   end
 
@@ -1569,6 +1555,20 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       dragging_groups: nil
     }
   end
+
+  defp remote_presence_diff?(diff, current_user_id)
+       when is_map(diff) and is_binary(current_user_id) do
+    joins = Map.get(diff, :joins) || Map.get(diff, "joins") || %{}
+    leaves = Map.get(diff, :leaves) || Map.get(diff, "leaves") || %{}
+
+    joins
+    |> Map.keys()
+    |> Kernel.++(Map.keys(leaves))
+    |> Enum.uniq()
+    |> Enum.any?(&(&1 != current_user_id))
+  end
+
+  defp remote_presence_diff?(_diff, _current_user_id), do: true
 
   defp presence_entries(nil), do: []
 

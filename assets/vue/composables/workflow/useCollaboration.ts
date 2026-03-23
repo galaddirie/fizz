@@ -1,8 +1,8 @@
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import type { Node } from '@vue-flow/core';
 import { useThrottleFn } from '@vueuse/core';
 
-import { CURSOR_IDLE_MS, CURSOR_THROTTLE_MS } from '@/constants/layout';
+import { CURSOR_THROTTLE_MS } from '@/constants/layout';
 import { isStepNode } from '@/lib/workflowGuards';
 import type { WorkflowNodeData, UserPresence } from '@/types/workflow';
 import type { WorkflowEditorEmits } from '@/types/workflowEditor';
@@ -21,27 +21,10 @@ interface UseCollaborationOptions {
 export function useCollaboration(options: UseCollaborationOptions) {
   const isUpdatingSelection = ref(false);
   const lastSelectionKey = ref('');
-  const interactionIdleTimer = ref<number | null>(null);
 
   const otherUserPresences = computed(() => {
     return options.presences().filter(p => p.user.id !== options.currentUserId());
   });
-
-  const cancelInteractionIdleTimer = () => {
-    if (interactionIdleTimer.value === null || typeof window === 'undefined') return;
-    window.clearTimeout(interactionIdleTimer.value);
-    interactionIdleTimer.value = null;
-  };
-
-  const scheduleInteractionClear = () => {
-    cancelInteractionIdleTimer();
-    if (typeof window === 'undefined') return;
-
-    interactionIdleTimer.value = window.setTimeout(() => {
-      interactionIdleTimer.value = null;
-      options.emit('mouse_leave');
-    }, CURSOR_IDLE_MS);
-  };
 
   const emitInteractionThrottled = useThrottleFn(
     (
@@ -83,17 +66,11 @@ export function useCollaboration(options: UseCollaborationOptions) {
     dragging_groups?: Record<string, { x: number; y: number; width: number; height: number }> | null
   ) => {
     emitInteractionThrottled(x, y, dragging_steps, dragging_groups);
-    scheduleInteractionClear();
   };
 
   const clearInteraction = () => {
-    cancelInteractionIdleTimer();
     options.emit('mouse_leave');
   };
-
-  onBeforeUnmount(() => {
-    cancelInteractionIdleTimer();
-  });
 
   const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) => {
     if (!options.canEdit()) return;
