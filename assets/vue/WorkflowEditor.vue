@@ -343,24 +343,14 @@ const lastSavedExact = computed(() => {
 });
 
 const saveStatus = computed(() => props.saveStatus ?? 'saved');
-const saveIndicatorLabel = computed(() => {
-  switch (saveStatus.value) {
-    case 'saving':
-      return 'Saving...';
-    case 'error':
-      return 'Save error';
-    default:
-      return 'All changes saved';
-  }
-});
 const saveIndicatorDetail = computed(() => {
   switch (saveStatus.value) {
     case 'saving':
-      return 'Changes are syncing automatically';
+      return 'Saving\u2026';
     case 'error':
-      return 'Retrying automatically';
+      return 'Save failed \u00b7 retrying';
     default:
-      return `Last saved ${lastSaved.value}`;
+      return `Saved ${lastSaved.value}`;
   }
 });
 const saveIndicatorTitle = computed(() => {
@@ -529,14 +519,11 @@ useLiveEvent<{
 
       <div class="absolute right-0 top-[14px] z-30 flex items-start">
         <EditorToolbar
-          :presences="editor.presences"
           :can-undo="editor.undoStore.canUndo"
           :can-redo="editor.undoStore.canRedo"
           :undo-tooltip="editor.undoStore.undoTooltip"
           :redo-tooltip="editor.undoStore.redoTooltip"
           :is-undo-pending="editor.undoStore.isPending"
-          :save-status="saveStatus"
-          :save-error="props.saveError"
           :validation-errors="toolbarValidationErrors"
           @undo="editor.handleUndo"
           @redo="editor.handleRedo"
@@ -568,15 +555,13 @@ useLiveEvent<{
             </div>
           </div>
 
-          <div
-            class="pointer-events-auto ml-1 inline-flex select-none items-center gap-2 rounded-full border border-base-300/60 bg-base-100/75 px-2.5 py-1 text-[10px] font-medium text-base-content/55 shadow-sm backdrop-blur-sm"
+          <p
+            class="pointer-events-auto ml-2 select-none text-[11px] tracking-wide text-base-content/60"
             :title="saveIndicatorTitle"
           >
-            <span class="inline-block h-1.5 w-1.5 rounded-full" :class="saveIndicatorDotClass"></span>
-            <span>{{ saveIndicatorLabel }}</span>
-            <span class="text-base-content/30">&middot;</span>
-            <span class="text-base-content/45">{{ saveIndicatorDetail }}</span>
-          </div>
+            <span class="inline-block h-1 w-1 rounded-full align-middle mr-1.5" :class="saveIndicatorDotClass"></span>
+            <span>{{ saveIndicatorDetail }}</span>
+          </p>
 
           <!-- Debug Mode Floating Pill -->
           <div

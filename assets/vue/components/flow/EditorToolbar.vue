@@ -1,94 +1,40 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { UserPresence } from '@/types/workflow';
 import {
   ArrowUturnLeftIcon,
   ArrowUturnRightIcon,
-  CloudArrowUpIcon,
   ExclamationCircleIcon,
   ArrowPathIcon,
   ClockIcon,
   RocketLaunchIcon,
 } from '@heroicons/vue/24/outline';
 
-// =============================================================================
-// Props
-// =============================================================================
-
 interface Props {
-  saveStatus?: 'saved' | 'saving' | 'error';
-  saveError?: string | null;
   canUndo?: boolean;
   canRedo?: boolean;
   undoTooltip?: string;
   redoTooltip?: string;
   isUndoPending?: boolean;
-  presences?: UserPresence[];
   validationErrors?: string[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  saveStatus: 'saved',
-  saveError: null,
   canUndo: false,
   canRedo: false,
   undoTooltip: 'Undo (⌘Z)',
   redoTooltip: 'Redo (⌘⇧Z)',
   isUndoPending: false,
-  presences: () => [],
   validationErrors: () => [],
 });
 
-// =============================================================================
-// Emits
-// =============================================================================
-
 const emit = defineEmits<{
-  (e: 'save'): void;
   (e: 'undo'): void;
   (e: 'redo'): void;
-  (e: 'run-test'): void;
   (e: 'publish'): void;
-  (e: 'rename', name: string): void;
   (e: 'open-revisions'): void;
 }>();
 
-// =============================================================================
-// Computed
-// =============================================================================
-
-
 const hasErrors = computed(() => props.validationErrors.length > 0);
-const saveIndicatorLabel = computed(() => {
-  switch (props.saveStatus) {
-    case 'saving':
-      return 'Saving...';
-    case 'error':
-      return 'Save error';
-    default:
-      return 'All changes saved';
-  }
-});
-const saveIndicatorTitle = computed(() => {
-  switch (props.saveStatus) {
-    case 'saving':
-      return 'Changes are being saved automatically';
-    case 'error':
-      return props.saveError ?? 'Saving failed. Retrying automatically.';
-    default:
-      return 'Workflow draft is fully synced';
-  }
-});
-const saveIndicatorClasses = computed(() => {
-  switch (props.saveStatus) {
-    case 'saving':
-      return 'border-amber-200 bg-amber-50 text-amber-700';
-    case 'error':
-      return 'border-rose-200 bg-rose-50 text-rose-700';
-    default:
-      return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  }
-});
 </script>
 
 <template>
@@ -100,78 +46,57 @@ const saveIndicatorClasses = computed(() => {
       </svg>
     </div>
 
-    <header class="pointer-events-auto bg-base-100 relative flex h-full items-center gap-4 rounded-bl-[20px] border-b border-l-0 border-base-300 pl-4 pr-6 pb-3.5">
-      <!-- Border Mask for seamless curve transition -->
-    <!-- Center Section: Undo/Redo Tools -->
-    <div class="bg-base-200/50 border-base-300/30 flex items-center gap-1 rounded-2xl border p-1.5">
-      <button
-        class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom hover:bg-base-100 rounded-lg disabled:opacity-30"
-        :disabled="!canUndo || isUndoPending"
-        :data-tip="undoTooltip"
-        @click="emit('undo')"
-      >
-        <ArrowPathIcon v-if="isUndoPending" class="h-4 w-4 animate-spin" />
-        <ArrowUturnLeftIcon v-else class="h-4.5 w-4.5" />
-      </button>
-      <button
-        class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom hover:bg-base-100 rounded-lg disabled:opacity-30"
-        :disabled="!canRedo || isUndoPending"
-        :data-tip="redoTooltip"
-        @click="emit('redo')"
-      >
-        <ArrowPathIcon v-if="isUndoPending" class="h-4 w-4 animate-spin" />
-        <ArrowUturnRightIcon v-else class="h-4.5 w-4.5" />
-      </button>
-    </div>
-
-    <!-- Right Section: Collaboration + Actions -->
-    <div class="flex items-center gap-4">
-      <!-- Collaborators -->
-      <!-- <Avatar :presences="presences" /> -->
-
-      <!-- Validation Errors Indicator -->
-      <div
-        v-if="hasErrors"
-        class="tooltip tooltip-bottom"
-        :data-tip="`${validationErrors.length} validation error(s)`"
-      >
-        <button class="btn btn-ghost btn-sm btn-circle text-error">
-          <ExclamationCircleIcon class="h-5 w-5" />
+    <header class="pointer-events-auto bg-base-100 relative flex h-full items-center gap-2.5 rounded-bl-[20px] border-b border-l-0 border-base-300 pl-4 pr-5 pb-3.5">
+      <!-- Undo/Redo -->
+      <div class="flex items-center gap-0.5 rounded-lg border border-base-300/40 bg-base-200/40 p-1">
+        <button
+          class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom rounded-md transition-colors disabled:opacity-25"
+          :disabled="!canUndo || isUndoPending"
+          :data-tip="undoTooltip"
+          @click="emit('undo')"
+        >
+          <ArrowPathIcon v-if="isUndoPending" class="h-3.5 w-3.5 animate-spin" />
+          <ArrowUturnLeftIcon v-else class="h-4 w-4" />
+        </button>
+        <button
+          class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom rounded-md transition-colors disabled:opacity-25"
+          :disabled="!canRedo || isUndoPending"
+          :data-tip="redoTooltip"
+          @click="emit('redo')"
+        >
+          <ArrowPathIcon v-if="isUndoPending" class="h-3.5 w-3.5 animate-spin" />
+          <ArrowUturnRightIcon v-else class="h-4 w-4" />
         </button>
       </div>
 
+      <div class="flex items-center gap-2">
+        <!-- Validation Errors -->
+        <button
+          v-if="hasErrors"
+          class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom text-error rounded-md"
+          :data-tip="`${validationErrors.length} validation error(s)`"
+        >
+          <ExclamationCircleIcon class="h-4.5 w-4.5" />
+        </button>
 
+        <!-- Revisions -->
+        <button
+          class="btn btn-ghost btn-xs btn-square tooltip tooltip-bottom rounded-md text-base-content/50 hover:text-base-content/80 transition-colors"
+          data-tip="Revisions"
+          @click="emit('open-revisions')"
+        >
+          <ClockIcon class="h-4.5 w-4.5" />
+        </button>
 
-      <button
-        class="btn btn-sm btn-ghost border-base-300 bg-base-100 hover:bg-base-200 text-base-content/70 flex gap-2 rounded-xl border px-4 text-sm font-semibold transition-all"
-        @click="emit('open-revisions')"
-      >
-        <ClockIcon class="h-5 w-5" />
-      </button>
-
-      <div
-        class="flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold shadow-sm transition-all"
-        :class="saveIndicatorClasses"
-        :title="saveIndicatorTitle"
-      >
-        <span
-          v-if="saveStatus === 'saving'"
-          class="loading loading-spinner loading-xs"
-        ></span>
-        <ExclamationCircleIcon v-else-if="saveStatus === 'error'" class="h-5 w-5" />
-        <CloudArrowUpIcon v-else class="h-5 w-5" />
-        {{ saveIndicatorLabel }}
+        <!-- Publish -->
+        <button
+          class="btn btn-sm btn-primary text-primary-content flex items-center gap-1.5 rounded-lg px-4 text-xs font-semibold shadow-sm transition-all hover:shadow-md"
+          @click="emit('publish')"
+        >
+          <RocketLaunchIcon class="h-4 w-4" />
+          Publish
+        </button>
       </div>
-
-      <!-- Publish Button -->
-      <button
-        class="btn btn-sm btn-primary text-primary-content flex gap-2 rounded-xl px-5 text-sm font-semibold shadow-md transition-all hover:shadow-lg"
-        @click="emit('publish')"
-      >
-        <RocketLaunchIcon class="h-5 w-5" />
-        Publish
-      </button>
-    </div>
     </header>
   </div>
 </template>

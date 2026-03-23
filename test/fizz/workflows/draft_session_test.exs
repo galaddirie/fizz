@@ -10,7 +10,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
 
   setup do
     previous_env = Application.get_env(:fizz, DraftSession, [])
-    Application.put_env(:fizz, DraftSession, persist_interval_ms: 25, idle_timeout_ms: 75)
+    Application.put_env(:fizz, DraftSession, persist_debounce_ms: 25, idle_timeout_ms: 75)
 
     on_exit(fn ->
       Application.put_env(:fizz, DraftSession, previous_env)
@@ -531,7 +531,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
 
   test "idle timeout shuts down after last user leaves" do
     previous_env = Application.get_env(:fizz, DraftSession, [])
-    Application.put_env(:fizz, DraftSession, persist_interval_ms: 500, idle_timeout_ms: 60)
+    Application.put_env(:fizz, DraftSession, persist_debounce_ms: 500, idle_timeout_ms: 60)
 
     on_exit(fn ->
       Application.put_env(:fizz, DraftSession, previous_env)
