@@ -123,6 +123,7 @@ const noop = () => {};
             :set-canvas-ref="viewer.setCanvasRef"
             :set-vue-flow-ref="viewer.setVueFlowRef"
             :handle-pane-mouse-move="noopMouse"
+            :handle-pane-mouse-leave="noop"
             :handle-node-click="viewer.handleNodeClick"
             :handle-node-double-click="viewer.handleNodeDoubleClick"
             :handle-node-context-menu="noopNodeMouse"
