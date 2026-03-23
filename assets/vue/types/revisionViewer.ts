@@ -1,4 +1,9 @@
-import type { UndoEntrySummary } from '@/stores/undoStore';
+export type UndoEntrySummary = {
+  id: string;
+  label: string | null;
+  timestamp?: string | null;
+  depth: number;
+};
 import type { EditorState, StepType, Workflow, WorkflowDraft } from '@/types/workflow';
 
 export type RevisionKind = 'current' | 'undo' | 'version';

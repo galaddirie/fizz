@@ -27,7 +27,8 @@ defmodule Fizz.Workflows.DraftSession do
     :idle_timer_ref,
     :scope,
     :save_status,
-    :save_error
+    :save_error,
+    :editor_state
   ]
 
   @type save_status :: :saved | :saving | :error
@@ -46,7 +47,8 @@ defmodule Fizz.Workflows.DraftSession do
           idle_timer_ref: reference() | nil,
           scope: term(),
           save_status: save_status(),
-          save_error: term() | nil
+          save_error: term() | nil,
+          editor_state: map()
         }
 
   @spec child_spec(keyword()) :: Supervisor.child_spec()
@@ -70,7 +72,7 @@ defmodule Fizz.Workflows.DraftSession do
   end
 
   @spec join(String.t(), term(), String.t()) ::
-          {:ok, WorkflowDefinitionVersion.t(), non_neg_integer(), map()} | {:error, term()}
+          {:ok, WorkflowDefinitionVersion.t(), non_neg_integer(), map(), map()} | {:error, term()}
   def join(version_id, scope, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- ensure_started(version_id, scope) do
       GenServer.call(pid, {:join, scope, user_id}, :infinity)
@@ -131,13 +133,50 @@ defmodule Fizz.Workflows.DraftSession do
     end
   end
 
+  @spec get_editor_state(String.t()) :: {:ok, map()} | {:error, term()}
+  def get_editor_state(version_id) when is_binary(version_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, :get_editor_state, :infinity)
+    end
+  end
+
+  @spec pin_output(String.t(), String.t(), term()) :: {:ok, map()} | {:error, term()}
+  def pin_output(version_id, step_id, output_data)
+      when is_binary(version_id) and is_binary(step_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, {:pin_output, step_id, output_data}, :infinity)
+    end
+  end
+
+  @spec unpin_output(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def unpin_output(version_id, step_id) when is_binary(version_id) and is_binary(step_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, {:unpin_output, step_id}, :infinity)
+    end
+  end
+
+  @spec disable_step(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def disable_step(version_id, step_id) when is_binary(version_id) and is_binary(step_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, {:disable_step, step_id}, :infinity)
+    end
+  end
+
+  @spec enable_step(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def enable_step(version_id, step_id) when is_binary(version_id) and is_binary(step_id) do
+    with {:ok, pid} <- lookup_pid(version_id) do
+      GenServer.call(pid, {:enable_step, step_id}, :infinity)
+    end
+  end
+
   @spec snapshot(String.t(), String.t()) ::
           {:ok,
            %{
              draft: WorkflowDefinitionVersion.t(),
              seq: non_neg_integer(),
              undo_state: map(),
-             persistence: persistence_state()
+             persistence: persistence_state(),
+             editor_state: map()
            }}
           | {:error, term()}
   def snapshot(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
@@ -169,7 +208,8 @@ defmodule Fizz.Workflows.DraftSession do
          idle_timer_ref: nil,
          scope: scope,
          save_status: :saved,
-         save_error: nil
+         save_error: nil,
+         editor_state: %{pinned_outputs: %{}, disabled_steps: [], step_locks: %{}}
        }}
     else
       {:error, _reason} = error -> {:stop, error}
@@ -184,7 +224,9 @@ defmodule Fizz.Workflows.DraftSession do
       |> Map.put(:scope, scope)
       |> put_connected_user(user_id)
 
-    {:reply, {:ok, next_state.draft, next_state.seq, undo_state(next_state, user_id)}, next_state}
+    {:reply,
+     {:ok, next_state.draft, next_state.seq, undo_state(next_state, user_id),
+      next_state.editor_state}, next_state}
   end
 
   def handle_call({:leave, user_id}, _from, state) do
@@ -282,6 +324,60 @@ defmodule Fizz.Workflows.DraftSession do
     {:reply, {:ok, persistence_state(state)}, state}
   end
 
+  def handle_call(:get_editor_state, _from, state) do
+    {:reply, {:ok, state.editor_state}, state}
+  end
+
+  def handle_call({:pin_output, step_id, output_data}, _from, state) do
+    editor_state =
+      %{
+        state.editor_state
+        | pinned_outputs: Map.put(state.editor_state.pinned_outputs, step_id, output_data)
+      }
+
+    next_state = %{state | editor_state: editor_state}
+    broadcast(state.version_id, {:editor_state_changed, editor_state})
+    {:reply, {:ok, editor_state}, next_state}
+  end
+
+  def handle_call({:unpin_output, step_id}, _from, state) do
+    editor_state =
+      %{
+        state.editor_state
+        | pinned_outputs: Map.delete(state.editor_state.pinned_outputs, step_id)
+      }
+
+    next_state = %{state | editor_state: editor_state}
+    broadcast(state.version_id, {:editor_state_changed, editor_state})
+    {:reply, {:ok, editor_state}, next_state}
+  end
+
+  def handle_call({:disable_step, step_id}, _from, state) do
+    disabled = state.editor_state.disabled_steps
+
+    editor_state =
+      %{
+        state.editor_state
+        | disabled_steps: if(step_id in disabled, do: disabled, else: [step_id | disabled])
+      }
+
+    next_state = %{state | editor_state: editor_state}
+    broadcast(state.version_id, {:editor_state_changed, editor_state})
+    {:reply, {:ok, editor_state}, next_state}
+  end
+
+  def handle_call({:enable_step, step_id}, _from, state) do
+    editor_state =
+      %{
+        state.editor_state
+        | disabled_steps: Enum.reject(state.editor_state.disabled_steps, &(&1 == step_id))
+      }
+
+    next_state = %{state | editor_state: editor_state}
+    broadcast(state.version_id, {:editor_state_changed, editor_state})
+    {:reply, {:ok, editor_state}, next_state}
+  end
+
   def handle_call({:snapshot, user_id}, _from, state) do
     {:reply,
      {:ok,
@@ -289,7 +385,8 @@ defmodule Fizz.Workflows.DraftSession do
         draft: state.draft,
         seq: state.seq,
         undo_state: undo_state(state, user_id),
-        persistence: persistence_state(state)
+        persistence: persistence_state(state),
+        editor_state: state.editor_state
       }}, state}
   end
 

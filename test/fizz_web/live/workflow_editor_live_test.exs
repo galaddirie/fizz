@@ -190,7 +190,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
       }
     })
 
-    assert {:ok, draft, 1, undo_state} =
+    assert {:ok, draft, 1, undo_state, _editor_state} =
              DraftSession.join(view_version_id(view), project_scope, user.id)
 
     assert length(draft.steps) == 1
@@ -476,7 +476,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     version_id = view_version_id(view)
 
-    assert {:ok, draft_after_undo, 2, undo_state_after_undo} =
+    assert {:ok, draft_after_undo, 2, undo_state_after_undo, _editor_state} =
              DraftSession.join(version_id, project_scope, user.id)
 
     assert draft_after_undo.steps == []
@@ -487,7 +487,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     |> element("#workflow-editor")
     |> render_hook("editor_command", %{"type" => "redo", "payload" => %{"count" => 1}})
 
-    assert {:ok, draft_after_redo, 3, undo_state_after_redo} =
+    assert {:ok, draft_after_redo, 3, undo_state_after_redo, _editor_state} =
              DraftSession.join(version_id, project_scope, user.id)
 
     assert length(draft_after_redo.steps) == 1

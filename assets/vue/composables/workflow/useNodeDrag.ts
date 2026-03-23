@@ -57,6 +57,7 @@ interface UseNodeDragOptions {
   onNodeDrag: (handler: (event: NodeDragEvent) => void) => void;
   onNodeDragStart: (handler: (event: NodeDragStartEvent) => void) => void;
   onNodeDragStop: (handler: (event: NodeDragStopEvent) => void) => void;
+  onDraggingChange?: (dragging: boolean) => void;
 }
 
 type DragAxis = 'x' | 'y';
@@ -526,6 +527,7 @@ export function useNodeDrag(options: UseNodeDragOptions) {
         lockAbsDelta: null,
         recentSamples: [],
       };
+      options.onDraggingChange?.(true);
     }
 
     const shiftPressed = 'shiftKey' in event.event ? !!event.event.shiftKey : false;
@@ -611,6 +613,7 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     } else {
       options.emitInteraction(undefined, undefined, null, null);
     }
+
     options.clearGroupingPreview();
 
     const session = dragSession.value;
@@ -814,6 +817,7 @@ export function useNodeDrag(options: UseNodeDragOptions) {
     }
 
     dragSession.value = null;
+    options.onDraggingChange?.(false);
   };
 
   const handleNodeDragStart = (event: NodeDragStartEvent) => {
@@ -849,6 +853,7 @@ export function useNodeDrag(options: UseNodeDragOptions) {
         ? [{ timestamp: Date.now(), position: flowPosition }]
         : [],
     };
+    options.onDraggingChange?.(true);
   };
 
   options.onNodeDrag(handleNodeDrag);

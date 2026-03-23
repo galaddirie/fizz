@@ -9,10 +9,8 @@ interface UseKeyboardShortcutsOptions {
   handleCutSteps: (stepIds: string[]) => void;
   createGroupFromSelection: () => void;
   ungroupSelectedSteps: () => void;
-  undo: (callback: () => void) => void;
-  redo: (callback: () => void) => void;
-  sendUndo: () => void;
-  sendRedo: () => void;
+  undo: () => void;
+  redo: () => void;
 }
 
 const isEditableTarget = (target: EventTarget | null) => {
@@ -32,9 +30,9 @@ export function useKeyboardShortcuts(options: UseKeyboardShortcutsOptions) {
     if (key === 'z') {
       event.preventDefault();
       if (event.shiftKey) {
-        options.redo(options.sendRedo);
+        options.redo();
       } else {
-        options.undo(options.sendUndo);
+        options.undo();
       }
       return;
     }

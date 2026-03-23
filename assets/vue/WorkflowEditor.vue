@@ -519,11 +519,11 @@ useLiveEvent<{
 
       <div class="absolute right-0 top-[14px] z-30 flex items-start">
         <EditorToolbar
-          :can-undo="editor.undoStore.canUndo"
-          :can-redo="editor.undoStore.canRedo"
-          :undo-tooltip="editor.undoStore.undoTooltip"
-          :redo-tooltip="editor.undoStore.redoTooltip"
-          :is-undo-pending="editor.undoStore.isPending"
+          :can-undo="editor.canUndo"
+          :can-redo="editor.canRedo"
+          :undo-tooltip="editor.undoTooltip"
+          :redo-tooltip="editor.redoTooltip"
+          :is-undo-pending="editor.isUndoPending"
           :validation-errors="toolbarValidationErrors"
           @undo="editor.handleUndo"
           @redo="editor.handleRedo"

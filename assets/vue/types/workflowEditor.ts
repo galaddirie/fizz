@@ -14,8 +14,12 @@ import type {
   WorkflowValidationError,
 } from '@/types/workflow';
 
-import { useUndoStore } from '@/stores/undoStore';
-type UndoState = ReturnType<typeof useUndoStore>['state'];
+type UndoState = {
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel: string | null;
+  redoLabel: string | null;
+};
 
 export interface WorkflowEditorProps {
   workflow: Workflow;

@@ -186,6 +186,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     {:noreply, assign_save_status(socket, persistence)}
   end
 
+  def handle_info({:editor_state_changed, editor_state}, socket) do
+    {:noreply, merge_editor_state(socket, editor_state)}
+  end
+
   def handle_info(
         {:operation_rejected, user_id, reason},
         %{assigns: %{current_user_id: user_id}} = socket
@@ -202,10 +206,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         {:undo_rejected, user_id, _reason},
         %{assigns: %{current_user_id: user_id}} = socket
       ) do
-    {:noreply,
-     socket
-     |> refresh_undo_state()
-     |> push_event("workflow:undo_conflict", %{})}
+    {:noreply, refresh_undo_state(socket)}
   end
 
   def handle_info({:undo_rejected, _user_id, _reason}, socket) do
@@ -327,7 +328,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
          {:ok, draft} <- Workflows.edit_definition(scope, definition_id),
          {:ok, execution, step_executions, debug_execution_id} <-
            load_execution(scope, run_id, socket.assigns.live_action),
-         {:ok, socket, draft, seq, undo_state, presences, persistence} <-
+         {:ok, socket, draft, seq, undo_state, editor_state, presences, persistence} <-
            maybe_connect_draft_session(socket, scope, draft, run_id) do
       step_types = Steps.list_types()
 
@@ -341,7 +342,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       |> assign(:node_library_items, Enum.map(step_types, &encode_node_library_item/1))
       |> assign(:collab_seq, seq)
       |> assign(:presences, presences)
-      |> assign(:editor_state, initial_editor_state(definition.id))
+      |> assign(:editor_state, Map.put(editor_state, :workflow_id, definition.id))
       |> assign(:execution, execution)
       |> assign(:step_executions, step_executions)
       |> assign(:undo_state, undo_state)
@@ -349,7 +350,6 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       |> assign(:save_error, encode_optional_reason(Map.get(persistence, :error)))
       |> assign(:credential_options, [])
       |> assign(:debug_execution_id, debug_execution_id)
-      |> maybe_push_undo_state()
     else
       {:error, :project_not_found} ->
         redirect_with_error(socket, "Project not found", ~p"/projects")
@@ -389,23 +389,23 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       draft_topic = draft_topic(draft.id)
       run_topic = run_topic(run_id)
 
-      with {:ok, joined_draft, seq, undo_state} <- DraftSession.join(draft.id, scope, user_id),
+      with {:ok, joined_draft, seq, undo_state, editor_state} <-
+             DraftSession.join(draft.id, scope, user_id),
            {:ok, persistence} <- DraftSession.get_persistence_state(draft.id),
            :ok <- Phoenix.PubSub.subscribe(Fizz.PubSub, draft_topic),
            :ok <- maybe_subscribe_to_run_topic(run_topic) do
+        updated_socket =
+          socket
+          |> assign(:draft_topic, draft_topic)
+          |> assign(:run_topic, run_topic)
+
         case Presence.track(self(), draft_topic, user_id, initial_presence_meta(scope.user)) do
           {:ok, _meta} ->
-            {:ok,
-             socket
-             |> assign(:draft_topic, draft_topic)
-             |> assign(:run_topic, run_topic), joined_draft, seq, undo_state,
+            {:ok, updated_socket, joined_draft, seq, undo_state, editor_state,
              presence_entries(draft_topic), persistence}
 
           {:error, {:already_tracked, _pid}} ->
-            {:ok,
-             socket
-             |> assign(:draft_topic, draft_topic)
-             |> assign(:run_topic, run_topic), joined_draft, seq, undo_state,
+            {:ok, updated_socket, joined_draft, seq, undo_state, editor_state,
              presence_entries(draft_topic), persistence}
 
           {:error, reason} ->
@@ -416,7 +416,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
           {:error, reason}
       end
     else
-      {:ok, socket, draft, 0, empty_undo_state(), [], %{status: :saved, error: nil}}
+      {:ok, socket, draft, 0, empty_undo_state(), initial_editor_state(nil), [],
+       %{status: :saved, error: nil}}
     end
   end
 
@@ -463,13 +464,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         |> assign_draft_state(draft, seq, undo_state)
         |> assign(:save_status, "saving")
         |> assign(:save_error, nil)
-        |> push_event("workflow:undo_applied", %{})
         |> push_event("workflow:operation_ack", %{type: "undo", seq: seq})
 
       {:error, _reason} ->
-        socket
-        |> refresh_undo_state()
-        |> push_event("workflow:undo_conflict", %{})
+        refresh_undo_state(socket)
     end
   end
 
@@ -480,13 +478,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         |> assign_draft_state(draft, seq, undo_state)
         |> assign(:save_status, "saving")
         |> assign(:save_error, nil)
-        |> push_event("workflow:redo_applied", %{})
         |> push_event("workflow:operation_ack", %{type: "redo", seq: seq})
 
       {:error, _reason} ->
-        socket
-        |> refresh_undo_state()
-        |> push_event("workflow:redo_conflict", %{})
+        refresh_undo_state(socket)
     end
   end
 
@@ -793,12 +788,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       output_data =
         Map.get(payload, "output_data", Map.get(payload, :output_data))
 
-      update(socket, :editor_state, fn editor_state ->
-        %{
-          editor_state
-          | pinned_outputs: Map.put(editor_state.pinned_outputs, step_id, output_data)
-        }
-      end)
+      case DraftSession.pin_output(socket.assigns.draft.id, step_id, output_data) do
+        {:ok, editor_state} -> merge_editor_state(socket, editor_state)
+        {:error, _reason} -> socket
+      end
     else
       socket
     end
@@ -808,9 +801,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
 
     if is_binary(step_id) do
-      update(socket, :editor_state, fn editor_state ->
-        %{editor_state | pinned_outputs: Map.delete(editor_state.pinned_outputs, step_id)}
-      end)
+      case DraftSession.unpin_output(socket.assigns.draft.id, step_id) do
+        {:ok, editor_state} -> merge_editor_state(socket, editor_state)
+        {:error, _reason} -> socket
+      end
     else
       socket
     end
@@ -820,9 +814,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
 
     if is_binary(step_id) do
-      update(socket, :editor_state, fn editor_state ->
-        %{editor_state | disabled_steps: Enum.uniq([step_id | editor_state.disabled_steps])}
-      end)
+      case DraftSession.disable_step(socket.assigns.draft.id, step_id) do
+        {:ok, editor_state} -> merge_editor_state(socket, editor_state)
+        {:error, _reason} -> socket
+      end
     else
       socket
     end
@@ -832,22 +827,36 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
 
     if is_binary(step_id) do
-      update(socket, :editor_state, fn editor_state ->
-        %{
-          editor_state
-          | disabled_steps: Enum.reject(editor_state.disabled_steps, &(&1 == step_id))
-        }
-      end)
+      case DraftSession.enable_step(socket.assigns.draft.id, step_id) do
+        {:ok, editor_state} -> merge_editor_state(socket, editor_state)
+        {:error, _reason} -> socket
+      end
     else
       socket
     end
   end
 
+  defp merge_editor_state(socket, editor_state) do
+    assign(
+      socket,
+      :editor_state,
+      Map.put(editor_state, :workflow_id, socket.assigns.editor_state[:workflow_id])
+    )
+  end
+
   defp refresh_draft_state(socket) do
     case DraftSession.snapshot(socket.assigns.draft.id, socket.assigns.current_user_id) do
-      {:ok, %{draft: draft, seq: seq, undo_state: undo_state, persistence: persistence}} ->
+      {:ok,
+       %{
+         draft: draft,
+         seq: seq,
+         undo_state: undo_state,
+         persistence: persistence,
+         editor_state: editor_state
+       }} ->
         socket
         |> assign_draft_state(draft, seq, undo_state)
+        |> merge_editor_state(editor_state)
         |> assign(:presences, presence_entries(socket.assigns.draft_topic))
         |> assign(:save_status, encode_save_status(Map.get(persistence, :status)))
         |> assign(:save_error, encode_optional_reason(Map.get(persistence, :error)))
@@ -897,9 +906,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp refresh_undo_state(socket) do
     case DraftSession.get_undo_state(socket.assigns.draft.id, socket.assigns.current_user_id) do
       {:ok, undo_state} ->
-        socket
-        |> assign(:undo_state, undo_state)
-        |> maybe_push_undo_state()
+        assign(socket, :undo_state, undo_state)
 
       {:error, _reason} ->
         socket
@@ -1250,19 +1257,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> assign(:collab_seq, seq)
     |> assign(:undo_state, undo_state)
     |> clear_validation_errors()
-    |> maybe_push_undo_state()
   end
 
   defp clear_validation_errors(socket) do
     assign(socket, :validation_errors, %{})
-  end
-
-  defp maybe_push_undo_state(socket) do
-    if connected?(socket) do
-      push_event(socket, "workflow:undo_state", socket.assigns.undo_state)
-    else
-      socket
-    end
   end
 
   defp operation_ack_payload(type, seq, payload) do

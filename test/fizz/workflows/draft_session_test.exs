@@ -26,7 +26,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
     subscribe_draft(draft.id)
     register_session_cleanup(draft.id)
 
-    assert {:ok, joined_draft, 0, undo_state} =
+    assert {:ok, joined_draft, 0, undo_state, _editor_state} =
              DraftSession.join(draft.id, scope, scope.user.id)
 
     assert Enum.map(joined_draft.steps, & &1.id) == Enum.map(draft.steps, & &1.id)
@@ -43,7 +43,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     original_step_ids = MapSet.new(Enum.map(draft.steps, & &1.id))
 
     register_session_cleanup(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     assert {:ok, draft_after_add, 1, undo_state_after_add} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{
@@ -113,7 +115,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope, base_snapshot_attrs())
 
     register_session_cleanup(draft.id)
-    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, joined_draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     source_step = Enum.at(joined_draft.steps, 0)
     target_step = Enum.at(joined_draft.steps, 1)
@@ -153,7 +157,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope, base_snapshot_attrs())
 
     register_session_cleanup(draft.id)
-    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, joined_draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     first_step = Enum.at(joined_draft.steps, 0)
     second_step = Enum.at(joined_draft.steps, 1)
@@ -226,7 +232,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope, grouped_snapshot_attrs())
 
     register_session_cleanup(draft.id)
-    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, joined_draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     group_one = Enum.at(joined_draft.step_groups, 0)
     group_two = Enum.at(joined_draft.step_groups, 1)
@@ -316,7 +324,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope, connected_grouped_snapshot_attrs())
 
     register_session_cleanup(draft.id)
-    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, joined_draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     first_step = Enum.at(joined_draft.steps, 0)
     second_step = Enum.at(joined_draft.steps, 1)
@@ -366,7 +376,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope)
 
     register_session_cleanup(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     assert {:ok, draft_after_add, 1, _undo_state_after_add} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{
@@ -391,7 +403,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope)
 
     register_session_cleanup(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     assert {:ok, _draft_after_add, 1, _undo_state_after_add} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{
@@ -420,9 +434,10 @@ defmodule Fizz.Workflows.DraftSessionTest do
     subscribe_draft(draft.id)
     register_session_cleanup(draft.id)
 
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
-    assert {:ok, _draft, 0, _undo_state} =
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
              DraftSession.join(draft.id, second_scope, second_scope.user.id)
 
     assert {:ok, draft_after_add, 1, _undo_state_after_add} =
@@ -451,7 +466,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope)
 
     register_session_cleanup(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     assert {:ok, _draft_after_add, 1, _undo_state_after_add} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{
@@ -483,7 +500,8 @@ defmodule Fizz.Workflows.DraftSessionTest do
     subscribe_draft(draft.id)
     register_session_cleanup(draft.id)
 
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, user_id)
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, user_id)
 
     assert {:ok, _draft_after_add, 1, _undo_state_after_add} =
              DraftSession.apply_operation(draft.id, user_id, %{
@@ -518,7 +536,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope)
 
     register_session_cleanup(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     assert {:ok, _draft_after_add, 1, _undo_state_after_add} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{
@@ -541,7 +561,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope)
 
     subscribe_draft(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
 
     pid = session_pid(draft.id)
     ref = Process.monitor(pid)
@@ -565,9 +587,11 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope)
 
     register_session_cleanup(draft.id)
-    assert {:ok, _draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
 
-    assert {:ok, _draft, 0, _undo_state} =
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
              DraftSession.join(draft.id, second_scope, second_scope.user.id)
 
     assert {:ok, draft_after_first_add, 1, _undo_state_after_first_add} =
@@ -610,9 +634,11 @@ defmodule Fizz.Workflows.DraftSessionTest do
     %{draft: draft} = draft_fixture(scope, grouped_snapshot_attrs())
 
     register_session_cleanup(draft.id)
-    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, scope.user.id)
 
-    assert {:ok, _draft, 0, _undo_state} =
+    assert {:ok, joined_draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
              DraftSession.join(draft.id, second_scope, second_scope.user.id)
 
     group = Enum.at(joined_draft.step_groups, 0)
@@ -673,7 +699,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
         {%{"x" => 180, "y" => 220, "width" => 460, "height" => 340}, %{"x" => 65, "y" => 70}}
       end
 
-    assert {:ok, current_draft, current_seq, _undo_state} =
+    assert {:ok, current_draft, current_seq, _undo_state, _editor_state} =
              DraftSession.join(draft.id, scope, scope.user.id)
 
     current_group = Enum.find(current_draft.step_groups, &(&1.id == group.id))
@@ -691,7 +717,9 @@ defmodule Fizz.Workflows.DraftSessionTest do
 
     subscribe_draft(draft.id)
     register_session_cleanup(draft.id)
-    assert {:ok, joined_draft, 0, _undo_state} = DraftSession.join(draft.id, scope, user_id)
+
+    assert {:ok, joined_draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, user_id)
 
     first_step = hd(joined_draft.steps)
 
@@ -707,13 +735,79 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert_receive {:operation_rejected, ^user_id, :self_connection}
     refute_receive {:draft_updated, _seq, _summary}
 
-    assert {:ok, current_draft, current_seq, undo_state} =
+    assert {:ok, current_draft, current_seq, undo_state, _editor_state} =
              DraftSession.join(draft.id, scope, user_id)
 
     assert current_seq == 0
     assert current_draft.steps == joined_draft.steps
     assert current_draft.connections == joined_draft.connections
     assert undo_state == %{canUndo: false, canRedo: false, undoLabel: nil, redoLabel: nil}
+  end
+
+  test "editor_state is shared across users and survives reconnection" do
+    scope = project_scope_fixture()
+    second_scope = secondary_scope(scope)
+    %{draft: draft} = draft_fixture(scope, base_snapshot_attrs())
+    first_step_id = hd(draft.steps).id
+
+    subscribe_draft(draft.id)
+    register_session_cleanup(draft.id)
+
+    assert {:ok, _draft, 0, _undo_state, editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert editor_state == %{pinned_outputs: %{}, disabled_steps: [], step_locks: %{}}
+
+    # Pin an output
+    assert {:ok, editor_state} =
+             DraftSession.pin_output(draft.id, first_step_id, %{"result" => 42})
+
+    assert editor_state.pinned_outputs == %{first_step_id => %{"result" => 42}}
+    assert_receive {:editor_state_changed, ^editor_state}
+
+    # Disable a step
+    assert {:ok, editor_state} = DraftSession.disable_step(draft.id, first_step_id)
+    assert first_step_id in editor_state.disabled_steps
+    assert_receive {:editor_state_changed, ^editor_state}
+
+    # Second user sees shared state on join
+    assert {:ok, _draft, 0, _undo_state, shared_editor_state} =
+             DraftSession.join(draft.id, second_scope, second_scope.user.id)
+
+    assert shared_editor_state.pinned_outputs == %{first_step_id => %{"result" => 42}}
+    assert first_step_id in shared_editor_state.disabled_steps
+
+    # First user leaves and rejoins — state persists
+    :ok = DraftSession.leave(draft.id, scope.user.id)
+
+    assert {:ok, _draft, _seq, _undo_state, reconnected_editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert reconnected_editor_state.pinned_outputs == %{first_step_id => %{"result" => 42}}
+    assert first_step_id in reconnected_editor_state.disabled_steps
+
+    # Unpin and enable
+    assert {:ok, editor_state} = DraftSession.unpin_output(draft.id, first_step_id)
+    assert editor_state.pinned_outputs == %{}
+
+    assert {:ok, editor_state} = DraftSession.enable_step(draft.id, first_step_id)
+    assert editor_state.disabled_steps == []
+  end
+
+  test "disable_step is idempotent" do
+    scope = project_scope_fixture()
+    %{draft: draft} = draft_fixture(scope, base_snapshot_attrs())
+    first_step_id = hd(draft.steps).id
+
+    register_session_cleanup(draft.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    assert {:ok, editor_state} = DraftSession.disable_step(draft.id, first_step_id)
+    assert {:ok, editor_state2} = DraftSession.disable_step(draft.id, first_step_id)
+    assert editor_state.disabled_steps == editor_state2.disabled_steps
+    assert length(editor_state2.disabled_steps) == 1
   end
 
   defp draft_fixture(scope, snapshot_attrs \\ nil) do

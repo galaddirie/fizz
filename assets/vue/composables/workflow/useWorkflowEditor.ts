@@ -8,7 +8,6 @@ import WorkflowSubNode from '@/components/flow/SubNode.vue';
 import GroupNode from '@/components/flow/GroupNode.vue';
 import CustomEdge from '@/components/flow/Edge.vue';
 import { useClientStore } from '@/stores/clientStore';
-import { useUndoStore } from '@/stores/undoStore';
 import { useWorkflowEdges } from '@/composables/useWorkflowEdges';
 import { useWorkflowGraph } from '@/composables/useWorkflowGraph';
 import { useWorkflowNodes } from '@/composables/useWorkflowNodes';
@@ -25,16 +24,16 @@ import { useMiniMapNodeColor } from '@/composables/workflow/useMiniMapNodeColor'
 import { useNodeDrag } from '@/composables/workflow/useNodeDrag';
 import { useNodeInteraction } from '@/composables/workflow/useNodeInteraction';
 import { useWorkflowActions } from '@/composables/workflow/useWorkflowActions';
-import { useWorkflowExecutionState } from '@/composables/workflow/useWorkflowExecutionState';
 import { useWorkflowNodeActions } from '@/composables/workflow/useWorkflowNodeActions';
 import { useWorkflowPins } from '@/composables/workflow/useWorkflowPins';
-import { useWorkflowSelection } from '@/composables/workflow/useWorkflowSelection';
 import { DEFAULT_NODE_DIMENSIONS, GRID_SIZE } from '@/constants/layout';
 import { findGroupAtPoint, getAbsoluteNodePosition } from '@/lib/workflowGeometry';
+import { isStepNode } from '@/lib/workflowGuards';
 import { workflowTrace } from '@/lib/workflowTrace';
 import type {
   NodeLibraryItem,
   StepHandleQuickAddRequest,
+  StepNodeData,
   StepType,
   Workflow,
   WorkflowDraft,
@@ -127,16 +126,35 @@ const draftMatchesOptimisticLayout = (
 
 export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEditorEmits) {
   const store = useClientStore();
-  const undoStore = useUndoStore();
 
-  // Initialize undo state from props if available
-  if (props.undoState) {
-    undoStore.handleStateUpdate(props.undoState);
-  }
-  const sendUndo = () => emit('undo', { count: 1 });
-  const sendRedo = () => emit('redo', { count: 1 });
-  const handleUndo = () => undoStore.undo(sendUndo);
-  const handleRedo = () => undoStore.redo(sendRedo);
+  // Undo state — driven entirely from server props
+  const isUndoPending = ref(false);
+  const canUndo = computed(() => (props.undoState?.canUndo ?? false) && !isUndoPending.value);
+  const canRedo = computed(() => (props.undoState?.canRedo ?? false) && !isUndoPending.value);
+  const undoTooltip = computed(() =>
+    props.undoState?.undoLabel ? `Undo: ${props.undoState.undoLabel} (⌘Z)` : 'Nothing to undo'
+  );
+  const redoTooltip = computed(() =>
+    props.undoState?.redoLabel ? `Redo: ${props.undoState.redoLabel} (⌘⇧Z)` : 'Nothing to redo'
+  );
+  const clearUndoPending = () => {
+    isUndoPending.value = false;
+  };
+  // Consecutive undo/redo operations can produce the same visible labels, so
+  // don't rely on undoState alone to release the pending flag.
+  watch(() => props.collabSeq ?? 0, clearUndoPending);
+  watch(() => props.undoState, clearUndoPending, { deep: true });
+
+  const handleUndo = () => {
+    if (!canUndo.value) return;
+    isUndoPending.value = true;
+    emit('undo', { count: 1 });
+  };
+  const handleRedo = () => {
+    if (!canRedo.value) return;
+    isUndoPending.value = true;
+    emit('redo', { count: 1 });
+  };
   const {
     onPaneClick,
     onConnect,
@@ -170,13 +188,8 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const activeWorkflow = computed<Workflow>(() => props.workflow);
   const activeDraft = computed<WorkflowDraft | undefined>(() => props.workflow.draft);
   const collabSeq = computed(() => props.collabSeq ?? 0);
+  const isLocalDragActive = ref(false);
   const optimisticLayout = ref<OptimisticLayoutState | null>(null);
-  const activeExpressionPreviews = computed(() => props.expressionPreviews ?? {});
-  const activeExecution = computed(() => props.execution ?? null);
-  const activeStepExecutions = computed(() => props.stepExecutions ?? []);
-  const activeEditorState = computed(() => props.editorState);
-  const activePresences = computed(() => props.presences ?? []);
-  const activeCurrentUserId = computed(() => props.currentUserId);
   const setOptimisticLayout = (payload: CommitDragLayoutPayload) => {
     optimisticLayout.value = {
       txnId: payload.txn_id,
@@ -255,9 +268,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   });
 
   // Prevent the :nodes prop from overwriting Vue Flow's internal drag positions.
-  // When any node is being dragged, freeze the nodes array passed to <VueFlow>
-  // so that recomputations triggered by presence updates etc. don't snap nodes back.
-  const isDragging = computed(() => getNodes.value.some(n => n.dragging));
+  // Vue Flow's per-node dragging flag can briefly flicker during a drag, so also
+  // pin the canvas while our local drag session is active.
+  const isDragging = computed(() => isLocalDragActive.value || getNodes.value.some(n => n.dragging));
   const displayNodes = shallowRef(nodes.value);
   watch(
     [isDragging, nodes],
@@ -360,6 +373,9 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     onNodeDrag,
     onNodeDragStart,
     onNodeDragStop,
+    onDraggingChange: dragging => {
+      isLocalDragActive.value = dragging;
+    },
   });
   const nodeInteraction = useNodeInteraction({
     canEdit: () => canEdit.value,
@@ -581,10 +597,8 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     handleCutSteps: clipboard.handleCutSteps,
     createGroupFromSelection: grouping.createGroupFromSelection,
     ungroupSelectedSteps: grouping.ungroupSelectedSteps,
-    undo: undoStore.undo,
-    redo: undoStore.redo,
-    sendUndo,
-    sendRedo,
+    undo: handleUndo,
+    redo: handleRedo,
   });
   const actions = useWorkflowActions({
     canEdit: () => canEdit.value,
@@ -592,17 +606,27 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     requestNodeRemoval: nodeInteraction.requestNodeRemoval,
     selectNode: store.selectNode,
   });
-  const selection = useWorkflowSelection({ nodes: () => nodes.value, selectedNodeId: () => store.selectedNodeId, stepTypes: () => props.stepTypes ?? ([] as StepType[]) });
-  const executionState = useWorkflowExecutionState({ execution: () => props.execution });
+  const selectedNode = computed<Node<StepNodeData> | null>(() => {
+    const nodeId = store.selectedNodeId;
+    if (!nodeId) return null;
+    const node = nodes.value.find(n => n.id === nodeId);
+    if (!node || !isStepNode(node)) return null;
+    return node as Node<StepNodeData>;
+  });
+
+  const selectedStepType = computed<StepType | null>(() => {
+    if (!selectedNode.value) return null;
+    const typeId = selectedNode.value.data?.type_id;
+    return (props.stepTypes ?? []).find(st => st.id === typeId) ?? null;
+  });
+
+  const isExecutionFailed = computed(() => props.execution?.status === 'failed');
+  const isExecutionRunning = computed(() => {
+    const status = props.execution?.status;
+    return status === 'running' || status === 'pending';
+  });
   const miniMap = useMiniMapNodeColor();
   const closeContextMenu = () => store.hideContextMenu();
-  useLiveEvent<any>('workflow:undo_state', payload => {
-    undoStore.handleStateUpdate(payload);
-  });
-  useLiveEvent('workflow:undo_applied', () => undoStore.handleUndoApplied());
-  useLiveEvent('workflow:undo_conflict', () => undoStore.handleUndoConflict());
-  useLiveEvent('workflow:redo_applied', () => undoStore.handleRedoApplied());
-  useLiveEvent('workflow:redo_conflict', () => undoStore.handleRedoConflict());
   useLiveEvent<any>('workflow:operation_ack', payload => {
     workflowTrace('server_ack', payload ?? {});
 
@@ -659,7 +683,6 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   });
   return {
     store,
-    undoStore,
     nodes: displayNodes,
     edges,
     nodeTypes,
@@ -671,14 +694,14 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     setVueFlowRef,
     isMounted: draftSync.isMounted,
     canEdit,
-    selectedNode: selection.selectedNode,
-    selectedStepType: selection.selectedStepType,
+    selectedNode,
+    selectedStepType,
     stepNameById,
     incomingStepIdsByStepId,
     incomingConnectionsByTargetInputByStepId,
     upstreamStepIdsByStepId,
-    isExecutionFailed: executionState.isExecutionFailed,
-    isExecutionRunning: executionState.isExecutionRunning,
+    isExecutionFailed,
+    isExecutionRunning,
     miniMapNodeColor: miniMap.miniMapNodeColor,
     otherUserPresences: collaboration.otherUserPresences,
     canvasRef: canvas.canvasRef,
@@ -713,14 +736,19 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
     handlePinOutput: pins.handlePinOutput,
     handleUnpinOutput: pins.handleUnpinOutput,
     selectTraceStep: actions.selectTraceStep,
-    expressionPreviews: activeExpressionPreviews,
+    expressionPreviews: computed(() => props.expressionPreviews ?? {}),
     nodeLibraryItems,
     addStepPickerItems,
-    execution: activeExecution,
-    stepExecutions: activeStepExecutions,
-    editorState: activeEditorState,
-    presences: activePresences,
-    currentUserId: activeCurrentUserId,
+    execution: computed(() => props.execution ?? null),
+    stepExecutions: computed(() => props.stepExecutions ?? []),
+    editorState: computed(() => props.editorState),
+    presences: computed(() => props.presences ?? []),
+    currentUserId: computed(() => props.currentUserId),
     workflow: activeWorkflow,
+    canUndo,
+    canRedo,
+    undoTooltip,
+    redoTooltip,
+    isUndoPending,
   };
 }
