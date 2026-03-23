@@ -128,3 +128,10 @@ A bot that starts an a/b experiment and updates the experiments based on events 
 
  - [ ] Users should be able to pin data without needing to run a node. they should be able to paste a payload of their shape 
  - [ ] add loop zone like ui from blender to spliter aggregate pairs. add ux that lets user paginate through the iterations 
+
+
+ bugs 
+ - splitter 
+ - stopping workflows does not seem to brodcast changes 
+- no items numbers on edges
+- for draft workflows visting /edit/runs/<id> does not rebuild the graph from the logs, it shows the current draft model ( have not tested with published workflows)
