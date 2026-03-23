@@ -234,16 +234,18 @@ defmodule Fizz.Workflows do
   is initialized, and a worker is started. Once the worker is ready the run is
   transitioned to `:running` and the initial input is dispatched.
   """
-  def start_run(scope, version, input, opts \\ []) do
-    with {:ok, version_record} <- fetch_version(scope, version),
-         {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
-      case create_pending_run(scope, version_record, input, compiled_hash, opts) do
-        {:ok, run} ->
-          start_pending_run(scope, run, workflow, compiled_hash, input)
+  def start_run(scope, version, input, opts \\ [])
 
-        {:error, _reason} = error ->
-          error
-      end
+  def start_run(scope, %WorkflowDefinitionVersion{id: version_id} = version, input, opts)
+      when is_binary(version_id) do
+    with {:ok, _authorized_version} <- fetch_version(scope, version_id) do
+      do_start_run(scope, version, input, opts)
+    end
+  end
+
+  def start_run(scope, version, input, opts) do
+    with {:ok, version_record} <- fetch_version(scope, version) do
+      do_start_run(scope, version_record, input, opts)
     end
   end
 
@@ -815,6 +817,18 @@ defmodule Fizz.Workflows do
       |> case do
         {:ok, %{run: run}} -> {:ok, run}
         {:error, _operation, reason, _changes} -> {:error, reason}
+      end
+    end
+  end
+
+  defp do_start_run(scope, %WorkflowDefinitionVersion{} = version_record, input, opts) do
+    with {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
+      case create_pending_run(scope, version_record, input, compiled_hash, opts) do
+        {:ok, run} ->
+          start_pending_run(scope, run, workflow, compiled_hash, input)
+
+        {:error, _reason} = error ->
+          error
       end
     end
   end

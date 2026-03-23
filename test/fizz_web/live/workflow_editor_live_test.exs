@@ -75,8 +75,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   } do
     %{conn: conn, definition: definition, draft: draft} = editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     assert has_element?(view, "#workflow-editor")
 
@@ -140,8 +139,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     vue = get_vue(view, id: "workflow-editor")
     draft = vue.props["workflow"]["draft"]
@@ -177,8 +175,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -212,8 +209,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     txn_id = "txn_drag_commit"
 
@@ -248,8 +244,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   test "draft changes autosave and update the save status indicator", %{conn: conn} do
     %{conn: conn, definition: definition, project_scope: project_scope} = editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     initial_updated_at = live_socket(view).assigns.draft.updated_at
 
@@ -286,8 +281,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   test "run_test persists the current draft before compiling", %{conn: conn} do
     %{conn: conn, definition: definition, project_scope: project_scope} = editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -323,8 +317,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -344,6 +337,146 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
              wait_for_run_status(project_scope, execution.id, :completed)
 
     assert :ok = wait_for_worker_exit(execution.id)
+    GenServer.stop(view.pid, :normal)
+  end
+
+  test "run_test uses saved manual trigger test data as workflow input", %{conn: conn} do
+    trigger_step =
+      WorkflowsFixtures.step(%{
+        type_id: "manual_input",
+        name: "Manual Trigger",
+        config: %{
+          "input_schema" => %{
+            "type" => "object",
+            "properties" => %{
+              "name" => %{"type" => "string"},
+              "email" => %{"type" => "string"}
+            }
+          },
+          "test_data" => %{
+            "name" => "Ada Lovelace",
+            "email" => "ada@example.com"
+          }
+        }
+      })
+
+    debug_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Debug"})
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [trigger_step, debug_step],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: trigger_step.id,
+            target_step_id: debug_step.id
+          })
+        ]
+      })
+
+    %{conn: conn, definition: definition, project_scope: project_scope} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    execution = live_socket(view).assigns.execution
+
+    assert execution.input == %{
+             "name" => "Ada Lovelace",
+             "email" => "ada@example.com"
+           }
+
+    assert execution.triggered_by["trigger_step_id"] == trigger_step.id
+    assert {:ok, run} = Workflows.get_run(project_scope, execution.id)
+
+    assert run.input == %{
+             "name" => "Ada Lovelace",
+             "email" => "ada@example.com"
+           }
+
+    assert {:ok, %{status: :completed}} =
+             wait_for_run_status(project_scope, execution.id, :completed)
+
+    assert :ok = wait_for_worker_exit(execution.id)
+    GenServer.stop(view.pid, :normal)
+  end
+
+  test "run_node starts a partial run and excludes downstream steps", %{conn: conn} do
+    trigger_step =
+      WorkflowsFixtures.step(%{
+        type_id: "manual_input",
+        name: "Manual Trigger",
+        config: %{
+          "test_data" => %{"ticket_id" => "T-42"}
+        }
+      })
+
+    target_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Target"})
+    downstream_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Downstream"})
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [trigger_step, target_step, downstream_step],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: trigger_step.id,
+            target_step_id: target_step.id
+          }),
+          WorkflowsFixtures.connection(%{
+            source_step_id: target_step.id,
+            target_step_id: downstream_step.id
+          })
+        ]
+      })
+
+    %{conn: conn, definition: definition, project_scope: project_scope} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{
+      "type" => "run_node",
+      "payload" => %{"step_id" => target_step.id}
+    })
+
+    execution = live_socket(view).assigns.execution
+
+    assert execution.input == %{"ticket_id" => "T-42"}
+    assert execution.triggered_by["mode"] == "partial"
+    assert execution.triggered_by["target_step_id"] == target_step.id
+
+    assert {:ok, run} = Workflows.get_run(project_scope, execution.id)
+    assert run.input == %{"ticket_id" => "T-42"}
+    assert run.triggered_by["mode"] == "partial"
+    assert run.triggered_by["target_step_id"] == target_step.id
+
+    assert {:ok, %{status: :completed}} =
+             wait_for_run_status(project_scope, execution.id, :completed)
+
+    assert :ok =
+             wait_until(fn ->
+               render(view)
+
+               step_ids =
+                 live_socket(view).assigns.step_executions
+                 |> Enum.map(& &1.step_id)
+                 |> Enum.uniq()
+
+               Enum.sort(step_ids) == Enum.sort([trigger_step.id, target_step.id])
+             end)
+
+    refute Enum.any?(
+             live_socket(view).assigns.step_executions,
+             &(&1.step_id == downstream_step.id)
+           )
+
+    assert :ok = wait_for_worker_exit(execution.id)
+    GenServer.stop(view.pid, :normal)
   end
 
   test "publish_workflow persists before validation and blocks on validation errors", %{
@@ -351,8 +484,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   } do
     %{conn: conn, definition: definition, project_scope: project_scope} = editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -397,8 +529,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   test "validate_draft returns publish preview results for the publish modal", %{conn: conn} do
     %{conn: conn, definition: definition} = editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -436,8 +567,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, project_scope: project_scope} =
       editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     version_id = view_version_id(view)
 
@@ -457,8 +587,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -499,8 +628,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, draft: draft, user: user} = editor_fixture(conn)
     user_id = user.id
 
-    {:ok, _view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, _view, _html} = live_editor(conn, definition)
 
     assert %{^user_id => %{metas: [meta | _]}} = Presence.list("draft:#{draft.id}")
     assert meta.user_id == user.id
@@ -607,8 +735,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -643,8 +770,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     expression = "{% if steps.#{source_step.id}.name %}"
     preview_expression(view, target_step.id, "text", expression)
@@ -673,8 +799,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     put_step_executions(view, [
       %{
@@ -717,8 +842,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -780,8 +904,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     put_execution(view, %{id: "run-live", status: "running"})
 
@@ -853,8 +976,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, project_scope: project_scope} =
       editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -900,8 +1022,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     %{conn: conn, definition: definition, project_scope: project_scope} =
       editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -936,8 +1057,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     view
     |> element("#workflow-editor")
@@ -946,6 +1066,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert_push_event(view, "compilation_errors", %{errors: [%{message: message} | _rest]})
     assert message =~ "trigger steps must be graph roots with no incoming connections"
     assert live_socket(view).assigns.execution == nil
+    assert live_socket(view).assigns.validation_errors != %{}
   end
 
   test "resolve_field_options replies with credential options and pushes credential results", %{
@@ -965,8 +1086,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
       "OpenAI Production"
     )
 
-    {:ok, view, _html} =
-      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+    {:ok, view, _html} = live_editor(conn, definition)
 
     render_hook(view, "resolve_field_options", %{
       "node_id" => model_step_id,
@@ -1046,6 +1166,25 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
       user: user,
       project_scope: collaborator_scope
     }
+  end
+
+  defp live_editor(conn, definition) do
+    {:ok, view, html} =
+      live(conn, ~p"/projects/#{definition.project_id}/workflows/#{definition.id}/edit")
+
+    register_editor_cleanup(view)
+    {:ok, view, html}
+  end
+
+  defp register_editor_cleanup(view) do
+    version_id = view_version_id(view)
+
+    on_exit(fn ->
+      case Registry.lookup(Fizz.Workflows.DraftSessionRegistry, version_id) do
+        [{pid, _value}] -> GenServer.stop(pid, :normal)
+        [] -> :ok
+      end
+    end)
   end
 
   defp view_version_id(view) do

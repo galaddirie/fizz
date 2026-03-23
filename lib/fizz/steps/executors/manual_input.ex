@@ -14,6 +14,14 @@ defmodule Fizz.Steps.Executors.ManualInput do
         "type" => "object",
         "title" => "Input Schema",
         "description" => "JSON Schema describing expected input data"
+      },
+      "test_data" => %{
+        "type" => "object",
+        "title" => "Test Data",
+        "description" => "JSON payload used for editor test runs and partial runs",
+        "ui" => %{
+          "component" => "json"
+        }
       }
     }
   }

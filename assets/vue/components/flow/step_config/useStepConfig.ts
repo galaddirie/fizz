@@ -70,6 +70,10 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         return false;
     });
 
+    const isManualTriggerStep = computed(() => {
+        return props.stepType?.id === 'manual_input' || props.node?.data?.type_id === 'manual_input';
+    });
+
     // --- Init watcher: populate fields/modes on open ---
     watch(
         [() => props.node, () => props.isOpen],
@@ -78,6 +82,11 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
                 const config = newNode.data.config || {};
                 const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
                 const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
+
+                if (isManualTriggerStep.value && !Object.prototype.hasOwnProperty.call(config, 'test_data')) {
+                    allKeys.delete('test_data');
+                }
+
                 const modes: Record<string, 'literal' | 'expression'> = {};
                 const values: Record<string, unknown> = {};
 
@@ -189,12 +198,44 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
     const isStructuredValue = (value: unknown) =>
         Array.isArray(value) || (value !== null && typeof value === 'object');
 
+    const manualTriggerTestDataField = computed<ConfigField | null>(() => {
+        if (!isManualTriggerStep.value) return null;
+
+        const schema =
+            (props.stepType?.config_schema as ConfigSchema | undefined)?.properties?.test_data ?? {};
+
+        return {
+            ...schema,
+            key: 'test_data',
+            label: schema.title || 'Test Data',
+            description:
+                schema.description ||
+                'Saved on this trigger and used for Run Test and Run from Here.',
+            type: 'json',
+            expressionCapable: false,
+        };
+    });
+
+    const manualTriggerInputSchema = computed(() => {
+        const value =
+            fieldValues.value['input_schema'] ??
+            props.node?.data?.config?.input_schema ??
+            null;
+
+        if (value === null || value === undefined) return null;
+        return value;
+    });
+
     const fields = computed<ConfigField[]>(() => {
         if (!props.node || !props.node.data) return [];
 
         const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
         const config = props.node.data.config || {};
         const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
+
+        if (isManualTriggerStep.value) {
+            allKeys.delete('test_data');
+        }
 
         return Array.from(allKeys).map(key => {
             const schemaField: ConfigSchemaField = schema[key] ?? {};
@@ -245,6 +286,16 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         if (!isSearchField && hasExpressionSyntax(value)) {
             fieldModes.value[fieldKey] = 'expression';
         }
+    };
+
+    const handleManualTriggerTestDataUpdate = (value: unknown) => {
+        if (value === null) {
+            const { test_data: _removed, ...rest } = fieldValues.value;
+            fieldValues.value = rest;
+            return;
+        }
+
+        fieldValues.value['test_data'] = value;
     };
 
     const nodeId = computed(() => props.node?.id ?? '');
@@ -337,6 +388,10 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         fields,
         fieldByKey,
         handleFieldValueUpdate,
+        isManualTriggerStep,
+        manualTriggerTestDataField,
+        manualTriggerInputSchema,
+        handleManualTriggerTestDataUpdate,
         nodeId,
         evaluatedConfig,
         // Sub-composables

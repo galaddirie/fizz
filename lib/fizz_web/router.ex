@@ -75,6 +75,11 @@ defmodule FizzWeb.Router do
       live "/projects", ProjectsLive.Index, :index
       live "/projects/:project_id", ProjectsLive.Show, :show
       live "/projects/:project_id/workflows", WorkflowsLive.Index, :index
+      live "/projects/:project_id/workflows/:definition_id", WorkflowsLive.Show, :show
+
+      live "/projects/:project_id/workflows/:definition_id/runs/:run_id",
+           WorkflowsLive.RunShow,
+           :show
 
       live "/projects/:project_id/workflows/:definition_id/edit",
            WorkflowsLive.Editor,

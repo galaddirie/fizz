@@ -17,7 +17,12 @@ import type {
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
 import type { TriggerImpact, WorkflowValidationError } from '@/types/workflow';
-import { BugAntIcon, SlashIcon, ChevronDoubleRightIcon } from '@heroicons/vue/24/outline';
+import {
+  BugAntIcon,
+  SlashIcon,
+  ChevronDoubleRightIcon,
+  ExclamationCircleIcon,
+} from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   stepTypes: () => [],
@@ -37,6 +42,7 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
 });
 
 const live = useLiveVue();
+const compilationErrors = ref<WorkflowValidationError[]>([]);
 const publishStateResetCommands = new Set<WorkflowEditorCommandType>([
   'add_step',
   'add_group',
@@ -64,6 +70,11 @@ function emitCommand(type: WorkflowEditorCommandType, payload?: unknown) {
     publishTriggerImpact.value = null;
     publishExecutionHashChanged.value = null;
     isValidatingPublish.value = false;
+    compilationErrors.value = [];
+  }
+
+  if (type === 'run_test' || type === 'run_node') {
+    compilationErrors.value = [];
   }
 
   const normalizedPayload =
@@ -278,12 +289,47 @@ function handlePublish() {
   emit('publish_workflow');
 }
 
+const editorValidationErrors = computed<WorkflowValidationError[]>(() =>
+  Object.values(props.validationErrors ?? {}).flat()
+);
+
+const activeToolbarErrors = computed(() =>
+  compilationErrors.value.length > 0
+    ? compilationErrors.value
+    : publishValidationErrors.value.length > 0
+      ? publishValidationErrors.value
+      : editorValidationErrors.value
+);
+
 const toolbarValidationErrors = computed(() =>
-  publishValidationErrors.value.map(error => {
+  activeToolbarErrors.value.map(error => {
     const location = error.field ? `${error.field}: ` : '';
     return `${location}${error.message}`;
   })
 );
+
+const inlineValidationErrors = computed(() => {
+  if (compilationErrors.value.length > 0) {
+    return compilationErrors.value;
+  }
+
+  if (isPublishModalOpen.value || publishValidationErrors.value.length > 0) {
+    return [];
+  }
+
+  return editorValidationErrors.value;
+});
+
+const inlineValidationTitle = computed(() =>
+  inlineValidationErrors.value.some(error => error.code === 'compile_error')
+    ? 'Execution blocked'
+    : 'Draft issues'
+);
+
+const formatValidationError = (error: WorkflowValidationError) => {
+  const location = error.field ? `${error.field}: ` : '';
+  return `${location}${error.message}`;
+};
 
 const isDebugMode = computed(() => !!props.debugExecutionId);
 
@@ -402,7 +448,7 @@ const debugStatusBadge = computed(() => {
 const debugExecutionLink = computed(() => {
   const workflow = editor.workflow as any;
   if (!workflow?.id || !workflow?.project_id || !props.debugExecutionId) return null;
-  return `/projects/${workflow.project_id}/workflows/${workflow.id}/execution/${props.debugExecutionId}`;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}/runs/${props.debugExecutionId}`;
 });
 const workflowExecutionsLink = computed(() => {
   const workflow = editor.workflow as any;
@@ -441,6 +487,21 @@ useLiveEvent<{
   publishTriggerImpact.value = payload.trigger_impact ?? null;
   publishExecutionHashChanged.value = payload.execution_hash_changed ?? null;
   publishError.value = payload.error ?? null;
+});
+
+useLiveEvent<{
+  errors?: Array<{
+    step_id?: string | null;
+    message?: string;
+  }>;
+}>('compilation_errors', payload => {
+  compilationErrors.value = (payload.errors ?? []).map(error => ({
+    step_id: error.step_id ?? null,
+    field: null,
+    message: error.message ?? 'Compilation failed',
+    severity: 'error',
+    code: 'compile_error',
+  }));
 });
 
 useLiveEvent<{
@@ -603,6 +664,33 @@ useLiveEvent<{
                 </a>
               </div>
             </div>
+          </div>
+
+          <div
+            v-if="inlineValidationErrors.length > 0"
+            class="pointer-events-auto mt-3 max-w-lg rounded-2xl border border-error/20 bg-error/6 px-4 py-3 shadow-sm backdrop-blur-sm"
+          >
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-error/80">
+              <ExclamationCircleIcon class="h-4 w-4" />
+              <span>{{ inlineValidationTitle }}</span>
+              <span class="text-error/35">&middot;</span>
+              <span class="font-medium">{{ inlineValidationErrors.length }} issue<span v-if="inlineValidationErrors.length !== 1">s</span></span>
+            </div>
+            <ul class="mt-2 space-y-1.5">
+              <li
+                v-for="(error, index) in inlineValidationErrors.slice(0, 3)"
+                :key="`${error.code}-${error.step_id ?? 'global'}-${index}`"
+                class="text-[11px] leading-relaxed text-error/75"
+              >
+                {{ formatValidationError(error) }}
+              </li>
+            </ul>
+            <p
+              v-if="inlineValidationErrors.length > 3"
+              class="mt-2 text-[10px] font-medium uppercase tracking-[0.16em] text-error/45"
+            >
+              + {{ inlineValidationErrors.length - 3 }} more
+            </p>
           </div>
         </div>
 

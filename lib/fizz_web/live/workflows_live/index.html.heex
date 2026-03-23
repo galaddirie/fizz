@@ -47,7 +47,7 @@
           tbody_class="divide-y divide-base-200"
           row_click={
             fn {_dom_id, definition} ->
-              JS.navigate(~p"/projects/#{@project_id}/workflows/#{definition.id}/edit")
+              JS.navigate(~p"/projects/#{@project_id}/workflows/#{definition.id}")
             end
           }
           row_class="cursor-pointer hover:bg-neutral/10"

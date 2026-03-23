@@ -40,7 +40,7 @@ defmodule FizzWeb.WorkflowsLive.Index do
   def handle_event("open_workflow", %{"definition_id" => definition_id}, socket) do
     {:noreply,
      push_navigate(socket,
-       to: ~p"/projects/#{socket.assigns.project_id}/workflows/#{definition_id}/edit"
+       to: ~p"/projects/#{socket.assigns.project_id}/workflows/#{definition_id}"
      )}
   end
 

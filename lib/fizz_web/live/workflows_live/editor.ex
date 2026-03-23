@@ -23,6 +23,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias Phoenix.Socket.Broadcast
 
   @preview_debounce_ms 300
+  @global_validation_key "workflow"
 
   @structural_command_types ~w(
     add_step
@@ -130,7 +131,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         {:noreply, run_test(socket)}
 
       "run_node" ->
-        {:noreply, put_flash(socket, :info, "Execution controls are wired in Phase 4.")}
+        {:noreply, run_node(socket, payload)}
 
       "cancel_execution" ->
         {:noreply, cancel_execution(socket)}
@@ -587,38 +588,67 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     end
   end
 
-  defp run_test(socket) do
-    with {:ok, draft, seq} <- DraftSession.persist_now(socket.assigns.draft.id) do
+  defp run_test(socket), do: run_editor_execution(socket, nil)
+
+  defp run_node(socket, payload) do
+    case payload_value(payload, "step_id") do
+      step_id when is_binary(step_id) ->
+        run_editor_execution(socket, step_id)
+
+      _missing_step_id ->
+        put_flash(socket, :error, "Could not run step: missing step id")
+    end
+  end
+
+  defp run_editor_execution(socket, target_step_id) do
+    with {:ok, draft, seq} <- DraftSession.persist_now(socket.assigns.draft.id),
+         {:ok, execution_draft} <- editor_execution_draft(draft, target_step_id) do
       socket =
         socket
         |> assign(:draft, draft)
         |> assign(:collab_seq, seq)
         |> assign(:save_status, "saved")
         |> assign(:save_error, nil)
-        |> cancel_existing_execution()
 
-      case Compiler.compile(draft) do
+      case Compiler.compile(execution_draft) do
         {:ok, _workflow, _hash} ->
-          start_editor_test_run(socket, draft)
+          input = editor_execution_input(execution_draft)
+
+          triggered_by =
+            editor_triggered_by(
+              socket.assigns.current_user_id,
+              target_step_id,
+              execution_draft
+            )
+
+          socket
+          |> clear_validation_errors()
+          |> cancel_existing_execution()
+          |> start_editor_test_run(execution_draft, input, triggered_by)
 
         {:error, errors} ->
-          push_event(socket, "compilation_errors", %{errors: format_compilation_errors(errors)})
+          handle_compilation_errors(socket, errors)
       end
     else
+      {:error, :step_not_found} ->
+        put_flash(socket, :error, "Could not run step: step not found")
+
       {:error, reason} ->
         put_flash(socket, :error, "Could not save workflow: #{inspect(reason)}")
     end
   end
 
-  defp start_editor_test_run(socket, %WorkflowDefinitionVersion{} = draft) do
+  defp start_editor_test_run(
+         socket,
+         %WorkflowDefinitionVersion{} = draft,
+         input,
+         triggered_by
+       ) do
     case Workflows.start_run(
            socket.assigns.current_scope,
            draft,
-           %{},
-           triggered_by: %{
-             "kind" => "editor_test",
-             "user_id" => socket.assigns.current_user_id
-           }
+           input,
+           triggered_by: triggered_by
          ) do
       {:ok, run} ->
         :ok = maybe_subscribe_to_run_topic(run_topic(run.id))
@@ -634,6 +664,111 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         put_flash(socket, :error, "Could not start test run: #{inspect(reason)}")
     end
   end
+
+  defp handle_compilation_errors(socket, errors) do
+    compilation_errors = format_compilation_errors(errors)
+
+    socket
+    |> assign(:validation_errors, compilation_error_map(compilation_errors))
+    |> push_event("compilation_errors", %{errors: compilation_errors})
+  end
+
+  defp editor_execution_draft(%WorkflowDefinitionVersion{} = draft, nil), do: {:ok, draft}
+
+  defp editor_execution_draft(%WorkflowDefinitionVersion{} = draft, step_id)
+       when is_binary(step_id) do
+    with {:ok, _step} <- fetch_step(draft, step_id) do
+      included_step_ids =
+        draft
+        |> upstream_step_ids(step_id)
+        |> MapSet.new()
+        |> MapSet.put(step_id)
+
+      filtered_groups =
+        draft.step_groups
+        |> Enum.map(fn %StepGroup{} = group ->
+          filtered_step_ids =
+            Enum.filter(group.step_ids || [], &MapSet.member?(included_step_ids, &1))
+
+          %{group | step_ids: filtered_step_ids}
+        end)
+        |> Enum.reject(&Enum.empty?(&1.step_ids))
+
+      {:ok,
+       %{
+         draft
+         | steps: Enum.filter(draft.steps, &MapSet.member?(included_step_ids, &1.id)),
+           connections:
+             Enum.filter(draft.connections, fn connection ->
+               MapSet.member?(included_step_ids, connection.source_step_id) and
+                 MapSet.member?(included_step_ids, connection.target_step_id)
+             end),
+           step_groups: filtered_groups
+       }}
+    end
+  end
+
+  defp editor_execution_input(%WorkflowDefinitionVersion{} = draft) do
+    case editor_trigger_step(draft) do
+      %Step{type_id: "manual_input", config: config} ->
+        manual_trigger_test_data(config)
+
+      _step ->
+        %{}
+    end
+  end
+
+  defp editor_triggered_by(current_user_id, target_step_id, %WorkflowDefinitionVersion{} = draft) do
+    %{
+      "kind" => "editor_test",
+      "user_id" => current_user_id
+    }
+    |> maybe_put("trigger_step_id", editor_trigger_step_id(draft))
+    |> maybe_put("mode", editor_run_mode(target_step_id))
+    |> maybe_put("target_step_id", target_step_id)
+  end
+
+  defp editor_run_mode(step_id) when is_binary(step_id), do: "partial"
+  defp editor_run_mode(_step_id), do: nil
+
+  defp editor_trigger_step_id(%WorkflowDefinitionVersion{} = draft) do
+    case editor_trigger_step(draft) do
+      %Step{id: step_id} -> step_id
+      _ -> nil
+    end
+  end
+
+  defp editor_trigger_step(%WorkflowDefinitionVersion{} = draft) do
+    step_order = step_order_by_id(draft)
+
+    draft.steps
+    |> Enum.filter(&editor_trigger_root?(draft, &1))
+    |> Enum.sort_by(fn %Step{} = step ->
+      {editor_trigger_priority(step), Map.get(step_order, step.id, map_size(step_order))}
+    end)
+    |> List.first()
+  end
+
+  defp editor_trigger_root?(%WorkflowDefinitionVersion{} = draft, %Step{} = step) do
+    with {:ok, %Type{} = type} <- Steps.get_type(step.type_id) do
+      Type.trigger?(type) and Enum.empty?(incoming_connections(draft, step.id))
+    else
+      _error ->
+        false
+    end
+  end
+
+  defp editor_trigger_priority(%Step{type_id: "manual_input"}), do: 0
+  defp editor_trigger_priority(%Step{}), do: 1
+
+  defp manual_trigger_test_data(config) when is_map(config) do
+    case Map.get(config, "test_data") do
+      value when is_map(value) -> value
+      _missing_or_invalid -> %{}
+    end
+  end
+
+  defp manual_trigger_test_data(_config), do: %{}
 
   defp cancel_execution(%{assigns: %{execution: %{id: run_id}}} = socket)
        when is_binary(run_id) do
@@ -917,15 +1052,23 @@ defmodule FizzWeb.WorkflowsLive.Editor do
        when is_binary(run_id) do
     if execution_terminal?(socket.assigns.execution) do
       unsubscribe_from_run(run_id)
-      socket
     else
       _ = Workflows.cancel_run(socket.assigns.current_scope, run_id)
       unsubscribe_from_run(run_id)
-      socket
     end
+
+    clear_active_execution(socket)
   end
 
-  defp cancel_existing_execution(socket), do: socket
+  defp cancel_existing_execution(socket), do: clear_active_execution(socket)
+
+  defp clear_active_execution(socket) do
+    socket
+    |> assign(:execution, nil)
+    |> assign(:step_executions, [])
+    |> assign(:run_topic, nil)
+    |> assign(:debug_execution_id, nil)
+  end
 
   defp refresh_execution_state(socket, run_id) when is_binary(run_id) do
     case load_execution_snapshot(socket.assigns.current_scope, run_id) do
@@ -1211,6 +1354,22 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp format_compilation_errors(_errors), do: []
+
+  defp compilation_error_map(errors) when is_list(errors) do
+    errors
+    |> Enum.map(fn error ->
+      %{
+        step_id: Map.get(error, :step_id) || Map.get(error, "step_id"),
+        field: nil,
+        message: Map.get(error, :message) || Map.get(error, "message") || inspect(error),
+        severity: "error",
+        code: "compile_error"
+      }
+    end)
+    |> Enum.group_by(fn error -> error.step_id || @global_validation_key end)
+  end
+
+  defp compilation_error_map(_errors), do: %{}
 
   defp step_execution_id_from_payload(socket, payload) do
     case payload_value(payload, "step_execution_id") do
@@ -2046,9 +2205,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp validation_error_map(errors) do
-    errors
-    |> Enum.reject(&is_nil(&1.step_id))
-    |> Enum.group_by(& &1.step_id, & &1)
+    Enum.group_by(errors, fn error -> error.step_id || @global_validation_key end, & &1)
   end
 
   defp handle_publish_persist_error(socket, %Ecto.Changeset{} = changeset) do
