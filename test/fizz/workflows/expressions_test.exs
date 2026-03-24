@@ -18,6 +18,13 @@ defmodule Fizz.Workflows.ExpressionsTest do
     assert Expressions.resolve(plan, context(%{"orders" => orders})) == orders
   end
 
+  test "resolves json aliases against the current input" do
+    orders = [%{"id" => 1}, %{"id" => 2}]
+    plan = access_plan!("{{ json.orders }}")
+
+    assert Expressions.resolve(plan, context(%{"orders" => orders})) == orders
+  end
+
   test "resolves template expressions to strings" do
     plan = access_plan!("Hello {{ input.name }}")
 

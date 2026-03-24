@@ -250,8 +250,11 @@ defmodule Fizz.Workflows.Expressions do
   end
 
   defp solid_bindings(context) do
+    input = Map.get(context, :input) || Map.get(context, "input") || %{}
+
     %{
-      "input" => Map.get(context, :input) || Map.get(context, "input") || %{},
+      "input" => input,
+      "json" => input,
       "steps" => Map.get(context, :steps) || Map.get(context, "steps") || %{},
       "workflow" => Map.get(context, :workflow) || Map.get(context, "workflow") || %{},
       "env" => Map.get(context, :env) || Map.get(context, "env") || %{}
@@ -405,6 +408,7 @@ defmodule Fizz.Workflows.Expressions do
     root_value =
       case root do
         "input" -> Map.get(context, :input) || Map.get(context, "input")
+        "json" -> Map.get(context, :input) || Map.get(context, "input")
         "steps" -> Map.get(context, :steps) || Map.get(context, "steps")
         "workflow" -> Map.get(context, :workflow) || Map.get(context, "workflow")
         "env" -> Map.get(context, :env) || Map.get(context, "env")

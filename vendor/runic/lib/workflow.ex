@@ -1061,7 +1061,16 @@ defmodule Runic.Workflow do
 
   def apply_event(%__MODULE__{} = wf, %FanOutFactEmitted{} = e) do
     fact =
-      Fact.new(hash: e.emitted_fact_hash, value: e.emitted_value, ancestry: e.emitted_ancestry)
+      Fact.new(
+        hash: e.emitted_fact_hash,
+        value: e.emitted_value,
+        ancestry: e.emitted_ancestry,
+        meta: %{
+          item_index: e.item_index,
+          items_total: e.items_total,
+          fan_out_hash: e.fan_out_hash
+        }
+      )
 
     fan_out = Map.get(wf.graph.vertices, e.fan_out_hash)
 
@@ -1105,7 +1114,7 @@ defmodule Runic.Workflow do
   # Lean replay: creates FactRef instead of Fact when value was stripped.
   # Falls back to full Fact for legacy events that still carry values (migration).
   defp apply_event_lean(%__MODULE__{} = wf, %FactProduced{value: nil} = e) do
-    ref = %FactRef{hash: e.hash, ancestry: e.ancestry}
+    ref = %FactRef{hash: e.hash, ancestry: e.ancestry, meta: e.meta}
     wf = log_fact(wf, ref)
 
     case e.ancestry do
@@ -1153,7 +1162,12 @@ defmodule Runic.Workflow do
     %{wf | mapped: mapped}
   end
 
-  defp maybe_delete_expected_batch(mapped, {_source_fact_hash, fan_out_hash} = expected_key, source_fact_hash, wf) do
+  defp maybe_delete_expected_batch(
+         mapped,
+         {_source_fact_hash, fan_out_hash} = expected_key,
+         source_fact_hash,
+         wf
+       ) do
     if all_fan_ins_completed_for_batch?(wf, fan_out_hash, source_fact_hash) do
       mapped
       |> Map.delete(expected_key)
@@ -1390,29 +1404,258 @@ defmodule Runic.Workflow do
 
     base =
       if base_workflow do
-        # Replay only structural/lifecycle events that from_log handles
-        if build_events != [] do
-          from_log(build_events)
-          |> then(fn rebuilt ->
-            # Merge runnable_events from rebuilt onto base if base is provided
-            %{
-              base_workflow
-              | runnable_events: base_workflow.runnable_events ++ rebuilt.runnable_events
-            }
-          end)
-        else
-          base_workflow
-        end
+        replay_snapshot_onto_base(base_workflow, build_events)
       else
         from_log(build_events)
       end
 
-    Enum.reduce(runtime_events, base, fn event, wf ->
+    runtime_events
+    |> Enum.reduce(base, fn event, wf ->
       case {fact_mode, event} do
         {:ref, %FactProduced{}} -> apply_event_lean(wf, event)
         _ -> apply_event(wf, event)
       end
     end)
+    |> rebuild_coordination_state()
+  end
+
+  defp replay_snapshot_onto_base(base_workflow, build_events) do
+    Enum.reduce(build_events, base_workflow, fn
+      %ComponentAdded{}, wf ->
+        wf
+
+      %ReactionOccurred{reaction: :generation}, wf ->
+        wf
+
+      %ReactionOccurred{} = reaction, wf ->
+        apply_reaction_event_to_base(wf, reaction)
+
+      %RunnableDispatched{} = event, wf ->
+        %{wf | runnable_events: wf.runnable_events ++ [event]}
+
+      %RunnableCompleted{} = event, wf ->
+        %{wf | runnable_events: wf.runnable_events ++ [event]}
+
+      %RunnableFailed{} = event, wf ->
+        %{wf | runnable_events: wf.runnable_events ++ [event]}
+    end)
+  end
+
+  defp apply_reaction_event_to_base(%__MODULE__{} = workflow, %ReactionOccurred{} = event) do
+    properties = restore_meta_ref_properties(event.reaction, event.properties)
+    from = normalize_replayed_vertex(workflow, event.from)
+    to = normalize_replayed_vertex(workflow, event.to)
+
+    if reaction_edge_exists?(workflow.graph, from, to, event.reaction) do
+      workflow
+    else
+      reaction_edge =
+        Graph.Edge.new(
+          from,
+          to,
+          label: event.reaction,
+          weight: event.weight,
+          properties: properties
+        )
+
+      %{workflow | graph: Graph.add_edge(workflow.graph, reaction_edge)}
+    end
+  end
+
+  defp normalize_replayed_vertex(%__MODULE__{} = workflow, %{hash: hash} = vertex) do
+    Map.get(workflow.graph.vertices, hash, vertex)
+  end
+
+  defp normalize_replayed_vertex(_workflow, vertex), do: vertex
+
+  defp reaction_edge_exists?(graph, from, to, label) do
+    graph
+    |> Graph.out_edges(from)
+    |> Enum.any?(fn edge -> edge.v2 == to and edge.label == label end)
+  end
+
+  # Reconstructs the `mapped` coordination state after replaying events onto a
+  # base workflow. This is necessary because `replay_snapshot_onto_base/2` only
+  # appends runnable lifecycle events — it does not re-run the invoke cycle that
+  # normally builds this state incrementally during live execution.
+  #
+  # Without this pass, a workflow rehydrated mid-fan-out (e.g. a downstream step
+  # was waiting on a timer when the worker passivated) would lose track of which
+  # fan-out items were already processed. The FanIn readiness check compares the
+  # expected set (from FanOutFactEmitted events, which *are* replayed) against the
+  # seen set (from Step.invoke, which is *not* replayed). This function rebuilds
+  # the seen set and related bookkeeping from the graph so the FanIn can fire.
+  #
+  # Three sub-phases:
+  #   1. expected_batches  — partially redundant with apply_event(FanOutFactEmitted)
+  #      but also sets the {:fan_out_for_batch, _} lookup key which apply_event skips
+  #   2. map_reduce_tracks — rebuilds the {fan_out, source, step} → seen maps
+  #   3. fan_in_completions — marks fan-ins that already reduced before passivation
+  defp rebuild_coordination_state(%__MODULE__{} = workflow) do
+    mapped =
+      workflow.mapped
+      |> rebuild_expected_batches(workflow)
+      |> rebuild_map_reduce_tracks(workflow)
+      |> rebuild_fan_in_completions(workflow)
+
+    %{workflow | mapped: mapped}
+  end
+
+  defp rebuild_expected_batches(mapped, %__MODULE__{graph: graph}) do
+    graph
+    |> Graph.edges(by: :fan_out)
+    |> Enum.reduce(%{}, fn
+      %Graph.Edge{
+        v1: %Runic.Workflow.FanOut{hash: fan_out_hash},
+        v2: %Fact{hash: fact_hash, ancestry: {fan_out_hash, source_fact_hash}, meta: meta}
+      },
+      acc ->
+        item_index = meta |> Kernel.||(%{}) |> Map.get(:item_index)
+
+        Map.update(
+          acc,
+          {source_fact_hash, fan_out_hash},
+          [{item_index, fact_hash}],
+          &[{item_index, fact_hash} | &1]
+        )
+
+      _edge,
+      acc ->
+        acc
+    end)
+    |> Enum.reduce(mapped, fn {{source_fact_hash, fan_out_hash}, entries}, acc ->
+      emitted_fact_hashes =
+        entries
+        |> Enum.sort_by(fn {item_index, fact_hash} ->
+          {is_nil(item_index), item_index || 0, fact_hash}
+        end)
+        |> Enum.map(&elem(&1, 1))
+        |> Enum.reverse()
+
+      acc
+      |> Map.put({source_fact_hash, fan_out_hash}, emitted_fact_hashes)
+      |> Map.put({:fan_out_for_batch, source_fact_hash}, fan_out_hash)
+    end)
+  end
+
+  defp rebuild_map_reduce_tracks(mapped, %__MODULE__{} = workflow) do
+    path_fan_outs = Map.get(workflow.mapped, :mapped_path_fan_outs, %{})
+
+    Enum.reduce(workflow.graph.vertices, mapped, fn
+      {result_fact_hash, %Fact{ancestry: {producer_hash, _parent_hash}} = fact}, acc ->
+        case {Map.get(path_fan_outs, producer_hash), Map.get(workflow.graph.vertices, producer_hash)} do
+          {nil, _producer} ->
+            acc
+
+          {_fan_outs, %Runic.Workflow.FanOut{}} ->
+            acc
+
+          {_fan_outs, %Runic.Workflow.FanIn{}} ->
+            acc
+
+          {fan_outs, _producer} ->
+            Enum.reduce(fan_outs, acc, fn fan_out_hash, mapped_acc ->
+              case find_replayed_fan_out_info(workflow, fact, fan_out_hash) do
+                {source_fact_hash, ^fan_out_hash, fan_out_fact_hash} ->
+                  seen_key = {fan_out_hash, source_fact_hash, producer_hash}
+                  seen = Map.get(mapped_acc, seen_key, %{})
+                  seen = Map.put(seen, fan_out_fact_hash, result_fact_hash)
+
+                  mapped_acc
+                  |> Map.put(seen_key, seen)
+                  |> Map.put({:fan_out_for_batch, source_fact_hash}, fan_out_hash)
+
+                nil ->
+                  mapped_acc
+              end
+            end)
+        end
+
+      _vertex, acc ->
+        acc
+    end)
+  end
+
+  defp rebuild_fan_in_completions(mapped, %__MODULE__{} = workflow) do
+    workflow.graph
+    |> Graph.edges(by: :reduced)
+    |> Enum.reduce(mapped, fn
+      %Graph.Edge{v1: %Runic.Workflow.FanIn{hash: fan_in_hash}, v2: %Fact{} = fact}, acc ->
+        case find_replayed_fan_out_source_fact_hash(workflow, fact) do
+          nil -> acc
+          source_fact_hash -> Map.put(acc, {:fan_in_completed, source_fact_hash, fan_in_hash}, true)
+        end
+
+      _edge, acc ->
+        acc
+    end)
+  end
+
+  defp find_replayed_fan_out_info(
+         workflow,
+         %Fact{hash: fact_hash, ancestry: {producer_hash, input_fact_hash}},
+         target_fan_out_hash
+       ) do
+    case Map.get(workflow.graph.vertices, producer_hash) do
+      %Runic.Workflow.FanOut{} = fan_out when fan_out.hash == target_fan_out_hash ->
+        {input_fact_hash, fan_out.hash, fact_hash}
+
+      _ ->
+        do_find_replayed_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
+    end
+  end
+
+  defp find_replayed_fan_out_info(_workflow, _fact, _target_fan_out_hash), do: nil
+
+  defp do_find_replayed_fan_out_info(_workflow, nil, _target_fan_out_hash), do: nil
+
+  defp do_find_replayed_fan_out_info(workflow, fact_hash, target_fan_out_hash) do
+    case Map.get(workflow.graph.vertices, fact_hash) do
+      %Fact{ancestry: {producer_hash, parent_fact_hash}} ->
+        case Map.get(workflow.graph.vertices, producer_hash) do
+          %Runic.Workflow.FanOut{} = fan_out when fan_out.hash == target_fan_out_hash ->
+            {parent_fact_hash, fan_out.hash, fact_hash}
+
+          _ ->
+            do_find_replayed_fan_out_info(workflow, parent_fact_hash, target_fan_out_hash)
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp find_replayed_fan_out_source_fact_hash(
+         workflow,
+         %Fact{ancestry: {producer_hash, input_fact_hash}}
+       ) do
+    case Map.get(workflow.graph.vertices, producer_hash) do
+      %Runic.Workflow.FanOut{} ->
+        input_fact_hash
+
+      _ ->
+        do_find_replayed_fan_out_source_fact_hash(workflow, input_fact_hash)
+    end
+  end
+
+  defp find_replayed_fan_out_source_fact_hash(_workflow, _fact), do: nil
+
+  defp do_find_replayed_fan_out_source_fact_hash(_workflow, nil), do: nil
+
+  defp do_find_replayed_fan_out_source_fact_hash(workflow, fact_hash) do
+    case Map.get(workflow.graph.vertices, fact_hash) do
+      %Fact{ancestry: {producer_hash, parent_fact_hash}} ->
+        case Map.get(workflow.graph.vertices, producer_hash) do
+          %Runic.Workflow.FanOut{} ->
+            parent_fact_hash
+
+          _ ->
+            do_find_replayed_fan_out_source_fact_hash(workflow, parent_fact_hash)
+        end
+
+      _ ->
+        nil
+    end
   end
 
   # Rebuild getter_fn for :meta_ref edges during from_log restoration

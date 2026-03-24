@@ -24,6 +24,7 @@ defmodule Fizz.Workflows do
   alias Fizz.Workflows.Embeds.Step
   alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
   alias Fizz.Workflows.Runtime.ContextBuilder
+  alias Fizz.Workflows.StepExecutionTrace
   alias Fizz.Workflows.Store.SqliteStore
 
   alias Fizz.Workflows.{
@@ -35,7 +36,7 @@ defmodule Fizz.Workflows do
   }
 
   alias Runic.Workflow
-  alias Runic.Workflow.{RunnableCompleted, RunnableDispatched, RunnableFailed}
+  alias Runic.Workflow.{ComponentAdded, RunnableCompleted, RunnableDispatched, RunnableFailed}
 
   require Logger
 
@@ -1008,15 +1009,20 @@ defmodule Fizz.Workflows do
   end
 
   defp restore_workflow(run, store_state) do
-    case SqliteStore.load(run.id, store_state) do
-      {:ok, event_log} ->
-        {:ok, Workflow.from_events(event_log)}
+    with {:ok, version} <- restore_version(run.workflow_definition_version_id),
+         {:ok, compiled_workflow, _compiled_hash} <- Compiler.compile(version),
+         {:ok, event_log} <- SqliteStore.load(run.id, store_state) do
+      {:ok, Workflow.from_events(event_log, compiled_workflow)}
+    else
+      {:error, :not_found} -> {:error, :checkpoint_not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-      {:error, :not_found} ->
-        {:error, :checkpoint_not_found}
-
-      {:error, reason} ->
-        {:error, reason}
+  defp restore_version(version_id) when is_binary(version_id) do
+    case Repo.get(WorkflowDefinitionVersion, version_id) do
+      %WorkflowDefinitionVersion{} = version -> {:ok, version}
+      nil -> {:error, :version_not_found}
     end
   end
 
@@ -1081,6 +1087,7 @@ defmodule Fizz.Workflows do
       Map.new(version.steps, fn %Step{id: step_id, type_id: type_id} -> {step_id, type_id} end)
 
     node_name_by_hash = node_name_by_hash(event_log)
+    splitter_dispatch_by_runnable = splitter_dispatch_by_runnable(event_log, step_type_by_id)
 
     event_log
     |> Enum.with_index()
@@ -1092,6 +1099,7 @@ defmodule Fizz.Workflows do
         run,
         step_type_by_id,
         node_name_by_hash,
+        splitter_dispatch_by_runnable,
         store_state
       )
     end)
@@ -1106,11 +1114,13 @@ defmodule Fizz.Workflows do
          run,
          step_type_by_id,
          _node_name_by_hash,
+         _splitter_dispatch_by_runnable,
          _store_state
        ) do
-    with {:ok, step_id} <- logical_step_id(event.node_name, step_type_by_id) do
+    with {:ok, step_id} <- StepExecutionTrace.logical_step_id(event.node_name, step_type_by_id) do
       step_execution_id = step_execution_id(run.id, event.runnable_id, event.attempt)
       started_at = approximate_event_time(run, index)
+      iteration = StepExecutionTrace.fact_iteration_metadata(event.input_fact)
 
       Map.put(acc, step_execution_id, %{
         id: step_execution_id,
@@ -1121,8 +1131,8 @@ defmodule Fizz.Workflows do
         input_data: fact_value(event.input_fact),
         output_data: nil,
         output_item_count: nil,
-        item_index: nil,
-        items_total: nil,
+        item_index: iteration.item_index,
+        items_total: iteration.items_total,
         error: nil,
         attempt: event.attempt,
         retry_of_id: nil,
@@ -1149,44 +1159,64 @@ defmodule Fizz.Workflows do
          run,
          step_type_by_id,
          node_name_by_hash,
+         splitter_dispatch_by_runnable,
          store_state
        ) do
-    step_execution_id = step_execution_id(run.id, event.runnable_id, event.attempt)
-    existing = Map.get(acc, step_execution_id)
+    case splitter_fan_out_step_id(event, node_name_by_hash, step_type_by_id) do
+      {:ok, step_id} ->
+        build_splitter_iteration_executions(
+          acc,
+          event,
+          index,
+          run,
+          step_id,
+          splitter_dispatch_by_runnable,
+          store_state
+        )
 
-    with {:ok, step_id} <- completed_step_id(existing, event, node_name_by_hash, step_type_by_id) do
-      input_fact_hash = existing_input_fact_hash(existing, event)
-      output = fact_value(event.result_fact)
-      completed_at = approximate_event_time(run, index)
-      started_at = existing_timestamp(existing, :started_at, approximate_event_time(run, index))
+      :error ->
+        step_execution_id = step_execution_id(run.id, event.runnable_id, event.attempt)
+        existing = Map.get(acc, step_execution_id)
 
-      Map.put(acc, step_execution_id, %{
-        id: step_execution_id,
-        execution_id: run.id,
-        step_id: step_id,
-        step_type_id: Map.get(step_type_by_id, step_id, "unknown"),
-        status: "completed",
-        input_data: existing_input_data(existing, input_fact_hash, store_state),
-        output_data: output,
-        output_item_count: nil,
-        item_index: nil,
-        items_total: nil,
-        error: nil,
-        attempt: event.attempt,
-        retry_of_id: nil,
-        duration_us: event_duration_us(event),
-        queued_at: existing_timestamp(existing, :queued_at, started_at),
-        started_at: encode_datetime(started_at),
-        completed_at: encode_datetime(completed_at),
-        metadata: %{
-          input_fact_hash: input_fact_hash,
-          output_fact_hash: fact_hash(event.result_fact),
-          output_summary: truncate_output(output)
-        },
-        inserted_at: existing_timestamp(existing, :inserted_at, started_at)
-      })
-    else
-      :error -> acc
+        with {:ok, step_id} <-
+               completed_step_id(existing, event, node_name_by_hash, step_type_by_id) do
+          input_fact_hash = existing_input_fact_hash(existing, event)
+          output = fact_value(event.result_fact)
+          completed_at = approximate_event_time(run, index)
+
+          started_at =
+            existing_timestamp(existing, :started_at, approximate_event_time(run, index))
+
+          iteration = completed_iteration_metadata(existing, event.result_fact)
+
+          Map.put(acc, step_execution_id, %{
+            id: step_execution_id,
+            execution_id: run.id,
+            step_id: step_id,
+            step_type_id: Map.get(step_type_by_id, step_id, "unknown"),
+            status: "completed",
+            input_data: existing_input_data(existing, input_fact_hash, store_state),
+            output_data: output,
+            output_item_count: output_item_count(output),
+            item_index: iteration.item_index,
+            items_total: iteration.items_total,
+            error: nil,
+            attempt: event.attempt,
+            retry_of_id: nil,
+            duration_us: event_duration_us(event),
+            queued_at: existing_timestamp(existing, :queued_at, started_at),
+            started_at: encode_datetime(started_at),
+            completed_at: encode_datetime(completed_at),
+            metadata: %{
+              input_fact_hash: input_fact_hash,
+              output_fact_hash: fact_hash(event.result_fact),
+              output_summary: truncate_output(output)
+            },
+            inserted_at: existing_timestamp(existing, :inserted_at, started_at)
+          })
+        else
+          :error -> acc
+        end
     end
   end
 
@@ -1197,6 +1227,7 @@ defmodule Fizz.Workflows do
          run,
          step_type_by_id,
          node_name_by_hash,
+         _splitter_dispatch_by_runnable,
          store_state
        ) do
     step_execution_id = step_execution_id(run.id, event.runnable_id, event.attempts - 1)
@@ -1205,6 +1236,7 @@ defmodule Fizz.Workflows do
     with {:ok, step_id} <- failed_step_id(existing, event, node_name_by_hash, step_type_by_id) do
       started_at = existing_timestamp(existing, :started_at, approximate_event_time(run, index))
       input_fact_hash = existing_input_fact_hash(existing, nil)
+      iteration = existing_iteration_metadata(existing)
 
       Map.put(acc, step_execution_id, %{
         id: step_execution_id,
@@ -1215,8 +1247,8 @@ defmodule Fizz.Workflows do
         input_data: existing_input_data(existing, input_fact_hash, store_state),
         output_data: Map.get(existing || %{}, :output_data),
         output_item_count: nil,
-        item_index: nil,
-        items_total: nil,
+        item_index: iteration.item_index,
+        items_total: iteration.items_total,
         error: inspect(event.error),
         attempt: max(event.attempts - 1, 0),
         retry_of_id: nil,
@@ -1239,23 +1271,42 @@ defmodule Fizz.Workflows do
          _run,
          _step_type_by_id,
          _node_name_by_hash,
+         _splitter_dispatch_by_runnable,
          _store_state
        ),
        do: acc
 
   defp node_name_by_hash(event_log) do
-    event_log
-    |> Workflow.from_events()
-    |> Map.get(:graph)
-    |> Map.get(:vertices, %{})
-    |> Enum.reduce(%{}, fn {hash, node}, acc ->
-      case Map.get(node, :name) do
-        nil -> acc
-        name -> Map.put(acc, hash, name)
-      end
+    Enum.reduce(event_log, %{}, fn
+      %ComponentAdded{hash: hash, name: name}, acc when not is_nil(hash) and not is_nil(name) ->
+        Map.put(acc, hash, name)
+
+      %RunnableDispatched{node_hash: hash, node_name: name}, acc
+      when not is_nil(hash) and not is_nil(name) ->
+        Map.put(acc, hash, name)
+
+      _event, acc ->
+        acc
     end)
-  rescue
-    _exception -> %{}
+  end
+
+  defp splitter_dispatch_by_runnable(event_log, step_type_by_id) do
+    Enum.reduce(event_log, %{}, fn
+      %RunnableDispatched{} = event, acc ->
+        case StepExecutionTrace.splitter_fan_out_step_id(event.node_name, step_type_by_id) do
+          {:ok, _step_id} ->
+            Map.put(acc, {event.runnable_id, event.attempt}, %{
+              input_data: fact_value(event.input_fact),
+              input_fact_hash: fact_hash(event.input_fact)
+            })
+
+          :error ->
+            acc
+        end
+
+      _event, acc ->
+        acc
+    end)
   end
 
   defp completed_step_id(existing, event, node_name_by_hash, step_type_by_id) do
@@ -1266,7 +1317,7 @@ defmodule Fizz.Workflows do
       _ ->
         event.node_hash
         |> then(&Map.get(node_name_by_hash, &1))
-        |> logical_step_id(step_type_by_id)
+        |> StepExecutionTrace.logical_step_id(step_type_by_id)
     end
   end
 
@@ -1278,32 +1329,9 @@ defmodule Fizz.Workflows do
       _ ->
         event.node_hash
         |> then(&Map.get(node_name_by_hash, &1))
-        |> logical_step_id(step_type_by_id)
+        |> StepExecutionTrace.logical_step_id(step_type_by_id)
     end
   end
-
-  defp logical_step_id(name, step_type_by_id) when is_atom(name) do
-    name
-    |> Atom.to_string()
-    |> logical_step_id(step_type_by_id)
-  end
-
-  defp logical_step_id(name, step_type_by_id) when is_binary(name) do
-    step_id =
-      cond do
-        String.ends_with?(name, "__extract") -> String.trim_trailing(name, "__extract")
-        String.contains?(name, "__") -> nil
-        true -> name
-      end
-
-    if is_binary(step_id) and Map.has_key?(step_type_by_id, step_id) do
-      {:ok, step_id}
-    else
-      :error
-    end
-  end
-
-  defp logical_step_id(_name, _step_type_by_id), do: :error
 
   defp step_execution_id(run_id, runnable_id, attempt) do
     "#{run_id}:#{runnable_id}:#{attempt}"
@@ -1360,10 +1388,120 @@ defmodule Fizz.Workflows do
   defp fact_value(%{value: value}), do: value
   defp fact_value(_fact), do: nil
 
+  defp output_item_count(nil), do: nil
+  defp output_item_count(output) when is_list(output), do: length(output)
+  defp output_item_count(_output), do: 1
+
+  defp splitter_fan_out_step_id(
+         %RunnableCompleted{node_hash: node_hash},
+         node_name_by_hash,
+         step_type_by_id
+       ) do
+    node_hash
+    |> then(&Map.get(node_name_by_hash, &1))
+    |> StepExecutionTrace.splitter_fan_out_step_id(step_type_by_id)
+  end
+
+  defp build_splitter_iteration_executions(
+         acc,
+         event,
+         index,
+         run,
+         step_id,
+         splitter_dispatch_by_runnable,
+         store_state
+       ) do
+    completed_at = approximate_event_time(run, index)
+    emitted_facts = splitter_emitted_facts(event.result_fact)
+    items_total = length(emitted_facts)
+    per_item_duration = per_item_duration_us(event_duration_us(event), items_total)
+    dispatch = Map.get(splitter_dispatch_by_runnable, {event.runnable_id, event.attempt}, %{})
+
+    Enum.reduce(Enum.with_index(emitted_facts), acc, fn {fact, fallback_index}, acc ->
+      item_index = StepExecutionTrace.fact_item_index(fact) || fallback_index
+
+      step_execution_id =
+        step_execution_id(run.id, "#{event.runnable_id}:#{item_index}", event.attempt)
+
+      input_fact_hash =
+        Map.get(dispatch, :input_fact_hash) || fan_out_input_fact_hash(fact)
+
+      input_data =
+        Map.get(dispatch, :input_data) || load_fact_value(input_fact_hash, store_state, nil)
+
+      started_at = DateTime.add(completed_at, -per_item_duration, :microsecond)
+
+      Map.put(acc, step_execution_id, %{
+        id: step_execution_id,
+        execution_id: run.id,
+        step_id: step_id,
+        step_type_id: "splitter",
+        status: "completed",
+        input_data: input_data,
+        output_data: fact_value(fact),
+        output_item_count: 1,
+        item_index: item_index,
+        items_total: StepExecutionTrace.fact_items_total(fact) || items_total,
+        error: nil,
+        attempt: event.attempt,
+        retry_of_id: nil,
+        duration_us: per_item_duration,
+        queued_at: encode_datetime(started_at),
+        started_at: encode_datetime(started_at),
+        completed_at: encode_datetime(completed_at),
+        metadata: %{
+          input_fact_hash: input_fact_hash,
+          output_fact_hash: fact_hash(fact),
+          output_summary: truncate_output(fact_value(fact))
+        },
+        inserted_at: encode_datetime(started_at)
+      })
+    end)
+  end
+
+  defp splitter_emitted_facts(result) when is_list(result) do
+    Enum.filter(result, &match?(%Runic.Workflow.Fact{}, &1))
+  end
+
+  defp splitter_emitted_facts(_result), do: []
+
   defp fact_parent_hash(%{ancestry: {_node_hash, fact_hash}}) when not is_nil(fact_hash),
     do: fact_hash
 
   defp fact_parent_hash(_fact), do: nil
+
+  defp fan_out_input_fact_hash(%{ancestry: {_fan_out_hash, input_fact_hash}})
+       when not is_nil(input_fact_hash),
+       do: input_fact_hash
+
+  defp fan_out_input_fact_hash(_fact), do: nil
+
+  defp completed_iteration_metadata(
+         %{item_index: item_index, items_total: items_total},
+         _result_fact
+       ) do
+    %{item_index: item_index, items_total: items_total}
+  end
+
+  defp completed_iteration_metadata(_existing, result_fact) do
+    StepExecutionTrace.fact_iteration_metadata(result_fact)
+  end
+
+  defp existing_iteration_metadata(%{item_index: item_index, items_total: items_total}) do
+    %{item_index: item_index, items_total: items_total}
+  end
+
+  defp existing_iteration_metadata(_existing) do
+    %{item_index: nil, items_total: nil}
+  end
+
+  defp per_item_duration_us(duration_us, items_total)
+       when is_integer(duration_us) and duration_us >= 0 and is_integer(items_total) and
+              items_total > 0 do
+    max(div(duration_us, items_total), 0)
+  end
+
+  defp per_item_duration_us(_duration_us, _items_total), do: 0
 
   defp duration_us_from_ms(duration_ms) when is_integer(duration_ms) and duration_ms >= 0,
     do: duration_ms * 1_000

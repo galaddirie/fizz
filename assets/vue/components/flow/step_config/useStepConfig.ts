@@ -74,45 +74,60 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         return props.stepType?.id === 'manual_input' || props.node?.data?.type_id === 'manual_input';
     });
 
+    const initializeFromNode = (node: Node<StepNodeData>) => {
+        const nodeData = node.data!;
+        const config = nodeData.config || {};
+        const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
+        const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
+
+        if (isManualTriggerStep.value && !Object.prototype.hasOwnProperty.call(config, 'test_data')) {
+            allKeys.delete('test_data');
+        }
+
+        const modes: Record<string, 'literal' | 'expression'> = {};
+        const values: Record<string, unknown> = {};
+
+        allKeys.forEach(key => {
+            const schemaField = schema[key] ?? {};
+            const rawValue = config[key] ?? schemaField.default;
+            const isSearchField = schemaField.ui?.component === 'search';
+            const isExpr =
+                !isSearchField &&
+                typeof rawValue === 'string' &&
+                (rawValue.includes('{{') || rawValue.includes('{%'));
+
+            modes[key] = isExpr ? 'expression' : 'literal';
+            values[key] = rawValue ?? null;
+        });
+
+        fieldModes.value = modes;
+        fieldValues.value = values;
+        fieldErrors.value = {};
+        editName.value = nodeData.name || '';
+        isEditingName.value = false;
+
+        originalValues.value = { ...values };
+        originalName.value = editName.value;
+        showCloseConfirmation.value = false;
+    };
+
     // --- Init watcher: populate fields/modes on open ---
     watch(
-        [() => props.node, () => props.isOpen],
-        ([newNode, open]) => {
-            if (open && newNode && newNode.data) {
-                const config = newNode.data.config || {};
-                const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
-                const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
+        [() => props.node?.id ?? null, () => props.node?.data?.type_id ?? null, () => props.isOpen],
+        ([nodeId, _typeId, open], previousValues) => {
+            const [previousNodeId, previousTypeId, wasOpen] = previousValues ?? [null, null, false];
+            const node = props.node;
 
-                if (isManualTriggerStep.value && !Object.prototype.hasOwnProperty.call(config, 'test_data')) {
-                    allKeys.delete('test_data');
-                }
+            if (!open || !node || !node.data) return;
 
-                const modes: Record<string, 'literal' | 'expression'> = {};
-                const values: Record<string, unknown> = {};
+            const shouldInitialize =
+                !wasOpen ||
+                nodeId !== previousNodeId ||
+                props.node?.data?.type_id !== previousTypeId;
 
-                allKeys.forEach(key => {
-                    const schemaField = schema[key] ?? {};
-                    const rawValue = config[key] ?? schemaField.default;
-                    const isSearchField = schemaField.ui?.component === 'search';
-                    const isExpr =
-                        !isSearchField &&
-                        typeof rawValue === 'string' &&
-                        (rawValue.includes('{{') || rawValue.includes('{%'));
+            if (!shouldInitialize) return;
 
-                    modes[key] = isExpr ? 'expression' : 'literal';
-                    values[key] = rawValue ?? null;
-                });
-
-                fieldModes.value = modes;
-                fieldValues.value = values;
-                fieldErrors.value = {};
-                editName.value = newNode.data.name || '';
-                isEditingName.value = false;
-
-                originalValues.value = { ...values };
-                originalName.value = editName.value;
-                showCloseConfirmation.value = false;
-            }
+            initializeFromNode(node);
         },
         { immediate: true }
     );

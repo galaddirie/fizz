@@ -1109,6 +1109,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
                id: "run-live:123:0",
                status: "completed",
                output_data: %{"ok" => true},
+               output_item_count: 1,
                duration_us: 12_000
              }
            ] =

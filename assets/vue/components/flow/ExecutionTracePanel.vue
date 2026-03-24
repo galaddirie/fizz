@@ -121,7 +121,8 @@ const traces = computed<TraceEntry[]>(() => {
       const firstExecution = executions[0];
       const baseName = props.stepNameById?.[stepId] || stepId;
 
-      const isMultiItem = firstExecution.items_total && firstExecution.items_total > 1;
+      const itemsTotal = firstExecution.items_total ?? executions.length;
+      const isMultiItem = itemsTotal > 1 || executions.length > 1;
 
       if (isMultiItem) {
         const completedCount = executions.filter(se => se.status === 'completed').length;
@@ -151,7 +152,7 @@ const traces = computed<TraceEntry[]>(() => {
           duration_us: totalDuration,
           timestamp: formatTraceTimestamp(earliestExecution),
           item_index: null,
-          items_total: firstExecution.items_total,
+          items_total: itemsTotal,
           isMultiItem: true,
           iterations: executions
             .map(se => ({

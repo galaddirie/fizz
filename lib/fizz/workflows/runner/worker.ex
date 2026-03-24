@@ -18,11 +18,13 @@ defmodule Fizz.Workflows.Runner.Worker do
   alias Fizz.Workflows
   alias Fizz.Workflows.{DurableTimer, SignalInbox}
   alias Fizz.Workflows.LeaseManager
+  alias Fizz.Workflows.StepExecutionTrace
   alias Fizz.Workflows.Store.{CheckpointStrategy, SqliteStore}
   alias Runic.Workflow
 
   alias Runic.Workflow.{
     Fact,
+    FanOut,
     Invokable,
     Runnable,
     RunnableCompleted,
@@ -731,7 +733,7 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   defp complete_and_stop(state) do
     state = do_checkpoint(state)
-    _ = Workflows.complete_run(state.run_id, Workflow.raw_productions(state.workflow))
+    _ = Workflows.complete_run(state.run_id, workflow_output(state.workflow))
 
     _ =
       broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, :completed)})
@@ -829,19 +831,22 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   defp maybe_broadcast_step_started(state, %Runnable{} = runnable) do
     with {:ok, step_id} <- runnable_step_id(runnable) do
+      payload =
+        %{
+          run_id: state.run_id,
+          runnable_id: runnable.id,
+          step_id: step_id,
+          attempt: 0,
+          input: runnable.input_fact.value,
+          input_fact_hash: runnable.input_fact.hash,
+          started_at: DateTime.utc_now()
+        }
+        |> put_iteration_metadata(runnable.input_fact)
+
       _ =
         broadcast(
           state.run_id,
-          {:step_started,
-           %{
-             run_id: state.run_id,
-             runnable_id: runnable.id,
-             step_id: step_id,
-             attempt: 0,
-             input: runnable.input_fact.value,
-             input_fact_hash: runnable.input_fact.hash,
-             started_at: DateTime.utc_now()
-           }}
+          {:step_started, payload}
         )
 
       :ok
@@ -849,49 +854,62 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp maybe_broadcast_step_completed(state, %Runnable{} = runnable, duration_us) do
-    with {:ok, step_id} <- runnable_step_id(runnable) do
-      output = runnable_output(runnable)
+    case splitter_iteration_payloads(state.run_id, runnable, duration_us) do
+      {:ok, payloads} ->
+        Enum.each(payloads, fn payload ->
+          _ = broadcast(state.run_id, {:step_completed, payload})
+        end)
 
-      _ =
-        broadcast(
-          state.run_id,
-          {:step_completed,
-           %{
-             run_id: state.run_id,
-             runnable_id: runnable.id,
-             step_id: step_id,
-             attempt: 0,
-             input: runnable.input_fact.value,
-             input_fact_hash: runnable.input_fact.hash,
-             output: output,
-             output_fact_hash: output_fact_hash(runnable),
-             output_summary: truncate_output(output),
-             duration_us: duration_us,
-             completed_at: DateTime.utc_now()
-           }}
-        )
+        :ok
 
-      :ok
+      :error ->
+        with {:ok, step_id} <- runnable_step_id(runnable) do
+          output = runnable_output(runnable)
+
+          payload =
+            %{
+              run_id: state.run_id,
+              runnable_id: runnable.id,
+              step_id: step_id,
+              attempt: 0,
+              input: runnable.input_fact.value,
+              input_fact_hash: runnable.input_fact.hash,
+              output: output,
+              output_item_count: output_item_count(output),
+              output_fact_hash: output_fact_hash(runnable),
+              output_summary: truncate_output(output),
+              duration_us: duration_us,
+              completed_at: DateTime.utc_now()
+            }
+            |> put_iteration_metadata(runnable.input_fact)
+
+          _ = broadcast(state.run_id, {:step_completed, payload})
+
+          :ok
+        end
     end
   end
 
   defp maybe_broadcast_step_failed(state, %Runnable{} = runnable, duration_us) do
     with {:ok, step_id} <- runnable_step_id(runnable) do
+      payload =
+        %{
+          run_id: state.run_id,
+          runnable_id: runnable.id,
+          step_id: step_id,
+          attempt: 0,
+          input: runnable.input_fact.value,
+          input_fact_hash: runnable.input_fact.hash,
+          error: encode_error(runnable.error),
+          duration_us: duration_us,
+          failed_at: DateTime.utc_now()
+        }
+        |> put_iteration_metadata(runnable.input_fact)
+
       _ =
         broadcast(
           state.run_id,
-          {:step_failed,
-           %{
-             run_id: state.run_id,
-             runnable_id: runnable.id,
-             step_id: step_id,
-             attempt: 0,
-             input: runnable.input_fact.value,
-             input_fact_hash: runnable.input_fact.hash,
-             error: encode_error(runnable.error),
-             duration_us: duration_us,
-             failed_at: DateTime.utc_now()
-           }}
+          {:step_failed, payload}
         )
 
       :ok
@@ -929,28 +947,83 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp runnable_step_id(%Runnable{node: %{name: name}}), do: logical_step_id(name)
   defp runnable_step_id(_runnable), do: :error
 
-  defp logical_step_id(name) when is_atom(name), do: name |> Atom.to_string() |> logical_step_id()
-
-  defp logical_step_id(name) when is_binary(name) do
-    cond do
-      String.contains?(name, "__") and not String.ends_with?(name, "__extract") ->
-        :error
-
-      String.ends_with?(name, "__extract") ->
-        {:ok, String.trim_trailing(name, "__extract")}
-
-      true ->
-        {:ok, name}
-    end
-  end
-
-  defp logical_step_id(_name), do: :error
+  defp logical_step_id(name), do: StepExecutionTrace.logical_step_id(name)
 
   defp runnable_output(%Runnable{result: %Fact{value: value}}), do: value
   defp runnable_output(%Runnable{result: value}), do: value
 
+  defp output_item_count(nil), do: nil
+  defp output_item_count(output) when is_list(output), do: length(output)
+  defp output_item_count(_output), do: 1
+
   defp output_fact_hash(%Runnable{result: %Fact{hash: hash}}), do: hash
   defp output_fact_hash(_runnable), do: nil
+
+  defp splitter_iteration_payloads(
+         run_id,
+         %Runnable{node: %FanOut{name: name}} = runnable,
+         duration_us
+       ) do
+    with {:ok, step_id} <- StepExecutionTrace.splitter_fan_out_step_id(name),
+         emitted_facts when emitted_facts != [] <- splitter_emitted_facts(runnable.result) do
+      items_total = length(emitted_facts)
+      completed_at = DateTime.utc_now()
+      per_item_duration = per_item_duration_us(duration_us, items_total)
+      started_at = DateTime.add(completed_at, -per_item_duration, :microsecond)
+
+      payloads =
+        Enum.map(Enum.with_index(emitted_facts), fn {fact, fallback_index} ->
+          item_index = StepExecutionTrace.fact_item_index(fact) || fallback_index
+
+          %{
+            run_id: run_id,
+            runnable_id: runnable.id,
+            execution_key: "#{runnable.id}:#{item_index}",
+            step_id: step_id,
+            attempt: 0,
+            input: runnable.input_fact.value,
+            input_fact_hash: runnable.input_fact.hash,
+            output: fact.value,
+            output_item_count: 1,
+            output_fact_hash: fact.hash,
+            output_summary: truncate_output(fact.value),
+            duration_us: per_item_duration,
+            started_at: started_at,
+            completed_at: completed_at,
+            item_index: item_index,
+            items_total: StepExecutionTrace.fact_items_total(fact) || items_total
+          }
+        end)
+
+      {:ok, payloads}
+    else
+      _ -> :error
+    end
+  end
+
+  defp splitter_iteration_payloads(_run_id, _runnable, _duration_us), do: :error
+
+  defp splitter_emitted_facts(result) when is_list(result) do
+    Enum.filter(result, &match?(%Fact{}, &1))
+  end
+
+  defp splitter_emitted_facts(_result), do: []
+
+  defp put_iteration_metadata(payload, fact) do
+    fact
+    |> StepExecutionTrace.fact_iteration_metadata()
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+    |> then(&Map.merge(payload, &1))
+  end
+
+  defp per_item_duration_us(duration_us, items_total)
+       when is_integer(duration_us) and duration_us >= 0 and is_integer(items_total) and
+              items_total > 0 do
+    max(div(duration_us, items_total), 0)
+  end
+
+  defp per_item_duration_us(_duration_us, _items_total), do: 0
 
   defp truncate_output(output) do
     rendered = inspect(output, pretty: true, limit: :infinity, printable_limit: :infinity)
@@ -997,6 +1070,25 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp encode_error(error) do
     %{type: "runtime_error", message: inspect(error), details: %{}}
   end
+
+  defp workflow_output(%Workflow{} = workflow) do
+    case workflow_result_step_ids(workflow) do
+      [] ->
+        Workflow.raw_productions(workflow)
+
+      step_ids ->
+        Enum.flat_map(step_ids, &Workflow.raw_productions(workflow, &1))
+    end
+  end
+
+  defp workflow_result_step_ids(%Workflow{} = workflow) do
+    case Map.get(workflow, :fizz_metadata, %{}) do
+      %{result_step_ids: step_ids} when is_list(step_ids) -> Enum.uniq(step_ids)
+      _ -> []
+    end
+  end
+
+  defp workflow_result_step_ids(_workflow), do: []
 
   defp broadcast(run_id, event) do
     Phoenix.PubSub.broadcast(Fizz.PubSub, "workflow_run:#{run_id}", event)

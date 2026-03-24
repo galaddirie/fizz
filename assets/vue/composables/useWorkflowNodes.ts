@@ -7,6 +7,7 @@ import {
   DEFAULT_GROUP_DIMENSIONS,
   DEFAULT_GROUP_NAME_FONT_SIZE,
 } from '@/constants/layout';
+import { unwrapData } from '@/lib/dataUtils';
 import type {
   Workflow,
   StepType,
@@ -159,6 +160,58 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return durations.length > 0
       ? durations.reduce((total, duration) => total + duration, 0)
       : undefined;
+  };
+
+  const executionTimestampMs = (execution: StepExecution): number => {
+    return (
+      toTimestampMs(execution.completed_at) ??
+      toTimestampMs(execution.started_at) ??
+      toTimestampMs(execution.inserted_at) ??
+      0
+    );
+  };
+
+  const derivedOutputItemCount = (outputData: unknown): number | undefined => {
+    const output = unwrapData(outputData);
+
+    if (output === null || output === undefined) return undefined;
+    if (Array.isArray(output)) return output.length;
+    return 1;
+  };
+
+  const executionOutputItemCount = (execution: StepExecution): number | undefined => {
+    if (
+      typeof execution.output_item_count === 'number' &&
+      Number.isFinite(execution.output_item_count)
+    ) {
+      return execution.output_item_count;
+    }
+
+    return derivedOutputItemCount(execution.output_data);
+  };
+
+  const totalOutputItemCount = (executions: StepExecution[]): number | undefined => {
+    if (executions.length === 0) return undefined;
+
+    const latestExecutionByKey = new Map<string, StepExecution>();
+
+    for (const execution of executions) {
+      const key =
+        execution.item_index === null || execution.item_index === undefined
+          ? '__single__'
+          : `item:${execution.item_index}`;
+      const existing = latestExecutionByKey.get(key);
+
+      if (!existing || executionTimestampMs(execution) >= executionTimestampMs(existing)) {
+        latestExecutionByKey.set(key, execution);
+      }
+    }
+
+    const total = Array.from(latestExecutionByKey.values()).reduce((sum, execution) => {
+      return sum + (executionOutputItemCount(execution) ?? 0);
+    }, 0);
+
+    return total > 0 ? total : undefined;
   };
 
   // Group all step executions by step_id (for multi-item fan-out steps)
@@ -382,6 +435,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const stepExecution = stepExecutions[step.id];
       const stepItemStats = itemStats[step.id];
       const allStepExecutions = stepExecutionsByStepId.value[step.id] || [];
+      const stepOutputItemCount = totalOutputItemCount(allStepExecutions);
       const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
@@ -468,8 +522,8 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           node_role: stepType?.node_role,
           status: displayStatus,
           stats:
-            stepExecution && totalDurationUs !== undefined
-              ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
+            totalDurationUs !== undefined || stepOutputItemCount !== undefined
+              ? { duration_us: totalDurationUs, out: stepOutputItemCount }
               : undefined,
           subnode_slots: stepType?.subnode_slots ?? [],
           itemStats: stepItemStats,

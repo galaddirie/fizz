@@ -8,8 +8,9 @@ defmodule Runic.Workflow.FactRef do
 
   @type t :: %__MODULE__{
           hash: Runic.Workflow.Fact.hash(),
-          ancestry: {Runic.Workflow.Fact.hash(), Runic.Workflow.Fact.hash()} | nil
+          ancestry: {Runic.Workflow.Fact.hash(), Runic.Workflow.Fact.hash()} | nil,
+          meta: map()
         }
 
-  defstruct [:hash, :ancestry]
+  defstruct [:hash, :ancestry, meta: %{}]
 end

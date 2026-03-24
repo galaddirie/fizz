@@ -23,7 +23,8 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       Workflow.new(name: ir.definition_version_id || "fizz_workflow")
       |> Map.put(:fizz_metadata, %{
         compiler_version: ir.compiler_version,
-        trigger_manifest: trigger_manifest(ir.steps)
+        trigger_manifest: trigger_manifest(ir.steps),
+        result_step_ids: result_step_ids(ir)
       })
       |> add_steps(ir, steps, accumulators, slot_assemblies)
       |> draw_meta_ref_edges(steps)
@@ -276,6 +277,34 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         config: step.config
       }
     end)
+  end
+
+  defp result_step_ids(ir) do
+    output_step_ids =
+      ir.steps
+      |> Map.values()
+      |> Enum.filter(&(&1.type_id == "data_output" and &1.node_role != :subnode))
+      |> Enum.map(& &1.id)
+      |> Enum.sort()
+
+    case output_step_ids do
+      [] -> terminal_step_ids(ir)
+      _ -> output_step_ids
+    end
+  end
+
+  defp terminal_step_ids(ir) do
+    source_step_ids =
+      ir.connections
+      |> Enum.map(& &1.source_step_id)
+      |> MapSet.new()
+
+    ir.steps
+    |> Map.values()
+    |> Enum.reject(&(&1.node_role == :subnode))
+    |> Enum.reject(&MapSet.member?(source_step_ids, &1.id))
+    |> Enum.map(& &1.id)
+    |> Enum.sort()
   end
 
   defp draw_meta_ref_edges(workflow, steps) do

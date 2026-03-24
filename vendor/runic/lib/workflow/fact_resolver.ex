@@ -31,18 +31,18 @@ defmodule Runic.Workflow.FactResolver do
   @spec resolve(Fact.t() | FactRef.t(), t()) :: {:ok, Fact.t()} | {:error, term()}
   def resolve(%Fact{value: v} = fact, _resolver) when not is_nil(v), do: {:ok, fact}
 
-  def resolve(%FactRef{hash: h, ancestry: a}, %__MODULE__{} = resolver) do
+  def resolve(%FactRef{hash: h, ancestry: a, meta: meta}, %__MODULE__{} = resolver) do
     case Map.get(resolver.cache, h) do
       nil ->
         {mod, st} = resolver.store
 
         case mod.load_fact(h, st) do
-          {:ok, value} -> {:ok, %Fact{hash: h, ancestry: a, value: value}}
+          {:ok, value} -> {:ok, %Fact{hash: h, ancestry: a, value: value, meta: meta}}
           {:error, _} = err -> err
         end
 
       value ->
-        {:ok, %Fact{hash: h, ancestry: a, value: value}}
+        {:ok, %Fact{hash: h, ancestry: a, value: value, meta: meta}}
     end
   end
 

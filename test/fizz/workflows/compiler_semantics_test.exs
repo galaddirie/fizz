@@ -54,6 +54,41 @@ defmodule Fizz.Workflows.CompilerSemanticsTest do
     assert productions(workflow, aggregator_id) == [[6, 2, 4]]
   end
 
+  test "splitter supports json aliases when selecting the collection to fan out" do
+    root = step(%{id: Ecto.UUID.generate(), type_id: "manual_input", name: "Entry"})
+
+    splitter =
+      step(%{
+        id: Ecto.UUID.generate(),
+        type_id: "splitter",
+        name: "Split",
+        config: %{"field" => "{{ json.items }}"}
+      })
+
+    multiply = math_step("Times Two", "multiply", "{{ input }}", 2)
+
+    aggregator =
+      step(%{
+        id: Ecto.UUID.generate(),
+        type_id: "aggregator",
+        name: "Collect",
+        config: %{"operation" => "collect"}
+      })
+
+    workflow =
+      [root, splitter, multiply, aggregator]
+      |> version([
+        connection(%{source_step_id: root.id, target_step_id: splitter.id}),
+        connection(%{source_step_id: splitter.id, target_step_id: multiply.id}),
+        connection(%{source_step_id: multiply.id, target_step_id: aggregator.id})
+      ])
+      |> compile!()
+      |> elem(0)
+      |> react(%{"items" => [1, 2, 3]})
+
+    assert productions(workflow, aggregator.id) == [[2, 4, 6]]
+  end
+
   test "splitter to aggregator emits one result for a single split item" do
     {workflow, aggregator_id} = split_collect_workflow()
     workflow = react(workflow, %{"items" => [4]})

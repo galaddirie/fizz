@@ -13,6 +13,14 @@ defmodule Fizz.Workflows.Runtime.ConfigResolverTest do
              %{"orders" => orders}
   end
 
+  test "resolve_config preserves native values for json aliases" do
+    compiled_config = %{"orders" => access_plan!("{{ json.orders }}")}
+    orders = [%{"id" => 1}, %{"id" => 2}]
+
+    assert ConfigResolver.resolve_config(compiled_config, context(%{"orders" => orders}, %{})) ==
+             %{"orders" => orders}
+  end
+
   test "resolve_config renders template expressions to strings" do
     compiled_config = %{"message" => access_plan!("Hello {{ input.name }}")}
 

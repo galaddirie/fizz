@@ -13,6 +13,8 @@ defmodule Runic.Workflow.Events.FanOutFactEmitted do
           emitted_fact_hash: term(),
           emitted_value: term(),
           emitted_ancestry: {term(), term()} | nil,
+          item_index: non_neg_integer() | nil,
+          items_total: non_neg_integer() | nil,
           weight: non_neg_integer()
         }
 
@@ -22,6 +24,8 @@ defmodule Runic.Workflow.Events.FanOutFactEmitted do
     :emitted_fact_hash,
     :emitted_value,
     :emitted_ancestry,
+    :item_index,
+    :items_total,
     :weight
   ]
 end

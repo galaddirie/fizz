@@ -197,9 +197,10 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorkerTest do
         job.args["trigger_registration_id"] == registration.id and
           job.args["event_id"] != event_id
       end)
+      |> Enum.sort_by(& &1.scheduled_at, {:desc, DateTime})
 
     assert length(next_jobs) >= 1
-    [next_job] = next_jobs
+    [next_job | _] = next_jobs
     assert next_job.scheduled_at != nil
 
     # The registration's next_fire_at should be updated

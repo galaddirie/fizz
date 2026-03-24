@@ -1204,13 +1204,19 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp upsert_step_completed(step_executions, socket, payload) do
+    output = payload_value(payload, "output")
+
     step_execution =
       socket
       |> base_step_execution(payload)
       |> merge_existing_step_execution(step_executions)
       |> Map.put(:status, "completed")
       |> Map.put(:input_data, existing_or_payload(step_executions, payload, :input_data, "input"))
-      |> Map.put(:output_data, payload_value(payload, "output"))
+      |> Map.put(:output_data, output)
+      |> Map.put(
+        :output_item_count,
+        payload_value(payload, "output_item_count") || output_item_count(output)
+      )
       |> Map.put(:duration_us, payload_value(payload, "duration_us"))
       |> Map.put(:completed_at, encode_datetime(payload_value(payload, "completed_at")))
       |> put_step_execution_metadata(%{
@@ -1255,8 +1261,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       input_data: nil,
       output_data: nil,
       output_item_count: nil,
-      item_index: nil,
-      items_total: nil,
+      item_index: payload_value(payload, "item_index"),
+      items_total: payload_value(payload, "items_total"),
       error: nil,
       attempt: payload_value(payload, "attempt") || 0,
       retry_of_id: nil,
@@ -1303,7 +1309,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp step_execution_id(payload) do
-    runnable_id = payload_value(payload, "runnable_id")
+    runnable_id = payload_value(payload, "execution_key") || payload_value(payload, "runnable_id")
     run_id = payload_value(payload, "run_id")
     attempt = payload_value(payload, "attempt") || 0
     "#{run_id}:#{runnable_id}:#{attempt}"
@@ -1771,6 +1777,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   rescue
     ArgumentError -> Map.get(payload, string_key)
   end
+
+  defp output_item_count(nil), do: nil
+  defp output_item_count(output) when is_list(output), do: length(output)
+  defp output_item_count(_output), do: 1
 
   defp string_list(values) when is_list(values) do
     values

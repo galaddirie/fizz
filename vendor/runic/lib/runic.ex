@@ -4435,10 +4435,12 @@ defmodule Runic do
       fan_out_hash =
         Components.fact_hash({:fan_out, unquote(name), unquote(Macro.escape(expression))})
 
+      fan_out_name = "#{unquote(name)}__fan_out"
+
       fan_out =
         %FanOut{
           hash: fan_out_hash,
-          name: unquote(name)
+          name: fan_out_name
         }
 
       step_hash =
@@ -4461,7 +4463,7 @@ defmodule Runic do
       quote do
         %FanOut{
           hash: unquote(fan_out_hash),
-          name: unquote(name)
+          name: "#{unquote(name)}__fan_out"
         }
       end
 

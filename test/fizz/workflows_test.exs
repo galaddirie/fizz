@@ -259,6 +259,182 @@ defmodule Fizz.WorkflowsTest do
     assert_worker_shutdown(run.id)
   end
 
+  test "list_run_step_executions exposes split iterations without compiler internals" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+
+    trigger = WorkflowsFixtures.step(%{type_id: "manual_input", name: "Manual"})
+
+    splitter =
+      WorkflowsFixtures.step(%{
+        type_id: "splitter",
+        name: "Split",
+        config: %{"field" => "{{ json.items }}"}
+      })
+
+    debug = WorkflowsFixtures.step(%{type_id: "debug", name: "Debug"})
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [trigger, splitter, debug],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: trigger.id,
+            target_step_id: splitter.id
+          }),
+          WorkflowsFixtures.connection(%{
+            source_step_id: splitter.id,
+            target_step_id: debug.id
+          })
+        ]
+      })
+
+    %{version: version} = WorkflowsFixtures.published_version_fixture(scope, snapshot_attrs)
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"items" => [1, 2, 3]})
+
+    _completed_run =
+      eventually(fn ->
+        with {:ok, workflow_run} <- Workflows.get_run(scope, run.id),
+             true <- workflow_run.status == :completed do
+          {:ok, workflow_run}
+        else
+          _ -> :retry
+        end
+      end)
+
+    assert {:ok, step_executions} = Workflows.list_run_step_executions(scope, run.id)
+
+    step_ids =
+      step_executions
+      |> Enum.map(& &1.step_id)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    assert step_ids == Enum.sort([trigger.id, splitter.id, debug.id])
+    refute Enum.any?(step_executions, &String.contains?(&1.step_id, "__"))
+
+    splitter_executions =
+      step_executions
+      |> Enum.filter(&(&1.step_id == splitter.id))
+      |> Enum.sort_by(& &1.item_index)
+
+    assert Enum.map(splitter_executions, & &1.item_index) == [0, 1, 2]
+    assert Enum.map(splitter_executions, & &1.items_total) == [3, 3, 3]
+    assert Enum.map(splitter_executions, & &1.input_data) == [[1, 2, 3], [1, 2, 3], [1, 2, 3]]
+    assert Enum.map(splitter_executions, & &1.output_data) == [1, 2, 3]
+
+    debug_executions =
+      step_executions
+      |> Enum.filter(&(&1.step_id == debug.id))
+      |> Enum.sort_by(& &1.item_index)
+
+    assert Enum.map(debug_executions, & &1.item_index) == [0, 1, 2]
+    assert Enum.map(debug_executions, & &1.items_total) == [3, 3, 3]
+    assert Enum.map(debug_executions, & &1.input_data) == [1, 2, 3]
+
+    assert_worker_shutdown(run.id)
+  end
+
+  test "completed run output excludes internal splitter artifacts and preserves iteration metadata downstream" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+
+    trigger = WorkflowsFixtures.step(%{type_id: "manual_input", name: "Manual Trigger"})
+
+    debug =
+      WorkflowsFixtures.step(%{
+        type_id: "debug",
+        name: "Inspect Request",
+        config: %{"label" => "Incoming request", "level" => "info"}
+      })
+
+    output = WorkflowsFixtures.step(%{type_id: "data_output", name: "Output"})
+
+    splitter =
+      WorkflowsFixtures.step(%{
+        type_id: "splitter",
+        name: "Split Items",
+        config: %{"field" => "{{ json.email }}"}
+      })
+
+    math =
+      WorkflowsFixtures.step(%{
+        type_id: "math",
+        name: "Math",
+        config: %{"operation" => "add", "value" => "{{ input }}", "operand" => 10}
+      })
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [trigger, debug, output, splitter, math],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: trigger.id,
+            target_step_id: debug.id
+          }),
+          WorkflowsFixtures.connection(%{
+            source_step_id: debug.id,
+            target_step_id: output.id
+          }),
+          WorkflowsFixtures.connection(%{
+            source_step_id: trigger.id,
+            target_step_id: splitter.id
+          }),
+          WorkflowsFixtures.connection(%{
+            source_step_id: splitter.id,
+            target_step_id: math.id
+          })
+        ]
+      })
+
+    %{version: version} = WorkflowsFixtures.published_version_fixture(scope, snapshot_attrs)
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"email" => [1, 2, 3]})
+
+    completed_run =
+      eventually(fn ->
+        with {:ok, workflow_run} <- Workflows.get_run(scope, run.id),
+             true <- workflow_run.status == :completed do
+          {:ok, workflow_run}
+        else
+          _ -> :retry
+        end
+      end)
+
+    assert completed_run.output == %{"value" => [%{"email" => [1, 2, 3]}]}
+
+    assert {:ok, step_executions} = Workflows.list_run_step_executions(scope, run.id)
+
+    step_ids =
+      step_executions
+      |> Enum.map(& &1.step_id)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    assert step_ids == Enum.sort([trigger.id, debug.id, output.id, splitter.id, math.id])
+
+    splitter_executions =
+      step_executions
+      |> Enum.filter(&(&1.step_id == splitter.id))
+      |> Enum.sort_by(& &1.item_index)
+
+    assert Enum.map(splitter_executions, & &1.item_index) == [0, 1, 2]
+    assert Enum.map(splitter_executions, & &1.items_total) == [3, 3, 3]
+    assert Enum.map(splitter_executions, & &1.input_data) == [[1, 2, 3], [1, 2, 3], [1, 2, 3]]
+    assert Enum.map(splitter_executions, & &1.output_data) == [1, 2, 3]
+
+    math_executions =
+      step_executions
+      |> Enum.filter(&(&1.step_id == math.id))
+      |> Enum.sort_by(& &1.item_index)
+
+    assert Enum.map(math_executions, & &1.item_index) == [0, 1, 2]
+    assert Enum.map(math_executions, & &1.items_total) == [3, 3, 3]
+    assert Enum.map(math_executions, & &1.input_data) == [1, 2, 3]
+    assert Enum.map(math_executions, & &1.output_data) == [11.0, 12.0, 13.0]
+
+    assert_worker_shutdown(run.id)
+  end
+
   test "cancel_run transitions the run to cancelled and stops the worker" do
     scope = WorkflowsFixtures.project_scope_fixture()
 
@@ -344,7 +520,8 @@ defmodule Fizz.WorkflowsTest do
 
     assert :ok = SqliteStore.save(run.id, event_log, store_state)
 
-    assert {:ok, [%{duration_us: 713, status: "completed", step_id: step_id}]} =
+    assert {:ok,
+            [%{duration_us: 713, output_item_count: 1, status: "completed", step_id: step_id}]} =
              Workflows.list_run_step_executions(scope, run.id)
 
     assert step_id == step.id

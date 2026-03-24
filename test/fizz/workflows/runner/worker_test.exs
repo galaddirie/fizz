@@ -143,11 +143,13 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
                       step_id: ^step_id,
                       completed_at: %DateTime{},
                       duration_us: duration_us,
+                      output_item_count: output_item_count,
                       output_summary: output_summary
                     }},
                    2_000
 
     assert is_integer(duration_us)
+    assert output_item_count == 1
     assert is_binary(output_summary)
 
     assert_receive {:run_status_changed,

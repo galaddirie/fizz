@@ -381,7 +381,7 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
       ) do
     result = Components.run(step.work, fact.value, Components.arity_of(step.work))
 
-    result_fact = Fact.new(value: result, ancestry: {step.hash, fact.hash})
+    result_fact = Fact.new(value: result, ancestry: {step.hash, fact.hash}, meta: fact.meta)
 
     causal_depth = Workflow.ancestry_depth(workflow, fact) + 1
 
@@ -425,7 +425,7 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
       try do
         result = run_step_work(step, fact.value, ctx)
 
-        result_fact = Fact.new(value: result, ancestry: {step.hash, fact.hash})
+        result_fact = Fact.new(value: result, ancestry: {step.hash, fact.hash}, meta: fact.meta)
 
         case HookRunner.run_after(ctx, step, fact, result_fact) do
           {:ok, after_apply_fns} ->
@@ -474,7 +474,8 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
         value: result_fact.value,
         ancestry: result_fact.ancestry,
         producer_label: :produced,
-        weight: ctx.ancestry_depth + 1
+        weight: ctx.ancestry_depth + 1,
+        meta: result_fact.meta
       },
       %ActivationConsumed{
         fact_hash: input_fact.hash,
@@ -524,9 +525,12 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
   defp maybe_prepare_map_reduce(workflow, step, fact) do
     if is_reduced_in_map?(workflow, step) do
       map_reduce_tracks(workflow, step.hash, fact)
-      |> Enum.reduce(workflow, fn %{source_fact_hash: source_fact_hash, fan_out_hash: fan_out_hash,
-                                     fan_out_fact_hash: fan_out_fact_hash},
-                                    workflow_acc ->
+      |> Enum.reduce(workflow, fn %{
+                                    source_fact_hash: source_fact_hash,
+                                    fan_out_hash: fan_out_hash,
+                                    fan_out_fact_hash: fan_out_fact_hash
+                                  },
+                                  workflow_acc ->
         seen_key = {fan_out_hash, source_fact_hash, step.hash}
         seen = Map.get(workflow_acc.mapped, seen_key, %{})
         seen = Map.put(seen, fan_out_fact_hash, fact.hash)
@@ -572,20 +576,33 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.Step do
 
   @doc false
   def fan_out_origin_fact_hash(workflow, %Runic.Workflow.Fact{
-        ancestry: {_producer_hash, input_fact_hash}
+        hash: fact_hash,
+        ancestry: {producer_hash, input_fact_hash}
       }) do
-    # Walk up the ancestry chain to find the fact that was produced by a FanOut
-    find_fan_out_origin(workflow, input_fact_hash)
+    case workflow.graph.vertices[producer_hash] do
+      %Runic.Workflow.FanOut{} ->
+        fact_hash
+
+      _ ->
+        # Walk up the ancestry chain to find the fact that was produced by a FanOut
+        find_fan_out_origin(workflow, input_fact_hash)
+    end
   end
 
   def fan_out_origin_fact_hash(_workflow, _fact), do: nil
 
   defp find_fan_out_info(
          workflow,
-         %Runic.Workflow.Fact{ancestry: {_producer_hash, input_fact_hash}},
+         %Runic.Workflow.Fact{hash: fact_hash, ancestry: {producer_hash, input_fact_hash}},
          target_fan_out_hash
        ) do
-    do_find_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
+    case workflow.graph.vertices[producer_hash] do
+      %Runic.Workflow.FanOut{} = fan_out when fan_out.hash == target_fan_out_hash ->
+        {input_fact_hash, fan_out.hash, fact_hash}
+
+      _ ->
+        do_find_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
+    end
   end
 
   defp find_fan_out_info(_workflow, _fact, _target_fan_out_hash), do: nil
@@ -1102,10 +1119,16 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanOut do
       is_reduced? = is_reduced?(workflow, fan_out)
 
       causal_depth = Workflow.ancestry_depth(workflow, source_fact) + 1
+      items = Enum.to_list(source_fact.value)
+      items_total = length(items)
 
-      Enum.reduce(source_fact.value, workflow, fn value, wrk ->
+      Enum.reduce(Enum.with_index(items), workflow, fn {value, index}, wrk ->
         fact =
-          Fact.new(value: value, ancestry: {fan_out.hash, source_fact.hash})
+          Fact.new(
+            value: value,
+            ancestry: {fan_out.hash, source_fact.hash},
+            meta: %{item_index: index, items_total: items_total, fan_out_hash: fan_out.hash}
+          )
 
         wrk
         |> Workflow.log_fact(fact)
@@ -1141,9 +1164,16 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanOut do
   end
 
   def execute(%FanOut{} = fan_out, %Runnable{input_fact: source_fact, context: ctx} = runnable) do
+    items = Enum.to_list(source_fact.value)
+    items_total = length(items)
+
     emitted_facts =
-      Enum.map(Enum.to_list(source_fact.value), fn value ->
-        Fact.new(value: value, ancestry: {fan_out.hash, source_fact.hash})
+      Enum.map(Enum.with_index(items), fn {value, index} ->
+        Fact.new(
+          value: value,
+          ancestry: {fan_out.hash, source_fact.hash},
+          meta: %{item_index: index, items_total: items_total, fan_out_hash: fan_out.hash}
+        )
       end)
 
     fan_out_events =
@@ -1154,6 +1184,8 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanOut do
           emitted_fact_hash: fact.hash,
           emitted_value: fact.value,
           emitted_ancestry: fact.ancestry,
+          item_index: get_in(fact.meta, [:item_index]),
+          items_total: get_in(fact.meta, [:items_total]),
           weight: ctx.ancestry_depth + 1
         }
       end)
@@ -1316,8 +1348,17 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
   # Find the source_fact hash that triggered the FanOut
   # This walks up the ancestry chain from the current fact to find the FanOut producer,
   # then returns its parent (the source_fact that was input to the FanOut)
-  defp find_fan_out_source_fact_hash(workflow, %Fact{ancestry: {_producer_hash, input_fact_hash}}) do
-    do_find_fan_out_source(workflow, input_fact_hash)
+  defp find_fan_out_source_fact_hash(
+         workflow,
+         %Fact{ancestry: {producer_hash, input_fact_hash}}
+       ) do
+    case workflow.graph.vertices[producer_hash] do
+      %FanOut{} ->
+        input_fact_hash
+
+      _ ->
+        do_find_fan_out_source(workflow, input_fact_hash)
+    end
   end
 
   defp find_fan_out_source_fact_hash(workflow, fact, target_fan_out_hash) do
@@ -1357,10 +1398,16 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
 
   defp find_fan_out_info(
          workflow,
-         %Fact{ancestry: {_producer_hash, input_fact_hash}},
+         %Fact{hash: fact_hash, ancestry: {producer_hash, input_fact_hash}},
          target_fan_out_hash
        ) do
-    do_find_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
+    case workflow.graph.vertices[producer_hash] do
+      %FanOut{} = fan_out when fan_out.hash == target_fan_out_hash ->
+        {input_fact_hash, fan_out.hash, fact_hash}
+
+      _ ->
+        do_find_fan_out_info(workflow, input_fact_hash, target_fan_out_hash)
+    end
   end
 
   defp find_fan_out_info(_workflow, _fact, _target_fan_out_hash), do: nil
@@ -1474,7 +1521,12 @@ defimpl Runic.Workflow.Invokable, for: Runic.Workflow.FanIn do
   defp merge_effective_context(meta, run) when map_size(meta) == 0, do: run
   defp merge_effective_context(meta, run), do: Map.merge(run, meta)
 
-  defp cleanup_mapped(workflow, {source_fact_hash, fan_out_hash} = expected_key, seen_key, source_fact_hash) do
+  defp cleanup_mapped(
+         workflow,
+         {source_fact_hash, fan_out_hash} = expected_key,
+         seen_key,
+         source_fact_hash
+       ) do
     mapped =
       workflow.mapped
       |> Map.delete(seen_key)
