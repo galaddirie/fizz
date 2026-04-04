@@ -264,6 +264,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     {:noreply, maybe_apply_step_failed(socket, run_id, payload)}
   end
 
+  def handle_info({:step_cancelled, %{run_id: run_id} = payload}, socket) do
+    {:noreply, maybe_apply_step_cancelled(socket, run_id, payload)}
+  end
+
   def handle_info({:run_status_changed, %{run_id: run_id, status: status} = payload}, socket) do
     {:noreply, maybe_apply_run_status(socket, run_id, status, payload)}
   end
@@ -1136,15 +1140,25 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     end
   end
 
+  defp maybe_apply_step_cancelled(socket, run_id, payload) do
+    if current_execution_id(socket) == run_id do
+      assign(
+        socket,
+        :step_executions,
+        upsert_step_cancelled(socket.assigns.step_executions, payload)
+      )
+    else
+      socket
+    end
+  end
+
   defp maybe_apply_run_status(socket, run_id, status, payload) do
     if current_execution_id(socket) == run_id do
-      socket =
-        socket
-        |> refresh_terminal_execution(run_id, status)
-        |> update_execution_status(status, payload)
-        |> maybe_unsubscribe_terminal_run(run_id, status)
-
       socket
+      |> refresh_terminal_execution(run_id, status)
+      |> update_execution_status(status, payload)
+      |> mark_nonterminal_steps_cancelled(status)
+      |> maybe_unsubscribe_terminal_run(run_id, status)
     else
       socket
     end
@@ -1181,6 +1195,23 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     if terminal_status?(status) do
       unsubscribe_from_run(run_id)
       assign(socket, :run_topic, nil)
+    else
+      socket
+    end
+  end
+
+  defp mark_nonterminal_steps_cancelled(socket, status) do
+    if terminal_status?(status) do
+      step_executions =
+        Enum.map(socket.assigns.step_executions, fn step_exec ->
+          if step_exec.status in ["running", "pending"] do
+            %{step_exec | status: "cancelled", completed_at: encode_datetime(DateTime.utc_now())}
+          else
+            step_exec
+          end
+        end)
+
+      assign(socket, :step_executions, step_executions)
     else
       socket
     end
@@ -1245,6 +1276,20 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       })
 
     put_step_execution(step_executions, step_execution)
+  end
+
+  defp upsert_step_cancelled(step_executions, payload) do
+    runnable_id = payload_value(payload, "runnable_id")
+    run_id = payload_value(payload, "run_id")
+    cancelled_at = encode_datetime(payload_value(payload, "cancelled_at"))
+
+    Enum.map(step_executions, fn step_exec ->
+      if String.starts_with?(step_exec.id, "#{run_id}:#{runnable_id}:") do
+        %{step_exec | status: "cancelled", completed_at: cancelled_at}
+      else
+        step_exec
+      end
+    end)
   end
 
   defp base_step_execution(socket, payload) do

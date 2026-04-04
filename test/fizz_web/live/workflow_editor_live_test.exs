@@ -1186,6 +1186,115 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert :ok = wait_for_worker_exit(execution_id)
   end
 
+  test "step_cancelled event updates step execution status", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.valid_snapshot_attrs()
+    step_id = hd(Enum.map(snapshot_attrs.steps, & &1.id))
+    run_id = Ecto.UUID.generate()
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    put_execution(view, %{id: run_id, status: "running"})
+
+    send(
+      view.pid,
+      {:step_started,
+       %{
+         run_id: run_id,
+         runnable_id: 123,
+         step_id: step_id,
+         attempt: 0,
+         input: %{"x" => 1},
+         input_fact_hash: "hash",
+         started_at: DateTime.utc_now()
+       }}
+    )
+
+    render(view)
+    assert [%{status: "running"}] = live_socket(view).assigns.step_executions
+
+    send(
+      view.pid,
+      {:step_cancelled,
+       %{
+         run_id: run_id,
+         runnable_id: 123,
+         step_id: step_id,
+         cancelled_at: DateTime.utc_now()
+       }}
+    )
+
+    render(view)
+    assert [%{status: "cancelled"}] = live_socket(view).assigns.step_executions
+  end
+
+  test "terminal run status marks running steps as cancelled", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.valid_snapshot_attrs()
+    steps = snapshot_attrs.steps
+    step_a_id = Enum.at(steps, 0).id
+    step_b_id = Enum.at(steps, 1).id
+    run_id = Ecto.UUID.generate()
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    put_execution(view, %{id: run_id, status: "running"})
+
+    for {step_id, runnable_id} <- [{step_a_id, 1}, {step_b_id, 2}] do
+      send(
+        view.pid,
+        {:step_started,
+         %{
+           run_id: run_id,
+           runnable_id: runnable_id,
+           step_id: step_id,
+           attempt: 0,
+           input: %{},
+           input_fact_hash: "h",
+           started_at: DateTime.utc_now()
+         }}
+      )
+    end
+
+    render(view)
+    assert length(live_socket(view).assigns.step_executions) == 2
+    assert Enum.all?(live_socket(view).assigns.step_executions, &(&1.status == "running"))
+
+    send(
+      view.pid,
+      {:run_status_changed,
+       %{
+         run_id: run_id,
+         status: :failed,
+         timestamp: DateTime.utc_now()
+       }}
+    )
+
+    render(view)
+
+    statuses =
+      live_socket(view).assigns.step_executions
+      |> Enum.map(& &1.status)
+      |> Enum.sort()
+
+    assert statuses == ["cancelled", "cancelled"]
+  end
+
+  test "paused execution assigns correct status for stop button visibility", %{conn: conn} do
+    snapshot_attrs = WorkflowsFixtures.long_running_snapshot_attrs(5_000)
+    run_id = Ecto.UUID.generate()
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    put_execution(view, %{id: run_id, status: "paused"})
+
+    render(view)
+
+    execution = live_socket(view).assigns.execution
+    assert execution.status == "paused"
+  end
+
   test "compilation errors are pushed to the client", %{conn: conn} do
     source_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Source"})
     trigger_step = WorkflowsFixtures.step(%{type_id: "schedule_trigger", name: "Schedule"})

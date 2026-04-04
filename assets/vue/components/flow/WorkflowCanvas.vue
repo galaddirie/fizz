@@ -86,7 +86,7 @@ onBeforeUnmount(() => {
 <template>
   <div
     :ref="setCanvasRef"
-    class="relative min-w-0 flex-1 overflow-hidden"
+    class="relative isolate min-w-0 flex-1 overflow-hidden"
     :class="{ 'selection-modifier-active': isSelectionModifierPressed }"
     @pointermove.capture="handlePaneMouseMove"
     @pointerleave.capture="handlePaneMouseLeave"

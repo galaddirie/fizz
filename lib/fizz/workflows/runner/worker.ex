@@ -35,6 +35,8 @@ defmodule Fizz.Workflows.Runner.Worker do
   alias Runic.Workflow.Events.{ActivationConsumed, FactProduced, MapReduceTracked}
   alias Runic.Workflow.SchedulerPolicy
 
+  require Logger
+
   @default_idle_timeout_ms 60_000
   @output_summary_limit 1_024
 
@@ -285,11 +287,40 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   @impl true
-  def terminate(_reason, state) do
+  def terminate(:normal, state) do
+    # Normal shutdown (via Worker.stop/2 or workflow completion) — just clean up.
+    # The caller (e.g. cancel_run) is responsible for setting the final status.
     state
     |> cancel_idle_timeout()
     |> cancel_local_timers()
     |> shutdown_active_tasks()
+
+    :ok
+  end
+
+  def terminate(_reason, state) do
+    state =
+      state
+      |> cancel_idle_timeout()
+      |> cancel_local_timers()
+      |> broadcast_active_tasks_cancelled()
+      |> shutdown_active_tasks()
+
+    # Safety net: if run is still non-terminal in DB, mark it as failed.
+    # fail_run/2 internally fetches the run and handles already-failed runs,
+    # so we just call it and handle errors gracefully.
+    case Workflows.fail_run(state.run_id, :worker_terminated) do
+      {:ok, _run} ->
+        _ =
+          broadcast(
+            state.run_id,
+            {:run_status_changed, status_payload(state.run_id, :failed)}
+          )
+
+      {:error, _reason} ->
+        # Run was already terminal or not found — nothing to do
+        :ok
+    end
 
     :ok
   end
@@ -743,10 +774,34 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp fail_and_stop(state, reason) do
-    state = do_checkpoint(state)
-    _ = Workflows.fail_run(state.run_id, reason)
+    # 1. Broadcast :step_cancelled for every active sibling task
+    state = broadcast_active_tasks_cancelled(state)
+
+    # 2. Shutdown active tasks
+    state = shutdown_active_tasks(state)
+
+    # 3. Checkpoint — wrapped in try/rescue so failure doesn't prevent DB update
+    state =
+      try do
+        do_checkpoint(state)
+      rescue
+        e ->
+          Logger.error("Checkpoint failed during fail_and_stop: #{Exception.message(e)}")
+          state
+      end
+
+    # 4. Mark run as failed in DB — log on error
+    case Workflows.fail_run(state.run_id, reason) do
+      {:ok, _run} -> :ok
+      {:error, fail_reason} -> Logger.error("fail_run failed: #{inspect(fail_reason)}")
+    end
+
+    # 5. Broadcast terminal status
     _ = broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, :failed)})
+
+    # 6. Release lease
     _ = release_lease(state.run_id)
+
     state
   end
 
@@ -911,6 +966,31 @@ defmodule Fizz.Workflows.Runner.Worker do
           state.run_id,
           {:step_failed, payload}
         )
+
+      :ok
+    end
+  end
+
+  defp broadcast_active_tasks_cancelled(%__MODULE__{active_tasks: active_tasks} = state) do
+    now = DateTime.utc_now()
+
+    Enum.each(active_tasks, fn {_ref, task_state} ->
+      maybe_broadcast_step_cancelled(state, task_state.runnable, now)
+    end)
+
+    state
+  end
+
+  defp maybe_broadcast_step_cancelled(state, %Runnable{} = runnable, cancelled_at) do
+    with {:ok, step_id} <- runnable_step_id(runnable) do
+      payload = %{
+        run_id: state.run_id,
+        runnable_id: runnable.id,
+        step_id: step_id,
+        cancelled_at: cancelled_at
+      }
+
+      _ = broadcast(state.run_id, {:step_cancelled, payload})
 
       :ok
     end

@@ -623,7 +623,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   const isExecutionFailed = computed(() => props.execution?.status === 'failed');
   const isExecutionRunning = computed(() => {
     const status = props.execution?.status;
-    return status === 'running' || status === 'pending';
+    return status === 'running' || status === 'pending' || status === 'paused';
   });
   const miniMap = useMiniMapNodeColor();
   const closeContextMenu = () => store.hideContextMenu();

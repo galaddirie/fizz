@@ -131,9 +131,7 @@ A bot that starts an a/b experiment and updates the experiments based on events 
 
 
  bugs 
- - splitter 
- - stopping workflows does not seem to brodcast changes 
-- no items numbers on edges
+ - stopping workflows does not seem to brodcast changes, same with errors
 - for draft workflows visting /edit/runs/<id> does not rebuild the graph from the logs, it shows the current draft model ( have not tested with published workflows)
 
 
