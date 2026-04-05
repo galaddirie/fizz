@@ -10,8 +10,8 @@ status: active
 summary: Workflow executions use lease-based ownership with monotonic fencing tokens to enforce single-writer safety at the storage boundary, preventing split-brain data corruption.
 surface:
   - docs/plans/durable-workflow-system-design.md
-  - .spec/decisions/single-writer-leasing-and-fencing.md
-  - .spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/single-writer-leasing-and-fencing.md
+  - docs/spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements
@@ -120,7 +120,7 @@ surface:
     - workflows.ownership.concurrent_claim_contention
 
 - kind: doc_file
-  target: .spec/decisions/single-writer-leasing-and-fencing.md
+  target: spec/decisions/single-writer-leasing-and-fencing.md
   covers:
     - workflows.ownership.lease_acquisition
     - workflows.ownership.fence_token_monotonic
@@ -129,7 +129,7 @@ surface:
     - workflows.ownership.stale_writer_fenced
 
 - kind: doc_file
-  target: .spec/decisions/postgres-control-plane.md
+  target: spec/decisions/postgres-control-plane.md
   covers:
     - workflows.ownership.lease_acquisition
     - workflows.ownership.lease_expiry_failover

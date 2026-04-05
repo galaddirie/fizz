@@ -11,8 +11,8 @@ status: active
 summary: Durable timers are platform-level Postgres rows created from workflow step intents, polled with skip-locked concurrency, and delivered as workflow input events after rehydrating dormant executions.
 surface:
   - docs/plans/durable-workflow-system-design.md
-  - .spec/decisions/durable-timer-model.md
-  - .spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/durable-timer-model.md
+  - docs/spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements
@@ -129,7 +129,7 @@ surface:
 
 ```spec-verification
 - kind: doc_file
-  target: .spec/decisions/durable-timer-model.md
+  target: spec/decisions/durable-timer-model.md
   covers:
     - workflows.durable_timers.state_machine
     - workflows.durable_timers.creation_from_intent
@@ -152,7 +152,7 @@ surface:
     - workflows.durable_timers.sleep_and_fire
 
 - kind: doc_file
-  target: .spec/decisions/postgres-control-plane.md
+  target: spec/decisions/postgres-control-plane.md
   covers:
     - workflows.durable_timers.creation_from_intent
     - workflows.durable_timers.polling_skip_locked

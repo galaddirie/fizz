@@ -10,8 +10,8 @@ status: active
 summary: Workflow runs progress through a defined status graph with terminal states, per-state operation guards, and periodic passivation sweeps that transition idle executions through storage tiers.
 surface:
   - docs/plans/durable-workflow-system-design.md
-  - .spec/decisions/per-execution-sqlite-store.md
-  - .spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/per-execution-sqlite-store.md
+  - docs/spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements
@@ -142,12 +142,12 @@ surface:
     - workflows.run_lifecycle.wake_from_cold
 
 - kind: doc_file
-  target: .spec/decisions/per-execution-sqlite-store.md
+  target: spec/decisions/per-execution-sqlite-store.md
   covers:
     - workflows.run_lifecycle.passivation_sweep
 
 - kind: doc_file
-  target: .spec/decisions/postgres-control-plane.md
+  target: spec/decisions/postgres-control-plane.md
   covers:
     - workflows.run_lifecycle.postgres_statuses
     - workflows.run_lifecycle.wake_on_event

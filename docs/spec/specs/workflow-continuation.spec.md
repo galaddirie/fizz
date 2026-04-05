@@ -11,9 +11,9 @@ summary: ContinueAsNew creates a fresh child run from explicit carry-forward sta
 surface:
   - docs/plans/durable-workflow-system-design.md
   - docs/plans/compiler-and-runtime-context-design.md
-  - .spec/decisions/continue-as-new-boundary.md
-  - .spec/decisions/per-execution-sqlite-store.md
-  - .spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/continue-as-new-boundary.md
+  - docs/spec/decisions/per-execution-sqlite-store.md
+  - docs/spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements
@@ -161,7 +161,7 @@ surface:
     - workflows.continuation.version
 
 - kind: doc_file
-  target: .spec/decisions/continue-as-new-boundary.md
+  target: spec/decisions/continue-as-new-boundary.md
   covers:
     - workflows.continuation.explicit_boundary
     - workflows.continuation.carry_forward

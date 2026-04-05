@@ -11,8 +11,8 @@ summary: Each workflow execution persists its state in a dedicated SQLite file t
 surface:
   - docs/plans/durable-workflow-system-design.md
   - docs/plans/runic-research.md
-  - .spec/decisions/per-execution-sqlite-store.md
-  - .spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/per-execution-sqlite-store.md
+  - docs/spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements
@@ -176,7 +176,7 @@ surface:
     - workflows.storage.checkpoint_and_restore
 
 - kind: doc_file
-  target: .spec/decisions/per-execution-sqlite-store.md
+  target: spec/decisions/per-execution-sqlite-store.md
   covers:
     - workflows.storage.one_to_one_sqlite
     - workflows.storage.checkpoint_format

@@ -2,7 +2,7 @@
 
 Phased implementation prompts for the workflow editor. Each phase builds on the previous one and is designed to be executed as a single session.
 
-**Specs:** `.spec/specs/editor.*.spec.md`
+**Specs:** `docs/spec/specs/editor.*.spec.md`
 **Plans:** `docs/plans/editor/01-architecture.md` through `06-save-publish.md`
 
 ---

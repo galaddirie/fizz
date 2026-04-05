@@ -13,7 +13,7 @@ surface:
   - docs/plans/compiler-and-runtime-context-design.md
   - deps/solid/lib/solid.ex
   - deps/solid/lib/solid/standard_filter.ex
-  - .spec/decisions/expression-filter-catalog.md
+  - docs/spec/decisions/expression-filter-catalog.md
 ```
 
 ## Requirements
@@ -159,7 +159,7 @@ surface:
     - workflows.expression_language.filter_catalog
 
 - kind: doc_file
-  target: .spec/decisions/expression-filter-catalog.md
+  target: spec/decisions/expression-filter-catalog.md
   covers:
     - workflows.expression_language.filter_catalog
     - workflows.expression_language.strict_filters

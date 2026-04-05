@@ -11,9 +11,9 @@ status: active
 summary: Triggers are registered signal producers that create persistent external-event listeners, route incoming events through Oban for dedup and retry, and either create new workflow runs (definition-level) or deliver signals to existing runs (run-level) depending on registration scope.
 surface:
   - docs/plans/triggers-design.md
-  - .spec/decisions/trigger-registry-architecture.md
-  - .spec/decisions/postgres-control-plane.md
-  - .spec/decisions/signal-dedup-scope.md
+  - docs/spec/decisions/trigger-registry-architecture.md
+  - docs/spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/signal-dedup-scope.md
 ```
 
 ## Requirements
@@ -247,14 +247,14 @@ surface:
     - workflows.triggers.multiple_triggers_any_of
 
 - kind: doc_file
-  target: .spec/decisions/trigger-registry-architecture.md
+  target: spec/decisions/trigger-registry-architecture.md
   covers:
     - workflows.triggers.definition_level_registration
     - workflows.triggers.publish_sync
     - workflows.triggers.registration_sync_reconciliation
 
 - kind: doc_file
-  target: .spec/decisions/postgres-control-plane.md
+  target: spec/decisions/postgres-control-plane.md
   covers:
     - workflows.triggers.definition_level_registration
     - workflows.triggers.event_dedup

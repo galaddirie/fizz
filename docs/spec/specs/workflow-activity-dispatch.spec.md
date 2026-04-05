@@ -12,7 +12,7 @@ summary: Activities flow through a plan-prepare-schedule-dispatch-apply cycle wi
 surface:
   - docs/plans/durable-workflow-system-design.md
   - docs/plans/runic-research.md
-  - .spec/decisions/runic-as-execution-kernel.md
+  - docs/spec/decisions/runic-as-execution-kernel.md
 ```
 
 ## Requirements
@@ -147,7 +147,7 @@ surface:
     - workflows.activity_dispatch.crash_recovery_redispatch
 
 - kind: doc_file
-  target: .spec/decisions/runic-as-execution-kernel.md
+  target: spec/decisions/runic-as-execution-kernel.md
   covers:
     - workflows.activity_dispatch.dispatch_flow
     - workflows.activity_dispatch.scheduler_policy

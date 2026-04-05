@@ -11,11 +11,11 @@ summary: Workflow state progression is durable and replayable, while external si
 surface:
   - docs/plans/runic-research.md
   - docs/plans/durable-workflow-system-design.md
-  - .spec/decisions/runic-as-execution-kernel.md
-  - .spec/decisions/per-execution-sqlite-store.md
-  - .spec/decisions/single-writer-leasing-and-fencing.md
-  - .spec/decisions/postgres-control-plane.md
-  - .spec/decisions/durable-timer-model.md
+  - docs/spec/decisions/runic-as-execution-kernel.md
+  - docs/spec/decisions/per-execution-sqlite-store.md
+  - docs/spec/decisions/single-writer-leasing-and-fencing.md
+  - docs/spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/durable-timer-model.md
 ```
 
 ## Requirements

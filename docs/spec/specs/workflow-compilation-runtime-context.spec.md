@@ -13,7 +13,7 @@ surface:
   - docs/plans/workflow-definition-design.md
   - deps/runic/lib/runic.ex
   - deps/runic/lib/workflow/step.ex
-  - .spec/decisions/programmatic-meta-ref-wiring.md
+  - docs/spec/decisions/programmatic-meta-ref-wiring.md
 ```
 
 ## Requirements
@@ -159,7 +159,7 @@ surface:
     - workflows.compilation_runtime.meta_ref_wiring
 
 - kind: doc_file
-  target: .spec/decisions/programmatic-meta-ref-wiring.md
+  target: spec/decisions/programmatic-meta-ref-wiring.md
   covers:
     - workflows.compilation_runtime.meta_ref_wiring
     - workflows.compilation_runtime.closure_bindings

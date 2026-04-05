@@ -10,8 +10,8 @@ status: active
 summary: Signals enter through a durable inbox, deduplicate per run and signal id, and use wakeup infrastructure to reach active or dormant workflow executions.
 surface:
   - docs/plans/durable-workflow-system-design.md
-  - .spec/decisions/signal-dedup-scope.md
-  - .spec/decisions/postgres-control-plane.md
+  - docs/spec/decisions/signal-dedup-scope.md
+  - docs/spec/decisions/postgres-control-plane.md
 ```
 
 ## Requirements
@@ -134,7 +134,7 @@ surface:
     - workflows.signal_delivery.wake_path
 
 - kind: doc_file
-  target: .spec/decisions/signal-dedup-scope.md
+  target: spec/decisions/signal-dedup-scope.md
   covers:
     - workflows.signal_delivery.dedup_scope
     - workflows.signal_delivery.idempotency

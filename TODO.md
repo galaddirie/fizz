@@ -131,13 +131,11 @@ A bot that starts an a/b experiment and updates the experiments based on events 
 
 
  bugs 
- - when a workflow fails a step execution is not marked as failed, it is remains in a running state
- - we cant stop/cancel a workflow in a paused state, our ui shows "Execute Workflow" button instead of "Stop Workflow"
- - workflow errors sometimes do not mark running steps as terminal, they appear to be stuck in a running state, while the workflow itself is marked as failed
 
 
- 
-- for draft workflows visting /edit/runs/<id> does not rebuild the graph from the logs, it shows the current draft model ( have not tested with published workflows)
+- When we open a a debug workflow mode by visting workflow/<workflow_id>/edit/runs/<run_id>, it does not rebuild the graph from the logs, it shows the current a view with the currentdraft model ( have not tested with published workflows )
 
 
-how will users debug and pin workflows on published versions if they drift significantly from the latest draft?
+what should the debug view show? what should the user experience be? how will users debug and pin workflows on published versions or previous drafts if they drift significantly from the current draft?
+
+c/workflows/\/edit/runs/648c061d-0b09-4cbe-9765-09fd578de200
