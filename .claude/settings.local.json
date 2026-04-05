@@ -22,7 +22,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:litestream.io)",
       "WebFetch(domain:hex.pm)",
-      "Bash(find /home/galad/code/fizz/deps/live_vue -name *.ex -o -name *.js -o -name *.ts)"
+      "Bash(find /home/galad/code/fizz/deps/live_vue -name *.ex -o -name *.js -o -name *.ts)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   },
   "enabledPlugins": {

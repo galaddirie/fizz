@@ -131,7 +131,12 @@ A bot that starts an a/b experiment and updates the experiments based on events 
 
 
  bugs 
- - stopping workflows does not seem to brodcast changes, same with errors
+ - when a workflow fails a step execution is not marked as failed, it is remains in a running state
+ - we cant stop/cancel a workflow in a paused state, our ui shows "Execute Workflow" button instead of "Stop Workflow"
+ - workflow errors sometimes do not mark running steps as terminal, they appear to be stuck in a running state, while the workflow itself is marked as failed
+
+
+ 
 - for draft workflows visting /edit/runs/<id> does not rebuild the graph from the logs, it shows the current draft model ( have not tested with published workflows)
 
 
