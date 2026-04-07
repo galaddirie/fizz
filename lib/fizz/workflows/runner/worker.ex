@@ -719,7 +719,11 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   defp append_runnable_result_event(state, _runnable, _task_state), do: state
 
-  defp append_delayed_runnable_result_event(state, %Runnable{} = runnable, %DurableTimer{} = timer) do
+  defp append_delayed_runnable_result_event(
+         state,
+         %Runnable{} = runnable,
+         %DurableTimer{} = timer
+       ) do
     duration_us = DateTime.diff(DateTime.utc_now(), timer.inserted_at, :microsecond)
     duration_ms = div(duration_us, 1000)
 
