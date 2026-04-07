@@ -25,7 +25,7 @@ defmodule Fizz.Workflows do
   alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
   alias Fizz.Workflows.Runtime.ContextBuilder
   alias Fizz.Workflows.StepExecutionTrace
-  alias Fizz.Workflows.Store.SqliteStore
+  alias Fizz.Workflows.Store.{LitestreamManager, SqliteStore}
 
   alias Fizz.Workflows.{
     DurableTimer,
@@ -951,6 +951,42 @@ defmodule Fizz.Workflows do
     )
   end
 
+  defp maybe_restore_from_s3(run, opts) do
+    test_store_opts = Keyword.get(opts, :store_opts, [])
+
+    ls_opts =
+      litestream_opts()
+      |> Keyword.merge(
+        org_id: run.workos_organization_id,
+        project_id: run.project_id
+      )
+      |> Keyword.merge(Keyword.take(test_store_opts, [:data_dir]))
+
+    local_path = LitestreamManager.local_path(run.id, ls_opts)
+
+    if File.exists?(local_path) do
+      :ok
+    else
+      case LitestreamManager.restore(run.id, ls_opts) do
+        {:ok, _path} -> :ok
+        {:error, :already_exists} -> :ok
+        {:error, :missing_binary} -> :ok
+        {:error, reason} -> {:error, {:s3_restore_failed, reason}}
+      end
+    end
+  end
+
+  defp litestream_opts do
+    [
+      data_dir: Application.get_env(:fizz, :workflow_data_dir, "priv/workflow_data"),
+      s3_bucket: Application.get_env(:fizz, :litestream_s3_bucket),
+      s3_prefix: Application.get_env(:fizz, :litestream_s3_prefix, "workflows"),
+      aws_region: Application.get_env(:fizz, :litestream_aws_region, "us-east-1"),
+      s3_endpoint: Application.get_env(:fizz, :litestream_s3_endpoint),
+      s3_skip_verify: Application.get_env(:fizz, :litestream_s3_skip_verify, false)
+    ]
+  end
+
   defp checkpoint_strategy do
     Application.get_env(:fizz, __MODULE__, []) |> Keyword.get(:checkpoint_strategy, :every_cycle)
   end
@@ -974,6 +1010,7 @@ defmodule Fizz.Workflows do
   defp start_run_worker(run, opts) do
     with {:ok, fence_token} <-
            Fizz.Workflows.LeaseManager.acquire(run.id, lease_manager_opts(opts)),
+         :ok <- maybe_restore_from_s3(run, opts),
          {:ok, store_state} <- SqliteStore.init(run.id, store_opts(run, fence_token, opts)),
          {:ok, workflow} <- restore_workflow(run, store_state),
          run_context <- ContextBuilder.build_run_context(Keyword.get(opts, :scope), run),

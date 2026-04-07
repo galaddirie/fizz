@@ -1,3 +1,13 @@
+defmodule Fizz.Workflows.PassivationSweeperTest.FakeLitestream do
+  use GenServer
+
+  @impl true
+  def init(_), do: {:ok, :running}
+
+  @impl true
+  def handle_call(:status, _from, state), do: {:reply, :running, state}
+end
+
 defmodule Fizz.Workflows.PassivationSweeperTest do
   use Fizz.DataCase, async: false
 
@@ -6,7 +16,7 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
   alias Fizz.Workflows.PassivationSweeper
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Runtime.ContextBuilder
-  alias Fizz.Workflows.Store.SqliteStore
+  alias Fizz.Workflows.Store.{Paths, SqliteStore}
   alias Fizz.Workflows.WorkflowRun
 
   require Runic
@@ -17,21 +27,12 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
 
     registry = unique_name(:registry)
     task_supervisor = unique_name(:task_supervisor)
-    sweeper = unique_name(:sweeper)
 
     tmp_dir =
       Path.join(System.tmp_dir!(), "fizz-sweeper-#{System.unique_integer([:positive])}")
 
     start_supervised!({Registry, keys: :unique, name: registry})
     start_supervised!({Task.Supervisor, name: task_supervisor})
-
-    start_supervised!(
-      {PassivationSweeper,
-       name: sweeper,
-       interval_ms: 60_000,
-       idle_threshold_ms: 60_000,
-       worker_opts: [registry: registry]}
-    )
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
@@ -40,75 +41,147 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
       version: version,
       registry: registry,
       task_supervisor: task_supervisor,
-      sweeper: sweeper,
       tmp_dir: tmp_dir
     }
   end
 
-  test "idle runs beyond the threshold are passivated", %{
-    scope: scope,
-    version: version,
-    registry: registry,
-    task_supervisor: task_supervisor,
-    sweeper: sweeper,
-    tmp_dir: tmp_dir
-  } do
-    run = insert_run(scope, version, :running, old_time())
+  test "idle runs beyond the threshold are passivated", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
 
-    pid =
-      start_idle_worker!(
-        run,
-        scope,
-        registry: registry,
-        task_supervisor: task_supervisor,
-        tmp_dir: tmp_dir
-      )
-
+    pid = start_idle_worker!(run, ctx)
     ref = Process.monitor(pid)
 
     assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
     assert run.id in passivated_run_ids
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
 
-    assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(scope, run.id)
+    assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(ctx.scope, run.id)
   end
 
-  test "active runs are not passivated", %{scope: scope, version: version, sweeper: sweeper} do
-    run = insert_run(scope, version, :running, DateTime.utc_now())
+  test "active runs are not passivated", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :running, DateTime.utc_now())
 
     assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
     refute run.id in passivated_run_ids
-    assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(scope, run.id)
+    assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(ctx.scope, run.id)
   end
 
-  test "completed and failed runs are not passivated", %{
-    scope: scope,
-    version: version,
-    sweeper: sweeper
-  } do
-    completed_run = insert_run(scope, version, :completed, old_time())
-    failed_run = insert_run(scope, version, :failed, old_time())
+  test "completed and failed runs are not passivated", ctx do
+    sweeper = start_sweeper!(ctx)
+    completed_run = insert_run(ctx.scope, ctx.version, :completed, old_time())
+    failed_run = insert_run(ctx.scope, ctx.version, :failed, old_time())
 
     assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
     refute completed_run.id in passivated_run_ids
     refute failed_run.id in passivated_run_ids
-    assert {:ok, %{status: :completed}} = Fizz.Workflows.get_run(scope, completed_run.id)
-    assert {:ok, %{status: :failed}} = Fizz.Workflows.get_run(scope, failed_run.id)
+    assert {:ok, %{status: :completed}} = Fizz.Workflows.get_run(ctx.scope, completed_run.id)
+    assert {:ok, %{status: :failed}} = Fizz.Workflows.get_run(ctx.scope, failed_run.id)
   end
 
-  defp start_idle_worker!(run, scope, opts) do
-    registry = Keyword.fetch!(opts, :registry)
-    task_supervisor = Keyword.fetch!(opts, :task_supervisor)
-    tmp_dir = Keyword.fetch!(opts, :tmp_dir)
+  test "passivated runs have local SQLite files evicted when litestream is running", ctx do
+    fake_litestream = start_fake_litestream!()
+    sweeper = start_sweeper!(ctx, litestream_server: fake_litestream)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
+
+    pid = start_idle_worker!(run, ctx)
+    ref = Process.monitor(pid)
+
+    db_path = run_db_path(run, ctx)
+    assert File.exists?(db_path)
+
+    assert {:ok, [_]} = PassivationSweeper.sweep(server: sweeper)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+
+    refute File.exists?(db_path)
+  end
+
+  test "local files are preserved when litestream is not running", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
+
+    pid = start_idle_worker!(run, ctx)
+    ref = Process.monitor(pid)
+
+    db_path = run_db_path(run, ctx)
+    assert File.exists?(db_path)
+
+    assert {:ok, [_]} = PassivationSweeper.sweep(server: sweeper)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+
+    assert File.exists?(db_path)
+  end
+
+  test "wal_checkpoint failure does not block passivation", ctx do
+    fake_litestream = start_fake_litestream!()
+    sweeper = start_sweeper!(ctx, litestream_server: fake_litestream)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
+
+    pid = start_idle_worker!(run, ctx)
+    ref = Process.monitor(pid)
+
+    # Pre-delete the file so wal_checkpoint will fail
+    db_path = run_db_path(run, ctx)
+    File.rm(db_path)
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    assert run.id in passivated_run_ids
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+
+    assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+  end
+
+  defp start_sweeper!(ctx, extra_opts \\ []) do
+    name = unique_name(:sweeper)
+
+    start_supervised!(
+      {PassivationSweeper,
+       Keyword.merge(
+         [
+           name: name,
+           interval_ms: 60_000,
+           idle_threshold_ms: 60_000,
+           worker_opts: [registry: ctx.registry],
+           data_dir: ctx.tmp_dir
+         ],
+         extra_opts
+       )}
+    )
+
+    name
+  end
+
+  defp start_fake_litestream! do
+    name = unique_name(:fake_litestream)
+
+    start_supervised!(%{
+      id: name,
+      start: {GenServer, :start_link, [__MODULE__.FakeLitestream, [], [name: name]]}
+    })
+
+    name
+  end
+
+  defp run_db_path(run, ctx) do
+    Paths.db_path(
+      Path.expand(ctx.tmp_dir),
+      run.id,
+      ctx.scope.project.workos_organization_id,
+      ctx.scope.project.id
+    )
+  end
+
+  defp start_idle_worker!(run, ctx) do
     fence_token = 1
 
     insert_lease(run.id, fence_token)
 
     {:ok, store_state} =
       SqliteStore.init(run.id,
-        data_dir: tmp_dir,
-        org_id: scope.project.workos_organization_id,
-        project_id: scope.project.id,
+        data_dir: ctx.tmp_dir,
+        org_id: ctx.scope.project.workos_organization_id,
+        project_id: ctx.scope.project.id,
         fence_token: fence_token,
         repo: Repo
       )
@@ -120,11 +193,11 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
        [
          run_id: run.id,
          workflow: workflow,
-         run_context: ContextBuilder.build_run_context(scope, run),
+         run_context: ContextBuilder.build_run_context(ctx.scope, run),
          store: store_state,
          fence_token: fence_token,
-         registry: registry,
-         task_supervisor: task_supervisor,
+         registry: ctx.registry,
+         task_supervisor: ctx.task_supervisor,
          checkpoint_strategy: :every_cycle
        ]}
     )

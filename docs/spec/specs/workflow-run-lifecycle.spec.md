@@ -75,8 +75,10 @@ surface:
   when:
     - the PassivationSweeper scans active workflows
   then:
+    - the Worker is stopped with a final checkpoint
+    - the local SQLite file is WAL-checkpointed and evicted (cold tier)
     - the run transitions to PASSIVATED
-    - the Worker is stopped and storage tiers advance per the storage contract
+    - the lease is released
   covers:
     - workflows.run_lifecycle.passivation_sweep
     - workflows.run_lifecycle.last_active_tracking
@@ -111,12 +113,13 @@ surface:
 
 - id: workflows.run_lifecycle.wake_from_cold
   given:
-    - a PASSIVATED run with SQLite in S3
+    - a PASSIVATED run with local SQLite evicted and replica in S3
   when:
     - a timer fires or an external signal arrives
   then:
     - lease is acquired from the control plane
-    - SQLite is downloaded and the workflow is restored
+    - "`maybe_restore_from_s3` detects the missing local file and restores from S3 via `litestream restore`"
+    - the workflow is reconstructed from the restored checkpoint
     - the run transitions to RUNNING and execution resumes
   covers:
     - workflows.run_lifecycle.wake_on_event

@@ -425,7 +425,7 @@ defmodule Fizz.Workflows.Runner.Worker do
         |> cancel_idle_timeout()
         |> ensure_running_state()
         |> drop_local_timer(timer.id)
-        |> append_delayed_runnable_result_event(runnable)
+        |> append_delayed_runnable_result_event(runnable, timer)
         |> apply_runnable(runnable)
         |> bump_cycle_count()
 
@@ -719,18 +719,21 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   defp append_runnable_result_event(state, _runnable, _task_state), do: state
 
-  defp append_delayed_runnable_result_event(state, %Runnable{} = runnable) do
+  defp append_delayed_runnable_result_event(state, %Runnable{} = runnable, %DurableTimer{} = timer) do
+    duration_us = DateTime.diff(DateTime.utc_now(), timer.inserted_at, :microsecond)
+    duration_ms = div(duration_us, 1000)
+
     event = %RunnableCompleted{
       runnable_id: runnable.id,
       node_hash: Map.get(runnable.node, :hash),
       result_fact: runnable.result,
       completed_at: System.monotonic_time(:millisecond),
       attempt: 0,
-      duration_ms: 0,
-      duration_us: 0
+      duration_ms: duration_ms,
+      duration_us: duration_us
     }
 
-    maybe_broadcast_step_completed(state, runnable, 0)
+    maybe_broadcast_step_completed(state, runnable, duration_us)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end

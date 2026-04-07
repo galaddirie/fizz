@@ -34,7 +34,7 @@ surface:
   stability: stable
 
 - id: workflows.storage.passivation_tiers
-  statement: Execution storage follows four tiers — HOT (Tier 0, Worker alive, SQLite open on local SSD), WARM (Tier 1, Worker stopped, SQLite on local SSD), COLD (Tier 2, SQLite uploaded to S3, local file evicted), and ARCHIVE (Tier 3, completed execution in S3 Glacier for operator inspection only).
+  statement: Execution storage follows three tiers — HOT (Tier 0, Worker alive, SQLite open on local SSD), COLD (Tier 1, Worker stopped, local SQLite WAL-checkpointed and evicted, S3 replica authoritative via Litestream), and ARCHIVE (Tier 2, completed execution in S3 Glacier for operator inspection only). The PassivationSweeper transitions idle executions directly from HOT to COLD by stopping the worker, flushing the WAL, and deleting the local file. Wake-up restores the SQLite file from S3 via `litestream restore` before rehydration.
   priority: must
   stability: stable
 
@@ -86,14 +86,15 @@ surface:
 
 - id: workflows.storage.passivation_to_cold
   given:
-    - a WARM-tier SQLite file has been idle beyond the configured eviction threshold
+    - a HOT-tier execution has been idle beyond the configured passivation threshold
     - Litestream has been continuously replicating the file's WAL to S3 via directory-mode replication
   when:
     - the passivation sweeper runs
   then:
+    - the Worker is stopped with a final checkpoint persisted to local SQLite
     - "the SQLite WAL is checkpointed via `PRAGMA wal_checkpoint(TRUNCATE)` to ensure all data is replicated"
-    - the Postgres control plane is updated with PASSIVATED status
-    - the local file may be evicted since the S3 replica is authoritative for restore
+    - the local SQLite file and WAL/SHM files are deleted (cold eviction)
+    - the Postgres control plane is updated with PASSIVATED status and the lease is released
   covers:
     - workflows.storage.passivation_tiers
     - workflows.storage.litestream_replication
@@ -101,17 +102,17 @@ surface:
 
 - id: workflows.storage.cold_restore_from_s3
   given:
-    - a COLD execution with SQLite in S3 receives a wake-up event
-    - the local SQLite file does not exist
+    - a COLD (passivated) execution with SQLite in S3 receives a wake-up event (signal or timer)
+    - the local SQLite file does not exist (evicted during passivation)
   when:
-    - the platform initiates resume
+    - the platform initiates resume via `start_run_worker`
   then:
+    - "`maybe_restore_from_s3` detects the missing local file and calls `LitestreamManager.restore/2`"
     - "`litestream restore -o {local_path} {replica_url}` downloads the database from S3"
-    - the platform verifies the restored file is a valid SQLite database
-    - schema migration runs if needed
-    - "`Runner.resume/3` reconstructs the workflow with the chosen rehydration mode"
+    - the platform verifies the restored file is a valid SQLite database via integrity check
+    - "`SqliteStore.init` opens the restored file and runs schema migration if needed"
+    - the workflow is reconstructed from the checkpoint and execution resumes
     - Litestream directory-mode replication automatically picks up the restored file for ongoing replication
-    - execution continues from the last checkpoint
   covers:
     - workflows.storage.passivation_tiers
     - workflows.storage.rehydration_modes
@@ -189,15 +190,8 @@ surface:
 
 ```spec-exceptions
 - id: workflows.storage.impl_pending
-  note: The repository does not yet contain the Store adapter, Litestream integration, passivation sweeper, rehydration path, or SQLite schema migration logic that would enforce these storage contracts in code.
+  note: Hybrid and lazy rehydration modes are not yet implemented. The ARCHIVE tier (S3 Glacier for completed executions) is not yet implemented. All other storage contracts — checkpoint format, checkpoint strategies, passivation tiers (HOT/COLD), Litestream replication and restore, and schema versioning — are enforced in code.
   relates_to:
-    - workflows.storage.checkpoint_format
-    - workflows.storage.checkpoint_strategies
-    - workflows.storage.passivation_tiers
     - workflows.storage.fact_level_persistence
     - workflows.storage.rehydration_modes
-    - workflows.storage.litestream_replication
-    - workflows.storage.litestream_directory_layout
-    - workflows.storage.litestream_restore
-    - workflows.storage.schema_versioning
 ```

@@ -252,10 +252,18 @@ const stepStatusClass = (status: StepExecutionStatus): string => {
 
 // Format duration
 const formatDuration = (us?: number): string => {
-  if (typeof us !== 'number' || !Number.isFinite(us) || us <= 0) return '';
+  if (typeof us !== 'number' || !Number.isFinite(us) || us < 0) return '';
+  if (us <= 0) return '<1µs';
   if (us < 1000) return `${us}µs`;
   if (us < 1_000_000) return `${(us / 1000).toFixed(1)}ms`;
-  return `${(us / 1_000_000).toFixed(2)}s`;
+  const seconds = us / 1_000_000;
+  if (seconds < 60) return `${seconds.toFixed(2)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
 };
 
 const selectStep = (stepId: string) => {

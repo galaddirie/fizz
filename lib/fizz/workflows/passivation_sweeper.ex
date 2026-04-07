@@ -4,16 +4,18 @@ defmodule Fizz.Workflows.PassivationSweeper do
 
   The sweeper scans for runs still marked `:running` or `:sleeping` whose
   `last_active_at` is older than the configured idle threshold. Matching runs
-  have their workers stopped, their status updated to `:passivated`, and their
-  lease released.
-
-  TODO: Cold-tier checkpoint upload
+  have their workers stopped, their SQLite files WAL-checkpointed and evicted
+  (cold-tier), their status updated to `:passivated`, and their lease released.
   """
 
   use GenServer
 
+  require Logger
+
   alias Fizz.Workflows
   alias Fizz.Workflows.Runner.Worker
+  alias Fizz.Workflows.Store.LitestreamManager
+  alias Fizz.Workflows.Store.Paths
 
   @default_interval_ms 60_000
   @default_idle_threshold_ms 10 * 60 * 1_000
@@ -34,10 +36,18 @@ defmodule Fizz.Workflows.PassivationSweeper do
 
   @impl true
   def init(opts) do
+    data_dir =
+      opts
+      |> Keyword.get(:data_dir)
+      |> Kernel.||(Application.get_env(:fizz, :workflow_data_dir, "priv/workflow_data"))
+      |> Path.expand()
+
     state = %{
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
       idle_threshold_ms: Keyword.get(opts, :idle_threshold_ms, @default_idle_threshold_ms),
-      worker_opts: Keyword.get(opts, :worker_opts, [])
+      worker_opts: Keyword.get(opts, :worker_opts, []),
+      data_dir: data_dir,
+      litestream_server: Keyword.get(opts, :litestream_server, LitestreamManager)
     }
 
     schedule_sweep(state.interval_ms)
@@ -66,6 +76,10 @@ defmodule Fizz.Workflows.PassivationSweeper do
       |> Enum.reduce([], fn run, acc ->
         _ = Worker.stop(run.id, Keyword.merge([persist: true], state.worker_opts))
 
+        if LitestreamManager.status(server: state.litestream_server) == :running do
+          cold_evict(run, state)
+        end
+
         case Workflows.passivate_run(run.id) do
           {:ok, _run} ->
             _ = Workflows.release_run_lease(run.id)
@@ -78,6 +92,35 @@ defmodule Fizz.Workflows.PassivationSweeper do
       |> Enum.reverse()
 
     {:ok, passivated_run_ids}
+  end
+
+  defp cold_evict(run, state) do
+    db_path = db_path(run, state)
+
+    case LitestreamManager.wal_checkpoint(db_path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "WAL checkpoint failed for run #{run.id} before cold eviction: #{inspect(reason)}"
+        )
+    end
+
+    delete_local_files(db_path)
+  end
+
+  defp db_path(run, state) do
+    Paths.db_path(state.data_dir, run.id, run.workos_organization_id, run.project_id)
+  end
+
+  defp delete_local_files(db_path) do
+    for file <- [db_path, "#{db_path}-wal", "#{db_path}-shm"],
+        File.exists?(file) do
+      File.rm(file)
+    end
+
+    :ok
   end
 
   defp schedule_sweep(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
