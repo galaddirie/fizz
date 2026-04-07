@@ -44,9 +44,7 @@
         {{ field.description }}
       </p>
 
-      <p class="ml-auto shrink-0 text-[10px] font-medium tracking-wide text-base-content/30 uppercase">
-        Structured Data
-      </p>
+     
     </div>
   </div>
 </template>
