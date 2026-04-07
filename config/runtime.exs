@@ -55,6 +55,18 @@ litestream_endpoint_default =
     _ -> nil
   end
 
+workflow_idle_timeout_default =
+  case config_env() do
+    :dev -> 60_000
+    _ -> 60_000
+  end
+
+workflow_passivation_idle_threshold_default =
+  case config_env() do
+    :dev -> 60_000
+    _ -> 10 * 60 * 1_000
+  end
+
 config :fizz,
   workflow_data_dir: System.get_env("WORKFLOW_DATA_DIR", workflow_data_dir_default),
   litestream_s3_bucket: System.get_env("LITESTREAM_S3_BUCKET", litestream_bucket_default),
@@ -72,6 +84,21 @@ config :fizz,
     admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN", "admin"),
     member: System.get_env("WORKOS_ROLE_SLUG_MEMBER", "member")
   }
+
+config :fizz, Fizz.Workflows,
+  idle_timeout_ms:
+    String.to_integer(
+      System.get_env("WORKFLOW_IDLE_TIMEOUT_MS", Integer.to_string(workflow_idle_timeout_default))
+    )
+
+config :fizz, Fizz.Workflows.PassivationSweeper,
+  idle_threshold_ms:
+    String.to_integer(
+      System.get_env(
+        "WORKFLOW_PASSIVATION_IDLE_THRESHOLD_MS",
+        Integer.to_string(workflow_passivation_idle_threshold_default)
+      )
+    )
 
 config :fizz, :workspaces, provider: System.get_env("WORKSPACE_PROVIDER", "sprites")
 

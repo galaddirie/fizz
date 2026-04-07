@@ -39,7 +39,8 @@ defmodule Fizz.Application do
         |> Keyword.get(:enabled?, true)
       )
       |> Kernel.++([
-        Fizz.Workflows.PassivationSweeper,
+        {Fizz.Workflows.PassivationSweeper,
+         Application.get_env(:fizz, Fizz.Workflows.PassivationSweeper, [])},
         {DNSCluster, query: Application.get_env(:fizz, :dns_cluster_query) || :ignore},
         {Oban, Application.fetch_env!(:fizz, Oban)},
         {Phoenix.PubSub, name: Fizz.PubSub},
