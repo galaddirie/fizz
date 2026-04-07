@@ -211,13 +211,20 @@ defmodule FizzWeb.WorkflowsLive.RunShow do
 
   defp format_step_duration(duration_us) when is_integer(duration_us) do
     cond do
-      duration_us < 1_000 -> "<1ms"
-      duration_us < 1_000_000 -> "#{div(duration_us, 1_000)}ms"
-      duration_us < 60_000_000 -> "#{Float.round(duration_us / 1_000_000, 1)}s"
+      duration_us < 1_000 ->
+        "<1ms"
+
+      duration_us < 1_000_000 ->
+        "#{div(duration_us, 1_000)}ms"
+
+      duration_us < 60_000_000 ->
+        "#{Float.round(duration_us / 1_000_000, 1)}s"
+
       duration_us < 3_600_000_000 ->
         minutes = div(duration_us, 60_000_000)
         secs = div(rem(duration_us, 60_000_000), 1_000_000)
         "#{minutes}m #{secs}s"
+
       true ->
         hours = div(duration_us, 3_600_000_000)
         minutes = div(rem(duration_us, 3_600_000_000), 60_000_000)
