@@ -7,10 +7,11 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   @spec compile(map()) :: {:ok, map()} | {:error, [map()]}
   def compile(ir) when is_map(ir) do
     known_step_ids = Map.keys(ir.steps)
+    step_name_to_id = step_name_to_id(steps_from_map(ir.steps))
 
     {steps, errors} =
       Enum.reduce(ir.steps, {%{}, []}, fn {step_id, step}, {compiled_steps, errors} ->
-        case compile_step(step, known_step_ids) do
+        case compile_step(step, known_step_ids, step_name_to_id) do
           {:ok, compiled_step} ->
             {Map.put(compiled_steps, step_id, compiled_step), errors}
 
@@ -38,15 +39,18 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
 
   @spec validate_step_configs_detailed([map()], [String.t()]) :: [map()]
   def validate_step_configs_detailed(steps, known_step_ids) when is_list(steps) do
+    step_name_to_id = step_name_to_id(steps)
+
     Enum.flat_map(steps, fn step ->
       step.config
-      |> validate_tree_detailed(known_step_ids, [])
+      |> validate_tree_detailed(known_step_ids, step_name_to_id, [])
       |> Enum.map(&Map.put(&1, :step_id, step.id))
     end)
   end
 
-  defp compile_step(step, known_step_ids) do
-    {compiled_config, dependencies, errors} = compile_tree(step.config, known_step_ids, [])
+  defp compile_step(step, known_step_ids, step_name_to_id) do
+    {compiled_config, dependencies, errors} =
+      compile_tree(step.config, known_step_ids, step_name_to_id, [])
 
     if errors == [] do
       {:ok,
@@ -65,11 +69,11 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end
   end
 
-  defp compile_tree(map, known_step_ids, path) when is_map(map) do
+  defp compile_tree(map, known_step_ids, step_name_to_id, path) when is_map(map) do
     Enum.reduce(map, {%{}, empty_dependencies(), []}, fn {key, value},
                                                          {acc, dependencies, errors} ->
       {compiled_value, value_dependencies, value_errors} =
-        compile_tree(value, known_step_ids, path ++ [to_string(key)])
+        compile_tree(value, known_step_ids, step_name_to_id, path ++ [to_string(key)])
 
       {
         Map.put(acc, key, compiled_value),
@@ -79,25 +83,26 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end)
   end
 
-  defp compile_tree(list, known_step_ids, path) when is_list(list) do
+  defp compile_tree(list, known_step_ids, step_name_to_id, path) when is_list(list) do
     Enum.reduce(Enum.with_index(list), {[], empty_dependencies(), []}, fn {value, index},
                                                                           {acc, dependencies,
                                                                            errors} ->
       {compiled_value, value_dependencies, value_errors} =
-        compile_tree(value, known_step_ids, path ++ [Integer.to_string(index)])
+        compile_tree(value, known_step_ids, step_name_to_id, path ++ [Integer.to_string(index)])
 
       {acc ++ [compiled_value], merge_dependencies(dependencies, value_dependencies),
        errors ++ value_errors}
     end)
   end
 
-  defp compile_tree(value, known_step_ids, path) when is_binary(value) do
+  defp compile_tree(value, known_step_ids, step_name_to_id, path) when is_binary(value) do
     if Expressions.classify(value) == :literal do
       {%AccessPlan.Literal{value: value}, empty_dependencies(), []}
     else
       case Expressions.to_access_plan(value,
              strict_filters: true,
-             known_step_ids: known_step_ids
+             known_step_ids: known_step_ids,
+             step_name_to_id: step_name_to_id
            ) do
         {:ok, plan} ->
           dependencies =
@@ -121,27 +126,37 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end
   end
 
-  defp compile_tree(value, _known_step_ids, _path) do
+  defp compile_tree(value, _known_step_ids, _step_name_to_id, _path) do
     {%AccessPlan.Literal{value: value}, empty_dependencies(), []}
   end
 
-  defp validate_tree_detailed(map, known_step_ids, path) when is_map(map) do
+  defp validate_tree_detailed(map, known_step_ids, step_name_to_id, path) when is_map(map) do
     Enum.flat_map(map, fn {key, value} ->
-      validate_tree_detailed(value, known_step_ids, path ++ [to_string(key)])
+      validate_tree_detailed(value, known_step_ids, step_name_to_id, path ++ [to_string(key)])
     end)
   end
 
-  defp validate_tree_detailed(list, known_step_ids, path) when is_list(list) do
+  defp validate_tree_detailed(list, known_step_ids, step_name_to_id, path) when is_list(list) do
     Enum.flat_map(Enum.with_index(list), fn {value, index} ->
-      validate_tree_detailed(value, known_step_ids, path ++ [Integer.to_string(index)])
+      validate_tree_detailed(
+        value,
+        known_step_ids,
+        step_name_to_id,
+        path ++ [Integer.to_string(index)]
+      )
     end)
   end
 
-  defp validate_tree_detailed(value, known_step_ids, path) when is_binary(value) do
+  defp validate_tree_detailed(value, known_step_ids, step_name_to_id, path)
+       when is_binary(value) do
     if Expressions.classify(value) == :literal do
       []
     else
-      case Expressions.validate(value, strict_filters: true, known_step_ids: known_step_ids) do
+      case Expressions.validate(value,
+             strict_filters: true,
+             known_step_ids: known_step_ids,
+             step_name_to_id: step_name_to_id
+           ) do
         {:ok, _parsed} ->
           []
 
@@ -153,7 +168,7 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end
   end
 
-  defp validate_tree_detailed(_value, _known_step_ids, _path), do: []
+  defp validate_tree_detailed(_value, _known_step_ids, _step_name_to_id, _path), do: []
 
   defp format_path_error([], message), do: message
   defp format_path_error(path, message), do: "config.#{Enum.join(path, ".")}: #{message}"
@@ -176,4 +191,37 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
       runtime_keys: MapSet.union(left.runtime_keys, right.runtime_keys)
     }
   end
+
+  defp steps_from_map(steps) when is_map(steps), do: Map.values(steps)
+
+  defp step_name_to_id(steps) do
+    steps
+    |> Enum.reduce(%{}, fn step, acc -> put_step_name(acc, step_id(step), step_name(step)) end)
+    |> Enum.reject(&match?({_name, :duplicate}, &1))
+    |> Map.new()
+  end
+
+  defp put_step_name(acc, step_id, step_name)
+       when is_binary(step_id) and is_binary(step_name) do
+    case String.trim(step_name) do
+      "" ->
+        acc
+
+      _ ->
+        Map.update(acc, step_name, step_id, fn
+          ^step_id -> step_id
+          _existing_step_id -> :duplicate
+        end)
+    end
+  end
+
+  defp put_step_name(acc, _step_id, _step_name), do: acc
+
+  defp step_id(%{id: step_id}) when is_binary(step_id), do: step_id
+  defp step_id(%{"id" => step_id}) when is_binary(step_id), do: step_id
+  defp step_id(_step), do: nil
+
+  defp step_name(%{name: step_name}) when is_binary(step_name), do: step_name
+  defp step_name(%{"name" => step_name}) when is_binary(step_name), do: step_name
+  defp step_name(_step), do: nil
 end

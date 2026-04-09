@@ -14,8 +14,7 @@ defmodule Fizz.Workflows.PassivationSweeper do
 
   alias Fizz.Workflows
   alias Fizz.Workflows.Runner.Worker
-  alias Fizz.Workflows.Store.LitestreamManager
-  alias Fizz.Workflows.Store.Paths
+  alias Fizz.Workflows.Store.{LitestreamManager, Paths, Sqlite}
 
   @default_interval_ms 60_000
   @default_idle_threshold_ms 10 * 60 * 1_000
@@ -74,24 +73,62 @@ defmodule Fizz.Workflows.PassivationSweeper do
       idle_before
       |> Workflows.list_passivation_candidates()
       |> Enum.reduce([], fn run, acc ->
-        _ = Worker.stop(run.id, Keyword.merge([persist: true], state.worker_opts))
+        case prepare_run_for_passivation(run, state) do
+          :ok ->
+            if LitestreamManager.status(server: state.litestream_server) == :running do
+              cold_evict(run, state)
+            end
 
-        if LitestreamManager.status(server: state.litestream_server) == :running do
-          cold_evict(run, state)
-        end
+            case Workflows.passivate_run(run.id) do
+              {:ok, _run} ->
+                _ = Workflows.release_run_lease(run.id)
+                [run.id | acc]
 
-        case Workflows.passivate_run(run.id) do
-          {:ok, _run} ->
-            _ = Workflows.release_run_lease(run.id)
-            [run.id | acc]
+              {:error, _reason} ->
+                acc
+            end
 
-          {:error, _reason} ->
+          {:error, reason} ->
+            Logger.warning("skipping passivation for run #{run.id}: #{inspect(reason)}")
+
             acc
         end
       end)
       |> Enum.reverse()
 
     {:ok, passivated_run_ids}
+  end
+
+  defp prepare_run_for_passivation(run, state) do
+    case Worker.stop(run.id, Keyword.merge([persist: true], state.worker_opts)) do
+      :ok ->
+        :ok
+
+      {:error, :not_found} ->
+        if checkpoint_available?(run, state) do
+          :ok
+        else
+          {:error, :checkpoint_not_found}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp checkpoint_available?(run, state) do
+    db_path = db_path(run, state)
+
+    if File.exists?(db_path) do
+      case Sqlite.with_db(db_path, [configure?: false], fn db ->
+             match?({:ok, 1}, Sqlite.first_value(db, "SELECT 1 FROM workflow_log LIMIT 1"))
+           end) do
+        true -> true
+        _ -> false
+      end
+    else
+      false
+    end
   end
 
   defp cold_evict(run, state) do

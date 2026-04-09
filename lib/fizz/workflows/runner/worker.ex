@@ -504,12 +504,11 @@ defmodule Fizz.Workflows.Runner.Worker do
         state
         |> apply_runnable(timer_placeholder_runnable(executed))
         |> bump_cycle_count()
+        |> do_checkpoint()
         |> maybe_schedule_local_timer(timer)
         |> mark_sleeping_state()
 
       _ = Workflows.touch_run_activity(state.run_id)
-
-      state = maybe_checkpoint(state, %{cycle_count: state.cycle_count, status: :sleeping})
 
       dispatch_cycle(state)
     else

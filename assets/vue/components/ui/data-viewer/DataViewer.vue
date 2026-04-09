@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { computed, toRef, watch } from 'vue';
-import {
-  ChevronDoubleDownIcon,
-  ChevronDoubleUpIcon,
-} from '@heroicons/vue/24/outline';
-import { type ViewMode } from './types';
-import { useDataViewer } from './useDataViewer';
+import { ChevronDoubleDownIcon, ChevronDoubleUpIcon } from '@heroicons/vue/24/outline';
+import JsonFrame from './JsonFrame.vue';
 import DataViewerTree from './DataViewerTree.vue';
-import DataViewerJson from './DataViewerJson.vue';
+import { useDataViewer } from './useDataViewer';
+import { type ViewMode } from './types';
 
 interface Props {
   data: unknown;
@@ -30,7 +27,6 @@ const dataRef = toRef(props, 'data');
 
 const {
   viewMode,
-  effectiveViewMode,
   expandedPaths,
   copiedPath,
   toggleExpanded,
@@ -40,16 +36,19 @@ const {
   copyToClipboard,
 } = useDataViewer(dataRef, props.defaultView);
 
-// Auto-expand first level on data change
-watch(dataRef, (newData) => {
-  expandedPaths.value.clear();
-  expandToDepth(newData, 1);
-}, { immediate: true });
+watch(
+  dataRef,
+  newData => {
+    expandedPaths.value.clear();
+    expandToDepth(newData, 1);
+  },
+  { immediate: true }
+);
 
-const handleCopy = (expression: string) => {
+function handleCopy(expression: string) {
   copyToClipboard(expression);
   props.onCopyPath?.(expression);
-};
+}
 
 const hasData = computed(() => props.data !== null && props.data !== undefined);
 const isExpandable = computed(() => props.data && typeof props.data === 'object');
@@ -57,17 +56,16 @@ const isExpandable = computed(() => props.data && typeof props.data === 'object'
 const viewModes: { id: ViewMode; label: string; icon: string }[] = [
   { id: 'tree', label: 'Tree', icon: '{}' },
   { id: 'json', label: 'JSON', icon: '</>' },
+  { id: 'table', label: 'Table', icon: '[]' },
 ];
 </script>
 
 <template>
-  <div class="flex flex-col overflow-hidden" :style="maxHeight ? { maxHeight } : {}">
-    <!-- Toolbar -->
+  <div class="relative flex flex-col overflow-hidden" :style="maxHeight ? { maxHeight } : {}">
     <div
       v-if="showViewToggle && hasData"
       class="flex shrink-0 items-center justify-between border-b border-base-200/60 px-2 py-1.5"
     >
-      <!-- View mode tabs -->
       <div class="flex items-center gap-0.5 rounded-md bg-base-200/40 p-0.5">
         <button
           v-for="mode in viewModes"
@@ -76,7 +74,7 @@ const viewModes: { id: ViewMode; label: string; icon: string }[] = [
           :title="mode.label"
           :class="[
             'rounded px-2.5 py-1 text-[11px] font-medium transition-all cursor-pointer',
-            effectiveViewMode === mode.id
+            viewMode === mode.id
               ? 'bg-base-100 text-base-content shadow-sm'
               : 'text-base-content/55 hover:text-base-content/75',
           ]"
@@ -86,8 +84,7 @@ const viewModes: { id: ViewMode; label: string; icon: string }[] = [
         </button>
       </div>
 
-      <!-- Tree controls -->
-      <div v-if="effectiveViewMode === 'tree' && isExpandable" class="flex items-center gap-1">
+      <div v-if="viewMode === 'tree' && isExpandable" class="flex items-center gap-1">
         <button
           @click="expandAll(data)"
           class="rounded p-1 text-base-content/40 transition-colors hover:bg-base-200/60 hover:text-base-content/70"
@@ -105,11 +102,10 @@ const viewModes: { id: ViewMode; label: string; icon: string }[] = [
       </div>
     </div>
 
-    <!-- Content -->
     <div class="custom-scrollbar flex-1 overflow-auto">
       <template v-if="hasData">
         <DataViewerTree
-          v-if="effectiveViewMode === 'tree'"
+          v-if="viewMode === 'tree'"
           :data="data"
           :rootPath="rootPath"
           :expandedPaths="expandedPaths"
@@ -117,9 +113,16 @@ const viewModes: { id: ViewMode; label: string; icon: string }[] = [
           :onToggle="toggleExpanded"
           :onCopy="rootPath ? handleCopy : undefined"
         />
-        <DataViewerJson
+        <JsonFrame
           v-else
-          :data="data"
+          :key="viewMode"
+          :modelValue="data"
+          :defaultView="viewMode"
+          :allowedModes="[viewMode]"
+          :show-mode-toggle="false"
+          :show-copy-json="false"
+          :show-copy-expression="false"
+          read-only
         />
       </template>
 
@@ -128,7 +131,6 @@ const viewModes: { id: ViewMode; label: string; icon: string }[] = [
       </div>
     </div>
 
-    <!-- Copy toast -->
     <Transition
       enter-active-class="transition-all duration-200 ease-out"
       enter-from-class="translate-y-2 opacity-0"
@@ -152,10 +154,12 @@ const viewModes: { id: ViewMode; label: string; icon: string }[] = [
   width: 6px;
   height: 6px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: color-mix(in oklch, var(--color-base-content) 10%, transparent);
   border-radius: 999px;
 }
+
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }

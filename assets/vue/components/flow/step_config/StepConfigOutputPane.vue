@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, inject, computed } from 'vue';
-import { BookmarkIcon, DocumentDuplicateIcon, BoltIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline';
+import { BookmarkIcon, BoltIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline';
 import { colorMap, oklchToHex, statusLabels, type NodeStatus } from '@/lib/color';
 import { unwrapData } from '@/lib/dataUtils';
+import { buildStepRootPath } from '@/lib/expressionPath';
 import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 import { StepConfigKey } from './useStepConfig';
 
@@ -23,11 +24,51 @@ const statusColor = computed(() => {
   const s = effectiveStatus.value;
   return s ? oklchToHex(colorMap[s]) : null;
 });
+const pinButtonColor = computed(() => oklchToHex(colorMap.pinned));
 
 const getStatusColor = (status: string) => oklchToHex(colorMap[status as NodeStatus] || colorMap.pending);
-const getStatusLabel = (status: string) => statusLabels[status as NodeStatus] || status;
 
 const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
+const showPinAction = computed(
+  () => state.canEdit.value && (state.hasPinnedOutput.value || !!state.activeStepExecution.value)
+);
+const pinButtonLabel = computed(() => (state.hasPinnedOutput.value ? 'Unpin Output' : 'Pin Output'));
+const pinButtonTitle = computed(() => {
+  if (state.hasPinnedOutput.value) return 'Remove the pinned output preview';
+
+  return state.canPinOutput.value
+    ? 'Pin this output for previews'
+    : 'Run the workflow to capture output before pinning';
+});
+const pinButtonDisabled = computed(
+  () => !state.hasPinnedOutput.value && !state.canPinOutput.value
+);
+
+const hasDuplicateOutputStepName = computed(() => {
+  const stepName = state.editName.value;
+
+  if (typeof stepName !== 'string' || stepName.trim().length === 0) {
+    return false;
+  }
+
+  return Object.values(state.stepNameById.value).filter(name => name === stepName).length > 1;
+});
+
+const outputRootPath = computed(() =>
+  buildStepRootPath(
+    hasDuplicateOutputStepName.value ? undefined : state.editName.value,
+    state.nodeId.value
+  )
+);
+
+function handlePinAction() {
+  if (state.hasPinnedOutput.value) {
+    state.unpinOutput();
+    return;
+  }
+
+  state.pinOutput();
+}
 </script>
 
 <template>
@@ -35,46 +76,65 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
     <template v-if="hasContent()">
       <!-- Tab Bar -->
       <div class="border-base-200 shrink-0 border-b">
-        <div class="flex">
-          <button
-            v-if="state.activeStepExecution.value"
-            @click="activeTab = 'input'"
-            :class="[
-              'relative px-4 py-2.5 text-xs font-medium transition-colors',
-              activeTab === 'input'
-                ? 'text-base-content'
-                : 'text-base-content/50 hover:text-base-content/70',
-            ]"
-          >
-            Input
-            <span
-              v-if="activeTab === 'input'"
-              class="bg-primary absolute bottom-0 left-0 h-0.5 w-full"
-            ></span>
-          </button>
-          <button
-            @click="activeTab = 'output'"
-            :class="[
-              'relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors',
-              activeTab === 'output'
-                ? 'text-base-content'
-                : 'text-base-content/50 hover:text-base-content/70',
-            ]"
-          >
-            Output
-            <span
-              v-if="effectiveStatus"
-              class="inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-bold leading-tight"
+        <div class="flex items-end gap-4 px-4">
+          <div class="flex">
+            <button
+              v-if="state.activeStepExecution.value"
+              @click="activeTab = 'input'"
+              :class="[
+                'relative px-4 py-2.5 text-xs font-medium transition-colors',
+                activeTab === 'input'
+                  ? 'text-base-content'
+                  : 'text-base-content/50 hover:text-base-content/70',
+              ]"
+            >
+              Input
+              <span
+                v-if="activeTab === 'input'"
+                class="bg-primary absolute bottom-0 left-0 h-0.5 w-full"
+              ></span>
+            </button>
+            <button
+              @click="activeTab = 'output'"
+              :class="[
+                'relative flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors',
+                activeTab === 'output'
+                  ? 'text-base-content'
+                  : 'text-base-content/50 hover:text-base-content/70',
+              ]"
+            >
+              Output
+              <span
+                v-if="effectiveStatus"
+                class="inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-bold leading-tight"
+                :style="{
+                  backgroundColor: (statusColor ?? '') + '25',
+                  color: statusColor ?? undefined,
+                }"
+              >{{ statusLabels[effectiveStatus] }}</span>
+              <span
+                v-if="activeTab === 'output'"
+                class="bg-primary absolute bottom-0 left-0 h-0.5 w-full"
+              ></span>
+            </button>
+          </div>
+
+          <div v-if="showPinAction" class="ml-auto flex py-2">
+            <button
+              @click.stop="handlePinAction"
+              :disabled="pinButtonDisabled"
+              :title="pinButtonTitle"
               :style="{
-                backgroundColor: (statusColor ?? '') + '25',
-                color: statusColor ?? undefined,
+                backgroundColor: pinButtonColor,
+                borderColor: pinButtonColor,
+                boxShadow: `0 10px 24px ${pinButtonColor}26`,
               }"
-            >{{ statusLabels[effectiveStatus] }}</span>
-            <span
-              v-if="activeTab === 'output'"
-              class="bg-primary absolute bottom-0 left-0 h-0.5 w-full"
-            ></span>
-          </button>
+              class="inline-flex h-9 items-center gap-2 rounded-full border px-4 text-sm font-semibold text-white transition-all hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <BookmarkIcon class="size-3.5" />
+              {{ pinButtonLabel }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -134,45 +194,6 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
 
       <!-- Tab Content -->
       <div class="custom-scrollbar flex-1 overflow-y-auto p-4">
-        <!-- Action bar (shared layout for both tabs) -->
-        <div class="mb-3 flex min-h-[24px] items-center justify-end">
-          <div class="flex items-center gap-2">
-            <template v-if="activeTab === 'input'">
-              <button
-                @click.stop="state.copyExpression('json')"
-                class="text-base-content/50 flex items-center gap-1 text-[11px] transition-colors hover:text-base-content/70"
-              >
-                <DocumentDuplicateIcon class="size-3.5" />
-                Copy
-              </button>
-            </template>
-            <template v-if="activeTab === 'output' && state.canEdit.value && (state.hasPinnedOutput.value || state.activeStepExecution.value)">
-              <button
-                v-if="!state.hasPinnedOutput.value && state.activeStepExecution.value"
-                @click.stop="state.pinOutput()"
-                :disabled="!state.canPinOutput.value"
-                :title="
-                  state.canPinOutput.value
-                    ? 'Pin this output for previews'
-                    : 'Run the workflow to capture output before pinning'
-                "
-                class="text-base-content/50 flex items-center gap-1 text-[11px] transition-colors hover:text-base-content/70 disabled:opacity-30"
-              >
-                <BookmarkIcon class="size-3.5" />
-                Pin
-              </button>
-
-              <button
-                v-if="state.hasPinnedOutput.value"
-                @click.stop="state.unpinOutput()"
-                class="text-error/50 flex items-center gap-1 text-[11px] transition-colors hover:text-error"
-              >
-                Unpin
-              </button>
-            </template>
-          </div>
-        </div>
-
         <!-- INPUT TAB -->
         <div v-if="activeTab === 'input' && state.activeStepExecution.value">
           <div class="overflow-hidden rounded-xl border border-base-200/60">
@@ -202,7 +223,7 @@ const copyPath = (path: string) => window.navigator.clipboard.writeText(path);
             >
               <DataViewer
                 :data="unwrapData(state.hasPinnedOutput.value ? state.pinnedOutput.value : state.activeStepExecution.value?.output_data)"
-                :rootPath="`steps.${state.nodeId.value}`"
+                :rootPath="outputRootPath"
                 :onCopyPath="copyPath"
               />
             </div>

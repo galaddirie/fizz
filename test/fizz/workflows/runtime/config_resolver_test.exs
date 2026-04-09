@@ -45,6 +45,26 @@ defmodule Fizz.Workflows.Runtime.ConfigResolverTest do
     assert resolved == %{"value" => %{"ok" => true}}
   end
 
+  test "resolve_config reads step outputs using named references" do
+    step_id = Ecto.UUID.generate()
+
+    compiled_config = %{
+      "value" =>
+        access_plan!(~s({{ steps["Manual Trigger"].body }}),
+          known_step_ids: [step_id],
+          step_name_to_id: %{"Manual Trigger" => step_id}
+        )
+    }
+
+    resolved =
+      ConfigResolver.resolve_config(
+        compiled_config,
+        context(%{}, %{step_id => %{"body" => %{"ok" => true}}})
+      )
+
+    assert resolved == %{"value" => %{"ok" => true}}
+  end
+
   test "fast path resolves simple lookups without invoking Solid" do
     compiled_config = %{
       "orders" => %AccessPlan.ValueExpression{

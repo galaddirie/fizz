@@ -139,3 +139,9 @@ A bot that starts an a/b experiment and updates the experiments based on events 
 what should the debug view show? what should the user experience be? how will users debug and pin workflows on published versions or previous drafts if they drift significantly from the current draft?
 
 c/workflows/\/edit/runs/648c061d-0b09-4cbe-9765-09fd578de200
+
+
+BUG
+Pinned outputs dont actually work. they appear to work in the ui on the pinned node (showing the input and the correct pinned output) but when you look at the downstream nodes, they are using real live output, not the pinned output.
+
+we honestly shouldnt even be executing nodes with pinned outputs so how is this happening.

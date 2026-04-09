@@ -102,6 +102,34 @@ defmodule Fizz.Workflows.ExpressionsTest do
     assert Enum.any?(errors, &String.contains?(&1, step_id))
   end
 
+  test "validate resolves named step references to stable ids when a mapping is provided" do
+    step_id = Ecto.UUID.generate()
+
+    assert {:ok, parsed} =
+             Expressions.validate(~s({{ steps["Manual Trigger"].body }}),
+               strict_filters: true,
+               known_step_ids: [step_id],
+               step_name_to_id: %{"Manual Trigger" => step_id}
+             )
+
+    assert Expressions.dependencies(parsed).step_ids == MapSet.new([step_id])
+  end
+
+  test "preview resolves named step references when context provides a step name mapping" do
+    step_id = Ecto.UUID.generate()
+
+    assert Expressions.preview(
+             ~s({{ steps["Manual Trigger"].body }}),
+             %{
+               input: %{},
+               steps: %{step_id => %{"body" => %{"ok" => true}}},
+               workflow: %{},
+               env: %{},
+               _step_name_to_id: %{"Manual Trigger" => step_id}
+             }
+           ) == {:ok, %{"ok" => true}}
+  end
+
   defp access_plan!(expression) do
     {:ok, plan} =
       Expressions.to_access_plan(expression,

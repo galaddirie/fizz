@@ -1,5 +1,6 @@
 import { type ComputedRef, type Ref } from 'vue';
 import type { Node } from '@vue-flow/core';
+import { buildStepRootPath } from '@/lib/expressionPath';
 import type { StepNodeData } from '@/types/workflow';
 
 interface UseExpressionHelpersOptions {
@@ -11,15 +12,6 @@ interface UseExpressionHelpersOptions {
     inputIndexLabels: ComputedRef<string[]>;
 }
 
-const slugify = (text: string) => {
-    return text
-        .toLowerCase()
-        .replace(/[^\w\s]/g, '')
-        .replace(/[\s]+/g, '_')
-        .replace(/_+/g, '_')
-        .replace(/^_|_$/g, '');
-};
-
 export function useExpressionHelpers({
     node,
     stepNameById,
@@ -28,6 +20,12 @@ export function useExpressionHelpers({
     directUpstreamStepIds,
     inputIndexLabels,
 }: UseExpressionHelpersOptions) {
+    const hasDuplicateStepName = (stepName: string) => {
+        if (stepName.trim().length === 0) return false;
+
+        return Object.values(stepNameById() ?? {}).filter(name => name === stepName).length > 1;
+    };
+
     const getExpressionFor = (sectionId: string, key?: string) => {
         if (key === sectionId && sectionId !== 'steps') return `{{ ${sectionId} }}`;
 
@@ -52,8 +50,12 @@ export function useExpressionHelpers({
                 const isCurrentStep = key === currentStepId || key === currentStepName;
                 const resolvedName = isCurrentStep ? editName.value : stepNameById()?.[key];
                 const stepName = resolvedName && resolvedName.length > 0 ? resolvedName : key;
-                const stepKey = stepName && stepName.length > 0 ? slugify(stepName) : key;
-                return `{{ steps["${stepKey}"].json }}`;
+                const fallbackStepKey = isCurrentStep ? currentStepId ?? key : key;
+
+                return `{{ ${buildStepRootPath(
+                    hasDuplicateStepName(stepName) ? undefined : stepName,
+                    fallbackStepKey
+                )}.json }}`;
             }
             default:
                 return `{{ ${sectionId}${path} }}`;

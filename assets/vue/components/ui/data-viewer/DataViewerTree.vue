@@ -25,9 +25,7 @@ const props = withDefaults(defineProps<Props>(), {
   onCopy: null,
 });
 
-const rootNodes = computed<TreeNode[]>(() => {
-  return buildTreeNodes(props.data, '$', []);
-});
+const rootNodes = computed<TreeNode[]>(() => buildTreeNodes(props.data, '$', []));
 
 function handleCopyRoot() {
   if (!props.onCopy || !props.rootPath) return;
@@ -36,7 +34,6 @@ function handleCopyRoot() {
 </script>
 
 <template>
-  <!-- Primitive root value -->
   <div
     v-if="rootNodes.length === 0 && data !== null && data !== undefined"
     class="flex items-center gap-2 px-2 py-1.5"
@@ -61,7 +58,6 @@ function handleCopyRoot() {
     </button>
   </div>
 
-  <!-- Null/undefined root -->
   <div
     v-else-if="data === null || data === undefined"
     class="px-2 py-1.5 font-mono text-xs text-base-content/40"
@@ -69,7 +65,6 @@ function handleCopyRoot() {
     {{ data === null ? 'null' : 'undefined' }}
   </div>
 
-  <!-- Tree nodes -->
   <div v-else class="text-xs">
     <TreeNodeRow
       v-for="node in rootNodes"

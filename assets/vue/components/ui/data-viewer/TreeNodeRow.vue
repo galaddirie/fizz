@@ -51,13 +51,11 @@ function handleCopy() {
 
 <template>
   <div>
-    <!-- Row -->
     <div
       class="group/row flex items-center gap-1 rounded-md px-1 py-[3px] transition-colors hover:bg-base-200/50 cursor-default"
       :style="{ paddingLeft: `${indent}px` }"
       @click="node.isExpandable ? onToggle(node.path) : undefined"
     >
-      <!-- Expand chevron or spacer -->
       <button
         v-if="node.isExpandable"
         class="shrink-0 rounded p-0.5 text-base-content/50 transition-colors hover:text-base-content/80 hover:bg-base-200/60"
@@ -70,15 +68,12 @@ function handleCopy() {
       </button>
       <span v-else class="w-[18px] shrink-0"></span>
 
-      <!-- Key -->
       <span class="shrink-0 font-mono text-base-content/80 font-medium">
         {{ typeof node.key === 'number' ? String(node.key) : node.key }}
       </span>
 
-      <!-- Separator -->
       <span class="text-base-content/35 shrink-0 mx-1">:</span>
 
-      <!-- Value or type label -->
       <template v-if="node.isExpandable">
         <span v-if="!isExpanded" class="truncate font-mono text-base-content/55">
           {{ getCollapsedPreview(node.value, node.type) }}
@@ -102,7 +97,6 @@ function handleCopy() {
         </span>
       </template>
 
-      <!-- Copy button -->
       <button
         v-if="onCopy && rootPath"
         @click.stop="handleCopy"
@@ -114,7 +108,6 @@ function handleCopy() {
       </button>
     </div>
 
-    <!-- Children (recursive) -->
     <TreeNodeRow
       v-for="child in children"
       :key="child.path"

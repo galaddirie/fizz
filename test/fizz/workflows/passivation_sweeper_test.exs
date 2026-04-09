@@ -80,6 +80,26 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     assert {:ok, %{status: :failed}} = Fizz.Workflows.get_run(ctx.scope, failed_run.id)
   end
 
+  test "runs without a worker and without a checkpoint are not passivated", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :sleeping, old_time())
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute run.id in passivated_run_ids
+    assert {:ok, %{status: :sleeping}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+  end
+
+  test "runs without a worker can still be passivated when a checkpoint exists", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :sleeping, old_time())
+
+    persist_checkpoint!(run, ctx)
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    assert run.id in passivated_run_ids
+    assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+  end
+
   test "passivated runs have local SQLite files evicted when litestream is running", ctx do
     fake_litestream = start_fake_litestream!()
     sweeper = start_sweeper!(ctx, litestream_server: fake_litestream)
@@ -237,6 +257,23 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
 
   defp old_time do
     DateTime.add(DateTime.utc_now(), -5, :minute)
+  end
+
+  defp persist_checkpoint!(run, ctx) do
+    fence_token = 1
+    insert_lease(run.id, fence_token)
+
+    {:ok, store_state} =
+      SqliteStore.init(run.id,
+        data_dir: ctx.tmp_dir,
+        org_id: ctx.scope.project.workos_organization_id,
+        project_id: ctx.scope.project.id,
+        fence_token: fence_token,
+        repo: Repo
+      )
+
+    workflow = Runic.workflow(steps: [])
+    :ok = SqliteStore.save(run.id, Runic.Workflow.event_log(workflow), store_state)
   end
 
   defp unique_name(name) do

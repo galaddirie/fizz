@@ -14,6 +14,7 @@ import {
   StopIcon,
 } from '@heroicons/vue/24/outline';
 import { unwrapData } from '@/lib/dataUtils';
+import { buildStepRootPath } from '@/lib/expressionPath';
 import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 
 // Props from LiveView
@@ -105,6 +106,17 @@ const formatTraceTimestamp = (execution: StepExecution): string => {
   if (execution.completed_at) return new Date(execution.completed_at).toLocaleTimeString();
   return '';
 };
+
+const hasDuplicateStepName = (stepName?: string | null) => {
+  if (typeof stepName !== 'string' || stepName.trim().length === 0) {
+    return false;
+  }
+
+  return Object.values(props.stepNameById).filter(name => name === stepName).length > 1;
+};
+
+const outputRootPath = (stepName?: string | null, stepId?: string | null) =>
+  buildStepRootPath(hasDuplicateStepName(stepName) ? undefined : stepName, stepId);
 
 // Computed traces from props or mock
 const traces = computed<TraceEntry[]>(() => {
@@ -531,7 +543,7 @@ const stepMetaLine = (trace: TraceEntry) => {
               <div class="overflow-hidden rounded-lg border border-base-200">
                 <DataViewer
                   :data="unwrapData(getIterationData(activeIterationId || selectedTraceEntry.iterations[0].id, activeTab))"
-                  :rootPath="activeTab === 'input' ? 'json' : `steps.${selectedTraceEntry.step_name}`"
+                  :rootPath="activeTab === 'input' ? 'json' : outputRootPath(selectedTraceEntry.step_name, selectedTraceEntry.step_id)"
                 />
               </div>
             </div>
@@ -560,7 +572,7 @@ const stepMetaLine = (trace: TraceEntry) => {
                 <div v-if="selectedStepExecution?.output_data" class="overflow-hidden rounded-lg border border-base-200">
                   <DataViewer
                     :data="unwrapData(selectedStepExecution.output_data)"
-                    :rootPath="`steps.${selectedTraceEntry?.step_name || localSelectedStepId}`"
+                    :rootPath="outputRootPath(selectedTraceEntry?.step_name, localSelectedStepId)"
                   />
                 </div>
                 <div v-else class="rounded-lg border border-base-200 bg-base-100 p-4 text-sm text-base-content/55">

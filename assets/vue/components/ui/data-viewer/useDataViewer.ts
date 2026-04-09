@@ -7,8 +7,6 @@ export function useDataViewer(data: Ref<unknown>, defaultView: ViewMode = 'tree'
   const copiedPath = ref<string | null>(null);
   let copyTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  const effectiveViewMode = viewMode;
-
   function toggleExpanded(path: string) {
     if (expandedPaths.value.has(path)) {
       expandedPaths.value.delete(path);
@@ -21,7 +19,7 @@ export function useDataViewer(data: Ref<unknown>, defaultView: ViewMode = 'tree'
     if (value && typeof value === 'object') {
       expandedPaths.value.add(prefix);
       if (Array.isArray(value)) {
-        value.forEach((item, i) => expandAll(item, `${prefix}[${i}]`));
+        value.forEach((item, index) => expandAll(item, `${prefix}[${index}]`));
       } else {
         for (const key of Object.keys(value)) {
           expandAll((value as Record<string, unknown>)[key], `${prefix}.${key}`);
@@ -36,11 +34,13 @@ export function useDataViewer(data: Ref<unknown>, defaultView: ViewMode = 'tree'
 
   function expandToDepth(value: unknown, depth: number, prefix = '$', currentDepth = 0) {
     if (currentDepth >= depth || !value || typeof value !== 'object') return;
+
     expandedPaths.value.add(prefix);
+
     if (Array.isArray(value)) {
-      value.forEach((item, i) =>
-        expandToDepth(item, depth, `${prefix}[${i}]`, currentDepth + 1)
-      );
+      value.forEach((item, index) => {
+        expandToDepth(item, depth, `${prefix}[${index}]`, currentDepth + 1);
+      });
     } else {
       for (const key of Object.keys(value)) {
         expandToDepth(
@@ -57,12 +57,13 @@ export function useDataViewer(data: Ref<unknown>, defaultView: ViewMode = 'tree'
     navigator.clipboard.writeText(text);
     copiedPath.value = text;
     if (copyTimeout) clearTimeout(copyTimeout);
-    copyTimeout = setTimeout(() => { copiedPath.value = null; }, 1500);
+    copyTimeout = setTimeout(() => {
+      copiedPath.value = null;
+    }, 1500);
   }
 
   return {
     viewMode,
-    effectiveViewMode,
     expandedPaths,
     copiedPath,
     toggleExpanded,

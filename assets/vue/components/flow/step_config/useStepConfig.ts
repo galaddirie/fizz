@@ -314,6 +314,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
     };
 
     const nodeId = computed(() => props.node?.id ?? '');
+    const stepNameById = computed(() => props.stepNameById ?? {});
 
     // --- Sub-composables ---
     const previews = useExpressionPreviews({
@@ -408,6 +409,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         manualTriggerInputSchema,
         handleManualTriggerTestDataUpdate,
         nodeId,
+        stepNameById,
         evaluatedConfig,
         // Sub-composables
         ...previews,

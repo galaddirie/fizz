@@ -51,13 +51,17 @@ defmodule Fizz.Workflows.Expressions do
   @allowed_custom_filters MapSet.new(Filters.custom_filter_names())
   @allowed_filters MapSet.union(@allowed_builtin_filters, @allowed_custom_filters)
   @predicate_filters MapSet.new(Filters.predicate_filter_names())
+  @quoted_step_access_regex ~r/steps\["((?:[^"\\]|\\.)*)"\]/
 
   @type validation_error :: String.t()
 
   @spec parse(String.t()) :: {:ok, Solid.Template.t()} | {:error, String.t()}
-  def parse(expression_string) when is_binary(expression_string) do
+  def parse(expression_string) when is_binary(expression_string), do: parse(expression_string, [])
+
+  @spec parse(String.t(), keyword()) :: {:ok, Solid.Template.t()} | {:error, String.t()}
+  def parse(expression_string, opts) when is_binary(expression_string) and is_list(opts) do
     expression_string
-    |> normalize_expression()
+    |> normalize_expression(opts)
     |> Solid.parse()
     |> case do
       {:ok, parsed} -> {:ok, parsed}
@@ -68,7 +72,7 @@ defmodule Fizz.Workflows.Expressions do
   @spec validate(String.t(), keyword()) ::
           {:ok, Solid.Template.t()} | {:error, [validation_error()]}
   def validate(expression_string, opts \\ []) when is_binary(expression_string) do
-    with {:ok, parsed} <- parse(expression_string) do
+    with {:ok, parsed} <- parse(expression_string, opts) do
       errors =
         parsed
         |> validation_errors(opts)
@@ -83,7 +87,8 @@ defmodule Fizz.Workflows.Expressions do
 
   @spec preview(String.t(), map()) :: {:ok, term()} | {:error, String.t()}
   def preview(expression_string, context) when is_binary(expression_string) and is_map(context) do
-    with {:ok, parsed} <- parse(expression_string),
+    with {:ok, parsed} <-
+           parse(expression_string, step_name_to_id: step_name_to_id_from_context(context)),
          {:ok, plan} <- preview_access_plan(parsed) do
       {:ok, resolve(plan, context)}
     else
@@ -207,12 +212,15 @@ defmodule Fizz.Workflows.Expressions do
   end
 
   @spec normalize_expression(String.t()) :: String.t()
-  def normalize_expression(expression_string) do
-    Regex.replace(
-      ~r/steps\.([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})/,
-      expression_string,
-      ~s(steps["\\1"])
-    )
+  def normalize_expression(expression_string) when is_binary(expression_string),
+    do: normalize_expression(expression_string, [])
+
+  @spec normalize_expression(String.t(), keyword()) :: String.t()
+  def normalize_expression(expression_string, opts)
+      when is_binary(expression_string) and is_list(opts) do
+    expression_string
+    |> normalize_uuid_step_access()
+    |> normalize_named_step_access(Keyword.get(opts, :step_name_to_id, %{}))
   end
 
   defp resolve_value_expression(%AccessPlan.ValueExpression{parsed: parsed}, context) do
@@ -509,4 +517,37 @@ defmodule Fizz.Workflows.Expressions do
   defp truthy?(0), do: false
   defp truthy?(value) when is_float(value), do: value != 0.0
   defp truthy?(_value), do: true
+
+  defp normalize_uuid_step_access(expression_string) do
+    Regex.replace(
+      ~r/steps\.([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})/,
+      expression_string,
+      ~s(steps["\\1"])
+    )
+  end
+
+  defp normalize_named_step_access(expression_string, step_name_to_id)
+       when not is_map(step_name_to_id) or map_size(step_name_to_id) == 0,
+       do: expression_string
+
+  defp normalize_named_step_access(expression_string, step_name_to_id) do
+    Regex.replace(@quoted_step_access_regex, expression_string, fn full_match, encoded_name ->
+      step_name =
+        encoded_name
+        |> then(&~s("#{&1}"))
+        |> Jason.decode!()
+
+      case Map.get(step_name_to_id, step_name) do
+        step_id when is_binary(step_id) -> ~s(steps["#{step_id}"])
+        _ -> full_match
+      end
+    end)
+  end
+
+  defp step_name_to_id_from_context(context) do
+    case Map.get(context, :_step_name_to_id) || Map.get(context, "_step_name_to_id") do
+      step_name_to_id when is_map(step_name_to_id) -> step_name_to_id
+      _ -> %{}
+    end
+  end
 end

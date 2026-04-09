@@ -1866,6 +1866,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     %{
       "steps" => build_preview_steps_context(step_id, draft, editor_state, step_executions),
       "input" => build_preview_input_context(step_id, draft, editor_state, step_executions),
+      "_step_name_to_id" => build_preview_step_name_to_id(draft),
       "env" => %{}
     }
   end
@@ -1888,6 +1889,28 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp build_preview_steps_context(_step_id, _draft, _editor_state, _step_executions), do: %{}
+
+  defp build_preview_step_name_to_id(%WorkflowDefinitionVersion{steps: steps}) do
+    steps
+    |> Enum.reduce(%{}, fn
+      %{id: step_id, name: step_name}, acc when is_binary(step_id) and is_binary(step_name) ->
+        case String.trim(step_name) do
+          "" ->
+            acc
+
+          _ ->
+            Map.update(acc, step_name, step_id, fn
+              ^step_id -> step_id
+              _existing_step_id -> :duplicate
+            end)
+        end
+
+      _step, acc ->
+        acc
+    end)
+    |> Enum.reject(&match?({_name, :duplicate}, &1))
+    |> Map.new()
+  end
 
   defp build_preview_input_context(
          step_id,

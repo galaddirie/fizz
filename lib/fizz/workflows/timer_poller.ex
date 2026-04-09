@@ -6,6 +6,8 @@ defmodule Fizz.Workflows.TimerPoller do
 
   use GenServer
 
+  require Logger
+
   alias Fizz.Workflows
   alias Fizz.Workflows.DurableTimer
 
@@ -81,7 +83,11 @@ defmodule Fizz.Workflows.TimerPoller do
               :ok = Workflows.mark_timer_fired(timer.id)
               [timer.id | acc]
 
-            {:error, _reason} ->
+            {:error, reason} ->
+              Logger.error(
+                "failed to deliver timer #{timer.id} for run #{timer.run_id}: #{inspect(reason)}"
+              )
+
               acc
           end
         end)
