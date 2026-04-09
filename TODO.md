@@ -145,3 +145,7 @@ BUG
 Pinned outputs dont actually work. they appear to work in the ui on the pinned node (showing the input and the correct pinned output) but when you look at the downstream nodes, they are using real live output, not the pinned output.
 
 we honestly shouldnt even be executing nodes with pinned outputs so how is this happening.
+
+- Research workflow execution check points during live runs
+- Research post-terminal SQLite /litestream/minio compaction: checkpoint completed/cancelled/failed workflows
+
