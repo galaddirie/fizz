@@ -11,7 +11,7 @@ defmodule Fizz.Workflows.Runner.WorkerSupervisor do
 
   alias Fizz.Workflows.Runner.Worker
 
-  @default_max_children 1_000
+  @default_max_children 10_000
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
