@@ -1,10 +1,8 @@
 defmodule Fizz.Workflows.PublishValidation do
   @moduledoc false
 
-  alias Fizz.Accounts.Scope
   alias Fizz.Graph
-  alias Fizz.Integrations.CredentialRef
-  alias Fizz.Integrations.CredentialsResolver
+  alias Fizz.Slots.Registry, as: SlotRegistry
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
   alias Fizz.Steps.Type
@@ -59,39 +57,26 @@ defmodule Fizz.Workflows.PublishValidation do
     end)
   end
 
-  @spec credential_accessibility_issues([map()], Scope.t()) :: [issue()]
-  def credential_accessibility_issues(steps, %Scope{} = scope) when is_list(steps) do
-    accessible_ids_by_key =
-      steps
-      |> credential_checks()
-      |> Enum.group_by(fn %{credential_ref: credential_ref} ->
-        {credential_ref["provider"], credential_ref["auth_type"]}
+  @doc """
+  Validates that slot declarations in step configs are well-formed.
+
+  This replaces the prior credential-accessibility check. Per-user credential
+  selection now happens at run time via `Fizz.Workflows.Readiness`, so publish
+  validation only needs to confirm the workflow declares its slot
+  requirements correctly.
+  """
+  @spec slot_declaration_issues([map()]) :: [issue()]
+  def slot_declaration_issues(steps) when is_list(steps) do
+    Enum.flat_map(steps, fn step ->
+      walk_slot_decls(step.config || %{}, [])
+      |> Enum.flat_map(fn {path, decl} ->
+        case validate_slot_decl(decl) do
+          :ok -> []
+          {:error, message} -> [%{step_id: step.id, field: format_field_path(path), message: message}]
+        end
       end)
-      |> Enum.map(fn {key, _checks} -> {key, accessible_credential_ids(scope, key)} end)
-      |> Map.new()
-
-    steps
-    |> credential_checks()
-    |> Enum.flat_map(fn %{step_id: step_id, field: field, credential_ref: credential_ref} ->
-      key = {credential_ref["provider"], credential_ref["auth_type"]}
-      accessible_ids = Map.get(accessible_ids_by_key, key, MapSet.new())
-
-      if MapSet.member?(accessible_ids, credential_ref["id"]) do
-        []
-      else
-        [
-          %{
-            step_id: step_id,
-            field: field,
-            message: "selected credential is not accessible to the current user"
-          }
-        ]
-      end
     end)
   end
-
-  @spec credential_accessibility_issues([map()], term()) :: [issue()]
-  def credential_accessibility_issues(_steps, _scope), do: []
 
   @spec trigger_root_issues([map()], [map()]) :: [issue()]
   def trigger_root_issues(steps, connections) when is_list(steps) and is_list(connections) do
@@ -215,72 +200,43 @@ defmodule Fizz.Workflows.PublishValidation do
   defp missing_required_value?(value) when is_list(value), do: value == []
   defp missing_required_value?(_value), do: false
 
-  defp credential_checks(steps) do
-    Enum.flat_map(steps, &step_credential_checks/1)
+  defp walk_slot_decls(%{"$slot" => true} = decl, path), do: [{path, decl}]
+
+  defp walk_slot_decls(map, path) when is_map(map) do
+    Enum.flat_map(map, fn {key, value} ->
+      walk_slot_decls(value, path ++ [to_string(key)])
+    end)
   end
 
-  defp step_credential_checks(step) do
-    case step_type(step.type_id) do
-      {:ok, %Type{} = type} ->
-        type.config_schema
-        |> Map.get("properties", %{})
-        |> Enum.flat_map(fn {field, property} ->
-          credential_check(step, field, property)
-        end)
+  defp walk_slot_decls(list, path) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {value, idx} ->
+      walk_slot_decls(value, path ++ [Integer.to_string(idx)])
+    end)
+  end
 
-      :error ->
-        []
+  defp walk_slot_decls(_value, _path), do: []
+
+  defp validate_slot_decl(%{"$slot" => true} = decl) do
+    cond do
+      not is_binary(Map.get(decl, "kind")) or Map.get(decl, "kind") == "" ->
+        {:error, "slot is missing kind"}
+
+      not is_binary(Map.get(decl, "slot_key")) or Map.get(decl, "slot_key") == "" ->
+        {:error, "slot is missing slot_key"}
+
+      not is_map(Map.get(decl, "spec")) ->
+        {:error, "slot is missing spec"}
+
+      true ->
+        case SlotRegistry.fetch(Map.get(decl, "kind")) do
+          {:ok, _module} -> :ok
+          :error -> {:error, "slot kind \"#{Map.get(decl, "kind")}\" is not registered"}
+        end
     end
   end
 
-  defp credential_check(step, field, property) when is_binary(field) and is_map(property) do
-    if credential_field?(field, property) do
-      case CredentialRef.normalize(Map.get(step.config || %{}, field)) do
-        {:ok, credential_ref} ->
-          [
-            %{
-              step_id: step.id,
-              field: field,
-              credential_ref: credential_ref
-            }
-          ]
-
-        {:error, _reason} ->
-          []
-      end
-    else
-      []
-    end
-  end
-
-  defp credential_check(_step, _field, _property), do: []
-
-  defp credential_field?(field, property) do
-    field == "credential_ref" or
-      String.ends_with?(field, "_credential_ref") or
-      get_in(property, ["ui", "resolver"]) == CredentialsResolver
-  end
-
-  defp accessible_credential_ids(scope, {provider, auth_type})
-       when is_binary(provider) and is_binary(auth_type) do
-    case CredentialsResolver.resolve(%{
-           q: "",
-           params: %{
-             "provider_filter" => [provider],
-             "auth_types" => [auth_type]
-           },
-           context: %{current_scope: scope}
-         }) do
-      {:ok, options} ->
-        options
-        |> Enum.map(&Map.get(&1, "id"))
-        |> Enum.reject(&is_nil/1)
-        |> MapSet.new()
-
-      {:error, _reason} ->
-        MapSet.new()
-    end
-  end
-
-  defp accessible_credential_ids(_scope, _key), do: MapSet.new()
+  defp format_field_path([]), do: nil
+  defp format_field_path(path), do: Enum.join(path, ".")
 end

@@ -7,6 +7,8 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
   alias Fizz.Workflows.PublishValidation
   alias Fizz.Workflows.WorkflowDefinition
 
+  @type t :: %__MODULE__{}
+
   @statuses [:draft, :published, :archived]
   @default_viewport %{"x" => 0, "y" => 0, "zoom" => 1.0}
 

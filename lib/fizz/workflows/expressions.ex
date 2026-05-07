@@ -141,18 +141,21 @@ defmodule Fizz.Workflows.Expressions do
   end
 
   def resolve(
-        %AccessPlan.CredentialFetch{provider: provider, credential_ref: credential_ref},
+        %AccessPlan.SlotRef{kind: kind, slot_key: slot_key, step_id: step_id, spec: spec},
         context
       ) do
     resolver =
-      Map.get(context, :_credential_resolver) ||
-        Map.get(context, "_credential_resolver") ||
-        get_in(context, [:workflow, "_credential_resolver"]) ||
-        get_in(context, [:workflow, :_credential_resolver])
+      Map.get(context, :_slot_resolver) ||
+        Map.get(context, "_slot_resolver") ||
+        get_in(context, [:workflow, "_slot_resolver"]) ||
+        get_in(context, [:workflow, :_slot_resolver])
 
     case resolver do
-      resolver when is_function(resolver, 1) ->
-        resolver.(Map.put(credential_ref, "provider", provider))
+      resolver when is_function(resolver, 4) ->
+        case resolver.(kind, slot_key, step_id, spec) do
+          {:ok, value} -> value
+          _ -> nil
+        end
 
       _ ->
         nil

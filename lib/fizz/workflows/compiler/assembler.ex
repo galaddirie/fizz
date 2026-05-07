@@ -1032,7 +1032,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     runtime_refs =
       Enum.map(dependencies.runtime_keys, fn
-        runtime_key when runtime_key in [:workflow, :env, :_credential_resolver] ->
+        runtime_key when runtime_key in [:workflow, :env, :_slot_resolver] ->
           %{
             kind: :context,
             target: runtime_key,
@@ -1485,7 +1485,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         end),
       workflow: Map.get(meta_ctx, :workflow) || %{},
       env: Map.get(meta_ctx, :env) || %{},
-      _credential_resolver: Map.get(meta_ctx, :_credential_resolver)
+      _slot_resolver: Map.get(meta_ctx, :_slot_resolver)
     }
   end
 

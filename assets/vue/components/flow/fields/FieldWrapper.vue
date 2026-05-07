@@ -1,6 +1,10 @@
 <template>
   <div class="field-wrapper">
-    <div v-if="mode === 'literal' && uiComponent !== 'default'">
+    <div v-if="isSlotField">
+      <SlotField :field="field" />
+    </div>
+
+    <div v-else-if="mode === 'literal' && uiComponent !== 'default'">
       <component
         :is="componentMap[uiComponent as keyof typeof componentMap]"
         :modelValue="modelValue"
@@ -49,6 +53,7 @@ import NumberField from './NumberField.vue';
 import JsonField from './JsonField.vue';
 import SelectField from './SelectField.vue';
 import SearchField from './SearchField.vue';
+import SlotField from './SlotField.vue';
 
 import type { ConfigField } from '@/types/configSchema';
 
@@ -76,6 +81,8 @@ const uiComponent = computed(() => {
   const comp = props.field?.ui?.component || props.field?.type || 'string';
   return componentMap[comp] ? comp : 'default';
 });
+
+const isSlotField = computed(() => props.field?.ui?.component === 'slot');
 
 const handleChange = (val: unknown) => {
   emit('update:modelValue', val);

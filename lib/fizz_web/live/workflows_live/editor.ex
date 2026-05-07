@@ -5,6 +5,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   alias Fizz.Accounts
   alias Fizz.Integrations.CredentialsResolver
+  alias Fizz.Slots
   alias Fizz.Steps
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Type
@@ -15,6 +16,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias Fizz.Workflows.DraftSession
   alias Fizz.Workflows.DraftSession.Operation
   alias Fizz.Workflows.Expressions
+  alias Fizz.Workflows.Readiness
   alias Fizz.Workflows.WorkflowDefinition
   alias Fizz.Workflows.WorkflowDefinitionVersion
   alias Fizz.Workflows.WorkflowRun
@@ -132,6 +134,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
       "run_node" ->
         {:noreply, run_node(socket, payload)}
+
+      "submit_slot_bindings" ->
+        {:noreply, submit_slot_bindings(socket, payload)}
 
       "cancel_execution" ->
         {:noreply, cancel_execution(socket)}
@@ -594,6 +599,38 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp run_test(socket), do: run_editor_execution(socket, nil)
 
+  defp submit_slot_bindings(socket, payload) do
+    bindings = Map.get(payload, "bindings") || []
+    target_step_id = Map.get(payload, "target_step_id")
+    user_id = socket.assigns.current_user_id
+    workflow_definition_id = socket.assigns.draft.workflow_definition_id
+
+    workos_organization_id =
+      socket.assigns.current_scope &&
+        socket.assigns.current_scope.organization_id
+
+    results =
+      Enum.map(bindings, fn binding ->
+        Slots.upsert_binding(%{
+          user_id: user_id,
+          workflow_definition_id: workflow_definition_id,
+          step_id: Map.get(binding, "step_id"),
+          slot_key: Map.get(binding, "slot_key"),
+          kind: Map.get(binding, "kind"),
+          binding_data: Map.get(binding, "binding_data") || %{},
+          workos_organization_id: workos_organization_id
+        })
+      end)
+
+    case Enum.find(results, &match?({:error, _}, &1)) do
+      nil ->
+        run_editor_execution(socket, target_step_id)
+
+      {:error, changeset} ->
+        put_flash(socket, :error, "Could not save bindings: #{inspect(changeset.errors)}")
+    end
+  end
+
   defp run_node(socket, payload) do
     case payload_value(payload, "step_id") do
       step_id when is_binary(step_id) ->
@@ -616,19 +653,20 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
       case Compiler.compile(execution_draft) do
         {:ok, _workflow, _hash} ->
-          input = editor_execution_input(execution_draft)
+          case Readiness.check(
+                 execution_draft,
+                 socket.assigns.current_user_id,
+                 socket.assigns.current_scope
+               ) do
+            :ready ->
+              proceed_editor_execution(socket, execution_draft, target_step_id)
 
-          triggered_by =
-            editor_triggered_by(
-              socket.assigns.current_user_id,
-              target_step_id,
-              execution_draft
-            )
-
-          socket
-          |> clear_validation_errors()
-          |> cancel_existing_execution()
-          |> start_editor_test_run(execution_draft, input, triggered_by)
+            {:needs_bindings, descriptors} ->
+              push_event(socket, "slot_bindings_needed", %{
+                target_step_id: target_step_id,
+                descriptors: descriptors
+              })
+          end
 
         {:error, errors} ->
           handle_compilation_errors(socket, errors)
@@ -640,6 +678,22 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       {:error, reason} ->
         put_flash(socket, :error, "Could not save workflow: #{inspect(reason)}")
     end
+  end
+
+  defp proceed_editor_execution(socket, execution_draft, target_step_id) do
+    input = editor_execution_input(execution_draft)
+
+    triggered_by =
+      editor_triggered_by(
+        socket.assigns.current_user_id,
+        target_step_id,
+        execution_draft
+      )
+
+    socket
+    |> clear_validation_errors()
+    |> cancel_existing_execution()
+    |> start_editor_test_run(execution_draft, input, triggered_by)
   end
 
   defp start_editor_test_run(

@@ -92,7 +92,8 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorker do
     |> project_scope()
     |> then(
       &Workflows.start_run(&1, registration.definition_version_id, normalized_data,
-        triggered_by: metadata
+        triggered_by: metadata,
+        user_id: registration.user_id
       )
     )
     |> case do

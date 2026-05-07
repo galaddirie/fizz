@@ -5,14 +5,15 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
   The compiler produces a reusable `Runic.Workflow` graph. This module provides
   the run-specific context that should not be baked into that compiled artifact,
   such as the run identity, project and organization metadata, current scope,
-  and integration credential resolver.
+  and the slot resolver used for per-user value bindings (credentials, etc.).
 
   The result is attached to the workflow at worker start and can be rebuilt on
   resume from durable metadata.
   """
 
   alias Fizz.Accounts.Scope
-  alias Fizz.Integrations.ProviderCatalog
+  alias Fizz.Slots
+  alias Fizz.Slots.Registry
   alias Fizz.Workflows.WorkflowRun
 
   @doc """
@@ -22,14 +23,14 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
     run
     |> base_context()
     |> maybe_put_scope(scope)
-    |> maybe_put_credential_resolver(scope, run.workos_organization_id)
+    |> maybe_put_slot_resolver(scope, run)
   end
 
   def build_run_context(scope, attrs) when is_map(attrs) do
     attrs
     |> base_context()
     |> maybe_put_scope(scope)
-    |> maybe_put_credential_resolver(scope, fetch_value(attrs, :workos_organization_id))
+    |> maybe_put_slot_resolver(scope, attrs)
   end
 
   defp base_context(run_like) do
@@ -64,60 +65,59 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
 
   defp maybe_put_scope(context, _scope), do: context
 
-  defp maybe_put_credential_resolver(context, %Scope{} = scope, organization_id)
-       when is_binary(organization_id) and byte_size(organization_id) > 0 do
-    Map.put(
-      context,
-      :_credential_resolver,
-      fn credential_ref ->
-        with {:ok, provider_id} <- provider_id_from_ref(credential_ref),
-             {:ok, auth_type} <- auth_type_from_ref(credential_ref),
-             {:ok, provider_module} <- provider_module(provider_id, auth_type),
-             {:ok, token_result} <- provider_module.fetch_token(scope, organization_id) do
-          token_result
+  defp maybe_put_slot_resolver(context, %Scope{} = scope, run_or_attrs) do
+    with {:ok, user_id} <- user_id_for_run(run_or_attrs, scope),
+         {:ok, workflow_definition_id} <- workflow_definition_id(run_or_attrs),
+         {:ok, organization_id} <- organization_id(run_or_attrs) do
+      bindings =
+        organization_id
+        |> Slots.list_for_user(workflow_definition_id, user_id)
+        |> Map.new(fn binding -> {{binding.step_id, binding.slot_key}, binding} end)
+
+      resolver = fn kind, slot_key, step_id, spec ->
+        with {:ok, module} <- Registry.fetch(kind),
+             binding when not is_nil(binding) <-
+               Map.get(bindings, {step_id, slot_key}) do
+          module.resolve(spec, binding.binding_data, scope)
         else
-          _ -> nil
+          _ -> {:error, :slot_unbound}
         end
       end
-    )
-  end
 
-  defp maybe_put_credential_resolver(context, _scope, _organization_id), do: context
-
-  defp provider_module(provider_id, auth_type) do
-    with {:ok, provider} <- ProviderCatalog.provider_for_type(provider_id, auth_type) do
-      case auth_type do
-        :oauth when is_atom(provider.oauth_module) -> {:ok, provider.oauth_module}
-        :api_key when is_atom(provider.api_key_module) -> {:ok, provider.api_key_module}
-        _ -> {:error, :provider_not_implemented}
-      end
+      Map.put(context, :_slot_resolver, resolver)
+    else
+      _ -> context
     end
   end
 
-  defp provider_id_from_ref(ref) when is_map(ref) do
-    case fetch_value(ref, :provider) do
-      provider_id when is_binary(provider_id) and byte_size(provider_id) > 0 ->
-        {:ok, provider_id}
+  defp maybe_put_slot_resolver(context, _scope, _run_or_attrs), do: context
+
+  defp user_id_for_run(run_or_attrs, scope) when is_map(run_or_attrs) do
+    case fetch_value(run_or_attrs, :user_id) do
+      user_id when is_binary(user_id) and user_id != "" ->
+        {:ok, user_id}
 
       _ ->
-        {:error, :provider_not_set}
+        case scope do
+          %Scope{user: %{id: user_id}} when is_binary(user_id) -> {:ok, user_id}
+          _ -> {:error, :user_id_required}
+        end
     end
   end
 
-  defp provider_id_from_ref(_ref), do: {:error, :provider_not_set}
-
-  defp auth_type_from_ref(ref) when is_map(ref) do
-    case fetch_value(ref, :auth_type) do
-      "oauth" -> {:ok, :oauth}
-      "api_key" -> {:ok, :api_key}
-      :oauth -> {:ok, :oauth}
-      :api_key -> {:ok, :api_key}
-      nil -> {:ok, :api_key}
-      _ -> {:error, :invalid_auth_type}
+  defp workflow_definition_id(run_or_attrs) do
+    case fetch_value(run_or_attrs, :workflow_definition_id) do
+      id when is_binary(id) and id != "" -> {:ok, id}
+      _ -> {:error, :workflow_definition_id_required}
     end
   end
 
-  defp auth_type_from_ref(_ref), do: {:ok, :api_key}
+  defp organization_id(run_or_attrs) do
+    case fetch_value(run_or_attrs, :workos_organization_id) do
+      id when is_binary(id) and id != "" -> {:ok, id}
+      _ -> {:error, :organization_id_required}
+    end
+  end
 
   defp fetch_value(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do

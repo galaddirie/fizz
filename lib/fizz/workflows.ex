@@ -759,6 +759,13 @@ defmodule Fizz.Workflows do
 
   defp user_id_from_scope(_scope), do: {:error, :unauthenticated}
 
+  defp run_user_id(scope, opts) do
+    case Keyword.get(opts, :user_id) do
+      user_id when is_binary(user_id) and user_id != "" -> {:ok, user_id}
+      _ -> user_id_from_scope(scope)
+    end
+  end
+
   defp ensure_draft(%WorkflowDefinitionVersion{status: :draft}), do: :ok
   defp ensure_draft(%WorkflowDefinitionVersion{}), do: {:error, :not_a_draft}
 
@@ -794,10 +801,12 @@ defmodule Fizz.Workflows do
   end
 
   defp create_pending_run(scope, version_record, input, compiled_hash, opts) do
-    with {:ok, project} <- project_from_scope(scope) do
+    with {:ok, project} <- project_from_scope(scope),
+         {:ok, user_id} <- run_user_id(scope, opts) do
       now = DateTime.utc_now()
 
       run_attrs = %{
+        user_id: user_id,
         workflow_definition_id: version_record.workflow_definition_id,
         workflow_definition_version_id: version_record.id,
         project_id: project.id,

@@ -138,7 +138,8 @@ defmodule Fizz.Triggers.RegistrationManager do
                workflow_definition_id: definition.id,
                definition_version_id: version.id,
                project_id: definition.project_id,
-               workos_organization_id: definition.workos_organization_id
+               workos_organization_id: definition.workos_organization_id,
+               user_id: coalesce(version.published_by_user_id, definition.created_by_user_id)
              }
            )
          ) do
@@ -150,15 +151,16 @@ defmodule Fizz.Triggers.RegistrationManager do
   defp registration_attrs(trigger, spec, context) do
     params = spec.params || %{}
     now = DateTime.utc_now()
-    existing = current_registration(context.definition_version_id, trigger.step_id)
+    existing = current_registration(context.definition_version_id, trigger.step_id, context.user_id)
 
     existing_webhook =
-      webhook_registration(existing, context.workflow_definition_id, trigger, spec)
+      webhook_registration(existing, context.workflow_definition_id, context.user_id, trigger, spec)
 
     %{
       workflow_definition_id: context.workflow_definition_id,
       definition_version_id: context.definition_version_id,
       step_id: trigger.step_id,
+      user_id: context.user_id,
       project_id: context.project_id,
       workos_organization_id: context.workos_organization_id,
       run_id: nil,
@@ -180,39 +182,40 @@ defmodule Fizz.Triggers.RegistrationManager do
     }
   end
 
-  defp current_registration(definition_version_id, step_id) do
+  defp current_registration(definition_version_id, step_id, user_id) do
     TriggerRegistration
     |> where(
       [registration],
       registration.definition_version_id == ^definition_version_id and
-        registration.step_id == ^step_id and is_nil(registration.run_id)
+        registration.step_id == ^step_id and registration.user_id == ^user_id and
+        is_nil(registration.run_id)
     )
     |> Repo.one()
   end
 
-  defp prior_webhook_registration(workflow_definition_id, step_id) do
+  defp prior_webhook_registration(workflow_definition_id, step_id, user_id) do
     TriggerRegistration
     |> where(
       [registration],
       registration.workflow_definition_id == ^workflow_definition_id and
-        registration.step_id == ^step_id and registration.kind == "webhook" and
-        is_nil(registration.run_id)
+        registration.step_id == ^step_id and registration.user_id == ^user_id and
+        registration.kind == "webhook" and is_nil(registration.run_id)
     )
     |> order_by([registration], desc: registration.inserted_at)
     |> limit(1)
     |> Repo.one()
   end
 
-  defp webhook_registration(%TriggerRegistration{} = existing, _definition_id, _trigger, %{
+  defp webhook_registration(%TriggerRegistration{} = existing, _definition_id, _user_id, _trigger, %{
          kind: :webhook
        }),
        do: existing
 
-  defp webhook_registration(nil, workflow_definition_id, trigger, %{kind: :webhook}) do
-    prior_webhook_registration(workflow_definition_id, trigger.step_id)
+  defp webhook_registration(nil, workflow_definition_id, user_id, trigger, %{kind: :webhook}) do
+    prior_webhook_registration(workflow_definition_id, trigger.step_id, user_id)
   end
 
-  defp webhook_registration(_existing, _definition_id, _trigger, _spec), do: nil
+  defp webhook_registration(_existing, _definition_id, _user_id, _trigger, _spec), do: nil
 
   defp digest_for(spec) do
     %{

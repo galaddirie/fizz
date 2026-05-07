@@ -50,7 +50,7 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
 
   defp compile_step(step, known_step_ids, step_name_to_id) do
     {compiled_config, dependencies, errors} =
-      compile_tree(step.config, known_step_ids, step_name_to_id, [])
+      compile_tree(step.config, known_step_ids, step_name_to_id, [], step.id)
 
     if errors == [] do
       {:ok,
@@ -69,11 +69,23 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end
   end
 
-  defp compile_tree(map, known_step_ids, step_name_to_id, path) when is_map(map) do
+  defp compile_tree(%{"$slot" => true} = slot_map, _known_step_ids, _step_name_to_id, path, step_id) do
+    case build_slot_ref(slot_map, step_id) do
+      {:ok, ref} ->
+        dependencies = %{step_ids: MapSet.new(), runtime_keys: MapSet.new([:_slot_resolver])}
+        {ref, dependencies, []}
+
+      {:error, message} ->
+        {%AccessPlan.Literal{value: slot_map}, empty_dependencies(),
+         [format_path_error(path, message)]}
+    end
+  end
+
+  defp compile_tree(map, known_step_ids, step_name_to_id, path, step_id) when is_map(map) do
     Enum.reduce(map, {%{}, empty_dependencies(), []}, fn {key, value},
                                                          {acc, dependencies, errors} ->
       {compiled_value, value_dependencies, value_errors} =
-        compile_tree(value, known_step_ids, step_name_to_id, path ++ [to_string(key)])
+        compile_tree(value, known_step_ids, step_name_to_id, path ++ [to_string(key)], step_id)
 
       {
         Map.put(acc, key, compiled_value),
@@ -83,19 +95,26 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end)
   end
 
-  defp compile_tree(list, known_step_ids, step_name_to_id, path) when is_list(list) do
+  defp compile_tree(list, known_step_ids, step_name_to_id, path, step_id) when is_list(list) do
     Enum.reduce(Enum.with_index(list), {[], empty_dependencies(), []}, fn {value, index},
                                                                           {acc, dependencies,
                                                                            errors} ->
       {compiled_value, value_dependencies, value_errors} =
-        compile_tree(value, known_step_ids, step_name_to_id, path ++ [Integer.to_string(index)])
+        compile_tree(
+          value,
+          known_step_ids,
+          step_name_to_id,
+          path ++ [Integer.to_string(index)],
+          step_id
+        )
 
       {acc ++ [compiled_value], merge_dependencies(dependencies, value_dependencies),
        errors ++ value_errors}
     end)
   end
 
-  defp compile_tree(value, known_step_ids, step_name_to_id, path) when is_binary(value) do
+  defp compile_tree(value, known_step_ids, step_name_to_id, path, _step_id)
+       when is_binary(value) do
     if Expressions.classify(value) == :literal do
       {%AccessPlan.Literal{value: value}, empty_dependencies(), []}
     else
@@ -107,14 +126,8 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
         {:ok, plan} ->
           dependencies =
             case plan do
-              %AccessPlan.CredentialFetch{} ->
-                %{step_ids: MapSet.new(), runtime_keys: MapSet.new([:_credential_resolver])}
-
-              %{parsed: parsed} ->
-                Expressions.dependencies(parsed)
-
-              _ ->
-                empty_dependencies()
+              %{parsed: parsed} -> Expressions.dependencies(parsed)
+              _ -> empty_dependencies()
             end
 
           {plan, dependencies, []}
@@ -126,8 +139,36 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end
   end
 
-  defp compile_tree(value, _known_step_ids, _step_name_to_id, _path) do
+  defp compile_tree(value, _known_step_ids, _step_name_to_id, _path, _step_id) do
     {%AccessPlan.Literal{value: value}, empty_dependencies(), []}
+  end
+
+  defp build_slot_ref(slot_map, step_id) do
+    with {:ok, kind} <- fetch_string(slot_map, "kind"),
+         {:ok, slot_key} <- fetch_string(slot_map, "slot_key"),
+         {:ok, spec} <- fetch_spec(slot_map) do
+      {:ok,
+       %AccessPlan.SlotRef{
+         kind: kind,
+         slot_key: slot_key,
+         step_id: step_id,
+         spec: spec
+       }}
+    end
+  end
+
+  defp fetch_string(map, key) when is_map(map) and is_binary(key) do
+    case Map.get(map, key) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _ -> {:error, "slot is missing #{key}"}
+    end
+  end
+
+  defp fetch_spec(map) do
+    case Map.get(map, "spec") do
+      spec when is_map(spec) -> {:ok, spec}
+      _ -> {:error, "slot is missing spec"}
+    end
   end
 
   defp validate_tree_detailed(map, known_step_ids, step_name_to_id, path) when is_map(map) do

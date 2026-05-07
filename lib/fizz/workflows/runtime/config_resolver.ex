@@ -21,7 +21,7 @@ defmodule Fizz.Workflows.Runtime.ConfigResolver do
   defp resolve_value(%AccessPlan.PredicateExpression{} = plan, context),
     do: Expressions.resolve(plan, context)
 
-  defp resolve_value(%AccessPlan.CredentialFetch{} = plan, context),
+  defp resolve_value(%AccessPlan.SlotRef{} = plan, context),
     do: Expressions.resolve(plan, context)
 
   defp resolve_value(map, context) when is_map(map) do

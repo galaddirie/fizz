@@ -22,10 +22,10 @@ defmodule Fizz.Workflows.DraftValidator do
 
   @spec validate_for_publish(WorkflowDefinitionVersion.t(), Scope.t()) ::
           :ok | {:error, [ValidationError.t()]}
-  def validate_for_publish(%WorkflowDefinitionVersion{} = version, %Scope{} = scope) do
+  def validate_for_publish(%WorkflowDefinitionVersion{} = version, %Scope{} = _scope) do
     errors =
       version
-      |> collect_errors(scope)
+      |> collect_errors()
       |> dedupe_errors()
 
     case errors do
@@ -34,7 +34,7 @@ defmodule Fizz.Workflows.DraftValidator do
     end
   end
 
-  defp collect_errors(%WorkflowDefinitionVersion{} = version, %Scope{} = scope) do
+  defp collect_errors(%WorkflowDefinitionVersion{} = version) do
     steps = version.steps || []
     connections = version.connections || []
 
@@ -53,10 +53,7 @@ defmodule Fizz.Workflows.DraftValidator do
     |> Kernel.++(invalid_step_config_errors)
     |> Kernel.++(wrap_errors(PublishValidation.expression_issues(steps), :invalid_expression))
     |> Kernel.++(
-      wrap_errors(
-        PublishValidation.credential_accessibility_issues(steps, scope),
-        :inaccessible_credential
-      )
+      wrap_errors(PublishValidation.slot_declaration_issues(steps), :invalid_slot_declaration)
     )
     |> Kernel.++(
       wrap_errors(PublishValidation.trigger_root_issues(steps, connections), :trigger_not_root)

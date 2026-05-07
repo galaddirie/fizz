@@ -17,31 +17,24 @@ defmodule Fizz.Steps.Executors.AnthropicModel do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.CredentialRef
+  alias Fizz.Slots.Field, as: SlotField
 
   @default_config %{
     "model" => "claude-3-5-sonnet-latest",
     "temperature" => 0.2,
     "max_tokens" => 800,
-    "credential_ref" => nil
+    "credential_ref" => SlotField.credential_declaration("anthropic_api_key", :api_key)
   }
 
   @config_schema %{
     "type" => "object",
     "required" => ["model", "credential_ref"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Credential",
-        "description" => "Select the Anthropic credential to use for execution",
-        "ui" => %{
-          "component" => "select",
-          "resolver" => Fizz.Integrations.CredentialsResolver,
-          "params" => %{
-            "provider_filter" => ["anthropic_api_key"],
-            "auth_types" => ["api_key"]
-          }
-        }
-      },
+      "credential_ref" =>
+        SlotField.credential_schema("anthropic_api_key", :api_key,
+          title: "Credential",
+          description: "Anthropic credential. Bound at run time per user."
+        ),
       "model" => %{
         "type" => "string",
         "title" => "Model",
@@ -133,33 +126,20 @@ defmodule Fizz.Steps.Executors.AnthropicModel do
   end
 
   defp credential_ref_errors(config, errors) do
-    case normalize_credential_ref(config) do
-      {:ok, _credential_ref} ->
+    credential_ref =
+      Map.get(config, "credential_ref") ||
+        Map.get(config, :credential_ref)
+
+    cond do
+      SlotField.slot_declaration?(credential_ref) ->
         errors
 
-      {:error, :credential_ref_required} ->
-        [{:credential_ref, "is required"} | errors]
-
-      {:error, {:missing_field, :id}} ->
-        [{:credential_ref, "must include id"} | errors]
-
-      {:error, {:missing_field, :owner_user_id}} ->
-        [{:credential_ref, "must include owner_user_id"} | errors]
-
-      {:error, {:missing_field, :provider}} ->
-        [{:credential_ref, "must include provider"} | errors]
-
-      {:error, {:missing_field, :auth_type}} ->
-        [{:credential_ref, "must include auth_type"} | errors]
-
-      {:error, :credential_ref_provider_mismatch} ->
-        [{:credential_ref, "must target anthropic_api_key"} | errors]
-
-      {:error, :credential_ref_auth_type_mismatch} ->
-        [{:credential_ref, "must use api_key auth_type"} | errors]
-
-      {:error, _reason} ->
-        [{:credential_ref, "is invalid"} | errors]
+      true ->
+        case CredentialRef.normalize_for_provider(credential_ref, "anthropic_api_key", :api_key) do
+          {:ok, _credential_ref} -> errors
+          {:error, :credential_ref_required} -> [{:credential_ref, "is required"} | errors]
+          {:error, _reason} -> [{:credential_ref, "is invalid"} | errors]
+        end
     end
   end
 end

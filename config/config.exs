@@ -50,6 +50,8 @@ config :fizz,
   ecto_repos: [Fizz.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+config :fizz, Fizz.Slots, kinds: %{"credential" => Fizz.Slots.Resolvers.Credential}
+
 config :tesla, disable_deprecated_builder_warning: true
 
 # Configure the endpoint

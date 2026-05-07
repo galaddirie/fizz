@@ -6,6 +6,7 @@ import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import AddStepPicker from '@/components/flow/AddStepPicker.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
 import PublishModal from '@/components/flow/PublishModal.vue';
+import RunLaunchModal from '@/components/flow/RunLaunchModal.vue';
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import Avatar from '@/components/ui/Avatar.vue';
@@ -265,6 +266,53 @@ const publishError = ref<string | null>(null);
 const publishValidationErrors = ref<WorkflowValidationError[]>([]);
 const publishTriggerImpact = ref<TriggerImpact | null>(null);
 const publishExecutionHashChanged = ref<boolean | null>(null);
+
+// Run launch (slot binding) modal state
+interface SlotCandidate {
+  id: string;
+  provider?: string;
+  provider_label?: string;
+  auth_type?: string;
+  owner_user_id?: string;
+  owner_display_name?: string;
+  display_name?: string;
+}
+interface SlotBindingDescriptor {
+  step_id: string;
+  slot_key: string;
+  kind: string;
+  spec: Record<string, unknown>;
+  candidates: SlotCandidate[];
+}
+const isRunLaunchModalOpen = ref(false);
+const runLaunchTargetStepId = ref<string | null>(null);
+const runLaunchDescriptors = ref<SlotBindingDescriptor[]>([]);
+
+useLiveEvent<{ target_step_id: string | null; descriptors: SlotBindingDescriptor[] }>(
+  'slot_bindings_needed',
+  payload => {
+    runLaunchTargetStepId.value = payload.target_step_id ?? null;
+    runLaunchDescriptors.value = payload.descriptors ?? [];
+    isRunLaunchModalOpen.value = true;
+  }
+);
+
+function closeRunLaunchModal() {
+  isRunLaunchModalOpen.value = false;
+}
+
+function handleSubmitSlotBindings(payload: {
+  target_step_id: string | null;
+  bindings: Array<{
+    step_id: string;
+    slot_key: string;
+    kind: string;
+    binding_data: Record<string, unknown>;
+  }>;
+}) {
+  live.pushEvent('submit_slot_bindings', payload);
+  isRunLaunchModalOpen.value = false;
+}
 
 function openPublishModal() {
   publishError.value = null;
@@ -802,6 +850,14 @@ useLiveEvent<{
         :execution-hash-changed="publishExecutionHashChanged"
         @close="closePublishModal"
         @publish="handlePublish"
+      />
+
+      <RunLaunchModal
+        :is-open="isRunLaunchModalOpen"
+        :target-step-id="runLaunchTargetStepId"
+        :descriptors="runLaunchDescriptors"
+        @close="closeRunLaunchModal"
+        @submit="handleSubmitSlotBindings"
       />
     </div>
   </div>

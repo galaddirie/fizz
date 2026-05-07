@@ -15,6 +15,8 @@ defmodule Fizz.Workflows.WorkflowRun do
   alias Fizz.Accounts.Project
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion}
 
+  @type t :: %__MODULE__{}
+
   @statuses ~w(pending running sleeping passivated completed failed cancelled continued)a
   @terminal_statuses ~w(completed failed cancelled continued)a
   @transition_graph %{
@@ -29,6 +31,7 @@ defmodule Fizz.Workflows.WorkflowRun do
   }
 
   schema "workflow_runs" do
+    field :user_id, :string
     field :workos_organization_id, :string
     field :status, Ecto.Enum, values: @statuses, default: :pending
     field :input, :map, default: %{}
@@ -73,6 +76,7 @@ defmodule Fizz.Workflows.WorkflowRun do
   def changeset(run, attrs) do
     run
     |> cast(attrs, [
+      :user_id,
       :workflow_definition_id,
       :workflow_definition_version_id,
       :project_id,
@@ -90,6 +94,7 @@ defmodule Fizz.Workflows.WorkflowRun do
       :triggered_by
     ])
     |> validate_required([
+      :user_id,
       :workflow_definition_id,
       :workflow_definition_version_id,
       :project_id,
@@ -98,6 +103,7 @@ defmodule Fizz.Workflows.WorkflowRun do
       :input,
       :last_active_at
     ])
+    |> validate_length(:user_id, min: 1, max: 255)
     |> validate_length(:workos_organization_id, min: 3, max: 255)
     |> foreign_key_constraint(:workflow_definition_id)
     |> foreign_key_constraint(:workflow_definition_version_id)

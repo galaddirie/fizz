@@ -260,7 +260,8 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             const rawValue = config[key] ?? schemaField.default;
 
             let inferredType: ExtendedFieldType = 'text';
-            if (uiComponent === 'search') inferredType = 'search';
+            if (uiComponent === 'slot') inferredType = 'json';
+            else if (uiComponent === 'search') inferredType = 'search';
             else if (uiComponent === 'select') inferredType = 'select';
             else if (uiComponent === 'json') inferredType = 'json';
             else if (schemaField.enum && schemaField.enum.length > 0) inferredType = 'select';
@@ -282,7 +283,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
                 label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
                 description: schemaField.description,
                 type: inferredType as ExtendedFieldType,
-                expressionCapable: true,
+                expressionCapable: uiComponent !== 'slot',
             };
         });
     });

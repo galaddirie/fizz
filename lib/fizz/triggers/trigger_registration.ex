@@ -8,11 +8,14 @@ defmodule Fizz.Triggers.TriggerRegistration do
   alias Fizz.Accounts.Project
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun}
 
+  @type t :: %__MODULE__{}
+
   @kinds ~w(manual webhook schedule polling subscription chat)
   @statuses ~w(active paused errored inactive)
 
   schema "trigger_registrations" do
     field :step_id, :string
+    field :user_id, :string
     field :workos_organization_id, :string
     field :kind, :string
     field :status, :string, default: "active"
@@ -47,6 +50,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
       :workflow_definition_id,
       :definition_version_id,
       :step_id,
+      :user_id,
       :project_id,
       :workos_organization_id,
       :run_id,
@@ -70,6 +74,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
       :workflow_definition_id,
       :definition_version_id,
       :step_id,
+      :user_id,
       :project_id,
       :workos_organization_id,
       :kind,
@@ -78,6 +83,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
       :config_digest
     ])
     |> validate_length(:step_id, min: 1, max: 255)
+    |> validate_length(:user_id, min: 1, max: 255)
     |> validate_length(:workos_organization_id, min: 3, max: 255)
     |> validate_length(:config_digest, min: 1, max: 255)
     |> validate_inclusion(:kind, @kinds)
@@ -88,8 +94,8 @@ defmodule Fizz.Triggers.TriggerRegistration do
     |> foreign_key_constraint(:definition_version_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:run_id)
-    |> unique_constraint([:definition_version_id, :step_id],
-      name: :trigger_registrations_definition_level_step_index
+    |> unique_constraint([:definition_version_id, :step_id, :user_id],
+      name: :trigger_registrations_definition_level_step_user_index
     )
     |> unique_constraint([:run_id, :step_id], name: :trigger_registrations_run_level_step_index)
     |> unique_constraint(:webhook_path, name: :trigger_registrations_active_webhook_path_index)

@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported UI component types for field rendering. */
-export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json';
+export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'slot';
 
 /** Resolver-based configuration for dynamic option loading. */
 export interface UIResolverConfig {
@@ -34,13 +34,19 @@ export interface UIResponseConfig {
 }
 
 /** The `ui` extension on a config schema field property. */
-export interface FieldUIConfig extends UIResolverConfig {
+export interface FieldUIConfig extends Partial<UIResolverConfig> {
     /** Which component to render. Inferred from JSON Schema if omitted. */
     component?: UIComponent;
     /** Static options for select fields (alternative to resolver). */
     options?: Array<{ label: string; value: unknown }>;
     /** Response mapping config for search result shaping. */
     responseConfig?: UIResponseConfig;
+    /** For component='slot': discriminator that selects the resolver kind. */
+    slot_kind?: string;
+    /** For component='slot': stable identifier for this slot within the step. */
+    slot_key?: string;
+    /** For component='slot': kind-specific spec (e.g. provider + auth_type). */
+    spec?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
