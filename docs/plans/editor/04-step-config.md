@@ -118,7 +118,7 @@ hasUnsavedChanges: computed                              // fieldValues !== orig
 useExpressionPreviews()    // debounced preview requests
 useExpressionHelpers()     // variable autocomplete data
 useContextExplorer()       // upstream step output tree
-useSubnodes()              // subnode slot management
+useSubnodes()              // subnode input management
 useStepExecution()         // execution data for this step
 usePinnedOutputs()         // pinned output data
 useInputData()             // resolved input from upstream
@@ -223,9 +223,9 @@ The `SearchField.vue` component handles resolver-driven fields. When `ui.compone
 
 ## Subnode Slot Management (exists)
 
-Root steps can declare `subnode_slots`:
+Root steps can declare `subnode_inputs`:
 ```elixir
-subnode_slots: [
+subnode_inputs: [
   %{id: "model", title: "Model", required: true, cardinality: :one,
     accepts: %{type_ids: ["openai_model", "anthropic_model"]}},
   %{id: "tools", title: "Tools", required: false, cardinality: :many,
@@ -234,10 +234,10 @@ subnode_slots: [
 ```
 
 The `useSubnodes` composable:
-- Shows occupied/empty slot indicators in the config pane
-- Empty slots show "Add [slot_title]" button → opens AddStepPicker filtered by `accepts.type_ids`
-- Occupied slots show the connected subnode step name with a link to its config
-- Slot cardinality `:one` prevents multiple connections; `:many` allows multiple
+- Shows occupied/empty input indicators in the config pane
+- Empty inputs show "Add [input_title]" button → opens AddStepPicker filtered by `accepts.type_ids`
+- Occupied inputs show the connected subnode step name with a link to its config
+- Input cardinality `:one` prevents multiple connections; `:many` allows multiple
 
 ---
 
@@ -312,7 +312,7 @@ Shows what data is available to this step from upstream:
 - `useExpressionPreviews` — debounced preview requests
 - `useExpressionHelpers` — variable data computation
 - `useContextExplorer` — upstream context tree
-- `useSubnodes` — subnode slot management
+- `useSubnodes` — subnode input management
 - `usePinnedOutputs`, `useInputData`, `useStepExecution`
 - `DataViewer` component family
 - Config schema TypeScript types

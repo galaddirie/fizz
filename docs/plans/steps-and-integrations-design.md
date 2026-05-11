@@ -34,8 +34,8 @@ Steps also carry an optional **role** for hierarchical composition:
 | Role | Description |
 |---|---|
 | `nil` (default) | Standalone node — placed directly in the workflow graph. |
-| `:root` | Accepts subnodes via declared slots (e.g. `ai_agent`). |
-| `:subnode` | Lives inside a root node's slot, not as a top-level graph node (e.g. `openai_model`, `ai_prompt_template`). |
+| `:root` | Accepts subnodes via declared inputs (e.g. `ai_agent`). |
+| `:subnode` | Feeds a root node's typed input, not as a top-level graph node (e.g. `openai_model`, `ai_prompt_template`). |
 
 ---
 
@@ -67,7 +67,7 @@ The macro:
 
 1. Validates that all required fields (`id`, `name`, `category`, `description`, `icon`, `kind`) are present at compile time — a missing field raises a `CompileError`.
 2. Injects `__step_id__/0`, `__step_definition__/0`, and `default_config/0` functions into the module.
-3. Collects optional module attributes (`@config_schema`, `@input_schema`, `@output_schema`, `@subnode_slots`) into the definition struct.
+3. Collects optional module attributes (`@config_schema`, `@input_schema`, `@output_schema`, `@subnode_inputs`) into the definition struct.
 
 #### Config Schema
 
@@ -93,12 +93,12 @@ Config schemas are JSON Schema objects optionally extended with a `"ui"` key per
 
 The `"ui"` extension is never passed to a JSON Schema validator — it is only consumed by the editor frontend to render the correct input component (e.g. a searchable credential picker vs. a plain text input).
 
-#### Subnode Slots
+#### Subnode Inputs
 
-Root nodes declare slots to describe what subnodes they accept:
+Root nodes declare inputs to describe what subnodes they accept:
 
 ```elixir
-@subnode_slots [
+@subnode_inputs [
   %{key: "model", label: "Model", required: true, cardinality: :one,
     allowed_types: ["openai_model", "anthropic_model"]},
   %{key: "prompt", label: "Prompt", required: true, cardinality: :one,
@@ -108,7 +108,7 @@ Root nodes declare slots to describe what subnodes they accept:
 ]
 ```
 
-At execution time the root executor receives subnode configs pre-resolved and keyed by slot name. Subnodes are never executed independently.
+At execution time the root executor receives subnode configs pre-resolved and keyed by input name. Subnodes are never executed independently.
 
 ---
 
@@ -128,7 +128,7 @@ At execution time the root executor receives subnode configs pre-resolved and ke
   config_schema:  %{...},               # JSON Schema + ui extensions
   input_schema:   %{...},               # expected input shape
   output_schema:  %{...},               # produced output shape
-  subnode_slots:  [...],                 # slot declarations (root nodes only)
+  subnode_inputs:  [...],                 # input declarations (root nodes only)
   executor:       Fizz.Steps.Executors.OpenaiModel
 }
 ```
@@ -231,18 +231,23 @@ Optional callbacks:
 #### Provider Catalog
 
 `Fizz.Integrations.ProviderCatalog` is the authoritative registry of available providers. Providers are keyed by a compound id of the form `"<base>_<auth_type>"` (e.g. `"github_oauth"`, `"openai_api_key"`).
+Built-in metadata lives with the provider definition modules; the catalog only
+assembles those definitions and enforces typed provider IDs.
 
 Built-in providers:
 
 | Provider ID | Auth Type | Module |
 |---|---|---|
-| `github_oauth` | oauth | `Fizz.Integrations.Providers.GithubOauth` |
-| `github_api_key` | api_key | _(stub)_ |
-| `openai_api_key` | api_key | `Fizz.Integrations.Providers.OpenaiApiKey` |
-| `anthropic_api_key` | api_key | _(stub)_ |
-| `custom_api_key` | api_key | _(stub)_ |
-
-The catalog also supports loading additional providers from the `CREDENTIAL_CATALOG` environment variable (legacy path, kept for backward compatibility).
+| `github_oauth` | oauth | `Fizz.Integrations.Providers.GitHubOAuth` |
+| `github_api_key` | api_key | `Fizz.Integrations.Providers.GitHubApiKey` |
+| `openai_api_key` | api_key | `Fizz.Integrations.Providers.OpenAIApiKey` |
+| `anthropic_api_key` | api_key | `Fizz.Integrations.Providers.AnthropicApiKey` |
+| `slack_oauth` | oauth | `Fizz.Integrations.Providers.SlackOAuth` |
+| `google_oauth` | oauth | `Fizz.Integrations.Providers.GoogleOAuth` |
+| `microsoft_oauth` | oauth | `Fizz.Integrations.Providers.MicrosoftOAuth` |
+| `notion_oauth` | oauth | `Fizz.Integrations.Providers.NotionOAuth` |
+| `box_oauth` | oauth | `Fizz.Integrations.Providers.BoxOAuth` |
+| `custom_api_key` | api_key | `Fizz.Integrations.Providers.CustomApiKey` |
 
 #### Credential Refs
 
@@ -251,7 +256,7 @@ A credential ref is a **metadata-only** map that travels with a workflow config.
 ```elixir
 %{
   id: "cred-uuid",
-  provider: "github",          # base name, no auth type suffix
+  provider: "github_oauth",
   auth_type: "oauth",
   display_name: "My GitHub",
   owner_user_id: "user-uuid"

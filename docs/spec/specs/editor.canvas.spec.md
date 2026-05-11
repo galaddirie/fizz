@@ -38,8 +38,8 @@ surface:
   priority: must
   stability: stable
 
-- id: editor.canvas.req_subnode_slot_type_check
-  statement: Subnode connections must only connect to valid slot types as defined by `StepType.subnode_slots[].accepts.type_ids`.
+- id: editor.canvas.req_subnode_input_type_check
+  statement: Subnode connections must only connect to valid input types as defined by `StepType.subnode_inputs[].accepts.type_ids`.
   priority: must
   stability: stable
 
@@ -93,7 +93,7 @@ surface:
     - editor.canvas.req_no_self_connections
     - editor.canvas.req_no_duplicate_connections
     - editor.canvas.req_cycle_detection
-    - editor.canvas.req_subnode_slot_type_check
+    - editor.canvas.req_subnode_input_type_check
     - editor.canvas.req_trigger_root_constraint
 
 - kind: source_file

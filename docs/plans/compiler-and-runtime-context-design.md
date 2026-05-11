@@ -99,7 +99,7 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
         config: step.config,
         config_schema: type.config_schema,
         executor: type.executor,
-        subnode_slots: type.subnode_slots
+        subnode_inputs: type.subnode_inputs
       }
     end)
     |> Map.new(&{&1.id, &1})

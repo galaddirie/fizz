@@ -17,7 +17,7 @@ This section defines how authored workflows are stored in Postgres, validated in
 ### Naming
 
 - Persisted and API-facing naming should be `step_groups`.
-- `groups` and `node_groups` are legacy terms from older code and UI types. Keep them only as temporary compatibility shims at the boundary.
+- `groups` and `node_groups` should not be accepted at storage boundaries.
 - Rename the old `Fizz.Workflows.Embeds.NodeGroup` concept to `Fizz.Workflows.Embeds.StepGroup`.
 
 ---

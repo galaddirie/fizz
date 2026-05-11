@@ -46,7 +46,7 @@ those contracts.
 - `specs/editor.canvas.spec.md`
   - Connection validation rules, node type visual contracts, keyboard shortcuts, layout constants.
 - `specs/editor.step-config.spec.md`
-  - Config schema to UI field mapping, expression editing, credential resolution, subnode slots.
+  - Config schema to UI field mapping, expression editing, credential resolution, subnode inputs.
 - `specs/editor.validation.spec.md`
   - Three validation tiers (operation, persist, publish), error structure, per-tier rules.
 - `specs/editor.execution.spec.md`

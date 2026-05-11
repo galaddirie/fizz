@@ -49,7 +49,7 @@ The current `Node.vue` is comprehensive. Changes needed:
 
 ### SubNode (`SubNode.vue` — exists, keep)
 
-Smaller footprint, attached to parent step's subnode slots. Same status overlay. No subnode slots of their own.
+Smaller footprint, attached to parent step's subnode inputs. Same status overlay. No subnode inputs of their own.
 
 ### Group Node (`GroupNode.vue` — exists, needs minor update)
 
@@ -66,7 +66,7 @@ Smaller footprint, attached to parent step's subnode slots. Same status overlay.
 When creating edges, validate:
 - **No self-connections:** source !== target
 - **No duplicates:** connection between same source_output → target_input doesn't already exist
-- **Subnode connections:** only to valid slot types (check `StepType.subnode_slots[].accepts.type_ids`)
+- **Subnode connections:** only to valid input types (check `StepType.subnode_inputs[].accepts.type_ids`)
 - **Trigger constraint:** trigger steps must be roots (no incoming connections)
 - **Cycle detection:** lightweight client-side check using topological sort from `useWorkflowGraph`. Server also validates on operation apply.
 
@@ -197,7 +197,7 @@ Keep existing constants from `assets/vue/constants/layout.ts`:
 - `GroupNode.vue` — remove `output_step_id` reference
 - `useWorkflowNodes` — update to read from `props.draft.steps` instead of `props.workflow.draft.steps`
 - `useWorkflowEdges` — same data path update
-- `useEdgeInteraction` — add connection validation (cycle check, subnode slot type check, trigger root constraint)
+- `useEdgeInteraction` — add connection validation (cycle check, subnode input type check, trigger root constraint)
 - All composables referencing POC types — update to new TypeScript interfaces
 
 **New:**

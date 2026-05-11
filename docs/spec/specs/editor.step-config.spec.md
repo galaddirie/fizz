@@ -1,12 +1,12 @@
 # Editor Step Configuration
 
-Step configuration is the core authoring experience. Each step type declares a `config_schema` (JSON Schema with `ui` extensions) that drives a schema-driven config modal. This spec covers the schema-to-UI mapping, expression editing contracts, credential resolution, and subnode slot management.
+Step configuration is the core authoring experience. Each step type declares a `config_schema` (JSON Schema with `ui` extensions) that drives a schema-driven config modal. This spec covers the schema-to-UI mapping, expression editing contracts, credential resolution, and subnode input management.
 
 ~~~spec-meta
 id: editor.step_config
 kind: component
 status: active
-summary: Config schema to UI field mapping, expression editing, credential resolution, and subnode slots.
+summary: Config schema to UI field mapping, expression editing, credential resolution, and subnode inputs.
 surface:
   - assets/vue/composables/workflow/useStepConfig.ts
   - assets/vue/components/workflow/step-config/StepConfigModal.vue
@@ -53,12 +53,12 @@ surface:
   stability: stable
 
 - id: editor.step_config.req_subnode_cardinality
-  statement: Subnode slots with `cardinality: :one` accept at most one connected subnode; slots with `cardinality: :many` accept multiple.
+  statement: Subnode inputs with `cardinality: :one` accept at most one connected subnode; inputs with `cardinality: :many` accept multiple.
   priority: must
   stability: stable
 
 - id: editor.step_config.req_subnode_type_filter
-  statement: When adding a subnode to a slot, the AddStepPicker is filtered to only show step types matching the slot's `accepts.type_ids`.
+  statement: When adding a subnode to an input, the AddStepPicker is filtered to only show step types matching the input's `accepts.type_ids`.
   priority: must
   stability: stable
 

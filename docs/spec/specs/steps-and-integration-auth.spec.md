@@ -43,12 +43,12 @@ surface:
   stability: stable
 
 - id: steps.integration_auth.subnode_metadata
-  statement: Step metadata supports root and subnode roles, and root types may publish subnode slot declarations through registry metadata.
+  statement: Step metadata supports root and subnode roles, and root types may publish subnode input declarations through registry metadata.
   priority: must
   stability: stable
 
 - id: steps.integration_auth.provider_ids
-  statement: Integration provider ids are auth-type specific, using typed ids such as `<base>_oauth` and `<base>_api_key`, while legacy aliases resolve to the typed id when supported.
+  statement: Integration provider ids are auth-type specific and callers must use typed ids such as `<base>_oauth` and `<base>_api_key`.
   priority: must
   stability: stable
 
@@ -77,7 +77,7 @@ surface:
   when:
     - the AI agent root type and model types are queried
   then:
-    - `ai_agent` exposes declared subnode slots
+    - `ai_agent` exposes declared subnode inputs
     - provider model nodes register with `node_role: :subnode`
   covers:
     - steps.integration_auth.registry
@@ -175,8 +175,8 @@ surface:
 ## Exceptions
 
 ```spec-exceptions
-- id: steps.integration_auth.stubbed_steps_and_providers
-  note: Some registered step types and cataloged providers are intentionally present as stubs or metadata-only entries, so registration or catalog presence does not imply the external side effect is already implemented.
+- id: steps.integration_auth.definition_only_providers
+  note: Some registered step types and cataloged providers are intentionally metadata-only entries, so registration or catalog presence does not imply the external side effect is already implemented.
   relates_to:
     - steps.integration_auth.registry
     - steps.integration_auth.provider_resolution
