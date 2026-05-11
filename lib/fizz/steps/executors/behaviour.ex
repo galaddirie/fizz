@@ -116,37 +116,14 @@ defmodule Fizz.Steps.Executors.Behaviour do
   @doc """
   Resolves the executor module for a given step type ID.
 
-  First checks the Registry for the type, falling back to convention-based
-  resolution if not found (for backwards compatibility).
-
   Returns `{:ok, module}` if found and loaded, `{:error, reason}` otherwise.
   """
   def resolve(type_id) when is_binary(type_id) do
-    # Try registry first
     case Fizz.Steps.Registry.get(type_id) do
       {:ok, type} ->
         Fizz.Steps.Type.executor_module(type)
 
       {:error, :not_found} ->
-        # Fallback to convention-based resolution
-        resolve_by_convention(type_id)
-    end
-  end
-
-  defp resolve_by_convention(type_id) do
-    # Convention: type_id "http_request" -> Fizz.Steps.Executors.HttpRequest
-    module_name = type_id_to_module_name(type_id)
-
-    try do
-      module = Module.safe_concat([Fizz.Steps.Executors, module_name])
-
-      if function_exported?(module, :execute, 3) do
-        {:ok, module}
-      else
-        {:error, {:not_executor, module}}
-      end
-    rescue
-      ArgumentError ->
         {:error, {:not_found, type_id}}
     end
   end
@@ -192,16 +169,5 @@ defmodule Fizz.Steps.Executors.Behaviour do
         # Can't validate if executor doesn't exist
         :ok
     end
-  end
-
-  # ============================================================================
-  # Private Helpers
-  # ============================================================================
-
-  defp type_id_to_module_name(type_id) do
-    type_id
-    |> String.split("_")
-    |> Enum.map(&String.capitalize/1)
-    |> Enum.join()
   end
 end

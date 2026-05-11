@@ -13,13 +13,19 @@ defmodule Fizz.Steps.Executors.GoogleDocsTrigger do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.GoogleOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Google Account"
-      },
+      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Google Account"),
       "document_id" => %{
         "type" => "string",
         "title" => "Document ID",

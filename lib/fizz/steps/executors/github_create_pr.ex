@@ -13,14 +13,26 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.GitHubOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(GitHubOAuth.provider_id())
+
+  @default_config %{
+    "base" => "main",
+    "draft" => false,
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "required" => ["repository", "title", "head", "base"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "GitHub Account"
-      },
+      "credential_ref" =>
+        CredentialSlot.schema(@credential_slot,
+          title: "GitHub Account",
+          description: "GitHub account. Bound at run time per user."
+        ),
       "repository" => %{
         "type" => "string",
         "title" => "Repository"
@@ -59,6 +71,9 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
       "state" => %{"type" => "string"}
     }
   }
+
+  @impl true
+  def default_config, do: @default_config
 
   @impl true
   def execute(_config, _input, _ctx) do

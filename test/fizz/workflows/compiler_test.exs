@@ -156,7 +156,7 @@ defmodule Fizz.Workflows.CompilerTest do
     assert [%{"status" => "pending"}] = Workflow.raw_productions(workflow, ids.matched_step)
   end
 
-  test "root steps assemble slot-connected subnodes into runnable input payloads" do
+  test "root steps assemble input-connected subnodes into runnable input payloads" do
     {version, ids} = ai_agent_version()
 
     assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
@@ -191,18 +191,18 @@ defmodule Fizz.Workflows.CompilerTest do
            ]
   end
 
-  test "compile rejects root steps missing required subnode slots" do
-    version = missing_required_subnode_slot_version()
+  test "compile rejects root steps missing required subnode inputs" do
+    version = missing_required_subnode_input_version()
 
     assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "missing required subnode slot `prompt`"
+    assert message =~ "missing required subnode input `prompt`"
   end
 
-  test "compile rejects subnodes whose type does not match the target slot" do
-    version = invalid_subnode_slot_type_version()
+  test "compile rejects subnodes whose type does not match the target input" do
+    version = invalid_subnode_input_type_version()
 
     assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "slot `model`"
+    assert message =~ "subnode input `model`"
     assert message =~ "got `ai_tool_http`"
   end
 
@@ -210,7 +210,7 @@ defmodule Fizz.Workflows.CompilerTest do
     version = unattached_subnode_version()
 
     assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "must be connected to a root slot"
+    assert message =~ "must be connected to a root input"
   end
 
   defp simple_version do
@@ -673,7 +673,7 @@ defmodule Fizz.Workflows.CompilerTest do
     {version, %{agent: agent_id}}
   end
 
-  defp missing_required_subnode_slot_version do
+  defp missing_required_subnode_input_version do
     entry_id = Ecto.UUID.generate()
     agent_id = Ecto.UUID.generate()
     model_id = Ecto.UUID.generate()
@@ -728,7 +728,7 @@ defmodule Fizz.Workflows.CompilerTest do
     }
   end
 
-  defp invalid_subnode_slot_type_version do
+  defp invalid_subnode_input_type_version do
     entry_id = Ecto.UUID.generate()
     agent_id = Ecto.UUID.generate()
     tool_id = Ecto.UUID.generate()

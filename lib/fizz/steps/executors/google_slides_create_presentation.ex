@@ -13,14 +13,23 @@ defmodule Fizz.Steps.Executors.GoogleSlidesCreatePresentation do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.GoogleOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "required" => ["title"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Google Account"
-      },
+      "credential_ref" =>
+        CredentialSlot.schema(@credential_slot,
+          title: "Google Account"
+        ),
       "title" => %{
         "type" => "string",
         "title" => "Presentation Title"

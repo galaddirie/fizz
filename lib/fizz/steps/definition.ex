@@ -55,7 +55,7 @@ defmodule Fizz.Steps.Definition do
   - `@default_config` - Default configuration map (optional)
   - `@input_schema` - JSON Schema describing expected input
   - `@output_schema` - JSON Schema describing output
-  - `@subnode_slots` - Slot declarations accepted by root nodes (optional)
+  - `@subnode_inputs` - Typed subnode input handles accepted by root nodes (optional)
 
   The macro defaults these attributes to:
 
@@ -63,7 +63,7 @@ defmodule Fizz.Steps.Definition do
   - `@default_config` - `%{}`
   - `@input_schema` - `%{"type" => "object"}`
   - `@output_schema` - `%{"type" => "object"}`
-  - `@subnode_slots` - `[]`
+  - `@subnode_inputs` - `[]`
   """
 
   @required_opts [:id, :name, :category, :description, :icon, :kind]
@@ -118,14 +118,14 @@ defmodule Fizz.Steps.Definition do
       @default_config %{}
       @input_schema %{"type" => "object"}
       @output_schema %{"type" => "object"}
-      @subnode_slots []
+      @subnode_inputs []
 
       # Allow redefinition
       Module.register_attribute(__MODULE__, :config_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :default_config, accumulate: false)
       Module.register_attribute(__MODULE__, :input_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :output_schema, accumulate: false)
-      Module.register_attribute(__MODULE__, :subnode_slots, accumulate: false)
+      Module.register_attribute(__MODULE__, :subnode_inputs, accumulate: false)
 
       if unquote(kind) == :trigger do
         @impl true
@@ -160,7 +160,7 @@ defmodule Fizz.Steps.Definition do
           config_schema: @config_schema,
           input_schema: @input_schema,
           output_schema: @output_schema,
-          subnode_slots: @subnode_slots,
+          subnode_inputs: @subnode_inputs,
           inserted_at: nil,
           updated_at: nil
         }

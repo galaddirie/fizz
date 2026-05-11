@@ -12,15 +12,26 @@ defmodule Fizz.Steps.Executors.GitHubTrigger do
     kind: :trigger
 
   @behaviour Fizz.Steps.Executors.Behaviour
+
+  alias Fizz.Integrations.Providers.GitHubOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(GitHubOAuth.provider_id())
   alias Fizz.Triggers.RegistrationSpec
+
+  @default_config %{
+    "events" => ["push"],
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
 
   @config_schema %{
     "type" => "object",
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "GitHub Account"
-      },
+      "credential_ref" =>
+        CredentialSlot.schema(@credential_slot,
+          title: "GitHub Account",
+          description: "GitHub account. Bound at run time per user."
+        ),
       "repository" => %{
         "type" => "string",
         "title" => "Repository",
@@ -50,6 +61,9 @@ defmodule Fizz.Steps.Executors.GitHubTrigger do
       "payload" => %{"type" => "object", "description" => "Full GitHub webhook payload"}
     }
   }
+
+  @impl true
+  def default_config, do: @default_config
 
   @impl true
   def registration_spec(config, _context) do

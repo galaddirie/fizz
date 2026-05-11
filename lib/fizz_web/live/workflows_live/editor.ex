@@ -611,15 +611,19 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
     results =
       Enum.map(bindings, fn binding ->
-        Slots.upsert_binding(%{
-          user_id: user_id,
-          workflow_definition_id: workflow_definition_id,
-          step_id: Map.get(binding, "step_id"),
-          slot_key: Map.get(binding, "slot_key"),
-          kind: Map.get(binding, "kind"),
-          binding_data: Map.get(binding, "binding_data") || %{},
-          workos_organization_id: workos_organization_id
-        })
+        Slots.upsert_binding(
+          socket.assigns.draft,
+          socket.assigns.current_scope,
+          %{
+            user_id: user_id,
+            workflow_definition_id: workflow_definition_id,
+            step_id: Map.get(binding, "step_id"),
+            slot_key: Map.get(binding, "slot_key"),
+            kind: Map.get(binding, "kind"),
+            binding_data: Map.get(binding, "binding_data") || %{},
+            workos_organization_id: workos_organization_id
+          }
+        )
       end)
 
     case Enum.find(results, &match?({:error, _}, &1)) do
@@ -1690,7 +1694,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       config_schema: type.config_schema || %{},
       input_schema: type.input_schema || %{},
       output_schema: type.output_schema || %{},
-      subnode_slots: type.subnode_slots || []
+      subnode_inputs: type.subnode_inputs || []
     }
   end
 
@@ -2188,7 +2192,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp fetch_field_resolver(field_schema) do
     case get_in(field_schema, ["ui", "resolver"]) do
-      resolver when is_atom(resolver) ->
+      resolver when is_atom(resolver) and not is_nil(resolver) ->
         case Code.ensure_loaded(resolver) do
           {:module, _module} ->
             case function_exported?(resolver, :resolve, 1) do
@@ -2201,7 +2205,14 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         end
 
       _ ->
-        {:error, :resolver_not_found}
+        fetch_slot_field_resolver(field_schema)
+    end
+  end
+
+  defp fetch_slot_field_resolver(field_schema) do
+    case field_ui_value(field_schema, :slot_kind) do
+      "credential" -> {:ok, CredentialsResolver}
+      _ -> {:error, :resolver_not_found}
     end
   end
 
@@ -2211,6 +2222,31 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp schema_resolver_params(field_schema) do
+    field_schema
+    |> slot_field_resolver_params()
+    |> Map.merge(resolver_ui_params(field_schema))
+  end
+
+  defp slot_field_resolver_params(field_schema) do
+    case field_ui_value(field_schema, :slot_kind) do
+      "credential" ->
+        spec = field_ui_value(field_schema, :spec) || %{}
+
+        %{}
+        |> maybe_put("provider_filter", Map.get(spec, "provider") || Map.get(spec, :provider))
+        |> maybe_put("auth_types", Map.get(spec, "auth_type") || Map.get(spec, :auth_type))
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp field_ui_value(field_schema, key) when is_map(field_schema) and is_atom(key) do
+    ui = Map.get(field_schema, "ui") || Map.get(field_schema, :ui) || %{}
+    Map.get(ui, Atom.to_string(key)) || Map.get(ui, key)
+  end
+
+  defp resolver_ui_params(field_schema) do
     case get_in(field_schema, ["ui", "params"]) do
       params when is_map(params) -> params
       _ -> %{}
@@ -2230,8 +2266,6 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       Map.get(payload, "provider_filter") || Map.get(payload, :provider_filter)
     )
     |> maybe_put("auth_types", Map.get(payload, "auth_types") || Map.get(payload, :auth_types))
-    |> maybe_put("provider", Map.get(payload, "provider") || Map.get(payload, :provider))
-    |> maybe_put("auth_type", Map.get(payload, "auth_type") || Map.get(payload, :auth_type))
   end
 
   defp search_credentials_params(payload) do

@@ -110,6 +110,37 @@ defmodule Fizz.IntegrationsTest do
              Integrations.network_domains_for_provider("openai_api_key")
   end
 
+  test "provider catalog exposes definition-only API-key providers without runtime modules" do
+    assert {:ok, %{label: "Anthropic", type: :api_key}} =
+             ProviderCatalog.provider("anthropic_api_key")
+
+    assert {:error, :provider_not_implemented} =
+             ProviderCatalog.api_key_provider_module("anthropic_api_key")
+
+    assert {:error, :provider_not_implemented} =
+             ProviderCatalog.api_key_provider_module("custom_api_key")
+  end
+
+  test "provider catalog resolves typed OAuth providers only" do
+    assert {:ok, Fizz.Integrations.Providers.SlackOAuth} =
+             ProviderCatalog.oauth_provider_module("slack_oauth")
+
+    assert {:ok, Fizz.Integrations.Providers.GoogleOAuth} =
+             ProviderCatalog.oauth_provider_module("google_oauth")
+
+    assert {:ok, Fizz.Integrations.Providers.MicrosoftOAuth} =
+             ProviderCatalog.oauth_provider_module("microsoft_oauth")
+
+    assert {:ok, Fizz.Integrations.Providers.NotionOAuth} =
+             ProviderCatalog.oauth_provider_module("notion_oauth")
+
+    assert {:ok, Fizz.Integrations.Providers.BoxOAuth} =
+             ProviderCatalog.oauth_provider_module("box_oauth")
+
+    assert {:error, :unknown_provider} = ProviderCatalog.oauth_provider_module("slack")
+    refute ProviderCatalog.provider_supported?("openai")
+  end
+
   test "openai API-key provider fetches vault-backed user credential" do
     user = user_fixture()
     org_id = "org_openai_provider"

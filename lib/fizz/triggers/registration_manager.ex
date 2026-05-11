@@ -5,7 +5,9 @@ defmodule Fizz.Triggers.RegistrationManager do
 
   import Ecto.Query
 
+  alias Fizz.Accounts.Scope
   alias Fizz.Repo
+  alias Fizz.Slots
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Triggers
   alias Fizz.Triggers.Webhook
@@ -27,16 +29,24 @@ defmodule Fizz.Triggers.RegistrationManager do
          {:ok, context} <- load_definition_context(definition_version) do
       _ = deactivate_stale_registrations(definition_version)
 
+      errors = slot_binding_errors(definition_version, context)
+
       errors =
-        workflow.fizz_metadata
-        |> Map.get(:trigger_manifest, [])
-        |> Enum.reduce([], fn trigger, acc ->
-          case sync_trigger(trigger, context) do
-            :ok -> acc
-            {:error, reason} -> [%{step_id: trigger.step_id, reason: reason} | acc]
-          end
-        end)
-        |> Enum.reverse()
+        case errors do
+          [] ->
+            workflow.fizz_metadata
+            |> Map.get(:trigger_manifest, [])
+            |> Enum.reduce([], fn trigger, acc ->
+              case sync_trigger(trigger, context) do
+                :ok -> acc
+                {:error, reason} -> [%{step_id: trigger.step_id, reason: reason} | acc]
+              end
+            end)
+            |> Enum.reverse()
+
+          _ ->
+            errors
+        end
 
       case errors do
         [] -> :ok
@@ -148,13 +158,53 @@ defmodule Fizz.Triggers.RegistrationManager do
     end
   end
 
+  defp slot_binding_errors(%WorkflowDefinitionVersion{} = definition_version, context) do
+    scope = %Scope{
+      user: %{id: context.user_id},
+      organization_id: context.workos_organization_id
+    }
+
+    case Slots.readiness(definition_version, context.user_id, scope) do
+      :ready ->
+        []
+
+      {:needs_bindings, descriptors} ->
+        Enum.map(descriptors, fn descriptor ->
+          %{
+            step_id: descriptor.step_id,
+            reason: slot_binding_error_reason(descriptor)
+          }
+        end)
+    end
+  end
+
+  defp slot_binding_error_reason(%{kind: kind, slot_key: slot_key, reason: :slot_unbound}) do
+    {:slot_binding_required, kind, slot_key}
+  end
+
+  defp slot_binding_error_reason(%{kind: kind, slot_key: slot_key, reason: reason}) do
+    {:slot_binding_invalid, kind, slot_key, reason}
+  end
+
+  defp slot_binding_error_reason(%{kind: kind, slot_key: slot_key}) do
+    {:slot_binding_required, kind, slot_key}
+  end
+
   defp registration_attrs(trigger, spec, context) do
     params = spec.params || %{}
     now = DateTime.utc_now()
-    existing = current_registration(context.definition_version_id, trigger.step_id, context.user_id)
+
+    existing =
+      current_registration(context.definition_version_id, trigger.step_id, context.user_id)
 
     existing_webhook =
-      webhook_registration(existing, context.workflow_definition_id, context.user_id, trigger, spec)
+      webhook_registration(
+        existing,
+        context.workflow_definition_id,
+        context.user_id,
+        trigger,
+        spec
+      )
 
     %{
       workflow_definition_id: context.workflow_definition_id,
@@ -206,9 +256,15 @@ defmodule Fizz.Triggers.RegistrationManager do
     |> Repo.one()
   end
 
-  defp webhook_registration(%TriggerRegistration{} = existing, _definition_id, _user_id, _trigger, %{
-         kind: :webhook
-       }),
+  defp webhook_registration(
+         %TriggerRegistration{} = existing,
+         _definition_id,
+         _user_id,
+         _trigger,
+         %{
+           kind: :webhook
+         }
+       ),
        do: existing
 
   defp webhook_registration(nil, workflow_definition_id, user_id, trigger, %{kind: :webhook}) do

@@ -22,6 +22,7 @@ defmodule Fizz.Workflows do
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Embeds.Step
+  alias Fizz.Workflows.Readiness
   alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
   alias Fizz.Workflows.Runtime.ContextBuilder
   alias Fizz.Workflows.StepExecutionTrace
@@ -832,13 +833,23 @@ defmodule Fizz.Workflows do
   end
 
   defp do_start_run(scope, %WorkflowDefinitionVersion{} = version_record, input, opts) do
-    with {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
+    with :ok <- ensure_ready_to_start(scope, version_record, opts),
+         {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
       case create_pending_run(scope, version_record, input, compiled_hash, opts) do
         {:ok, run} ->
           start_pending_run(scope, run, workflow, compiled_hash, input)
 
         {:error, _reason} = error ->
           error
+      end
+    end
+  end
+
+  defp ensure_ready_to_start(scope, %WorkflowDefinitionVersion{} = version_record, opts) do
+    with {:ok, user_id} <- run_user_id(scope, opts) do
+      case Readiness.check(version_record, user_id, scope) do
+        :ready -> :ok
+        {:needs_bindings, descriptors} -> {:error, {:slot_bindings_required, descriptors}}
       end
     end
   end

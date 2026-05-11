@@ -8,7 +8,7 @@ import { useThemeStore } from '@/stores/theme';
 import type {
   StepHandleQuickAddRequest,
   StepNodeData,
-  StepSubnodeSlot,
+  StepSubnodeInput,
   WorkflowValidationError,
 } from '@/types/workflow';
 import {
@@ -317,9 +317,9 @@ const showInputHandle = computed(
   () => props.data.hasInput !== false && props.data.step_kind !== 'trigger'
 );
 const showOutputHandle = computed(() => props.data.hasOutput !== false);
-const subnodeInputHandles = computed<StepSubnodeSlot[]>(() => {
-  const slots = props.data.subnode_slots ?? [];
-  return slots.filter(slot => slot.id && slot.id !== 'main');
+const subnodeInputHandles = computed<StepSubnodeInput[]>(() => {
+  const inputs = props.data.subnode_inputs ?? [];
+  return inputs.filter(input => input.id && input.id !== 'main');
 });
 
 const handleOutputQuickAdd = (screenPoint: { x: number; y: number }) => {
@@ -339,21 +339,21 @@ const handleOutputQuickAdd = (screenPoint: { x: number; y: number }) => {
   props.data.onHandleQuickAdd?.(request);
 };
 
-const handleSubnodeSlotQuickAdd = (
-  slot: StepSubnodeSlot,
+const handleSubnodeInputQuickAdd = (
+  input: StepSubnodeInput,
   screenPoint: { x: number; y: number }
 ) => {
   if (!canEdit.value) return;
 
-  const acceptedTypeIds = slot.accepts?.type_ids ?? [];
+  const acceptedTypeIds = input.accepts?.type_ids ?? [];
   const request: StepHandleQuickAddRequest = {
     screenPoint,
     autoConnect: {
       target_step_id: props.id,
-      target_input: slot.id,
+      target_input: input.id,
     },
     filter: {
-      mode: 'subnode_slot',
+      mode: 'subnode_input',
       accepted_type_ids: acceptedTypeIds.length > 0 ? acceptedTypeIds : undefined,
     },
   };
@@ -463,11 +463,11 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       <Handle id="main" type="target" :position="Position.Left" :node-id="props.id" />
     </div>
 
-    <!-- Subnode Slot Handles (bottom edge, flush on the edge) -->
+    <!-- Subnode Input Handles (bottom edge, flush on the edge) -->
     <template v-if="subnodeInputHandles.length > 0">
       <div
-        v-for="(slot, idx) in subnodeInputHandles"
-        :key="slot.id"
+        v-for="(input, idx) in subnodeInputHandles"
+        :key="input.id"
         class="absolute bottom-0 z-10 flex flex-col items-center"
         :style="{
           left: `${((idx + 1) / (subnodeInputHandles.length + 1)) * 100}%`,
@@ -475,15 +475,15 @@ const handleNameKeydown = (event: KeyboardEvent) => {
         }"
       >
         <span class="pointer-events-none mb-1 whitespace-nowrap text-[9px] font-medium text-base-content/50">
-          {{ slot.title || slot.id }}
+          {{ input.title || input.id }}
         </span>
         <Handle
-          :id="slot.id"
+          :id="input.id"
           type="target"
           :position="Position.Bottom"
           :node-id="props.id"
           :show-add-button="canEdit"
-          @add-click="point => handleSubnodeSlotQuickAdd(slot, point)"
+          @add-click="point => handleSubnodeInputQuickAdd(input, point)"
         />
       </div>
     </template>

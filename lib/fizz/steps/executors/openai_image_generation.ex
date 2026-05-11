@@ -13,14 +13,28 @@ defmodule Fizz.Steps.Executors.OpenAIImageGeneration do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.OpenAIApiKey
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.api_key(OpenAIApiKey.provider_id())
+
+  @default_config %{
+    "model" => "dall-e-3",
+    "size" => "1024x1024",
+    "quality" => "standard",
+    "n" => 1,
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "required" => ["prompt"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "OpenAI Credential"
-      },
+      "credential_ref" =>
+        CredentialSlot.schema(@credential_slot,
+          title: "OpenAI Credential",
+          description: "OpenAI credential. Bound at run time per user."
+        ),
       "prompt" => %{
         "type" => "string",
         "title" => "Prompt",
@@ -63,6 +77,9 @@ defmodule Fizz.Steps.Executors.OpenAIImageGeneration do
       "images" => %{"type" => "array", "description" => "All generated image URLs"}
     }
   }
+
+  @impl true
+  def default_config, do: @default_config
 
   @impl true
   def execute(_config, _input, _ctx) do

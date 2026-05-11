@@ -32,6 +32,7 @@ defmodule Fizz.Workflows.WorkflowRunTest do
 
     %WorkflowRun{
       id: Ecto.UUID.generate(),
+      user_id: Ecto.UUID.generate(),
       workflow_definition_id: Ecto.UUID.generate(),
       workflow_definition_version_id: Ecto.UUID.generate(),
       project_id: Ecto.UUID.generate(),

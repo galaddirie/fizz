@@ -11,6 +11,9 @@ defmodule Fizz.Slots.Resolver do
     * `validate_binding_data/1` — at the moment a user submits a binding,
       verify that `binding_data` has the shape and content this kind requires.
 
+    * `validate_binding_data/3` — at binding submission time, verify the
+      binding against the declaration spec and current user scope.
+
     * `candidate_options/2` — for the run-launch UI, list the values this user
       may choose from for a slot with the given spec.
   """
@@ -20,6 +23,11 @@ defmodule Fizz.Slots.Resolver do
   @type scope :: map()
 
   @callback resolve(spec, binding_data, scope) :: {:ok, term()} | {:error, term()}
+  @callback validate_spec(spec) :: :ok | {:error, term()}
   @callback validate_binding_data(map()) :: :ok | {:error, term()}
+  @callback validate_binding_data(map(), spec) :: :ok | {:error, term()}
+  @callback validate_binding_data(map(), spec, scope) :: :ok | {:error, term()}
   @callback candidate_options(spec, scope) :: {:ok, [map()]} | {:error, term()}
+
+  @optional_callbacks validate_spec: 1, validate_binding_data: 2, validate_binding_data: 3
 end

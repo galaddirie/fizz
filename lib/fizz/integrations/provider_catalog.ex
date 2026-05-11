@@ -6,61 +6,18 @@ defmodule Fizz.Integrations.ProviderCatalog do
   cleanly separated (for example `github_oauth` vs `github_api_key`).
   """
 
-  @default_providers [
-    %{
-      id: "github_oauth",
-      label: "GitHub",
-      logo_path: "/images/github.svg",
-      custom: false,
-      type: :oauth,
-      oauth_module: Fizz.Integrations.Providers.GitHubOAuth,
-      api_key_module: nil
-    },
-    %{
-      id: "github_api_key",
-      label: "GitHub",
-      logo_path: "/images/github.svg",
-      custom: false,
-      type: :api_key,
-      oauth_module: nil,
-      api_key_module: nil
-    },
-    %{
-      id: "openai_api_key",
-      label: "OpenAI",
-      logo_path: "/images/openai.svg",
-      custom: false,
-      type: :api_key,
-      oauth_module: nil,
-      api_key_module: Fizz.Integrations.Providers.OpenAIApiKey
-    },
-    %{
-      id: "anthropic_api_key",
-      label: "Anthropic",
-      logo_path: "/images/anthropic.svg",
-      custom: false,
-      type: :api_key,
-      oauth_module: nil,
-      api_key_module: nil
-    },
-    %{
-      id: "custom_api_key",
-      label: "Custom",
-      logo_path: nil,
-      custom: true,
-      type: :api_key,
-      oauth_module: nil,
-      api_key_module: nil
-    }
+  @builtin_provider_modules [
+    Fizz.Integrations.Providers.GitHubOAuth,
+    Fizz.Integrations.Providers.GitHubApiKey,
+    Fizz.Integrations.Providers.OpenAIApiKey,
+    Fizz.Integrations.Providers.AnthropicApiKey,
+    Fizz.Integrations.Providers.SlackOAuth,
+    Fizz.Integrations.Providers.GoogleOAuth,
+    Fizz.Integrations.Providers.MicrosoftOAuth,
+    Fizz.Integrations.Providers.NotionOAuth,
+    Fizz.Integrations.Providers.BoxOAuth,
+    Fizz.Integrations.Providers.CustomApiKey
   ]
-
-  @legacy_provider_aliases %{
-    {"github", :oauth} => "github_oauth",
-    {"github", :api_key} => "github_api_key",
-    {"openai", :api_key} => "openai_api_key",
-    {"anthropic", :api_key} => "anthropic_api_key",
-    {"custom", :api_key} => "custom_api_key"
-  }
 
   @spec providers() :: [map()]
   def providers do
@@ -69,7 +26,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
         normalize_entries(entries)
 
       _ ->
-        providers_from_legacy_credential_catalog()
+        builtin_providers()
     end
   end
 
@@ -85,13 +42,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
 
   @spec provider_supported?(String.t()) :: boolean()
   def provider_supported?(provider_id) when is_binary(provider_id) do
-    case provider(provider_id) do
-      {:ok, _entry} ->
-        true
-
-      {:error, :unknown_provider} ->
-        provider_known_for_any_type?(normalize_provider_id(provider_id))
-    end
+    match?({:ok, _entry}, provider(provider_id))
   end
 
   @spec provider_supports_auth_method?(String.t(), :oauth | :api_key) :: boolean()
@@ -115,24 +66,10 @@ defmodule Fizz.Integrations.ProviderCatalog do
     normalized_provider_id = normalize_provider_id(provider_id)
 
     cond do
-      provider_id_has_type_suffix?(normalized_provider_id, auth_type) ->
-        if provider_exists_for_type?(normalized_provider_id, auth_type) do
-          {:ok, normalized_provider_id}
-        else
-          {:error, :unknown_provider}
-        end
-
-      legacy_provider_alias = @legacy_provider_aliases[{normalized_provider_id, auth_type}] ->
-        if provider_exists_for_type?(legacy_provider_alias, auth_type) do
-          {:ok, legacy_provider_alias}
-        else
-          {:error, :unknown_provider}
-        end
-
       provider_exists_for_type?(normalized_provider_id, auth_type) ->
         {:ok, normalized_provider_id}
 
-      provider_known_for_any_type?(normalized_provider_id) ->
+      match?({:ok, _entry}, provider(normalized_provider_id)) ->
         {:error, :unsupported_auth_method}
 
       true ->
@@ -143,7 +80,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
   @spec oauth_provider_module(String.t()) :: {:ok, module()} | {:error, term()}
   def oauth_provider_module(provider_id) when is_binary(provider_id) do
     with {:ok, entry} <- provider_for_type(provider_id, :oauth),
-         module when is_atom(module) <- entry.oauth_module do
+         module when is_atom(module) and not is_nil(module) <- entry.oauth_module do
       {:ok, module}
     else
       nil -> {:error, :provider_not_implemented}
@@ -155,7 +92,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
   @spec api_key_provider_module(String.t()) :: {:ok, module()} | {:error, term()}
   def api_key_provider_module(provider_id) when is_binary(provider_id) do
     with {:ok, entry} <- provider_for_type(provider_id, :api_key),
-         module when is_atom(module) <- entry.api_key_module do
+         module when is_atom(module) and not is_nil(module) <- entry.api_key_module do
       {:ok, module}
     else
       nil -> {:error, :provider_not_implemented}
@@ -183,52 +120,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
     |> Enum.reject(&is_nil/1)
   end
 
-  defp normalize_entries(_entries), do: @default_providers
-
-  defp providers_from_legacy_credential_catalog do
-    case Application.get_env(:fizz, :integration_credential_providers) do
-      entries when is_list(entries) ->
-        entries
-        |> normalize_legacy_api_key_entries()
-        |> merge_with_defaults()
-
-      _ ->
-        @default_providers
-    end
-  end
-
-  defp normalize_legacy_api_key_entries(entries) do
-    entries
-    |> Enum.flat_map(&normalize_entry(Map.put(&1, :type, :api_key)))
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp merge_with_defaults(legacy_entries) do
-    default_map = Map.new(@default_providers, &{&1.id, &1})
-    legacy_map = Map.new(legacy_entries, &{&1.id, &1})
-    provider_ids = (Map.keys(default_map) ++ Map.keys(legacy_map)) |> Enum.uniq()
-
-    provider_ids
-    |> Enum.map(fn provider_id ->
-      merge_entry_maps(default_map[provider_id], legacy_map[provider_id])
-    end)
-    |> Enum.reject(&is_nil/1)
-  end
-
-  defp merge_entry_maps(nil, legacy_entry), do: legacy_entry
-  defp merge_entry_maps(default_entry, nil), do: default_entry
-
-  defp merge_entry_maps(default_entry, legacy_entry) do
-    %{
-      id: default_entry.id,
-      label: legacy_entry.label || default_entry.label,
-      logo_path: legacy_entry.logo_path || default_entry.logo_path,
-      custom: legacy_entry.custom || default_entry.custom,
-      type: legacy_entry.type || default_entry.type,
-      oauth_module: default_entry.oauth_module || legacy_entry.oauth_module,
-      api_key_module: default_entry.api_key_module || legacy_entry.api_key_module
-    }
-  end
+  defp normalize_entries(_entries), do: builtin_providers()
 
   defp normalize_entry(entry) when is_map(entry) do
     id = normalize_provider_id(entry[:id] || entry["id"] || "")
@@ -240,9 +132,7 @@ defmodule Fizz.Integrations.ProviderCatalog do
 
     logo_path = normalize_logo_path(entry[:logo_path] || entry["logo_path"])
     custom = entry[:custom] || entry["custom"] || false
-    auth_type = normalize_type(entry[:type] || entry["type"])
-    auth_methods = normalize_auth_methods(entry[:auth_methods] || entry["auth_methods"])
-    types = normalize_types(auth_type, auth_methods)
+    type = normalize_auth_type(entry[:type] || entry["type"])
     oauth_module = normalize_oauth_module(entry[:oauth_module] || entry["oauth_module"])
 
     api_key_module =
@@ -252,13 +142,16 @@ defmodule Fizz.Integrations.ProviderCatalog do
       id == "" or label == "" ->
         []
 
-      types == [] ->
+      type not in [:oauth, :api_key] ->
+        []
+
+      not provider_id_has_type_suffix?(id, type) ->
         []
 
       true ->
-        Enum.map(types, fn type ->
+        [
           %{
-            id: typed_provider_id(id, type),
+            id: id,
             label: label,
             logo_path: logo_path,
             custom: custom in [true, "true", 1],
@@ -266,11 +159,39 @@ defmodule Fizz.Integrations.ProviderCatalog do
             oauth_module: if(type == :oauth, do: oauth_module, else: nil),
             api_key_module: if(type == :api_key, do: api_key_module, else: nil)
           }
-        end)
+        ]
+    end
+  end
+
+  defp normalize_entry(module) when is_atom(module) do
+    case provider_definition(module) do
+      {:ok, definition} -> normalize_entry(definition)
+      :error -> []
     end
   end
 
   defp normalize_entry(_entry), do: []
+
+  defp builtin_providers do
+    Enum.map(@builtin_provider_modules, &provider_definition!/1)
+  end
+
+  defp provider_definition!(module) do
+    case provider_definition(module) do
+      {:ok, definition} -> definition
+      :error -> raise ArgumentError, "provider module #{inspect(module)} must define definition/0"
+    end
+  end
+
+  defp provider_definition(module) when is_atom(module) do
+    with {:module, ^module} <- Code.ensure_loaded(module),
+         true <- function_exported?(module, :definition, 0),
+         definition when is_map(definition) <- module.definition() do
+      {:ok, definition}
+    else
+      _ -> :error
+    end
+  end
 
   defp normalize_provider_id(provider_id) do
     provider_id
@@ -286,24 +207,10 @@ defmodule Fizz.Integrations.ProviderCatalog do
 
   defp normalize_logo_path(_path), do: nil
 
-  defp normalize_auth_methods(methods) when is_list(methods) do
-    methods
-    |> Enum.map(&normalize_auth_method/1)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.uniq()
-  end
-
-  defp normalize_auth_methods(_methods), do: []
-
-  defp normalize_auth_method(method) when method in [:oauth, :api_key], do: method
-  defp normalize_auth_method("oauth"), do: :oauth
-  defp normalize_auth_method("api_key"), do: :api_key
-  defp normalize_auth_method(_method), do: nil
-
-  defp normalize_type(type), do: normalize_auth_method(type)
-
-  defp normalize_types(type, _auth_methods) when type in [:oauth, :api_key], do: [type]
-  defp normalize_types(nil, auth_methods), do: auth_methods
+  defp normalize_auth_type(type) when type in [:oauth, :api_key], do: type
+  defp normalize_auth_type("oauth"), do: :oauth
+  defp normalize_auth_type("api_key"), do: :api_key
+  defp normalize_auth_type(_type), do: nil
 
   defp provider_id_has_type_suffix?(provider_id, :oauth),
     do: String.ends_with?(provider_id, "_oauth")
@@ -311,40 +218,11 @@ defmodule Fizz.Integrations.ProviderCatalog do
   defp provider_id_has_type_suffix?(provider_id, :api_key),
     do: String.ends_with?(provider_id, "_api_key")
 
-  defp typed_provider_id(provider_id, auth_type) do
-    cond do
-      provider_id_has_type_suffix?(provider_id, auth_type) ->
-        provider_id
-
-      auth_type == :oauth ->
-        "#{provider_id}_oauth"
-
-      auth_type == :api_key ->
-        "#{provider_id}_api_key"
-    end
-  end
-
   defp provider_exists_for_type?(provider_id, auth_type) do
     case provider(provider_id) do
       {:ok, entry} -> entry.type == auth_type
       {:error, :unknown_provider} -> false
     end
-  end
-
-  defp provider_known_for_any_type?(provider_id) do
-    match?({:ok, _}, provider(provider_id)) ||
-      Enum.any?([:oauth, :api_key], fn auth_type ->
-        legacy_provider_alias = @legacy_provider_aliases[{provider_id, auth_type}]
-
-        is_binary(legacy_provider_alias) and
-          provider_exists_for_type?(legacy_provider_alias, auth_type)
-      end) ||
-      Enum.any?([:oauth, :api_key], fn auth_type ->
-        candidate_provider_id = typed_provider_id(provider_id, auth_type)
-
-        candidate_provider_id != provider_id and
-          provider_exists_for_type?(candidate_provider_id, auth_type)
-      end)
   end
 
   defp normalize_oauth_module(module) when is_atom(module), do: module

@@ -6,6 +6,7 @@ defmodule Fizz.Integrations.Providers.GitHubOAuth do
   @behaviour Fizz.Integrations.Provider
 
   alias Fizz.Accounts
+  alias Fizz.Integrations.ProviderDefinition
 
   require Logger
 
@@ -14,6 +15,15 @@ defmodule Fizz.Integrations.Providers.GitHubOAuth do
 
   @impl true
   def display_name, do: "GitHub"
+
+  @impl true
+  def definition do
+    ProviderDefinition.oauth(__MODULE__,
+      id: provider_id(),
+      label: display_name(),
+      logo_path: "/images/github.svg"
+    )
+  end
 
   @impl true
   def check_connection(scope, organization_id) do

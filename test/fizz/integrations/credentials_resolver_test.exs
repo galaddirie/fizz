@@ -35,7 +35,7 @@ defmodule Fizz.Integrations.CredentialsResolverTest do
       assert option["owner_user_id"] == user.id
     end
 
-    test "supports legacy provider/auth_type params and search query" do
+    test "applies search query with current slot params" do
       user = user_fixture()
       organization_id = "org_credentials_resolver_search"
       scope = Scope.for_user(user) |> Scope.with_organization_id(organization_id)
@@ -50,8 +50,8 @@ defmodule Fizz.Integrations.CredentialsResolverTest do
                CredentialsResolver.resolve(%{
                  q: "production",
                  params: %{
-                   "provider" => "openai_api_key",
-                   "auth_type" => "api_key"
+                   "provider_filter" => ["openai_api_key"],
+                   "auth_types" => ["api_key"]
                  },
                  context: %{current_scope: scope}
                })

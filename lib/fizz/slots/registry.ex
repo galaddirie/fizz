@@ -12,7 +12,7 @@ defmodule Fizz.Slots.Registry do
   @spec fetch(String.t() | nil) :: {:ok, module()} | :error
   def fetch(kind) when is_binary(kind) do
     case Map.fetch(kinds(), kind) do
-      {:ok, module} when is_atom(module) -> {:ok, module}
+      {:ok, module} when is_atom(module) -> ensure_loaded(module)
       _ -> :error
     end
   end
@@ -24,5 +24,12 @@ defmodule Fizz.Slots.Registry do
     :fizz
     |> Application.get_env(Fizz.Slots, [])
     |> Keyword.get(:kinds, %{})
+  end
+
+  defp ensure_loaded(module) do
+    case Code.ensure_loaded(module) do
+      {:module, ^module} -> {:ok, module}
+      _ -> :error
+    end
   end
 end

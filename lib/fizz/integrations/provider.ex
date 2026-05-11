@@ -27,6 +27,7 @@ defmodule Fizz.Integrations.Provider do
 
   @callback provider_id() :: String.t()
   @callback display_name() :: String.t()
+  @callback definition() :: Fizz.Integrations.ProviderDefinition.t()
   @callback check_connection(Scope.t(), organization_id :: String.t() | nil) ::
               {:ok, connection_status()} | {:error, term()}
   @callback fetch_token(Scope.t(), organization_id :: String.t() | nil) ::

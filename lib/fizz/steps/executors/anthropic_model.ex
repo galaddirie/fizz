@@ -17,13 +17,17 @@ defmodule Fizz.Steps.Executors.AnthropicModel do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.CredentialRef
+  alias Fizz.Integrations.Providers.AnthropicApiKey
+  alias Fizz.Slots.CredentialSlot
   alias Fizz.Slots.Field, as: SlotField
+
+  @credential_slot CredentialSlot.api_key(AnthropicApiKey.provider_id())
 
   @default_config %{
     "model" => "claude-3-5-sonnet-latest",
     "temperature" => 0.2,
     "max_tokens" => 800,
-    "credential_ref" => SlotField.credential_declaration("anthropic_api_key", :api_key)
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
   }
 
   @config_schema %{
@@ -31,7 +35,7 @@ defmodule Fizz.Steps.Executors.AnthropicModel do
     "required" => ["model", "credential_ref"],
     "properties" => %{
       "credential_ref" =>
-        SlotField.credential_schema("anthropic_api_key", :api_key,
+        CredentialSlot.schema(@credential_slot,
           title: "Credential",
           description: "Anthropic credential. Bound at run time per user."
         ),

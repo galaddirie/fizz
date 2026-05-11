@@ -119,7 +119,7 @@ export interface CredentialOption {
 export type StepKind = 'trigger' | 'action' | 'transform' | 'control_flow';
 export type NodeRole = 'root' | 'subnode';
 
-export interface StepSubnodeSlot {
+export interface StepSubnodeInput {
   id: string;
   title?: string;
   description?: string;
@@ -138,7 +138,7 @@ export interface AddStepAutoConnect {
   target_input?: string;
 }
 
-export type HandleQuickAddFilterMode = 'output' | 'subnode_slot';
+export type HandleQuickAddFilterMode = 'output' | 'subnode_input';
 
 export interface StepHandleQuickAddRequest {
   screenPoint: { x: number; y: number };
@@ -160,7 +160,7 @@ export interface StepType {
   config_schema?: Record<string, unknown>;
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
-  subnode_slots?: StepSubnodeSlot[];
+  subnode_inputs?: StepSubnodeInput[];
 }
 
 export interface NodeLibraryItem {
@@ -193,7 +193,7 @@ export interface StepNodeData {
     bytes?: number;
     out?: number;
   };
-  subnode_slots?: StepSubnodeSlot[];
+  subnode_inputs?: StepSubnodeInput[];
   // Fan-out item stats for multi-item steps
   itemStats?: {
     isMultiItem: boolean;

@@ -13,13 +13,19 @@ defmodule Fizz.Steps.Executors.NotionTrigger do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.NotionOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(NotionOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Notion Integration"
-      },
+      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Notion Integration"),
       "database_id" => %{
         "type" => "string",
         "title" => "Database ID",

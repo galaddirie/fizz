@@ -13,14 +13,23 @@ defmodule Fizz.Steps.Executors.PowerPointCreatePresentation do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.MicrosoftOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(MicrosoftOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "required" => ["file_name"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Microsoft Account"
-      },
+      "credential_ref" =>
+        CredentialSlot.schema(@credential_slot,
+          title: "Microsoft Account"
+        ),
       "file_name" => %{
         "type" => "string",
         "title" => "File Name",

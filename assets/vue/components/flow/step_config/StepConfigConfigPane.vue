@@ -131,14 +131,14 @@ const state = inject(StepConfigKey)!;
       </div>
     </div>
 
-    <!-- Sub-node Slots -->
+    <!-- Sub-node Inputs -->
     <div
-      v-if="state.subnodeSlotRows.value.length > 0"
+      v-if="state.subnodeInputRows.value.length > 0"
       class="mt-6 border-t border-base-200/60 pt-6"
     >
       <div class="mb-4">
         <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30">
-          Sub-node Slots
+          Sub-node Inputs
         </span>
         <p class="mt-1 text-[11px] text-base-content/35">
           Inputs populated from connected sub-node outputs.
@@ -147,8 +147,8 @@ const state = inject(StepConfigKey)!;
 
       <div class="divide-y divide-base-200/40">
         <div
-          v-for="row in state.subnodeSlotRows.value"
-          :key="row.slot.id"
+          v-for="row in state.subnodeInputRows.value"
+          :key="row.input.id"
           class="flex items-center justify-between gap-4 py-3"
         >
           <div class="flex items-center gap-3 min-w-0">
@@ -160,24 +160,24 @@ const state = inject(StepConfigKey)!;
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <span class="text-xs font-medium text-base-content">
-                  {{ row.slot.title || row.slot.id }}
+                  {{ row.input.title || row.input.id }}
                 </span>
                 <span
-                  v-if="row.slot.required"
+                  v-if="row.input.required"
                   class="text-[9px] font-bold uppercase tracking-widest text-warning"
                 >
                   req
                 </span>
                 <span
-                  v-if="row.slot.cardinality === 'many'"
+                  v-if="row.input.cardinality === 'many'"
                   class="text-[9px] font-medium uppercase tracking-wider text-base-content/25"
                 >
                   many
                 </span>
               </div>
 
-              <p v-if="row.slot.description" class="mt-0.5 text-[11px] text-base-content/35">
-                {{ row.slot.description }}
+              <p v-if="row.input.description" class="mt-0.5 text-[11px] text-base-content/35">
+                {{ row.input.description }}
               </p>
 
               <p
@@ -208,15 +208,15 @@ const state = inject(StepConfigKey)!;
           </summary>
           <div class="mt-2 space-y-1">
             <div
-              v-for="row in state.subnodeSlotRows.value"
-              :key="'accepts-' + row.slot.id"
+              v-for="row in state.subnodeInputRows.value"
+              :key="'accepts-' + row.input.id"
               class="flex items-baseline gap-2 text-[11px]"
             >
-              <span class="font-medium text-base-content/40">{{ row.slot.title || row.slot.id }}:</span>
+              <span class="font-medium text-base-content/40">{{ row.input.title || row.input.id }}:</span>
               <span class="text-base-content/30">
                 {{
-                  row.slot.accepts?.type_ids?.length
-                    ? row.slot.accepts.type_ids.join(', ')
+                  row.input.accepts?.type_ids?.length
+                    ? row.input.accepts.type_ids.join(', ')
                     : 'None'
                 }}
               </span>

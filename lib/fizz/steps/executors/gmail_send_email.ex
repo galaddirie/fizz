@@ -13,15 +13,24 @@ defmodule Fizz.Steps.Executors.GmailSendEmail do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.GoogleOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "required" => ["to", "subject", "body"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Gmail Account",
-        "description" => "Google account to send from"
-      },
+      "credential_ref" =>
+        CredentialSlot.schema(@credential_slot,
+          title: "Gmail Account",
+          description: "Google account. Bound at run time per user."
+        ),
       "to" => %{
         "type" => "string",
         "title" => "To",

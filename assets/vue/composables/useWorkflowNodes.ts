@@ -525,7 +525,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
             totalDurationUs !== undefined || stepOutputItemCount !== undefined
               ? { duration_us: totalDurationUs, out: stepOutputItemCount }
               : undefined,
-          subnode_slots: stepType?.subnode_slots ?? [],
+          subnode_inputs: stepType?.subnode_inputs ?? [],
           itemStats: stepItemStats,
           hasInput: stepType?.step_kind !== 'trigger' && stepType?.node_role !== 'subnode',
           hasOutput: true,

@@ -14,6 +14,7 @@ defmodule Fizz.Triggers.TriggerEventTest do
     registration =
       %TriggerRegistration{}
       |> TriggerRegistration.changeset(%{
+        user_id: scope.user.id,
         workflow_definition_id: definition.id,
         definition_version_id: draft.id,
         step_id: "manual-root",

@@ -82,7 +82,7 @@ defmodule Fizz.Workflows.SlotBinding do
     binding_data = get_field(changeset, :binding_data)
 
     with {:ok, module} <- Registry.fetch(kind),
-         :ok <- module.validate_binding_data(binding_data) do
+         :ok <- validate_binding_data(module, binding_data) do
       changeset
     else
       :error ->
@@ -90,6 +90,14 @@ defmodule Fizz.Workflows.SlotBinding do
 
       {:error, reason} ->
         add_error(changeset, :binding_data, format_reason(reason))
+    end
+  end
+
+  defp validate_binding_data(module, binding_data) do
+    if function_exported?(module, :validate_binding_data, 1) do
+      module.validate_binding_data(binding_data)
+    else
+      :ok
     end
   end
 

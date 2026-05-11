@@ -60,7 +60,7 @@ defmodule FizzWeb.WorkflowsLive.Payload do
       config_schema: type.config_schema || %{},
       input_schema: type.input_schema || %{},
       output_schema: type.output_schema || %{},
-      subnode_slots: type.subnode_slots || []
+      subnode_inputs: type.subnode_inputs || []
     }
   end
 

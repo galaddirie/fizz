@@ -9,6 +9,7 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
 
   alias Fizz.Accounts.{ExternalAuth, Scope}
   alias Fizz.Integrations.CredentialRef
+  alias Fizz.Integrations.ProviderDefinition
 
   @type model_spec ::
           String.t()
@@ -24,6 +25,15 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
 
   @impl true
   def display_name, do: "OpenAI"
+
+  @impl true
+  def definition do
+    ProviderDefinition.api_key(__MODULE__,
+      id: provider_id(),
+      label: display_name(),
+      logo_path: "/images/openai.svg"
+    )
+  end
 
   @impl true
   def check_connection(_scope, nil), do: {:error, :organization_scope_required}

@@ -663,7 +663,7 @@ defmodule Fizz.Accounts do
   @doc """
   No-op local session revocation. WorkOS is the session source of truth.
 
-  We keep this function for compatibility with existing webhook handling paths.
+  WorkOS webhook handling calls this during user revocation events.
   """
   def revoke_user_sessions_by_workos_user_id(workos_user_id) when is_binary(workos_user_id),
     do: :ok

@@ -85,6 +85,7 @@ defmodule Fizz.Triggers.RegistryTest do
     attrs =
       Map.merge(
         %{
+          user_id: scope.user.id,
           workflow_definition_id: definition.id,
           definition_version_id: draft.id,
           step_id: "step-#{System.unique_integer([:positive])}",

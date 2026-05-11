@@ -15,6 +15,7 @@ defmodule Fizz.Steps.ConfigSchema do
     * `"params"` — parameters forwarded to the resolver (e.g. provider_filter)
     * `"options"` — static list of `%{"label" => ..., "value" => ...}` (alternative to resolver)
     * `"responseConfig"` — mapping config for shaping search results
+    * `"slot_kind"`, `"slot_key"`, `"spec"` — slot metadata when `"component"` is `"slot"`
 
   ## Examples
 
@@ -49,6 +50,12 @@ defmodule Fizz.Steps.ConfigSchema do
           }
         }
       }
+
+      # Slot-backed credential field
+      "credential_ref" =>
+        Fizz.Slots.Field.credential_schema("openai_api_key", :api_key,
+          title: "Credential"
+        )
   """
 
   @type ui_config :: %{optional(String.t()) => term()}

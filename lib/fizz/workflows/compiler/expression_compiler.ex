@@ -1,6 +1,7 @@
 defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   @moduledoc false
 
+  alias Fizz.Slots.Declaration
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.Expressions.AccessPlan
 
@@ -69,7 +70,13 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     end
   end
 
-  defp compile_tree(%{"$slot" => true} = slot_map, _known_step_ids, _step_name_to_id, path, step_id) do
+  defp compile_tree(
+         %{"$slot" => true} = slot_map,
+         _known_step_ids,
+         _step_name_to_id,
+         path,
+         step_id
+       ) do
     case build_slot_ref(slot_map, step_id) do
       {:ok, ref} ->
         dependencies = %{step_ids: MapSet.new(), runtime_keys: MapSet.new([:_slot_resolver])}
@@ -144,9 +151,7 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   end
 
   defp build_slot_ref(slot_map, step_id) do
-    with {:ok, kind} <- fetch_string(slot_map, "kind"),
-         {:ok, slot_key} <- fetch_string(slot_map, "slot_key"),
-         {:ok, spec} <- fetch_spec(slot_map) do
+    with {:ok, %{kind: kind, slot_key: slot_key, spec: spec}} <- Declaration.normalize(slot_map) do
       {:ok,
        %AccessPlan.SlotRef{
          kind: kind,
@@ -154,20 +159,9 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
          step_id: step_id,
          spec: spec
        }}
-    end
-  end
-
-  defp fetch_string(map, key) when is_map(map) and is_binary(key) do
-    case Map.get(map, key) do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, "slot is missing #{key}"}
-    end
-  end
-
-  defp fetch_spec(map) do
-    case Map.get(map, "spec") do
-      spec when is_map(spec) -> {:ok, spec}
-      _ -> {:error, "slot is missing spec"}
+    else
+      {:error, {:missing_field, field}} -> {:error, "slot is missing #{field}"}
+      {:error, _reason} -> {:error, "slot declaration is invalid"}
     end
   end
 

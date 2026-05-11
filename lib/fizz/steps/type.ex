@@ -36,7 +36,7 @@ defmodule Fizz.Steps.Type do
           config_schema: map(),
           input_schema: map(),
           output_schema: map(),
-          subnode_slots: [map()],
+          subnode_inputs: [map()],
           executor: String.t(),
           step_kind: step_kind(),
           inserted_at: DateTime.t() | nil,
@@ -56,7 +56,7 @@ defmodule Fizz.Steps.Type do
              :config_schema,
              :input_schema,
              :output_schema,
-             :subnode_slots
+             :subnode_inputs
            ]}
   @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
@@ -73,7 +73,7 @@ defmodule Fizz.Steps.Type do
     config_schema: %{},
     input_schema: %{},
     output_schema: %{},
-    subnode_slots: []
+    subnode_inputs: []
   ]
 
   @doc """

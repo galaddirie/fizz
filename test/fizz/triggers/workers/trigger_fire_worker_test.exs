@@ -94,6 +94,7 @@ defmodule Fizz.Triggers.Workers.TriggerFireWorkerTest do
     registration =
       %TriggerRegistration{}
       |> TriggerRegistration.changeset(%{
+        user_id: scope.user.id,
         workflow_definition_id: version.workflow_definition_id,
         definition_version_id: version.id,
         step_id: "external-signal",

@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.PublishValidation do
   @moduledoc false
 
   alias Fizz.Graph
-  alias Fizz.Slots.Registry, as: SlotRegistry
+  alias Fizz.Slots.Declaration
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
   alias Fizz.Steps.Type
@@ -68,11 +68,17 @@ defmodule Fizz.Workflows.PublishValidation do
   @spec slot_declaration_issues([map()]) :: [issue()]
   def slot_declaration_issues(steps) when is_list(steps) do
     Enum.flat_map(steps, fn step ->
-      walk_slot_decls(step.config || %{}, [])
-      |> Enum.flat_map(fn {path, decl} ->
-        case validate_slot_decl(decl) do
-          :ok -> []
-          {:error, message} -> [%{step_id: step.id, field: format_field_path(path), message: message}]
+      config = step.config || %{}
+
+      config
+      |> Declaration.walk()
+      |> Enum.flat_map(fn %{path: path, declaration: declaration} ->
+        case Declaration.validate(declaration) do
+          :ok ->
+            []
+
+          {:error, message} ->
+            [%{step_id: step.id, field: Declaration.format_path(path), message: message}]
         end
       end)
     end)
@@ -199,44 +205,4 @@ defmodule Fizz.Workflows.PublishValidation do
   defp missing_required_value?(value) when is_binary(value), do: String.trim(value) == ""
   defp missing_required_value?(value) when is_list(value), do: value == []
   defp missing_required_value?(_value), do: false
-
-  defp walk_slot_decls(%{"$slot" => true} = decl, path), do: [{path, decl}]
-
-  defp walk_slot_decls(map, path) when is_map(map) do
-    Enum.flat_map(map, fn {key, value} ->
-      walk_slot_decls(value, path ++ [to_string(key)])
-    end)
-  end
-
-  defp walk_slot_decls(list, path) when is_list(list) do
-    list
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {value, idx} ->
-      walk_slot_decls(value, path ++ [Integer.to_string(idx)])
-    end)
-  end
-
-  defp walk_slot_decls(_value, _path), do: []
-
-  defp validate_slot_decl(%{"$slot" => true} = decl) do
-    cond do
-      not is_binary(Map.get(decl, "kind")) or Map.get(decl, "kind") == "" ->
-        {:error, "slot is missing kind"}
-
-      not is_binary(Map.get(decl, "slot_key")) or Map.get(decl, "slot_key") == "" ->
-        {:error, "slot is missing slot_key"}
-
-      not is_map(Map.get(decl, "spec")) ->
-        {:error, "slot is missing spec"}
-
-      true ->
-        case SlotRegistry.fetch(Map.get(decl, "kind")) do
-          {:ok, _module} -> :ok
-          :error -> {:error, "slot kind \"#{Map.get(decl, "kind")}\" is not registered"}
-        end
-    end
-  end
-
-  defp format_field_path([]), do: nil
-  defp format_field_path(path), do: Enum.join(path, ".")
 end

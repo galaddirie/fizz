@@ -259,6 +259,43 @@ defmodule Fizz.WorkflowsTest do
     assert_worker_shutdown(run.id)
   end
 
+  test "start_run requires bindings for declared slots" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+
+    entry_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Entry"})
+
+    image_step =
+      WorkflowsFixtures.step(%{
+        type_id: "openai_image_generation",
+        name: "Image",
+        config:
+          "openai_image_generation"
+          |> Fizz.Steps.Registry.get_default_config()
+          |> Map.put("prompt", "a generated product mockup")
+      })
+
+    snapshot_attrs =
+      WorkflowsFixtures.snapshot_attrs(%{
+        steps: [entry_step, image_step],
+        connections: [
+          WorkflowsFixtures.connection(%{
+            source_step_id: entry_step.id,
+            target_step_id: image_step.id
+          })
+        ]
+      })
+
+    %{version: version} = WorkflowsFixtures.published_version_fixture(scope, snapshot_attrs)
+
+    assert {:error, {:slot_bindings_required, [descriptor]}} =
+             Workflows.start_run(scope, version, %{})
+
+    assert descriptor.step_id == image_step.id
+    assert descriptor.kind == "credential"
+    assert descriptor.slot_key == "auth"
+    assert descriptor.spec == %{"provider" => "openai_api_key", "auth_type" => "api_key"}
+  end
+
   test "list_run_step_executions exposes split iterations without compiler internals" do
     scope = WorkflowsFixtures.project_scope_fixture()
 
@@ -693,6 +730,7 @@ defmodule Fizz.WorkflowsTest do
 
     %WorkflowRun{}
     |> WorkflowRun.changeset(%{
+      user_id: scope.user.id,
       workflow_definition_id: version.workflow_definition_id,
       workflow_definition_version_id: version.id,
       project_id: scope.project.id,
@@ -712,6 +750,7 @@ defmodule Fizz.WorkflowsTest do
 
     %WorkflowRun{}
     |> WorkflowRun.changeset(%{
+      user_id: scope.user.id,
       workflow_definition_id: version.workflow_definition_id,
       workflow_definition_version_id: version.id,
       project_id: scope.project.id,

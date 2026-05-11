@@ -1,6 +1,6 @@
 import { computed } from 'vue';
 import type { Node } from '@vue-flow/core';
-import type { StepNodeData, StepSubnodeSlot, StepType } from '@/types/workflow';
+import type { StepNodeData, StepSubnodeInput, StepType } from '@/types/workflow';
 
 interface UseSubnodesOptions {
     node: () => Node<StepNodeData> | null;
@@ -34,10 +34,10 @@ export function useSubnodes({
         return upstreamIds.map(stepId => stepNameById()?.[stepId] || stepId);
     });
 
-    const subnodeSlots = computed<StepSubnodeSlot[]>(() => {
-        const typeSlots = stepType()?.subnode_slots;
-        if (typeSlots?.length) return typeSlots;
-        return node()?.data?.subnode_slots ?? [];
+    const subnodeInputs = computed<StepSubnodeInput[]>(() => {
+        const typeInputs = stepType()?.subnode_inputs;
+        if (typeInputs?.length) return typeInputs;
+        return node()?.data?.subnode_inputs ?? [];
     });
 
     const incomingConnectionsByTargetInputForStep = computed<Record<string, string[]>>(() => {
@@ -46,14 +46,14 @@ export function useSubnodes({
         return incomingConnectionsByTargetInput()?.[n.id] ?? {};
     });
 
-    const subnodeSlotRows = computed(() => {
-        return subnodeSlots.value.map(slot => {
-            const slotId = slot.id;
-            const sourceStepIds = incomingConnectionsByTargetInputForStep.value[slotId] ?? [];
+    const subnodeInputRows = computed(() => {
+        return subnodeInputs.value.map(input => {
+            const inputId = input.id;
+            const sourceStepIds = incomingConnectionsByTargetInputForStep.value[inputId] ?? [];
             const sourceStepNames = sourceStepIds.map(stepId => stepNameById()?.[stepId] || stepId);
 
             return {
-                slot,
+                input,
                 sourceStepIds,
                 sourceStepNames,
                 isConnected: sourceStepIds.length > 0,
@@ -65,8 +65,8 @@ export function useSubnodes({
         isTriggerStep,
         directUpstreamStepIds,
         inputIndexLabels,
-        subnodeSlots,
+        subnodeInputs,
         incomingConnectionsByTargetInputForStep,
-        subnodeSlotRows,
+        subnodeInputRows,
     };
 }

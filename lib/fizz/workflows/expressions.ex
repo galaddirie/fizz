@@ -153,12 +153,20 @@ defmodule Fizz.Workflows.Expressions do
     case resolver do
       resolver when is_function(resolver, 4) ->
         case resolver.(kind, slot_key, step_id, spec) do
-          {:ok, value} -> value
-          _ -> nil
+          {:ok, value} ->
+            value
+
+          {:error, reason} ->
+            raise ArgumentError,
+                  "slot `#{slot_key}` on step `#{step_id}` could not be resolved: #{inspect(reason)}"
+
+          other ->
+            raise ArgumentError,
+                  "slot `#{slot_key}` on step `#{step_id}` returned invalid resolver result: #{inspect(other)}"
         end
 
       _ ->
-        nil
+        raise ArgumentError, "slot `#{slot_key}` on step `#{step_id}` has no runtime resolver"
     end
   end
 

@@ -10,6 +10,8 @@ defmodule Fizz.Slots.Field do
       step config and, at compile time, becomes a `SlotRef` access plan.
   """
 
+  alias Fizz.Slots.Declaration
+
   @doc """
   Returns the JSON-shaped schema entry for a credential slot field.
   """
@@ -60,6 +62,5 @@ defmodule Fizz.Slots.Field do
   Returns true if the given value is a slot declaration map.
   """
   @spec slot_declaration?(term()) :: boolean()
-  def slot_declaration?(%{"$slot" => true}), do: true
-  def slot_declaration?(_), do: false
+  def slot_declaration?(value), do: Declaration.declaration?(value)
 end

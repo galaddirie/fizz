@@ -151,3 +151,4 @@ we honestly shouldnt even be executing nodes with pinned outputs so how is this 
 - Research workflow compute scaling: LeaseManager start-run contention, repo pool pressure, and Litestream memory/file-watch growth under high concurrency.
   Current benchmark snapshot: simple runs sustained ~80 runs/s, 500 sleeping workers stayed stable, but 1000-run launch bursts degraded sharply and a 200-concurrent start burst timed out in LeaseManager.acquire/1.
   Validate whether the next bottleneck is the single GenServer lease path, Repo pool_size=10 in dev, or Litestream recursively watching too many terminal SQLite files.
+Should we merge all field, resolver, and input logic into the slot system? extending it where needed?

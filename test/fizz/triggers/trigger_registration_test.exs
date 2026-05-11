@@ -111,6 +111,7 @@ defmodule Fizz.Triggers.TriggerRegistrationTest do
   defp insert_run(scope, definition, draft) do
     %WorkflowRun{}
     |> WorkflowRun.changeset(%{
+      user_id: scope.user.id,
       workflow_definition_id: definition.id,
       workflow_definition_version_id: draft.id,
       project_id: scope.project.id,
@@ -125,6 +126,7 @@ defmodule Fizz.Triggers.TriggerRegistrationTest do
   defp registration_attrs(scope, definition, draft, overrides) do
     Map.merge(
       %{
+        user_id: scope.user.id,
         workflow_definition_id: definition.id,
         definition_version_id: draft.id,
         step_id: "step-#{System.unique_integer([:positive])}",

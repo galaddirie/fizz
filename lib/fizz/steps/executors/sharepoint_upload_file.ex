@@ -13,14 +13,20 @@ defmodule Fizz.Steps.Executors.SharePointUploadFile do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Providers.MicrosoftOAuth
+  alias Fizz.Slots.CredentialSlot
+
+  @credential_slot CredentialSlot.oauth(MicrosoftOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+  }
+
   @config_schema %{
     "type" => "object",
     "required" => ["site_id", "file_name", "file_content"],
     "properties" => %{
-      "credential_ref" => %{
-        "type" => "object",
-        "title" => "Microsoft Account"
-      },
+      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Microsoft Account"),
       "site_id" => %{
         "type" => "string",
         "title" => "SharePoint Site ID"

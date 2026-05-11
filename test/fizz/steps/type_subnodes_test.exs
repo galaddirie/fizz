@@ -3,13 +3,13 @@ defmodule Fizz.Steps.TypeSubnodesTest do
 
   alias Fizz.Steps.Registry
 
-  test "ai_agent exposes declared subnode slots in registry metadata" do
+  test "ai_agent exposes declared subnode inputs in registry metadata" do
     assert {:ok, type} = Registry.get("ai_agent")
     assert type.node_role == :root
-    assert is_list(type.subnode_slots)
-    assert Enum.any?(type.subnode_slots, fn slot -> slot["id"] == "model" end)
-    assert Enum.any?(type.subnode_slots, fn slot -> slot["id"] == "prompt" end)
-    assert Enum.any?(type.subnode_slots, fn slot -> slot["id"] == "tools" end)
+    assert is_list(type.subnode_inputs)
+    assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "model" end)
+    assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "prompt" end)
+    assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "tools" end)
   end
 
   test "provider model nodes are registered as subnodes" do

@@ -33,26 +33,29 @@ defmodule Fizz.Steps.ResolverTest do
     end
   end
 
-  describe "schema-based resolver lookup" do
-    test "resolver module is stored as an atom in config schema" do
-      # Verify the executor schemas reference modules, not strings
+  describe "slot-backed credential fields" do
+    test "credential fields use the slot component in config schema" do
       {:ok, openai_type} = Fizz.Steps.Registry.get("openai_model")
 
-      resolver =
-        get_in(openai_type.config_schema, ["properties", "credential_ref", "ui", "resolver"])
+      ui = get_in(openai_type.config_schema, ["properties", "credential_ref", "ui"])
 
-      assert is_atom(resolver)
-      assert resolver == Fizz.Integrations.CredentialsResolver
+      assert ui["component"] == "slot"
+      assert ui["slot_kind"] == "credential"
+      assert ui["slot_key"] == "auth"
+      assert ui["spec"] == %{"provider" => "openai_api_key", "auth_type" => "api_key"}
     end
 
-    test "resolver module implements the behaviour" do
+    test "credential field default config is a slot declaration" do
       {:ok, openai_type} = Fizz.Steps.Registry.get("openai_model")
 
-      resolver =
-        get_in(openai_type.config_schema, ["properties", "credential_ref", "ui", "resolver"])
+      default_config = Fizz.Steps.Registry.get_default_config(openai_type.id)
 
-      Code.ensure_loaded!(resolver)
-      assert function_exported?(resolver, :resolve, 1)
+      assert %{
+               "$slot" => true,
+               "kind" => "credential",
+               "slot_key" => "auth",
+               "spec" => %{"provider" => "openai_api_key", "auth_type" => "api_key"}
+             } = default_config["credential_ref"]
     end
   end
 end

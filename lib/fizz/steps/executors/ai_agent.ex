@@ -32,7 +32,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
-  @subnode_slots [
+  @subnode_inputs [
     %{
       "id" => "model",
       "title" => "Model",

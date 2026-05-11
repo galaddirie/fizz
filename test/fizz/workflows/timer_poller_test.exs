@@ -179,6 +179,7 @@ defmodule Fizz.Workflows.TimerPollerTest do
 
     %WorkflowRun{}
     |> WorkflowRun.changeset(%{
+      user_id: scope.user.id,
       workflow_definition_id: version.workflow_definition_id,
       workflow_definition_version_id: version.id,
       project_id: scope.project.id,

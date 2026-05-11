@@ -27,6 +27,28 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     assert Enum.any?(registrations, &(&1.kind == "schedule" and not is_nil(&1.next_fire_at)))
   end
 
+  test "sync_on_publish requires bindings for trigger slots" do
+    scope = project_scope_fixture()
+
+    trigger =
+      step(%{
+        id: Ecto.UUID.generate(),
+        type_id: "github_trigger",
+        name: "GitHub Trigger",
+        config:
+          "github_trigger"
+          |> Fizz.Steps.Registry.get_default_config()
+          |> Map.put("repository", "acme/site")
+      })
+
+    %{version: version} = published_version_fixture(scope, snapshot_attrs(%{steps: [trigger]}))
+
+    assert {:error, [%{step_id: step_id, reason: {:slot_binding_required, "credential", "auth"}}]} =
+             RegistrationManager.sync_on_publish(version)
+
+    assert step_id == trigger.id
+  end
+
   test "sync_on_publish deactivates previous version registrations" do
     scope = project_scope_fixture()
     %{definition: definition, draft: draft} = definition_fixture(scope)
