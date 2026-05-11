@@ -152,3 +152,11 @@ we honestly shouldnt even be executing nodes with pinned outputs so how is this 
   Current benchmark snapshot: simple runs sustained ~80 runs/s, 500 sleeping workers stayed stable, but 1000-run launch bursts degraded sharply and a 200-concurrent start burst timed out in LeaseManager.acquire/1.
   Validate whether the next bottleneck is the single GenServer lease path, Repo pool_size=10 in dev, or Litestream recursively watching too many terminal SQLite files.
 Should we merge all field, resolver, and input logic into the slot system? extending it where needed?
+
+
+working on integrations, I was wondering if oauth was correct for some apps. 
+We currently support oauth for google, slack, notion, box, github, and custom api keys like openai, anthropic, etc. we do have api keys for platforms that also have oauth like microsoft, github, etc.
+
+but is this correct for all apps? what would it look like if users wanted make a slack/discord bot, what about a github app? what about google?
+
+add settings page, need to reconcile ux on how we we will display editor/owner settings like workflow name, deleting the workflow etc. and how to handle viewers/runners who need to manage things like what credentials they have bound.
