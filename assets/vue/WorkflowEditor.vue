@@ -310,7 +310,7 @@ function handleSubmitSlotBindings(payload: {
     binding_data: Record<string, unknown>;
   }>;
 }) {
-  live.pushEvent('submit_slot_bindings', payload);
+  emit('submit_slot_bindings', payload);
   isRunLaunchModalOpen.value = false;
 }
 
