@@ -23,7 +23,8 @@ defmodule Fizz.Application do
          s3_prefix: Application.get_env(:fizz, :litestream_s3_prefix),
          aws_region: Application.get_env(:fizz, :litestream_aws_region),
          s3_endpoint: Application.get_env(:fizz, :litestream_s3_endpoint),
-         s3_skip_verify: Application.get_env(:fizz, :litestream_s3_skip_verify, false)},
+         s3_skip_verify: Application.get_env(:fizz, :litestream_s3_skip_verify, false),
+         log_level: Application.get_env(:fizz, :litestream_log_level, "warn")},
         {Registry, keys: :unique, name: Fizz.Workflows.Runner.Registry},
         {Task.Supervisor, name: Fizz.Workflows.Runner.TaskSupervisor},
         {Fizz.Workflows.Runner.WorkerSupervisor, name: Fizz.Workflows.Runner.WorkerSupervisor}

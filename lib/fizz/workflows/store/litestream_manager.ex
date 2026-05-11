@@ -143,6 +143,7 @@ defmodule Fizz.Workflows.Store.LitestreamManager do
       s3_endpoint: Keyword.get(opts, :s3_endpoint),
       s3_skip_verify: Keyword.get(opts, :s3_skip_verify, false),
       bin_path: binary_path(opts),
+      log_level: Keyword.get(opts, :log_level, "warn"),
       config_path: nil
     }
 
@@ -198,7 +199,7 @@ defmodule Fizz.Workflows.Store.LitestreamManager do
              s3_endpoint: state.s3_endpoint,
              s3_skip_verify: state.s3_skip_verify
            ),
-         {:ok, port} <- open_port(state.bin_path, config_path) do
+         {:ok, port} <- open_port(state.bin_path, config_path, state.log_level) do
       %{state | status: :running, port: port, config_path: config_path}
     else
       {:error, :missing_binary} ->
@@ -222,7 +223,7 @@ defmodule Fizz.Workflows.Store.LitestreamManager do
     end
   end
 
-  defp open_port(bin_path, config_path) do
+  defp open_port(bin_path, config_path, log_level) do
     port =
       Port.open({:spawn_executable, bin_path}, [
         :binary,
@@ -230,7 +231,7 @@ defmodule Fizz.Workflows.Store.LitestreamManager do
         :use_stdio,
         :stderr_to_stdout,
         :hide,
-        args: ["replicate", "-config", config_path]
+        args: ["replicate", "-config", config_path, "-log-level", log_level]
       ])
 
     {:ok, port}

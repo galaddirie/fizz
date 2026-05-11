@@ -38,6 +38,7 @@ Override them with environment variables when needed:
 - `LITESTREAM_AWS_REGION`
 - `LITESTREAM_S3_ENDPOINT`
 - `LITESTREAM_S3_SKIP_VERIFY`
+- `LITESTREAM_LOG_LEVEL` (defaults to `warn`)
 - `LITESTREAM_ACCESS_KEY_ID`
 - `LITESTREAM_SECRET_ACCESS_KEY`
 

@@ -167,6 +167,49 @@ defmodule Fizz.Workflows.Store.LitestreamManagerTest do
     assert :running = LitestreamManager.status(server: name)
   end
 
+  test "manager starts litestream at warn log level by default", %{tmp_dir: tmp_dir} do
+    fake_bin = Path.join(tmp_dir, "fake-litestream")
+    write_fake_litestream_requiring_log_level(fake_bin, "warn")
+    name = unique_name()
+
+    pid =
+      start_supervised!(
+        {LitestreamManager,
+         name: name,
+         data_dir: tmp_dir,
+         s3_bucket: "bucket",
+         s3_prefix: "workflows",
+         aws_region: "us-east-1",
+         bin_path: fake_bin}
+      )
+
+    _ = :sys.get_state(pid)
+
+    assert :running = LitestreamManager.status(server: name)
+  end
+
+  test "manager starts litestream with configured log level", %{tmp_dir: tmp_dir} do
+    fake_bin = Path.join(tmp_dir, "fake-litestream")
+    write_fake_litestream_requiring_log_level(fake_bin, "error")
+    name = unique_name()
+
+    pid =
+      start_supervised!(
+        {LitestreamManager,
+         name: name,
+         data_dir: tmp_dir,
+         s3_bucket: "bucket",
+         s3_prefix: "workflows",
+         aws_region: "us-east-1",
+         bin_path: fake_bin,
+         log_level: "error"}
+      )
+
+    _ = :sys.get_state(pid)
+
+    assert :running = LitestreamManager.status(server: name)
+  end
+
   defp create_valid_sqlite(path) do
     assert :ok =
              Sqlite.with_db(path, [create_dirs?: true], fn db ->
@@ -190,6 +233,22 @@ defmodule Fizz.Workflows.Store.LitestreamManagerTest do
     fi
 
     exit 1
+    """
+
+    File.write!(path, script)
+    File.chmod!(path, 0o755)
+  end
+
+  defp write_fake_litestream_requiring_log_level(path, expected_log_level) do
+    script = """
+    #!/bin/sh
+    if [ "$1" = "replicate" ] && [ "$4" = "-log-level" ] && [ "$5" = "#{expected_log_level}" ]; then
+      while true; do
+        sleep 1
+      done
+    fi
+
+    exit 42
     """
 
     File.write!(path, script)
