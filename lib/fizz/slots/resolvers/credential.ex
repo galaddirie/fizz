@@ -20,6 +20,7 @@ defmodule Fizz.Slots.Resolvers.Credential do
   @behaviour Fizz.Slots.Resolver
 
   alias Fizz.Accounts.{ExternalAuth, Scope}
+  alias Fizz.Integrations.ProviderCatalog
 
   @max_options 50
 
@@ -130,9 +131,13 @@ defmodule Fizz.Slots.Resolvers.Credential do
 
       case ExternalAuth.list_credential_options(scope, organization_id, external_auth_opts) do
         {:ok, options} ->
+          user_id = scope_user_id(scope)
+
           options =
             options
-            |> filter_to_current_user(scope_user_id(scope))
+            |> filter_to_current_user(user_id)
+            |> maybe_sync_single_workos_oauth_option(spec, scope, organization_id)
+            |> filter_to_current_user(user_id)
             |> apply_search(Keyword.get(opts, :q, ""))
             |> apply_limit(Keyword.get(opts, :limit, @max_options))
 
@@ -158,6 +163,40 @@ defmodule Fizz.Slots.Resolvers.Credential do
     do: Enum.take(options, limit)
 
   defp apply_limit(options, _limit), do: Enum.take(options, @max_options)
+
+  defp maybe_sync_single_workos_oauth_option(options, spec, scope, organization_id)
+       when is_list(options) do
+    if options == [] do
+      sync_single_workos_oauth_option(spec, scope, organization_id, options)
+    else
+      options
+    end
+  end
+
+  defp sync_single_workos_oauth_option(spec, scope, organization_id, fallback_options) do
+    with {:ok, provider} <- single_spec_value(spec, "provider"),
+         {:ok, "oauth"} <- single_spec_value(spec, "auth_type"),
+         {:ok, provider_mod} <- ProviderCatalog.oauth_provider_module(provider),
+         {:ok, %{active: true} = status} <- provider_mod.check_connection(scope, organization_id),
+         {:ok, _connection} <-
+           ExternalAuth.upsert_oauth_connection(scope, organization_id, provider, status),
+         {:ok, options} <-
+           ExternalAuth.list_credential_options(scope, organization_id,
+             provider_filter: [provider],
+             auth_types: [:oauth]
+           ) do
+      options
+    else
+      _reason -> fallback_options
+    end
+  end
+
+  defp single_spec_value(spec, key) when is_map(spec) and is_binary(key) do
+    case list_param(spec, key) do
+      [value] -> {:ok, value}
+      _values -> {:error, :single_value_required}
+    end
+  end
 
   defp filter_to_current_user(options, user_id) when is_binary(user_id) do
     Enum.filter(options, fn option ->

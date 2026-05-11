@@ -13,6 +13,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRow do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Google.Sheets.Actions.AppendRow
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Slots.CredentialSlot
 
@@ -53,8 +54,5 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRow do
   }
 
   @impl true
-  def execute(_config, _input, _ctx) do
-    # TODO: Implement Google Sheets values.append
-    {:ok, %{}}
-  end
+  def execute(config, input, ctx), do: AppendRow.execute(config, input, ctx)
 end

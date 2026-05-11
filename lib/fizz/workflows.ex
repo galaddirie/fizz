@@ -19,6 +19,7 @@ defmodule Fizz.Workflows do
   alias Ecto.Multi
   alias Fizz.Accounts.{Project, Scope}
   alias Fizz.Repo
+  alias Fizz.Slots
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Embeds.Step
@@ -117,6 +118,8 @@ defmodule Fizz.Workflows do
     with {:ok, version_record} <- fetch_version(scope, version),
          :ok <- ensure_draft(version_record),
          {:ok, user_id} <- user_id_from_scope(scope) do
+      _ = Slots.ensure_auto_bindings(version_record, user_id, scope)
+
       published_at = DateTime.utc_now()
 
       changeset =

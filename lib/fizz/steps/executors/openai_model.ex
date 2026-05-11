@@ -4,7 +4,8 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
 
   It requires an `openai_api_key` credential reference and emits the provider
   payload consumed by `ai_agent`: provider, credential reference, model,
-  temperature, and max token settings.
+  temperature, and max token settings. Message prompts live on the main AI
+  Agent config; structured output is supplied by the optional schema subnode.
   """
 
   use Fizz.Steps.Definition,

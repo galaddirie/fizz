@@ -9,6 +9,7 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorkerTest do
   alias Fizz.Triggers.TriggerRegistration
   alias Fizz.Triggers.Workers.RegistrationSyncWorker
   alias Fizz.Triggers.Workers.TriggerFireWorker
+  alias Fizz.Workflows
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
   test "creates missing registrations for published versions" do
@@ -57,6 +58,66 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorkerTest do
       |> Enum.uniq()
 
     assert statuses == ["inactive"]
+  end
+
+  test "keeps only the latest published version registration active per workflow" do
+    scope = project_scope_fixture()
+    trigger_step_id = Ecto.UUID.generate()
+
+    {:ok, %{definition: definition, draft: draft}} =
+      Workflows.create_definition(scope, %{
+        name: "Registration worker #{System.unique_integer([:positive])}",
+        description: "Latest published version test"
+      })
+
+    assert {:ok, saved_v1} =
+             Workflows.save_draft(
+               scope,
+               draft,
+               manual_trigger_snapshot_attrs(trigger_step_id, "Manual v1")
+             )
+
+    assert {:ok, version_one} = Workflows.publish_draft(scope, saved_v1)
+
+    assert {:ok, draft_two} = Workflows.edit_definition(scope, definition)
+
+    assert {:ok, saved_v2} =
+             Workflows.save_draft(
+               scope,
+               draft_two,
+               manual_trigger_snapshot_attrs(trigger_step_id, "Manual v2")
+             )
+
+    assert {:ok, version_two} = Workflows.publish_draft(scope, saved_v2)
+
+    version_one_registration =
+      Repo.one!(
+        from(registration in TriggerRegistration,
+          where: registration.definition_version_id == ^version_one.id
+        )
+      )
+
+    version_two_registration =
+      Repo.one!(
+        from(registration in TriggerRegistration,
+          where: registration.definition_version_id == ^version_two.id
+        )
+      )
+
+    {:ok, _registration} =
+      version_one_registration
+      |> TriggerRegistration.changeset(%{status: "active"})
+      |> Repo.update()
+
+    {:ok, _registration} =
+      version_two_registration
+      |> TriggerRegistration.changeset(%{status: "inactive"})
+      |> Repo.update()
+
+    assert :ok = perform_job(RegistrationSyncWorker, %{})
+
+    assert Repo.get!(TriggerRegistration, version_one_registration.id).status == "inactive"
+    assert Repo.get!(TriggerRegistration, version_two_registration.id).status == "active"
   end
 
   test "resets errored registrations past cooldown" do
@@ -147,9 +208,9 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorkerTest do
     })
   end
 
-  defp manual_trigger_snapshot_attrs do
+  defp manual_trigger_snapshot_attrs(step_id \\ Ecto.UUID.generate(), name \\ "Manual") do
     snapshot_attrs(%{
-      steps: [step(%{id: Ecto.UUID.generate(), type_id: "manual_input", name: "Manual"})]
+      steps: [step(%{id: step_id, type_id: "manual_input", name: name})]
     })
   end
 end

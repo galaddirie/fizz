@@ -8,7 +8,7 @@ defmodule Fizz.Steps.TypeSubnodesTest do
     assert type.node_role == :root
     assert is_list(type.subnode_inputs)
     assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "model" end)
-    assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "prompt" end)
+    assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "structured_schema" end)
     assert Enum.any?(type.subnode_inputs, fn input -> input["id"] == "tools" end)
   end
 
@@ -18,5 +18,10 @@ defmodule Fizz.Steps.TypeSubnodesTest do
 
     assert {:ok, anthropic_type} = Registry.get("anthropic_model")
     assert anthropic_type.node_role == :subnode
+  end
+
+  test "ai structure schema is registered as a subnode" do
+    assert {:ok, schema_type} = Registry.get("ai_structure_schema")
+    assert schema_type.node_role == :subnode
   end
 end

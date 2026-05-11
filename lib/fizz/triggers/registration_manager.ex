@@ -8,6 +8,7 @@ defmodule Fizz.Triggers.RegistrationManager do
   alias Fizz.Accounts.Scope
   alias Fizz.Repo
   alias Fizz.Slots
+  alias Fizz.Slots.Declaration, as: SlotDeclaration
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Triggers
   alias Fizz.Triggers.Webhook
@@ -104,8 +105,10 @@ defmodule Fizz.Triggers.RegistrationManager do
 
   defp sync_trigger(trigger, context) do
     with {:ok, executor} <- StepExecutorBehaviour.resolve(trigger.type_id),
-         {:ok, spec} <- executor.registration_spec(trigger.config, context),
-         attrs <- registration_attrs(trigger, spec, context),
+         {:ok, config} <- resolve_trigger_config(trigger, context),
+         {:ok, spec} <- executor.registration_spec(config, context),
+         {:ok, trigger_source} <- maybe_upsert_source(spec, context),
+         attrs <- registration_attrs(trigger, spec, context, trigger_source),
          {:ok, registration} <- Triggers.upsert_registration(attrs) do
       maybe_enqueue_initial_schedule(registration, executor)
       :ok
@@ -137,6 +140,54 @@ defmodule Fizz.Triggers.RegistrationManager do
   end
 
   defp maybe_enqueue_initial_schedule(_registration, _executor), do: :ok
+
+  defp resolve_trigger_config(trigger, context) do
+    scope = %Scope{organization_id: context.workos_organization_id}
+
+    run_attrs = %{
+      user_id: context.user_id,
+      workflow_definition_id: context.workflow_definition_id,
+      workos_organization_id: context.workos_organization_id
+    }
+
+    with {:ok, resolver} <- Slots.runtime_resolver(scope, run_attrs),
+         {:ok, config} <- resolve_slots(trigger.config, trigger.step_id, resolver) do
+      {:ok, config}
+    end
+  end
+
+  defp resolve_slots(value, step_id, resolver) when is_map(value) do
+    if SlotDeclaration.declaration?(value) do
+      with {:ok, %{kind: kind, slot_key: slot_key, spec: spec}} <-
+             SlotDeclaration.normalize(value),
+           {:ok, resolved} <- resolver.(kind, slot_key, step_id, spec) do
+        {:ok, resolved}
+      end
+    else
+      Enum.reduce_while(value, {:ok, %{}}, fn {key, child}, {:ok, acc} ->
+        case resolve_slots(child, step_id, resolver) do
+          {:ok, resolved} -> {:cont, {:ok, Map.put(acc, key, resolved)}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+    end
+  end
+
+  defp resolve_slots(values, step_id, resolver) when is_list(values) do
+    values
+    |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
+      case resolve_slots(value, step_id, resolver) do
+        {:ok, resolved} -> {:cont, {:ok, [resolved | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, resolved} -> {:ok, Enum.reverse(resolved)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp resolve_slots(value, _step_id, _resolver), do: {:ok, value}
 
   defp load_definition_context(%WorkflowDefinitionVersion{} = definition_version) do
     case Repo.one(
@@ -190,7 +241,7 @@ defmodule Fizz.Triggers.RegistrationManager do
     {:slot_binding_required, kind, slot_key}
   end
 
-  defp registration_attrs(trigger, spec, context) do
+  defp registration_attrs(trigger, spec, context, trigger_source) do
     params = spec.params || %{}
     now = DateTime.utc_now()
 
@@ -212,6 +263,7 @@ defmodule Fizz.Triggers.RegistrationManager do
       step_id: trigger.step_id,
       user_id: context.user_id,
       project_id: context.project_id,
+      trigger_source_id: trigger_source && trigger_source.id,
       workos_organization_id: context.workos_organization_id,
       run_id: nil,
       kind: Atom.to_string(spec.kind),
@@ -231,6 +283,40 @@ defmodule Fizz.Triggers.RegistrationManager do
       last_error_at: nil
     }
   end
+
+  defp maybe_upsert_source(%{kind: kind, source_module: source_module} = spec, context)
+       when kind in [:polling, :subscription] and is_atom(source_module) do
+    with {:module, ^source_module} <- Code.ensure_loaded(source_module),
+         {:ok, cursor} <- source_module.init_cursor(spec.params || %{}, context),
+         {:ok, provider} <- source_provider(spec),
+         source_key <- spec.source_key || source_module.source_key(spec.params || %{}, context) do
+      Triggers.upsert_source(%{
+        project_id: context.project_id,
+        workos_organization_id: context.workos_organization_id,
+        user_id: context.user_id,
+        kind: Atom.to_string(kind),
+        provider: provider,
+        source_module: module_name(source_module),
+        source_key: source_key,
+        status: "active",
+        params: spec.params || %{},
+        cursor: cursor,
+        poll_interval_ms: polling_interval(spec) || 60_000,
+        next_poll_at: DateTime.utc_now(),
+        error_message: nil,
+        consecutive_errors: 0,
+        last_error_at: nil
+      })
+    else
+      {:error, _reason} = error -> error
+      _ -> {:error, :invalid_trigger_source_module}
+    end
+  end
+
+  defp maybe_upsert_source(%{kind: kind}, _context) when kind in [:polling, :subscription],
+    do: {:error, :trigger_source_module_required}
+
+  defp maybe_upsert_source(_spec, _context), do: {:ok, nil}
 
   defp current_registration(definition_version_id, step_id, user_id) do
     TriggerRegistration
@@ -332,6 +418,21 @@ defmodule Fizz.Triggers.RegistrationManager do
 
   defp batch_size(%{params: params}) do
     Map.get(params, "batch_size", 100)
+  end
+
+  defp source_provider(%{provider: provider}) when is_binary(provider) and provider != "",
+    do: {:ok, provider}
+
+  defp source_provider(%{params: %{"provider" => provider}})
+       when is_binary(provider) and provider != "",
+       do: {:ok, provider}
+
+  defp source_provider(_spec), do: {:error, :trigger_source_provider_required}
+
+  defp module_name(module) when is_atom(module) do
+    module
+    |> Atom.to_string()
+    |> String.replace_prefix("Elixir.", "")
   end
 
   defp parse_cron(cron) do

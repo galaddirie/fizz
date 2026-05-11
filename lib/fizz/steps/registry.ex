@@ -288,11 +288,10 @@ defmodule Fizz.Steps.Registry do
       Fizz.Steps.Executors.AIAgent,
       Fizz.Steps.Executors.OpenAIModel,
       Fizz.Steps.Executors.AnthropicModel,
-      Fizz.Steps.Executors.AIPromptTemplate,
+      Fizz.Steps.Executors.AIStructureSchema,
       Fizz.Steps.Executors.AIToolHttp,
       # TODO: implement
       Fizz.Steps.Executors.OpenAIImageGeneration,
-      Fizz.Steps.Executors.OpenAIStructuredOutput,
       Fizz.Steps.Executors.AnthropicVisionAnalysis,
 
       # -- Gmail --

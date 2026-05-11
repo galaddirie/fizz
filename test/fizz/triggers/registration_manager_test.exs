@@ -7,7 +7,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
   alias Fizz.Repo
   alias Fizz.Triggers
   alias Fizz.Triggers.RegistrationManager
-  alias Fizz.Triggers.TriggerRegistration
+  alias Fizz.Triggers.{TriggerRegistration, TriggerSource}
   alias Fizz.Triggers.Workers.TriggerFireWorker
   alias Fizz.Workflows
 
@@ -97,6 +97,51 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
       |> Repo.aggregate(:count, :id)
 
     assert count_after == count_before
+  end
+
+  test "sync_on_publish creates a shared polling source for Google Sheets triggers" do
+    scope = project_scope_fixture()
+
+    trigger =
+      step(%{
+        id: Ecto.UUID.generate(),
+        type_id: "google_sheets_trigger",
+        name: "Google Sheets Trigger",
+        config: %{
+          "credential_ref" => %{
+            "id" => "oauth_connection_1",
+            "provider" => "google_oauth",
+            "auth_type" => "oauth",
+            "owner_user_id" => scope.user.id
+          },
+          "spreadsheet_id" => "spreadsheet_1",
+          "sheet_name" => "Sheet1",
+          "event_mode" => "row_added_or_updated",
+          "range" => "A:ZZZ",
+          "poll_interval_ms" => 60_000
+        }
+      })
+
+    %{version: version} = published_version_fixture(scope, snapshot_attrs(%{steps: [trigger]}))
+
+    assert :ok = RegistrationManager.sync_on_publish(version)
+
+    registration =
+      Repo.one!(
+        from(registration in TriggerRegistration,
+          where:
+            registration.definition_version_id == ^version.id and
+              registration.step_id == ^trigger.id
+        )
+      )
+
+    source = Repo.get!(TriggerSource, registration.trigger_source_id)
+
+    assert registration.kind == "polling"
+    assert source.provider == "google_oauth"
+    assert source.source_module == "Fizz.Integrations.Google.Sheets.Triggers.RowChange"
+    assert source.params["spreadsheet_id"] == "spreadsheet_1"
+    assert source.cursor == %{"initialized" => false}
   end
 
   test "sync_on_publish enqueues initial TriggerFireWorker for schedule triggers" do

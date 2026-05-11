@@ -188,6 +188,55 @@ defmodule Fizz.Slots do
   end
 
   @doc """
+  Best-effort auto-binding for slot types that have a single safe choice.
+
+  Today this only applies to OAuth credential slots with exactly one available
+  candidate. WorkOS Pipes currently exposes one account connection per external
+  app, so persisting that single option avoids asking the user to bind a choice
+  they cannot meaningfully change yet.
+  """
+  @spec ensure_auto_bindings(WorkflowDefinitionVersion.t(), String.t(), Scope.t()) ::
+          {:ok, [SlotBinding.t()]} | {:error, Ecto.Changeset.t()}
+  def ensure_auto_bindings(%WorkflowDefinitionVersion{} = version, user_id, %Scope{} = scope)
+      when is_binary(user_id) do
+    workflow_definition_id = version.workflow_definition_id
+
+    with {:ok, organization_id} <- scope_organization_id(scope) do
+      bindings =
+        organization_id
+        |> list_for_user(workflow_definition_id, user_id)
+        |> index_bindings()
+
+      result =
+        version
+        |> required_slots()
+        |> Enum.reduce_while({:ok, []}, fn declaration, {:ok, auto_bound} ->
+          case auto_bind_declaration(
+                 version,
+                 scope,
+                 user_id,
+                 organization_id,
+                 bindings,
+                 declaration
+               ) do
+            {:ok, nil} -> {:cont, {:ok, auto_bound}}
+            {:ok, %SlotBinding{} = binding} -> {:cont, {:ok, [binding | auto_bound]}}
+            {:error, _changeset} = error -> {:halt, error}
+          end
+        end)
+
+      case result do
+        {:ok, auto_bound} -> {:ok, Enum.reverse(auto_bound)}
+        {:error, _changeset} = error -> error
+      end
+    else
+      {:error, _reason} -> {:ok, []}
+    end
+  end
+
+  def ensure_auto_bindings(_version, _user_id, _scope), do: {:ok, []}
+
+  @doc """
   Builds a runtime slot resolver for a run-like map or struct.
   """
   @spec runtime_resolver(Scope.t(), WorkflowRun.t() | map()) ::
@@ -337,6 +386,112 @@ defmodule Fizz.Slots do
       declaration -> {:ok, declaration}
     end
   end
+
+  defp auto_bind_declaration(
+         %WorkflowDefinitionVersion{} = version,
+         %Scope{} = scope,
+         user_id,
+         organization_id,
+         bindings,
+         %{step_id: step_id, slot_key: slot_key} = declaration
+       ) do
+    binding_key = {step_id, slot_key}
+
+    cond do
+      Map.has_key?(bindings, binding_key) ->
+        {:ok, nil}
+
+      not auto_bindable_declaration?(declaration) ->
+        {:ok, nil}
+
+      true ->
+        maybe_upsert_auto_binding(version, scope, user_id, organization_id, declaration)
+    end
+  end
+
+  defp auto_bind_declaration(
+         _version,
+         _scope,
+         _user_id,
+         _organization_id,
+         _bindings,
+         _declaration
+       ),
+       do: {:ok, nil}
+
+  defp maybe_upsert_auto_binding(version, scope, user_id, organization_id, declaration) do
+    with {:ok, [candidate]} <- candidate_options_for_auto_binding(declaration, scope),
+         {:ok, credential_id} <- candidate_id(candidate) do
+      upsert_binding(version, scope, %{
+        user_id: user_id,
+        workflow_definition_id: version.workflow_definition_id,
+        step_id: declaration.step_id,
+        slot_key: declaration.slot_key,
+        kind: declaration.kind,
+        binding_data: %{"credential_id" => credential_id},
+        workos_organization_id: organization_id
+      })
+    else
+      :skip -> {:ok, nil}
+      {:error, :no_auto_binding_candidate} -> {:ok, nil}
+      {:error, :invalid_candidate} -> {:ok, nil}
+      {:error, _reason} -> {:ok, nil}
+    end
+  end
+
+  defp candidate_options_for_auto_binding(%{kind: kind, spec: spec}, scope)
+       when is_binary(kind) and is_map(spec) do
+    case candidate_options(kind, spec, scope) do
+      {:ok, [_candidate] = candidates} -> {:ok, candidates}
+      {:ok, _candidates} -> :skip
+      {:error, _reason} -> :skip
+    end
+  end
+
+  defp candidate_options_for_auto_binding(_declaration, _scope), do: :skip
+
+  defp auto_bindable_declaration?(%{kind: "credential", spec: spec}) when is_map(spec) do
+    match?({:ok, _provider}, single_spec_value(spec, :provider)) and
+      match?({:ok, "oauth"}, single_spec_value(spec, :auth_type))
+  end
+
+  defp auto_bindable_declaration?(_declaration), do: false
+
+  defp single_spec_value(spec, key) when is_map(spec) and is_atom(key) do
+    case spec_value_list(spec, key) do
+      [value] -> {:ok, value}
+      _values -> {:error, :single_value_required}
+    end
+  end
+
+  defp spec_value_list(spec, key) do
+    spec
+    |> fetch_value(key)
+    |> List.wrap()
+    |> Enum.map(&normalize_spec_string/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp normalize_spec_string(value) when is_binary(value) do
+    value
+    |> String.trim()
+    |> case do
+      "" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_spec_string(_value), do: nil
+
+  defp candidate_id(candidate) when is_map(candidate) do
+    case fetch_value(candidate, :id) do
+      id when is_binary(id) and id != "" -> {:ok, id}
+      _ -> {:error, :invalid_candidate}
+    end
+  end
+
+  defp candidate_id(_candidate), do: {:error, :invalid_candidate}
 
   defp ensure_binding_context(%WorkflowDefinitionVersion{} = version, %Scope{} = scope, attrs) do
     with :ok <-

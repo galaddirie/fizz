@@ -23,6 +23,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
     |> base_context()
     |> maybe_put_scope(scope)
     |> maybe_put_slot_resolver(scope, run)
+    |> put_global_context()
   end
 
   def build_run_context(scope, attrs) when is_map(attrs) do
@@ -30,22 +31,33 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
     |> base_context()
     |> maybe_put_scope(scope)
     |> maybe_put_slot_resolver(scope, attrs)
+    |> put_global_context()
   end
 
   defp base_context(run_like) do
+    user_id = fetch_value(run_like, :user_id)
+    project_id = fetch_value(run_like, :project_id)
+    organization_id = fetch_value(run_like, :workos_organization_id)
+
     %{
+      run_id: fetch_value(run_like, :id),
+      user_id: user_id,
+      project_id: project_id,
+      workos_organization_id: organization_id,
       workflow: %{
         id: fetch_value(run_like, :id),
         definition_id: fetch_value(run_like, :workflow_definition_id),
         definition_version_id: fetch_value(run_like, :workflow_definition_version_id),
-        project_id: fetch_value(run_like, :project_id),
-        workos_organization_id: fetch_value(run_like, :workos_organization_id),
+        user_id: user_id,
+        project_id: project_id,
+        workos_organization_id: organization_id,
         compiled_hash: fetch_value(run_like, :compiled_hash)
       },
       env: %{},
       metadata: %{
-        project_id: fetch_value(run_like, :project_id),
-        workos_organization_id: fetch_value(run_like, :workos_organization_id)
+        user_id: user_id,
+        project_id: project_id,
+        workos_organization_id: organization_id
       }
     }
   end
@@ -72,6 +84,10 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
   end
 
   defp maybe_put_slot_resolver(context, _scope, _run_or_attrs), do: context
+
+  defp put_global_context(context) do
+    Map.put(context, :_global, Map.drop(context, [:_global]))
+  end
 
   defp fetch_value(map, key) when is_map(map) and is_atom(key) do
     case Map.fetch(map, key) do

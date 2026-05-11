@@ -13,6 +13,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsReadRows do
 
   @behaviour Fizz.Steps.Executors.Behaviour
 
+  alias Fizz.Integrations.Google.Sheets.Actions.ReadRows
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Slots.CredentialSlot
 
@@ -49,8 +50,5 @@ defmodule Fizz.Steps.Executors.GoogleSheetsReadRows do
   }
 
   @impl true
-  def execute(_config, _input, _ctx) do
-    # TODO: Implement Google Sheets values.get
-    {:ok, %{}}
-  end
+  def execute(config, input, ctx), do: ReadRows.execute(config, input, ctx)
 end

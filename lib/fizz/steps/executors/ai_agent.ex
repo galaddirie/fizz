@@ -6,14 +6,15 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   - `_primary` - upstream flow input
   - `model` - output from `openai_model` or `anthropic_model`
-  - `prompt` - output from `ai_prompt_template`
+  - `structured_schema` - optional output from `ai_structure_schema`
   - `tools` - zero or more outputs from `ai_tool_http`
 
   `mode: "assemble_only"` returns the assembled payload without calling a
   provider.
 
-  `mode: "provider_chat"` currently calls `OpenAIApiKey.generate_text/5` for
-  OpenAI models. Anthropic execution still returns
+  `mode: "provider_chat"` calls `OpenAIApiKey.generate_text/5` for OpenAI text
+  responses, or `OpenAIApiKey.generate_object/6` when a structured schema is
+  connected. Anthropic execution still returns
   `{:error, :anthropic_chat_not_implemented}`. Tool descriptors are included in
   the assembled output, but they are not forwarded to the provider call yet.
   """
@@ -43,13 +44,13 @@ defmodule Fizz.Steps.Executors.AIAgent do
       "input_key" => "model"
     },
     %{
-      "id" => "prompt",
-      "title" => "Prompt",
-      "description" => "Prompt/message builder",
-      "required" => true,
+      "id" => "structured_schema",
+      "title" => "Structured Schema",
+      "description" => "Optional structured response schema",
+      "required" => false,
       "cardinality" => "one",
-      "accepts" => %{"type_ids" => ["ai_prompt_template"]},
-      "input_key" => "prompt"
+      "accepts" => %{"type_ids" => ["ai_structure_schema"]},
+      "input_key" => "structured_schema"
     },
     %{
       "id" => "tools",
@@ -63,11 +64,14 @@ defmodule Fizz.Steps.Executors.AIAgent do
   ]
 
   @default_config %{
-    "mode" => "assemble_only"
+    "mode" => "assemble_only",
+    "system_prompt" => "You are a helpful assistant.",
+    "user_message" => "{{ json }}"
   }
 
   @config_schema %{
     "type" => "object",
+    "required" => ["user_message"],
     "properties" => %{
       "mode" => %{
         "type" => "string",
@@ -75,6 +79,20 @@ defmodule Fizz.Steps.Executors.AIAgent do
         "enum" => ["assemble_only", "provider_chat"],
         "default" => "assemble_only",
         "description" => "Assemble payload only or call provider integrations"
+      },
+      "system_prompt" => %{
+        "type" => "string",
+        "title" => "System Prompt",
+        "format" => "textarea",
+        "default" => "You are a helpful assistant.",
+        "description" => "Optional system instruction sent before the user message"
+      },
+      "user_message" => %{
+        "type" => "string",
+        "title" => "User Message",
+        "format" => "textarea",
+        "default" => "{{ json }}",
+        "description" => "User message template resolved against the primary input"
       }
     }
   }
@@ -90,6 +108,8 @@ defmodule Fizz.Steps.Executors.AIAgent do
       "max_tokens" => %{"type" => "integer"},
       "messages" => %{"type" => "array"},
       "tools" => %{"type" => "array"},
+      "structured_schema" => %{"type" => "object"},
+      "response_format" => %{"type" => "object"},
       "response" => %{"description" => "Provider response (provider_chat mode only)"}
     }
   }
@@ -100,9 +120,10 @@ defmodule Fizz.Steps.Executors.AIAgent do
   @impl true
   def execute(config, input, ctx) when is_map(ctx) do
     with {:ok, model_config} <- normalize_model_config(slot_value(input, "model")),
-         {:ok, messages} <-
-           normalize_messages(slot_value(input, "prompt"), slot_value(input, "_primary")),
-         {:ok, assembled} <- build_output(input, model_config, messages) do
+         {:ok, messages} <- build_messages(config, slot_value(input, "_primary")),
+         {:ok, structured_schema} <-
+           normalize_structured_schema(slot_value(input, "structured_schema")),
+         {:ok, assembled} <- build_output(input, model_config, messages, structured_schema) do
       case Map.get(config, "mode", "assemble_only") do
         "provider_chat" ->
           run_provider_chat(assembled, ctx)
@@ -118,16 +139,24 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   @impl true
   def validate_config(config) do
-    case Map.get(config, "mode", "assemble_only") do
-      mode when mode in ["assemble_only", "provider_chat"] ->
-        :ok
+    errors = []
 
-      _ ->
-        {:error, [mode: "must be assemble_only or provider_chat"]}
-    end
+    errors =
+      case Map.get(config, "mode", "assemble_only") do
+        mode when mode in ["assemble_only", "provider_chat"] ->
+          errors
+
+        _ ->
+          [{:mode, "must be assemble_only or provider_chat"} | errors]
+      end
+
+    errors = validate_required_message(config, errors)
+    errors = validate_optional_prompt(config, "system_prompt", errors)
+
+    if errors == [], do: :ok, else: {:error, Enum.reverse(errors)}
   end
 
-  defp build_output(input, model_config, messages) do
+  defp build_output(input, model_config, messages, structured_schema) do
     provider = Map.get(model_config, "provider", "openai_api_key")
     credential_ref = Map.get(model_config, "credential_ref")
     model = Map.get(model_config, "model")
@@ -137,17 +166,20 @@ defmodule Fizz.Steps.Executors.AIAgent do
     primary = slot_value(input, "_primary")
 
     if is_binary(model) and model != "" and is_map(credential_ref) do
-      {:ok,
-       %{
-         "_primary" => primary,
-         "provider" => provider,
-         "credential_ref" => credential_ref,
-         "model" => model,
-         "temperature" => temperature,
-         "max_tokens" => max_tokens,
-         "messages" => messages,
-         "tools" => tools
-       }}
+      assembled =
+        %{
+          "_primary" => primary,
+          "provider" => provider,
+          "credential_ref" => credential_ref,
+          "model" => model,
+          "temperature" => temperature,
+          "max_tokens" => max_tokens,
+          "messages" => messages,
+          "tools" => tools
+        }
+        |> maybe_put_structured_schema(structured_schema)
+
+      {:ok, assembled}
     else
       {:error, {:invalid_subnode_output, :model}}
     end
@@ -163,13 +195,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
   defp generate_provider_response(scope, organization_id, assembled) do
     case assembled["provider"] do
       "openai_api_key" ->
-        OpenAIApiKey.generate_text(
-          scope,
-          organization_id,
-          assembled["model"],
-          assembled["messages"],
-          generation_opts(assembled)
-        )
+        generate_openai_response(scope, organization_id, assembled)
 
       "anthropic_api_key" ->
         {:error, :anthropic_chat_not_implemented}
@@ -180,6 +206,31 @@ defmodule Fizz.Steps.Executors.AIAgent do
       _ ->
         {:error, :missing_provider}
     end
+  end
+
+  defp generate_openai_response(
+         scope,
+         organization_id,
+         %{"structured_schema" => structured_schema} = assembled
+       ) do
+    OpenAIApiKey.generate_object(
+      scope,
+      organization_id,
+      assembled["model"],
+      assembled["messages"],
+      Map.fetch!(structured_schema, "json_schema"),
+      generation_opts(assembled)
+    )
+  end
+
+  defp generate_openai_response(scope, organization_id, assembled) do
+    OpenAIApiKey.generate_text(
+      scope,
+      organization_id,
+      assembled["model"],
+      assembled["messages"],
+      generation_opts(assembled)
+    )
   end
 
   defp generation_opts(assembled) do
@@ -223,30 +274,100 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   defp normalize_model_config(_), do: {:error, {:invalid_subnode_output, :model}}
 
-  defp normalize_messages(%{"messages" => messages}, _primary) when is_list(messages) do
-    {:ok, messages}
-  end
+  defp build_messages(config, primary) do
+    messages =
+      []
+      |> maybe_append_message("system", config_value(config, "system_prompt"))
+      |> maybe_append_message("user", user_message(config, primary))
 
-  defp normalize_messages(%{messages: messages}, _primary) when is_list(messages) do
-    {:ok, messages}
-  end
-
-  defp normalize_messages(prompt, _primary) when is_binary(prompt) do
-    {:ok, [%{"role" => "user", "content" => prompt}]}
-  end
-
-  defp normalize_messages(_prompt, primary) do
-    case prompt_from_primary(primary) do
-      nil -> {:error, {:invalid_subnode_output, :prompt}}
-      prompt -> {:ok, [%{"role" => "user", "content" => prompt}]}
+    case Enum.any?(messages, &match?(%{"role" => "user"}, &1)) do
+      true -> {:ok, messages}
+      false -> {:error, {:invalid_config, :user_message}}
     end
   end
 
+  defp user_message(config, primary) do
+    config_value(config, "user_message") ||
+      config_value(config, "user_prompt") ||
+      prompt_from_primary(primary)
+  end
+
+  defp maybe_append_message(messages, _role, prompt) when prompt in [nil, ""], do: messages
+
+  defp maybe_append_message(messages, role, prompt) do
+    content = to_prompt_value(prompt)
+
+    case String.trim(content) do
+      "" -> messages
+      _ -> messages ++ [%{"role" => role, "content" => content}]
+    end
+  end
+
+  defp normalize_structured_schema(nil), do: {:ok, nil}
+
+  defp normalize_structured_schema(%{"json_schema" => json_schema} = schema)
+       when is_map(json_schema) and map_size(json_schema) > 0 do
+    {:ok,
+     %{
+       "name" => schema_name(schema),
+       "json_schema" => json_schema,
+       "strict" => strict_schema?(schema)
+     }}
+  end
+
+  defp normalize_structured_schema(%{json_schema: json_schema} = schema)
+       when is_map(json_schema) and map_size(json_schema) > 0 do
+    normalize_structured_schema(%{
+      "name" => Map.get(schema, :name),
+      "json_schema" => json_schema,
+      "strict" => Map.get(schema, :strict, true)
+    })
+  end
+
+  defp normalize_structured_schema(_schema),
+    do: {:error, {:invalid_subnode_output, :structured_schema}}
+
   defp prompt_from_primary(nil), do: nil
-  defp prompt_from_primary(prompt) when is_binary(prompt), do: prompt
-  defp prompt_from_primary(prompt) when is_number(prompt), do: to_string(prompt)
-  defp prompt_from_primary(prompt) when is_boolean(prompt), do: to_string(prompt)
-  defp prompt_from_primary(prompt), do: Jason.encode!(prompt)
+
+  defp prompt_from_primary(primary), do: to_prompt_value(primary)
+
+  defp maybe_put_structured_schema(output, nil), do: output
+
+  defp maybe_put_structured_schema(output, structured_schema) do
+    response_format = response_format(structured_schema)
+
+    output
+    |> Map.put("structured_schema", structured_schema)
+    |> Map.put("response_format", response_format)
+  end
+
+  defp response_format(%{"name" => name, "json_schema" => json_schema, "strict" => strict}) do
+    %{
+      "type" => "json_schema",
+      "json_schema" => %{
+        "name" => name,
+        "schema" => json_schema,
+        "strict" => strict
+      }
+    }
+  end
+
+  defp schema_name(%{"name" => name}) when is_binary(name) do
+    case String.trim(name) do
+      "" -> "structured_response"
+      trimmed_name -> trimmed_name
+    end
+  end
+
+  defp schema_name(_schema), do: "structured_response"
+
+  defp strict_schema?(%{"strict" => strict}) when strict in [true, false], do: strict
+  defp strict_schema?(_schema), do: true
+
+  defp to_prompt_value(value) when is_binary(value), do: value
+  defp to_prompt_value(value) when is_number(value), do: to_string(value)
+  defp to_prompt_value(value) when is_boolean(value), do: to_string(value)
+  defp to_prompt_value(value), do: Jason.encode!(value)
 
   defp normalize_tools(nil), do: []
   defp normalize_tools(tools) when is_list(tools), do: Enum.reject(tools, &is_nil/1)
@@ -267,9 +388,42 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   defp slot_key_atom("_primary"), do: :_primary
   defp slot_key_atom("model"), do: :model
-  defp slot_key_atom("prompt"), do: :prompt
+  defp slot_key_atom("structured_schema"), do: :structured_schema
   defp slot_key_atom("tools"), do: :tools
   defp slot_key_atom(_key), do: nil
+
+  defp config_value(config, "system_prompt") when is_map(config),
+    do: Map.get(config, "system_prompt") || Map.get(config, :system_prompt)
+
+  defp config_value(config, "user_message") when is_map(config),
+    do: Map.get(config, "user_message") || Map.get(config, :user_message)
+
+  defp config_value(config, "user_prompt") when is_map(config),
+    do: Map.get(config, "user_prompt") || Map.get(config, :user_prompt)
+
+  defp validate_required_message(config, errors) do
+    case config_value(config, "user_message") do
+      message when is_binary(message) ->
+        if String.trim(message) == "" do
+          [{:user_message, "is required"} | errors]
+        else
+          errors
+        end
+
+      _ ->
+        [{:user_message, "is required"} | errors]
+    end
+  end
+
+  defp validate_optional_prompt(config, field, errors) do
+    case config_value(config, field) do
+      nil -> errors
+      prompt when is_binary(prompt) -> errors
+      _ -> [{config_error_key(field), "must be a string"} | errors]
+    end
+  end
+
+  defp config_error_key("system_prompt"), do: :system_prompt
 
   defp scope_and_organization(ctx) when is_map(ctx) do
     with {:ok, scope} <- scope_from_context(ctx),

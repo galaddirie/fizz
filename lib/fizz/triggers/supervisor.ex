@@ -13,7 +13,10 @@ defmodule Fizz.Triggers.Supervisor do
   def init(_opts) do
     Supervisor.init(
       [
-        Fizz.Triggers.Registry
+        Fizz.Triggers.Registry,
+        {Registry, keys: :unique, name: Fizz.Triggers.SourceRegistry},
+        {DynamicSupervisor, name: Fizz.Triggers.SourceSupervisor, strategy: :one_for_one},
+        Fizz.Triggers.SourceReconciler
       ],
       strategy: :rest_for_one
     )

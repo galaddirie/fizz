@@ -6,6 +6,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
   use Fizz.Schema
 
   alias Fizz.Accounts.Project
+  alias Fizz.Triggers.TriggerSource
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun}
 
   @type t :: %__MODULE__{}
@@ -37,6 +38,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
     belongs_to :definition_version, WorkflowDefinitionVersion
     belongs_to :project, Project
     belongs_to :run, WorkflowRun
+    belongs_to :trigger_source, TriggerSource
 
     timestamps()
   end
@@ -52,6 +54,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
       :step_id,
       :user_id,
       :project_id,
+      :trigger_source_id,
       :workos_organization_id,
       :run_id,
       :kind,
@@ -94,6 +97,7 @@ defmodule Fizz.Triggers.TriggerRegistration do
     |> foreign_key_constraint(:definition_version_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:run_id)
+    |> foreign_key_constraint(:trigger_source_id)
     |> unique_constraint([:definition_version_id, :step_id, :user_id],
       name: :trigger_registrations_definition_level_step_user_index
     )

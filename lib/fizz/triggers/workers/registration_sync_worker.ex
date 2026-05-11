@@ -40,8 +40,14 @@ defmodule Fizz.Triggers.Workers.RegistrationSyncWorker do
       [version, definition],
       version.status == :published and is_nil(definition.archived_at)
     )
+    |> order_by([version],
+      asc: version.workflow_definition_id,
+      desc: version.published_at,
+      desc: version.inserted_at
+    )
     |> select([version], version)
     |> Repo.all()
+    |> Enum.uniq_by(& &1.workflow_definition_id)
     |> Enum.each(fn version ->
       case RegistrationManager.sync_on_publish(version) do
         :ok ->

@@ -1488,6 +1488,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   @doc false
   def resolution_context(input, meta_ctx, dependencies) do
+    workflow = Map.get(meta_ctx, :workflow) || %{}
+    metadata = Map.get(meta_ctx, :metadata) || %{}
+
     %{
       input: input,
       steps:
@@ -1495,8 +1498,15 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         |> Enum.reduce(%{}, fn step_id, acc ->
           Map.put(acc, step_id, Map.get(meta_ctx, {:step_output, step_id}))
         end),
-      workflow: Map.get(meta_ctx, :workflow) || %{},
+      workflow: workflow,
       env: Map.get(meta_ctx, :env) || %{},
+      metadata: metadata,
+      scope: Map.get(meta_ctx, :scope),
+      current_scope: Map.get(meta_ctx, :current_scope),
+      user_id: runtime_context_value(meta_ctx, workflow, metadata, :user_id),
+      project_id: runtime_context_value(meta_ctx, workflow, metadata, :project_id),
+      workos_organization_id:
+        runtime_context_value(meta_ctx, workflow, metadata, :workos_organization_id),
       _slot_resolver: Map.get(meta_ctx, :_slot_resolver)
     }
   end
@@ -1507,8 +1517,18 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       input: input,
       steps: Map.get(resolution_context, :steps, %{}),
       workflow: Map.get(resolution_context, :workflow, %{}),
-      env: Map.get(resolution_context, :env, %{})
+      env: Map.get(resolution_context, :env, %{}),
+      metadata: Map.get(resolution_context, :metadata, %{}),
+      scope: Map.get(resolution_context, :scope),
+      current_scope: Map.get(resolution_context, :current_scope),
+      user_id: Map.get(resolution_context, :user_id),
+      project_id: Map.get(resolution_context, :project_id),
+      workos_organization_id: Map.get(resolution_context, :workos_organization_id)
     })
+  end
+
+  defp runtime_context_value(meta_ctx, workflow, metadata, key) do
+    Map.get(meta_ctx, key) || Map.get(workflow, key) || Map.get(metadata, key)
   end
 
   @doc false

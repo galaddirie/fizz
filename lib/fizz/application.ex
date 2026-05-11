@@ -46,6 +46,7 @@ defmodule Fizz.Application do
         {Oban, Application.fetch_env!(:fizz, Oban)},
         {Phoenix.PubSub, name: Fizz.PubSub},
         FizzWeb.Presence,
+        Fizz.Integrations.Registry,
 
         # Step type registry - must start before endpoint so types are available
         Fizz.Steps.Registry

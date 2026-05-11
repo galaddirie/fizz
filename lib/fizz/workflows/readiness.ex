@@ -2,8 +2,9 @@ defmodule Fizz.Workflows.Readiness do
   @moduledoc """
   Pre-run readiness check for a user against a workflow definition.
 
-  Walks step configs for slot declarations and reports any slots the user has
-  not yet bound. Used by:
+  Walks step configs for slot declarations, first auto-binding any safe
+  single-choice OAuth credential slots, then reports any slots the user has not
+  yet bound. Used by:
 
     * The editor's run-launch flow — to gate `start_run` with a binding modal.
     * Trigger registration — so a user can't register a webhook/cron trigger
@@ -32,6 +33,8 @@ defmodule Fizz.Workflows.Readiness do
           :ready | {:needs_bindings, [descriptor()]}
   def check(%WorkflowDefinitionVersion{} = version, user_id, %Scope{} = scope)
       when is_binary(user_id) do
+    _ = Slots.ensure_auto_bindings(version, user_id, scope)
+
     Slots.readiness(version, user_id, scope)
   end
 end

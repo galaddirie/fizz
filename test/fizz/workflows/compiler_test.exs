@@ -158,6 +158,7 @@ defmodule Fizz.Workflows.CompilerTest do
 
   test "root steps assemble input-connected subnodes into runnable input payloads" do
     {version, ids} = ai_agent_version()
+    expected_schema = ai_agent_response_schema()
 
     assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
 
@@ -177,6 +178,21 @@ defmodule Fizz.Workflows.CompilerTest do
              %{"role" => "user", "content" => "Hello Ada Lovelace"}
            ]
 
+    assert output["structured_schema"] == %{
+             "name" => "agent_response",
+             "json_schema" => expected_schema,
+             "strict" => true
+           }
+
+    assert output["response_format"] == %{
+             "type" => "json_schema",
+             "json_schema" => %{
+               "name" => "agent_response",
+               "schema" => expected_schema,
+               "strict" => true
+             }
+           }
+
     assert output["tools"] == [
              %{
                "type" => "http",
@@ -195,7 +211,7 @@ defmodule Fizz.Workflows.CompilerTest do
     version = missing_required_subnode_input_version()
 
     assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "missing required subnode input `prompt`"
+    assert message =~ "missing required subnode input `model`"
   end
 
   test "compile rejects subnodes whose type does not match the target input" do
@@ -576,7 +592,7 @@ defmodule Fizz.Workflows.CompilerTest do
     entry_id = Ecto.UUID.generate()
     agent_id = Ecto.UUID.generate()
     model_id = Ecto.UUID.generate()
-    prompt_id = Ecto.UUID.generate()
+    schema_id = Ecto.UUID.generate()
     tool_id = Ecto.UUID.generate()
 
     version = %WorkflowDefinitionVersion{
@@ -594,7 +610,11 @@ defmodule Fizz.Workflows.CompilerTest do
           id: agent_id,
           type_id: "ai_agent",
           name: "Agent",
-          config: %{"mode" => "assemble_only"},
+          config: %{
+            "mode" => "assemble_only",
+            "system_prompt" => "Solve carefully.",
+            "user_message" => "Hello {{ input.name }}"
+          },
           position: %{},
           notes: nil
         },
@@ -612,12 +632,13 @@ defmodule Fizz.Workflows.CompilerTest do
           notes: nil
         },
         %Step{
-          id: prompt_id,
-          type_id: "ai_prompt_template",
-          name: "Prompt",
+          id: schema_id,
+          type_id: "ai_structure_schema",
+          name: "Structure Schema",
           config: %{
-            "system_prompt" => "Solve carefully.",
-            "user_prompt" => "Hello {{ input.name }}"
+            "name" => "agent_response",
+            "json_schema" => ai_agent_response_schema(),
+            "strict" => true
           },
           position: %{},
           notes: nil
@@ -652,10 +673,10 @@ defmodule Fizz.Workflows.CompilerTest do
         },
         %Connection{
           id: Ecto.UUID.generate(),
-          source_step_id: prompt_id,
+          source_step_id: schema_id,
           source_output: "main",
           target_step_id: agent_id,
-          target_input: "prompt"
+          target_input: "structured_schema"
         },
         %Connection{
           id: Ecto.UUID.generate(),
@@ -676,7 +697,6 @@ defmodule Fizz.Workflows.CompilerTest do
   defp missing_required_subnode_input_version do
     entry_id = Ecto.UUID.generate()
     agent_id = Ecto.UUID.generate()
-    model_id = Ecto.UUID.generate()
 
     %WorkflowDefinitionVersion{
       id: Ecto.UUID.generate(),
@@ -693,15 +713,7 @@ defmodule Fizz.Workflows.CompilerTest do
           id: agent_id,
           type_id: "ai_agent",
           name: "Agent",
-          config: %{},
-          position: %{},
-          notes: nil
-        },
-        %Step{
-          id: model_id,
-          type_id: "openai_model",
-          name: "Model",
-          config: %{"credential_ref" => credential_ref("openai_api_key")},
+          config: %{"user_message" => "{{ json }}"},
           position: %{},
           notes: nil
         }
@@ -713,13 +725,6 @@ defmodule Fizz.Workflows.CompilerTest do
           source_output: "main",
           target_step_id: agent_id,
           target_input: "main"
-        },
-        %Connection{
-          id: Ecto.UUID.generate(),
-          source_step_id: model_id,
-          source_output: "main",
-          target_step_id: agent_id,
-          target_input: "model"
         }
       ],
       step_groups: [],
@@ -837,6 +842,17 @@ defmodule Fizz.Workflows.CompilerTest do
       "provider" => provider,
       "auth_type" => "api_key",
       "owner_user_id" => "user_123"
+    }
+  end
+
+  defp ai_agent_response_schema do
+    %{
+      "type" => "object",
+      "additionalProperties" => false,
+      "properties" => %{
+        "answer" => %{"type" => "string"}
+      },
+      "required" => ["answer"]
     }
   end
 end
