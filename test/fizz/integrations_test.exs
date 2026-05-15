@@ -254,13 +254,13 @@ defmodule Fizz.IntegrationsTest do
              OpenAIApiKey.generate_text(
                scope,
                org_id,
-               "openai:gpt-4o-mini",
+               "openai:gpt-5.5",
                "Say hello",
                temperature: 0.2,
                credential_ref: credential_ref
              )
 
-    assert_receive {:req_llm_called, :generate_text, "openai:gpt-4o-mini", "Say hello",
+    assert_receive {:req_llm_called, :generate_text, "openai:gpt-5.5", "Say hello",
                     generate_text_opts}
 
     assert generate_text_opts[:api_key] == "sk-openai-req-llm"
@@ -281,11 +281,11 @@ defmodule Fizz.IntegrationsTest do
     assert bare_generate_text_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :stream_text}} =
-             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-4o-mini", "Stream hello",
+             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-5.5", "Stream hello",
                credential_ref: credential_ref
              )
 
-    assert_receive {:req_llm_called, :stream_text, "openai:gpt-4o-mini", "Stream hello",
+    assert_receive {:req_llm_called, :stream_text, "openai:gpt-5.5", "Stream hello",
                     stream_text_opts}
 
     assert stream_text_opts[:api_key] == "sk-openai-req-llm"
@@ -294,13 +294,13 @@ defmodule Fizz.IntegrationsTest do
              OpenAIApiKey.generate_object(
                scope,
                org_id,
-               "openai:gpt-4o-mini",
+               "openai:gpt-5.5",
                "Generate a person",
                [name: [type: :string, required: true]],
                credential_ref: credential_ref
              )
 
-    assert_receive {:req_llm_called, :generate_object, "openai:gpt-4o-mini", "Generate a person",
+    assert_receive {:req_llm_called, :generate_object, "openai:gpt-5.5", "Generate a person",
                     [name: [type: :string, required: true]], generate_object_opts}
 
     assert generate_object_opts[:api_key] == "sk-openai-req-llm"
@@ -328,7 +328,7 @@ defmodule Fizz.IntegrationsTest do
              OpenAIApiKey.generate_text(
                scope,
                "org_missing_ref",
-               "openai:gpt-4o-mini",
+               "openai:gpt-5.5",
                "Say hello"
              )
   end

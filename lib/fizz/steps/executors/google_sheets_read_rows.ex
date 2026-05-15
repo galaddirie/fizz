@@ -25,7 +25,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsReadRows do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["spreadsheet_id"],
+    "required" => ["credential_ref", "spreadsheet_id"],
     "properties" => %{
       "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Google Account"),
       "spreadsheet_id" => %{

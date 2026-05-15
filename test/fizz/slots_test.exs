@@ -1,11 +1,12 @@
 defmodule Fizz.SlotsTest do
   use Fizz.DataCase, async: true
 
-  alias Fizz.Accounts.ApiCredential
+  alias Fizz.Accounts.{ApiCredential, OauthConnection}
   alias Fizz.Accounts.Scope
   alias Fizz.Slots
   alias Fizz.Slots.Declaration
   alias Fizz.Workflows
+  alias Fizz.Workflows.SlotDefaults
   alias Fizz.WorkflowsFixtures
 
   describe "slot declarations" do
@@ -62,6 +63,83 @@ defmodule Fizz.SlotsTest do
                  spec: %{"provider" => "openai_api_key", "auth_type" => "api_key"}
                }
              ] = Slots.required_slots(steps)
+    end
+  end
+
+  describe "slot defaults" do
+    test "restores missing slot declarations from step default config" do
+      step =
+        WorkflowsFixtures.step(%{
+          type_id: "google_sheets_append_row",
+          config: %{"credential_ref" => nil, "spreadsheet_id" => "sheet", "values" => %{}}
+        })
+
+      assert [
+               %{
+                 config: %{
+                   "credential_ref" => %{
+                     "$slot" => true,
+                     "kind" => "credential",
+                     "slot_key" => "auth",
+                     "spec" => %{"provider" => "google_oauth", "auth_type" => "oauth"}
+                   }
+                 }
+               }
+             ] = SlotDefaults.normalize_steps([step])
+    end
+
+    test "does not overwrite concrete legacy credential refs" do
+      legacy_ref = %{
+        "id" => Ecto.UUID.generate(),
+        "provider" => "google_oauth",
+        "auth_type" => "oauth"
+      }
+
+      step =
+        WorkflowsFixtures.step(%{
+          type_id: "google_sheets_append_row",
+          config: %{"credential_ref" => legacy_ref, "spreadsheet_id" => "sheet", "values" => %{}}
+        })
+
+      assert [%{config: %{"credential_ref" => ^legacy_ref}}] =
+               SlotDefaults.normalize_steps([step])
+    end
+  end
+
+  describe "ensure_auto_bindings/3" do
+    test "auto-binds one available WorkOS OAuth connection for restored credential slots" do
+      scope = WorkflowsFixtures.project_scope_fixture()
+
+      append_step =
+        WorkflowsFixtures.step(%{
+          type_id: "google_sheets_append_row",
+          config: %{
+            "credential_ref" => nil,
+            "spreadsheet_id" => "sheet_123",
+            "values" => %{"A" => "1"}
+          }
+        })
+
+      {:ok, %{draft: draft}} =
+        Workflows.create_definition(scope, %{
+          name: "OAuth slot workflow #{System.unique_integer([:positive])}",
+          description: "Slot auto-bind test"
+        })
+
+      {:ok, version} =
+        Workflows.save_draft(
+          scope,
+          draft,
+          WorkflowsFixtures.snapshot_attrs(%{steps: [append_step]})
+        )
+
+      connection = insert_oauth_connection!(scope.user.id, scope.organization_id, "google_oauth")
+
+      assert {:ok, [binding]} = Slots.ensure_auto_bindings(version, scope.user.id, scope)
+      assert binding.step_id == append_step.id
+      assert binding.slot_key == "auth"
+      assert binding.binding_data == %{"credential_id" => connection.id}
+      assert Slots.readiness(version, scope.user.id, scope) == :ready
     end
   end
 
@@ -153,6 +231,17 @@ defmodule Fizz.SlotsTest do
       provider_label: "Credential #{unique}",
       vault_object_id: "vault_obj_#{unique}",
       vault_object_name: "vault_name_#{unique}"
+    })
+    |> Repo.insert!()
+  end
+
+  defp insert_oauth_connection!(user_id, organization_id, provider) do
+    %OauthConnection{}
+    |> OauthConnection.changeset(%{
+      user_id: user_id,
+      workos_organization_id: organization_id,
+      provider: provider,
+      status: :active
     })
     |> Repo.insert!()
   end

@@ -70,17 +70,8 @@ defmodule Fizz.Workflows.PublishValidation do
     Enum.flat_map(steps, fn step ->
       config = step.config || %{}
 
-      config
-      |> Declaration.walk()
-      |> Enum.flat_map(fn %{path: path, declaration: declaration} ->
-        case Declaration.validate(declaration) do
-          :ok ->
-            []
-
-          {:error, message} ->
-            [%{step_id: step.id, field: Declaration.format_path(path), message: message}]
-        end
-      end)
+      required_slot_declaration_issues(step, config) ++
+        configured_slot_declaration_issues(step, config)
     end)
   end
 
@@ -191,15 +182,115 @@ defmodule Fizz.Workflows.PublishValidation do
   defp required_fields_for_step(type_id) do
     case step_type(type_id) do
       {:ok, %Type{} = type} ->
-        type.config_schema
-        |> Map.get("required", [])
-        |> List.wrap()
-        |> Enum.filter(&is_binary/1)
+        config_schema = type.config_schema
+        properties = schema_properties(config_schema)
+
+        config_schema
+        |> schema_required_fields()
+        |> Enum.reject(fn field -> slot_schema_property?(Map.get(properties, field)) end)
 
       :error ->
         []
     end
   end
+
+  defp required_slot_fields_for_step(type_id) do
+    case step_type(type_id) do
+      {:ok, %Type{} = type} ->
+        type.config_schema
+        |> schema_properties()
+        |> Enum.flat_map(fn
+          {field, property} when is_binary(field) ->
+            case slot_schema_property?(property) do
+              true -> [field]
+              false -> []
+            end
+
+          _property ->
+            []
+        end)
+
+      :error ->
+        []
+    end
+  end
+
+  defp configured_slot_declaration_issues(step, config) do
+    config
+    |> Declaration.walk()
+    |> Enum.flat_map(fn %{path: path, declaration: declaration} ->
+      case Declaration.validate(declaration) do
+        :ok ->
+          []
+
+        {:error, message} ->
+          [%{step_id: step.id, field: Declaration.format_path(path), message: message}]
+      end
+    end)
+  end
+
+  defp required_slot_declaration_issues(step, config) do
+    step.type_id
+    |> required_slot_fields_for_step()
+    |> Enum.flat_map(fn field ->
+      case Map.fetch(config, field) do
+        {:ok, value} -> required_slot_value_issues(step, field, value)
+        :error -> [%{step_id: step.id, field: field, message: "is required"}]
+      end
+    end)
+  end
+
+  defp required_slot_value_issues(step, field, value) do
+    case Declaration.declaration?(value) do
+      true ->
+        []
+
+      false ->
+        [%{step_id: step.id, field: field, message: required_slot_message(value)}]
+    end
+  end
+
+  defp required_slot_message(value) do
+    case missing_required_value?(value) do
+      true -> "is required"
+      false -> "must be a slot declaration"
+    end
+  end
+
+  defp schema_required_fields(%{"required" => required}) do
+    required
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp schema_required_fields(%{required: required}) do
+    required
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp schema_required_fields(_schema), do: []
+
+  defp schema_properties(%{"properties" => properties}) when is_map(properties), do: properties
+  defp schema_properties(%{properties: properties}) when is_map(properties), do: properties
+  defp schema_properties(_schema), do: %{}
+
+  defp slot_schema_property?(property) when is_map(property) do
+    property
+    |> property_ui()
+    |> ui_component()
+    |> Kernel.==("slot")
+  end
+
+  defp slot_schema_property?(_property), do: false
+
+  defp property_ui(%{"ui" => ui}) when is_map(ui), do: ui
+  defp property_ui(%{ui: ui}) when is_map(ui), do: ui
+  defp property_ui(_property), do: %{}
+
+  defp ui_component(%{"component" => component}), do: component
+  defp ui_component(%{component: component}), do: component
+  defp ui_component(_ui), do: nil
 
   defp missing_required_value?(nil), do: true
   defp missing_required_value?(value) when is_binary(value), do: String.trim(value) == ""

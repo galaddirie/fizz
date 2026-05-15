@@ -160,3 +160,16 @@ We currently support oauth for google, slack, notion, box, github, and custom ap
 but is this correct for all apps? what would it look like if users wanted make a slack/discord bot, what about a github app? what about google?
 
 add settings page, need to reconcile ux on how we we will display editor/owner settings like workflow name, deleting the workflow etc. and how to handle viewers/runners who need to manage things like what credentials they have bound.
+
+
+
+issues
+- for fields like a object inut, we shouldnt show tree and table views, just json, that also means hide the otions/tab selectors 
+-rename structured schema sub node slot to schema
+- do we need to differentiate between fixed and expression? might be unnecessary
+    - but what about special ui inputs like Row Values @MapEditor for google sheets append row? what if we dont want a special ui input and just want to send json, ex. you get a table structure from a upstream node, doesnt make sense to put that in a single cell via map editor input 
+    map editor is already a "fixed" input but evaluates expressions inside the table.
+
+-cant ctrl c + p copy and paste from step config model
+
+- how should we organize custom ui? specific to a integration/provider like google

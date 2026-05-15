@@ -399,7 +399,10 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   end
 
   defp build_step(step, steps, accumulators, step_scope, subnode_input_assembly) do
-    meta_refs = build_meta_refs(step.dependencies, accumulators)
+    meta_refs =
+      step
+      |> executor_dependencies()
+      |> build_meta_refs(accumulators)
 
     cond do
       step.node_role == :subnode ->
@@ -437,6 +440,56 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       capture_refs: [],
       meta_targets: []
     }
+  end
+
+  @credential_runtime_keys [
+    :_slot_resolver,
+    :current_scope,
+    :user_id,
+    :project_id,
+    :workos_organization_id
+  ]
+
+  defp executor_dependencies(%{type_id: "ai_agent", dependencies: dependencies} = step) do
+    step
+    |> credential_runtime_dependencies(dependencies)
+    |> update_runtime_keys([:current_scope])
+  end
+
+  defp executor_dependencies(%{dependencies: dependencies} = step) do
+    credential_runtime_dependencies(step, dependencies)
+  end
+
+  defp credential_runtime_dependencies(step, dependencies) do
+    if credential_ref_config?(Map.get(step, :compiled_config)) do
+      update_runtime_keys(dependencies, @credential_runtime_keys)
+    else
+      dependencies
+    end
+  end
+
+  defp credential_ref_config?(%{"credential_ref" => %AccessPlan.SlotRef{}}), do: true
+
+  defp credential_ref_config?(%{credential_ref: %AccessPlan.SlotRef{}}), do: true
+
+  defp credential_ref_config?(%{__struct__: _struct}), do: false
+
+  defp credential_ref_config?(map) when is_map(map) do
+    Enum.any?(map, fn {_key, value} -> credential_ref_config?(value) end)
+  end
+
+  defp credential_ref_config?(list) when is_list(list),
+    do: Enum.any?(list, &credential_ref_config?/1)
+
+  defp credential_ref_config?(_value), do: false
+
+  defp update_runtime_keys(dependencies, runtime_keys) do
+    Map.update(dependencies, :runtime_keys, runtime_keys, fn existing_keys ->
+      existing_keys
+      |> List.wrap()
+      |> Kernel.++(runtime_keys)
+      |> Enum.uniq()
+    end)
   end
 
   defp build_root_step(step, steps, accumulators, meta_refs, subnode_input_assembly) do
@@ -1041,14 +1094,13 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       end)
 
     runtime_refs =
-      Enum.map(dependencies.runtime_keys, fn
-        runtime_key when runtime_key in [:workflow, :env, :_slot_resolver] ->
-          %{
-            kind: :context,
-            target: runtime_key,
-            field_path: [],
-            context_key: runtime_key
-          }
+      Enum.map(dependencies.runtime_keys, fn runtime_key ->
+        %{
+          kind: :context,
+          target: runtime_key,
+          field_path: [],
+          context_key: runtime_key
+        }
       end)
 
     step_refs ++ runtime_refs

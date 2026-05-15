@@ -34,6 +34,83 @@ defmodule Fizz.Workflows.DraftValidatorTest do
            end)
   end
 
+  test "validate_for_publish requires credential slot declarations for slot-backed fields" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+
+    append_step =
+      WorkflowsFixtures.step(%{
+        type_id: "google_sheets_append_row",
+        config: %{
+          "credential_ref" => nil,
+          "spreadsheet_id" => "sheet_123",
+          "values" => %{"A" => "1"}
+        }
+      })
+
+    version =
+      version_from_snapshot(
+        WorkflowsFixtures.snapshot_attrs(%{
+          steps: [append_step]
+        })
+      )
+
+    assert {:error, errors} = DraftValidator.validate_for_publish(version, scope)
+
+    assert Enum.any?(errors, fn
+             %ValidationError{
+               code: :invalid_slot_declaration,
+               step_id: step_id,
+               field: "credential_ref",
+               message: "is required"
+             } ->
+               step_id == append_step.id
+
+             _ ->
+               false
+           end)
+  end
+
+  test "validate_for_publish rejects legacy concrete credential refs in authored config" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+
+    append_step =
+      WorkflowsFixtures.step(%{
+        type_id: "google_sheets_append_row",
+        config: %{
+          "credential_ref" => %{
+            "id" => Ecto.UUID.generate(),
+            "provider" => "google_oauth",
+            "auth_type" => "oauth",
+            "owner_user_id" => scope.user.id
+          },
+          "spreadsheet_id" => "sheet_123",
+          "values" => %{"A" => "1"}
+        }
+      })
+
+    version =
+      version_from_snapshot(
+        WorkflowsFixtures.snapshot_attrs(%{
+          steps: [append_step]
+        })
+      )
+
+    assert {:error, errors} = DraftValidator.validate_for_publish(version, scope)
+
+    assert Enum.any?(errors, fn
+             %ValidationError{
+               code: :invalid_slot_declaration,
+               step_id: step_id,
+               field: "credential_ref",
+               message: "must be a slot declaration"
+             } ->
+               step_id == append_step.id
+
+             _ ->
+               false
+           end)
+  end
+
   test "validate_for_publish catches invalid expressions" do
     scope = WorkflowsFixtures.project_scope_fixture()
 

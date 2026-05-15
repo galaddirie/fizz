@@ -5,7 +5,9 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
   import Ecto.Query
   import Fizz.WorkflowsFixtures
 
+  alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
+  alias Fizz.Slots
   alias Fizz.Triggers.Registry
   alias Fizz.Triggers.TriggerRegistration
   alias Fizz.Triggers.Workers.TriggerFireWorker
@@ -69,7 +71,7 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
     conn: conn
   } do
     scope = project_scope_fixture()
-    %{version: version} = published_version_fixture(scope, github_workflow_snapshot_attrs())
+    version = publish_github_workflow!(scope, github_workflow_snapshot_attrs())
     registration = webhook_registration(version.id)
 
     start_supervised!({Registry, notifications?: false, refresh_interval_ms: :timer.hours(1)})
@@ -129,6 +131,8 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
     assert {:ok, saved_v1} =
              Workflows.save_draft(scope, draft, github_workflow_snapshot_attrs(trigger_step_id))
 
+    bind_github_trigger!(saved_v1, scope, definition.id, trigger_step_id)
+
     assert {:ok, version_one} = Workflows.publish_draft(scope, saved_v1)
 
     first_registration = webhook_registration(version_one.id)
@@ -173,7 +177,10 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
         id: step_id,
         type_id: "github_trigger",
         name: "GitHub Trigger",
-        config: %{"events" => ["push"], "repository" => repository}
+        config:
+          "github_trigger"
+          |> Fizz.Steps.Registry.get_default_config()
+          |> Map.merge(%{"events" => ["push"], "repository" => repository})
       })
 
     debug = step(%{id: Ecto.UUID.generate(), type_id: "debug", name: "Debug"})
@@ -227,6 +234,43 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
       })
 
     %{definition: definition, draft: draft}
+  end
+
+  defp publish_github_workflow!(scope, snapshot_attrs) do
+    %{definition: definition, draft: draft} = create_definition_fixture(scope)
+    [trigger | _steps] = snapshot_attrs.steps
+
+    {:ok, saved_draft} = Workflows.save_draft(scope, draft, snapshot_attrs)
+    bind_github_trigger!(saved_draft, scope, definition.id, trigger.id)
+
+    assert {:ok, version} = Workflows.publish_draft(scope, saved_draft)
+    version
+  end
+
+  defp bind_github_trigger!(version, scope, workflow_definition_id, trigger_step_id) do
+    connection = insert_oauth_connection!(scope, "github_oauth")
+
+    assert {:ok, _binding} =
+             Slots.upsert_binding(version, scope, %{
+               user_id: scope.user.id,
+               workflow_definition_id: workflow_definition_id,
+               step_id: trigger_step_id,
+               slot_key: "auth",
+               kind: "credential",
+               binding_data: %{"credential_id" => connection.id},
+               workos_organization_id: scope.organization_id
+             })
+  end
+
+  defp insert_oauth_connection!(scope, provider) do
+    %OauthConnection{}
+    |> OauthConnection.changeset(%{
+      workos_organization_id: scope.organization_id,
+      user_id: scope.user.id,
+      provider: provider,
+      status: :active
+    })
+    |> Repo.insert!()
   end
 
   defp eventually(fun, attempts \\ 100)

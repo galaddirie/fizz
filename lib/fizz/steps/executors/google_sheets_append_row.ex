@@ -25,7 +25,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRow do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["spreadsheet_id", "values"],
+    "required" => ["credential_ref", "spreadsheet_id", "values"],
     "properties" => %{
       "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Google Account"),
       "spreadsheet_id" => %{
@@ -35,12 +35,23 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRow do
       "sheet_name" => %{
         "type" => "string",
         "title" => "Sheet Name",
-        "default" => "Sheet1"
+        "default" => "",
+        "ui" => %{"component" => "hidden"}
+      },
+      "table_id" => %{
+        "type" => "string",
+        "title" => "Table ID",
+        "default" => "",
+        "ui" => %{"component" => "hidden"}
       },
       "values" => %{
         "type" => "object",
         "title" => "Row Values",
-        "description" => "Map of column header → value"
+        "description" => "Map a value to each column in your sheet.",
+        "ui" => %{
+          "component" => "map",
+          "resolver" => Fizz.Integrations.Google.Sheets.ColumnsResolver
+        }
       }
     }
   }

@@ -16,6 +16,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
   alias Fizz.Integrations.Google.Sheets.Triggers.RowChange
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Slots.CredentialSlot
+  alias Fizz.Slots.Declaration
   alias Fizz.Triggers.RegistrationSpec
 
   @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
@@ -32,7 +33,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
 
   @config_schema %{
     "type" => "object",
-    "required" => ["spreadsheet_id", "sheet_name"],
+    "required" => ["credential_ref", "spreadsheet_id", "sheet_name"],
     "properties" => %{
       "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Google Account"),
       "spreadsheet_id" => %{
@@ -128,6 +129,9 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
   @impl true
   def validate_config(config) do
     cond do
+      not Declaration.declaration?(Map.get(config, "credential_ref")) ->
+        {:error, [credential_ref: "must be a slot declaration"]}
+
       not present?(Map.get(config, "spreadsheet_id")) ->
         {:error, [spreadsheet_id: "is required"]}
 

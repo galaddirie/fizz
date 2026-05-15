@@ -5,6 +5,7 @@ defmodule Fizz.Workflows.DraftSession do
 
   alias Fizz.Workflows
   alias Fizz.Workflows.DraftSession.Operation
+  alias Fizz.Workflows.SlotDefaults
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
   require Logger
@@ -476,11 +477,19 @@ defmodule Fizz.Workflows.DraftSession do
 
   # --- Persistence ---
 
-  defp persist(%__MODULE__{dirty?: false} = state) do
-    {:ok, put_save_status(state, :saved, nil)}
+  defp persist(%__MODULE__{} = state) do
+    normalized_draft = SlotDefaults.normalize_version(state.draft)
+    needs_persist? = state.dirty? or normalized_draft != state.draft
+    state = %{state | draft: normalized_draft}
+
+    if not needs_persist? do
+      {:ok, put_save_status(state, :saved, nil)}
+    else
+      persist_dirty(state)
+    end
   end
 
-  defp persist(%__MODULE__{} = state) do
+  defp persist_dirty(%__MODULE__{} = state) do
     state = put_save_status(state, :saving, nil)
 
     case persist_to_db(state) do

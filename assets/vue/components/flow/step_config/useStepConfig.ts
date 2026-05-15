@@ -252,15 +252,18 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             allKeys.delete('test_data');
         }
 
-        return Array.from(allKeys).map(key => {
+        return Array.from(allKeys).flatMap(key => {
             const schemaField: ConfigSchemaField = schema[key] ?? {};
             const uiComponent = (schemaField as any).ui?.component;
             const format = schemaField.format;
             const typeStr = schemaField.type;
             const rawValue = config[key] ?? schemaField.default;
 
+            if (uiComponent === 'hidden') return [];
+
             let inferredType: ExtendedFieldType = 'text';
             if (uiComponent === 'slot') inferredType = 'json';
+            else if (uiComponent === 'map') inferredType = 'map';
             else if (uiComponent === 'search') inferredType = 'search';
             else if (uiComponent === 'select') inferredType = 'select';
             else if (uiComponent === 'json') inferredType = 'json';
@@ -277,14 +280,14 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             else if (typeStr === 'number' || typeStr === 'integer') inferredType = 'number';
             else if (typeStr === 'boolean') inferredType = 'boolean';
 
-            return {
+            return [{
                 ...schemaField,
                 key,
                 label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
                 description: schemaField.description,
                 type: inferredType as ExtendedFieldType,
                 expressionCapable: uiComponent !== 'slot',
-            };
+            }];
         });
     });
 

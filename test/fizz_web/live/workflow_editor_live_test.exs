@@ -485,6 +485,49 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     GenServer.stop(view.pid, :normal)
   end
 
+  test "run_test restores missing slot declarations before readiness", %{conn: conn} do
+    append_step =
+      WorkflowsFixtures.step(%{
+        type_id: "google_sheets_append_row",
+        name: "Append Row",
+        config: %{
+          "credential_ref" => nil,
+          "spreadsheet_id" => "sheet_123",
+          "values" => %{"A" => "1"}
+        }
+      })
+
+    snapshot_attrs = WorkflowsFixtures.snapshot_attrs(%{steps: [append_step]})
+
+    %{conn: conn, definition: definition, project_scope: project_scope} =
+      editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} = live_editor(conn, definition)
+    assert {:ok, runs_before} = Workflows.list_runs(project_scope, definition_id: definition.id)
+
+    view
+    |> element("#workflow-editor")
+    |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
+
+    assert_push_event(view, "slot_bindings_needed", %{
+      descriptors: [
+        %{
+          kind: "credential",
+          step_id: step_id,
+          slot_key: "auth",
+          spec: %{"provider" => "google_oauth", "auth_type" => "oauth"}
+        }
+      ]
+    })
+
+    assert step_id == append_step.id
+    assert live_socket(view).assigns.execution == nil
+    assert live_socket(view).assigns.validation_errors == %{}
+
+    assert {:ok, runs_after} = Workflows.list_runs(project_scope, definition_id: definition.id)
+    assert runs_after == runs_before
+  end
+
   test "run_test uses saved manual trigger test data as workflow input", %{conn: conn} do
     trigger_step =
       WorkflowsFixtures.step(%{
@@ -1318,8 +1361,16 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     |> element("#workflow-editor")
     |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
 
-    assert_push_event(view, "compilation_errors", %{errors: [%{message: message} | _rest]})
-    assert message =~ "trigger steps must be graph roots with no incoming connections"
+    errors =
+      live_socket(view).assigns.validation_errors
+      |> Map.values()
+      |> List.flatten()
+
+    assert Enum.any?(errors, fn error ->
+             error.code == :trigger_not_root and
+               error.message =~ "trigger steps must be graph roots with no incoming connections"
+           end)
+
     assert live_socket(view).assigns.execution == nil
     assert live_socket(view).assigns.validation_errors != %{}
   end

@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported UI component types for field rendering. */
-export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'slot';
+export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'slot' | 'map' | 'hidden';
 
 /** Resolver-based configuration for dynamic option loading. */
 export interface UIResolverConfig {
@@ -77,7 +77,7 @@ export interface ConfigSchema {
 // ---------------------------------------------------------------------------
 
 /** Field types after UI component inference. */
-export type ExtendedFieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json' | 'search' | 'select';
+export type ExtendedFieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json' | 'search' | 'select' | 'map';
 
 /** A config field with all metadata needed for rendering. */
 export interface ConfigField {

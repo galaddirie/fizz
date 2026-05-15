@@ -221,6 +221,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
       Map.fetch!(structured_schema, "json_schema"),
       generation_opts(assembled)
     )
+    |> normalize_provider_error(assembled["model"])
   end
 
   defp generate_openai_response(scope, organization_id, assembled) do
@@ -231,7 +232,14 @@ defmodule Fizz.Steps.Executors.AIAgent do
       assembled["messages"],
       generation_opts(assembled)
     )
+    |> normalize_provider_error(assembled["model"])
   end
+
+  defp normalize_provider_error({:error, :not_found}, model) when is_binary(model) do
+    {:error, {:model_not_found, model}}
+  end
+
+  defp normalize_provider_error(result, _model), do: result
 
   defp generation_opts(assembled) do
     []
@@ -310,7 +318,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
     {:ok,
      %{
        "name" => schema_name(schema),
-       "json_schema" => json_schema,
+       "json_schema" => unwrap_pasted_schema(json_schema),
        "strict" => strict_schema?(schema)
      }}
   end
@@ -326,6 +334,22 @@ defmodule Fizz.Steps.Executors.AIAgent do
 
   defp normalize_structured_schema(_schema),
     do: {:error, {:invalid_subnode_output, :structured_schema}}
+
+  defp unwrap_pasted_schema(%{"json_schema" => json_schema} = schema)
+       when is_map(json_schema) and map_size(json_schema) > 0 do
+    if schema_wrapper?(schema, json_schema) do
+      unwrap_pasted_schema(json_schema)
+    else
+      schema
+    end
+  end
+
+  defp unwrap_pasted_schema(schema), do: schema
+
+  defp schema_wrapper?(schema, json_schema) do
+    not Map.has_key?(schema, "type") and Map.has_key?(json_schema, "type") and
+      Enum.any?(["name", "strict"], &Map.has_key?(schema, &1))
+  end
 
   defp prompt_from_primary(nil), do: nil
 
@@ -440,6 +464,8 @@ defmodule Fizz.Steps.Executors.AIAgent do
     scope =
       Map.get(ctx, :scope) ||
         Map.get(ctx, "scope") ||
+        Map.get(ctx, :current_scope) ||
+        Map.get(ctx, "current_scope") ||
         if(is_map(metadata), do: Map.get(metadata, :scope) || Map.get(metadata, "scope"))
 
     case scope do

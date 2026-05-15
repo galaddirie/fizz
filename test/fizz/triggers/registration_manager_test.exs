@@ -4,7 +4,9 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
   import Fizz.WorkflowsFixtures
 
+  alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
+  alias Fizz.Slots
   alias Fizz.Triggers
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Triggers.{TriggerRegistration, TriggerSource}
@@ -108,12 +110,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
         type_id: "google_sheets_trigger",
         name: "Google Sheets Trigger",
         config: %{
-          "credential_ref" => %{
-            "id" => "oauth_connection_1",
-            "provider" => "google_oauth",
-            "auth_type" => "oauth",
-            "owner_user_id" => scope.user.id
-          },
+          "credential_ref" => credential_slot("google_oauth", "oauth"),
           "spreadsheet_id" => "spreadsheet_1",
           "sheet_name" => "Sheet1",
           "event_mode" => "row_added_or_updated",
@@ -122,7 +119,22 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
         }
       })
 
-    %{version: version} = published_version_fixture(scope, snapshot_attrs(%{steps: [trigger]}))
+    %{definition: definition, draft: draft} = definition_fixture(scope)
+    {:ok, saved_draft} = Workflows.save_draft(scope, draft, snapshot_attrs(%{steps: [trigger]}))
+    connection = insert_oauth_connection!(scope, "google_oauth")
+
+    assert {:ok, _binding} =
+             Slots.upsert_binding(saved_draft, scope, %{
+               user_id: scope.user.id,
+               workflow_definition_id: definition.id,
+               step_id: trigger.id,
+               slot_key: "auth",
+               kind: "credential",
+               binding_data: %{"credential_id" => connection.id},
+               workos_organization_id: scope.organization_id
+             })
+
+    assert {:ok, version} = Workflows.publish_draft(scope, saved_draft)
 
     assert :ok = RegistrationManager.sync_on_publish(version)
 
@@ -176,6 +188,19 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
     assert {:ok, saved_v1} =
              Workflows.save_draft(scope, draft, webhook_snapshot_attrs(trigger_step_id))
+
+    connection = insert_oauth_connection!(scope, "github_oauth")
+
+    assert {:ok, _binding} =
+             Slots.upsert_binding(saved_v1, scope, %{
+               user_id: scope.user.id,
+               workflow_definition_id: definition.id,
+               step_id: trigger_step_id,
+               slot_key: "auth",
+               kind: "credential",
+               binding_data: %{"credential_id" => connection.id},
+               workos_organization_id: scope.organization_id
+             })
 
     assert {:ok, version_one} = Workflows.publish_draft(scope, saved_v1)
 
@@ -249,9 +274,32 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
           id: step_id,
           type_id: "github_trigger",
           name: "GitHub Trigger",
-          config: %{"events" => ["push"], "repository" => repository}
+          config:
+            "github_trigger"
+            |> Fizz.Steps.Registry.get_default_config()
+            |> Map.merge(%{"events" => ["push"], "repository" => repository})
         })
       ]
     })
+  end
+
+  defp credential_slot(provider, auth_type) do
+    %{
+      "$slot" => true,
+      "kind" => "credential",
+      "slot_key" => "auth",
+      "spec" => %{"provider" => provider, "auth_type" => auth_type}
+    }
+  end
+
+  defp insert_oauth_connection!(scope, provider) do
+    %OauthConnection{}
+    |> OauthConnection.changeset(%{
+      workos_organization_id: scope.organization_id,
+      user_id: scope.user.id,
+      provider: provider,
+      status: :active
+    })
+    |> Repo.insert!()
   end
 end

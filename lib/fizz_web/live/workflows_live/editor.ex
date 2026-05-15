@@ -655,25 +655,12 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         |> assign(:save_status, "saved")
         |> assign(:save_error, nil)
 
-      case Compiler.compile(execution_draft) do
-        {:ok, _workflow, _hash} ->
-          case Readiness.check(
-                 execution_draft,
-                 socket.assigns.current_user_id,
-                 socket.assigns.current_scope
-               ) do
-            :ready ->
-              proceed_editor_execution(socket, execution_draft, target_step_id)
-
-            {:needs_bindings, descriptors} ->
-              push_event(socket, "slot_bindings_needed", %{
-                target_step_id: target_step_id,
-                descriptors: descriptors
-              })
-          end
+      case DraftValidator.validate_for_publish(execution_draft, socket.assigns.current_scope) do
+        :ok ->
+          validate_compiled_editor_execution(socket, execution_draft, target_step_id)
 
         {:error, errors} ->
-          handle_compilation_errors(socket, errors)
+          handle_run_validation_errors(socket, errors)
       end
     else
       {:error, :step_not_found} ->
@@ -700,6 +687,29 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> start_editor_test_run(execution_draft, input, triggered_by)
   end
 
+  defp validate_compiled_editor_execution(socket, execution_draft, target_step_id) do
+    case Compiler.compile(execution_draft) do
+      {:ok, _workflow, _hash} ->
+        case Readiness.check(
+               execution_draft,
+               socket.assigns.current_user_id,
+               socket.assigns.current_scope
+             ) do
+          :ready ->
+            proceed_editor_execution(socket, execution_draft, target_step_id)
+
+          {:needs_bindings, descriptors} ->
+            push_event(socket, "slot_bindings_needed", %{
+              target_step_id: target_step_id,
+              descriptors: descriptors
+            })
+        end
+
+      {:error, errors} ->
+        handle_compilation_errors(socket, errors)
+    end
+  end
+
   defp start_editor_test_run(
          socket,
          %WorkflowDefinitionVersion{} = draft,
@@ -722,9 +732,24 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         |> refresh_execution_state(run.id)
         |> maybe_assign_started_execution(run)
 
+      {:error, {:slot_bindings_required, descriptors}} ->
+        push_event(socket, "slot_bindings_needed", %{
+          target_step_id: nil,
+          descriptors: descriptors
+        })
+
+      {:error, {:invalid_slot_declarations, issues}} ->
+        issues
+        |> slot_declaration_validation_errors()
+        |> then(&handle_run_validation_errors(socket, &1))
+
       {:error, reason} ->
         put_flash(socket, :error, "Could not start test run: #{inspect(reason)}")
     end
+  end
+
+  defp handle_run_validation_errors(socket, errors) do
+    assign(socket, :validation_errors, validation_error_map(errors))
   end
 
   defp handle_compilation_errors(socket, errors) do
@@ -2283,7 +2308,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp resolver_context(socket) do
-    %{current_scope: socket.assigns.current_scope}
+    %{
+      current_scope: socket.assigns.current_scope,
+      project_id: socket.assigns[:project_id]
+    }
   end
 
   defp maybe_push_credential_results(socket, CredentialsResolver, payload, options) do
@@ -2376,6 +2404,18 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp validation_error_map(errors) do
     Enum.group_by(errors, fn error -> error.step_id || @global_validation_key end, & &1)
+  end
+
+  defp slot_declaration_validation_errors(issues) do
+    Enum.map(issues, fn issue ->
+      %DraftValidator.ValidationError{
+        step_id: Map.get(issue, :step_id) || Map.get(issue, "step_id"),
+        field: Map.get(issue, :field) || Map.get(issue, "field"),
+        message: Map.get(issue, :message) || Map.get(issue, "message") || inspect(issue),
+        severity: :error,
+        code: :invalid_slot_declaration
+      }
+    end)
   end
 
   defp handle_publish_persist_error(socket, %Ecto.Changeset{} = changeset) do

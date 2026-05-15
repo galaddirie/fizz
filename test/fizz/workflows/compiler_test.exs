@@ -99,6 +99,46 @@ defmodule Fizz.Workflows.CompilerTest do
     assert match?(%AccessPlan.ValueExpression{}, compiled_config["label"])
   end
 
+  test "credential slot steps request runtime auth context" do
+    append_id = Ecto.UUID.generate()
+
+    version = %WorkflowDefinitionVersion{
+      id: Ecto.UUID.generate(),
+      steps: [
+        %Step{
+          id: append_id,
+          type_id: "google_sheets_append_row",
+          name: "Append Row",
+          config: %{
+            "credential_ref" => credential_slot("google_oauth", "oauth"),
+            "spreadsheet_id" => "sheet_123",
+            "values" => %{"A" => "1"}
+          },
+          position: %{},
+          notes: nil
+        }
+      ],
+      connections: [],
+      step_groups: [],
+      viewport: %{},
+      settings: %{}
+    }
+
+    assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
+
+    context_keys =
+      workflow
+      |> Workflow.get_component(append_id)
+      |> Map.fetch!(:meta_refs)
+      |> Enum.filter(&(&1.kind == :context))
+      |> Enum.map(& &1.context_key)
+
+    assert :current_scope in context_keys
+    assert :user_id in context_keys
+    assert :project_id in context_keys
+    assert :workos_organization_id in context_keys
+  end
+
   test "splitter fan-out and aggregator fan-in compile into runnable map/reduce semantics" do
     {version, ids} = map_reduce_version()
 
@@ -161,6 +201,8 @@ defmodule Fizz.Workflows.CompilerTest do
     expected_schema = ai_agent_response_schema()
 
     assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
+    assert {:ok, context_keys} = Map.fetch(Workflow.required_context_keys(workflow), ids.agent)
+    assert {:current_scope, :required} in context_keys
 
     workflow =
       workflow
@@ -171,7 +213,7 @@ defmodule Fizz.Workflows.CompilerTest do
 
     assert output["_primary"] == %{"name" => "Ada Lovelace", "topic" => "algebra"}
     assert output["provider"] == "openai_api_key"
-    assert output["model"] == "gpt-4.1-mini"
+    assert output["model"] == "gpt-5.5"
 
     assert output["messages"] == [
              %{"role" => "system", "content" => "Solve carefully."},
@@ -624,7 +666,7 @@ defmodule Fizz.Workflows.CompilerTest do
           name: "Model",
           config: %{
             "credential_ref" => credential_ref("openai_api_key"),
-            "model" => "gpt-4.1-mini",
+            "model" => "gpt-5.5",
             "temperature" => 0.3,
             "max_tokens" => 300
           },
@@ -842,6 +884,15 @@ defmodule Fizz.Workflows.CompilerTest do
       "provider" => provider,
       "auth_type" => "api_key",
       "owner_user_id" => "user_123"
+    }
+  end
+
+  defp credential_slot(provider, auth_type) do
+    %{
+      "$slot" => true,
+      "kind" => "credential",
+      "slot_key" => "auth",
+      "spec" => %{"provider" => provider, "auth_type" => auth_type}
     }
   end
 

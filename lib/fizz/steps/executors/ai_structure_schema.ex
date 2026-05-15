@@ -93,9 +93,28 @@ defmodule Fizz.Steps.Executors.AIStructureSchema do
 
   defp normalize_json_schema(config) do
     case Map.get(config, "json_schema") || Map.get(config, :json_schema) do
-      schema when is_map(schema) and map_size(schema) > 0 -> {:ok, schema}
-      _ -> {:error, {:invalid_config, :json_schema}}
+      schema when is_map(schema) and map_size(schema) > 0 ->
+        {:ok, unwrap_pasted_schema(schema)}
+
+      _ ->
+        {:error, {:invalid_config, :json_schema}}
     end
+  end
+
+  defp unwrap_pasted_schema(%{"json_schema" => json_schema} = schema)
+       when is_map(json_schema) and map_size(json_schema) > 0 do
+    if schema_wrapper?(schema, json_schema) do
+      unwrap_pasted_schema(json_schema)
+    else
+      schema
+    end
+  end
+
+  defp unwrap_pasted_schema(schema), do: schema
+
+  defp schema_wrapper?(schema, json_schema) do
+    not Map.has_key?(schema, "type") and Map.has_key?(json_schema, "type") and
+      Enum.any?(["name", "strict"], &Map.has_key?(schema, &1))
   end
 
   defp normalize_name(name) when is_binary(name) do
@@ -136,8 +155,8 @@ defmodule Fizz.Steps.Executors.AIStructureSchema do
   end
 
   defp validate_json_schema(config, errors) do
-    case Map.get(config, "json_schema") do
-      schema when is_map(schema) and map_size(schema) > 0 -> errors
+    case normalize_json_schema(config) do
+      {:ok, _schema} -> errors
       _ -> [{:json_schema, "is required"} | errors]
     end
   end

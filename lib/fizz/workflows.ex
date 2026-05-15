@@ -23,6 +23,7 @@ defmodule Fizz.Workflows do
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Embeds.Step
+  alias Fizz.Workflows.PublishValidation
   alias Fizz.Workflows.Readiness
   alias Fizz.Workflows.Runner.{Worker, WorkerSupervisor}
   alias Fizz.Workflows.Runtime.ContextBuilder
@@ -32,6 +33,7 @@ defmodule Fizz.Workflows do
   alias Fizz.Workflows.{
     DurableTimer,
     SignalInbox,
+    SlotDefaults,
     WorkflowDefinition,
     WorkflowDefinitionVersion,
     WorkflowRun
@@ -118,12 +120,14 @@ defmodule Fizz.Workflows do
     with {:ok, version_record} <- fetch_version(scope, version),
          :ok <- ensure_draft(version_record),
          {:ok, user_id} <- user_id_from_scope(scope) do
+      version_record = SlotDefaults.normalize_version(version_record)
       _ = Slots.ensure_auto_bindings(version_record, user_id, scope)
 
       published_at = DateTime.utc_now()
 
       changeset =
         WorkflowDefinitionVersion.publish_changeset(version_record, %{
+          steps: Enum.map(version_record.steps, &embed_to_attrs/1),
           status: :published,
           compiled_hash: provisional_compiled_hash(),
           published_at: published_at,
@@ -836,6 +840,8 @@ defmodule Fizz.Workflows do
   end
 
   defp do_start_run(scope, %WorkflowDefinitionVersion{} = version_record, input, opts) do
+    version_record = SlotDefaults.normalize_version(version_record)
+
     with :ok <- ensure_ready_to_start(scope, version_record, opts),
          {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
       case create_pending_run(scope, version_record, input, compiled_hash, opts) do
@@ -849,11 +855,19 @@ defmodule Fizz.Workflows do
   end
 
   defp ensure_ready_to_start(scope, %WorkflowDefinitionVersion{} = version_record, opts) do
-    with {:ok, user_id} <- run_user_id(scope, opts) do
+    with :ok <- ensure_valid_slot_declarations(version_record),
+         {:ok, user_id} <- run_user_id(scope, opts) do
       case Readiness.check(version_record, user_id, scope) do
         :ready -> :ok
         {:needs_bindings, descriptors} -> {:error, {:slot_bindings_required, descriptors}}
       end
+    end
+  end
+
+  defp ensure_valid_slot_declarations(%WorkflowDefinitionVersion{} = version_record) do
+    case PublishValidation.slot_declaration_issues(version_record.steps || []) do
+      [] -> :ok
+      issues -> {:error, {:invalid_slot_declarations, issues}}
     end
   end
 
@@ -1669,6 +1683,7 @@ defmodule Fizz.Workflows do
     |> put_default_if_missing(:step_groups, [])
     |> put_default_if_missing(:viewport, WorkflowDefinitionVersion.default_viewport())
     |> put_default_if_missing(:settings, %{})
+    |> SlotDefaults.normalize_snapshot_attrs()
   end
 
   defp put_default_if_missing(attrs, field, default) do

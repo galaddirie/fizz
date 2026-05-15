@@ -129,7 +129,7 @@ const traces = computed<TraceEntry[]>(() => {
 
     const result: TraceEntry[] = [];
 
-    for (const [stepId, executions] of executionsByStep.entries()) {
+    for (const [stepId, executions] of Array.from(executionsByStep.entries())) {
       const firstExecution = executions[0];
       const baseName = props.stepNameById?.[stepId] || stepId;
 
@@ -211,9 +211,15 @@ const traces = computed<TraceEntry[]>(() => {
   return [];
 });
 
+type TracePanelStatus = ExecutionStatus | 'idle';
+
 // Execution status
-const executionStatus = computed<ExecutionStatus>(() => props.execution?.status ?? 'pending');
-const isRunning = computed(() => executionStatus.value === 'running' || executionStatus.value === 'pending');
+const executionStatus = computed<TracePanelStatus>(() => props.execution?.status ?? 'idle');
+const isRunning = computed(
+  () =>
+    !!props.execution &&
+    (executionStatus.value === 'running' || executionStatus.value === 'pending')
+);
 
 // Status counts (iteration-aware)
 const statusCounts = computed(() => {
@@ -238,7 +244,8 @@ const statusCounts = computed(() => {
 });
 
 // Minimal status badge config
-const statusBadgeConfig: Record<ExecutionStatus, { class: string; label: string }> = {
+const statusBadgeConfig: Record<TracePanelStatus, { class: string; label: string }> = {
+  idle: { class: 'bg-base-200 text-base-content/60', label: 'Idle' },
   pending: { class: 'bg-base-200 text-base-content/70', label: 'Pending' },
   running: { class: 'bg-primary/15 text-primary', label: 'Running' },
   paused: { class: 'bg-warning/15 text-warning', label: 'Paused' },

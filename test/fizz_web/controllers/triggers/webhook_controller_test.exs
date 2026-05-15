@@ -5,18 +5,21 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
   import Ecto.Query
   import Fizz.WorkflowsFixtures
 
+  alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
+  alias Fizz.Slots
   alias Fizz.Steps.Registry, as: StepRegistry
   alias Fizz.TestSupport.Executors.FailingWebhookTrigger
   alias Fizz.Triggers.Registry
   alias Fizz.Triggers.TriggerRegistration
   alias Fizz.Triggers.Workers.TriggerFireWorker
+  alias Fizz.Workflows
 
   setup do
     register_test_step_type(FailingWebhookTrigger)
 
     scope = project_scope_fixture()
-    %{version: version} = published_version_fixture(scope, github_trigger_snapshot_attrs())
+    version = publish_github_trigger_workflow!(scope)
     registration = webhook_registration(version.id)
 
     start_supervised!({Registry, notifications?: false, refresh_interval_ms: :timer.hours(1)})
@@ -128,10 +131,10 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
           id: Ecto.UUID.generate(),
           type_id: "github_trigger",
           name: "GitHub Trigger",
-          config: %{
-            "events" => ["push"],
-            "repository" => "acme/site"
-          }
+          config:
+            "github_trigger"
+            |> Fizz.Steps.Registry.get_default_config()
+            |> Map.merge(%{"events" => ["push"], "repository" => "acme/site"})
         })
       ]
     })
@@ -182,5 +185,44 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
     on_exit(fn ->
       :ok = StepRegistry.unregister(definition.id)
     end)
+  end
+
+  defp publish_github_trigger_workflow!(scope) do
+    {:ok, %{definition: definition, draft: draft}} =
+      Workflows.create_definition(scope, %{
+        name: "Webhook Controller #{System.unique_integer([:positive])}",
+        description: "Webhook controller test"
+      })
+
+    snapshot_attrs = github_trigger_snapshot_attrs()
+    [trigger] = snapshot_attrs.steps
+
+    {:ok, saved_draft} = Workflows.save_draft(scope, draft, snapshot_attrs)
+    connection = insert_oauth_connection!(scope, "github_oauth")
+
+    assert {:ok, _binding} =
+             Slots.upsert_binding(saved_draft, scope, %{
+               user_id: scope.user.id,
+               workflow_definition_id: definition.id,
+               step_id: trigger.id,
+               slot_key: "auth",
+               kind: "credential",
+               binding_data: %{"credential_id" => connection.id},
+               workos_organization_id: scope.organization_id
+             })
+
+    assert {:ok, version} = Workflows.publish_draft(scope, saved_draft)
+    version
+  end
+
+  defp insert_oauth_connection!(scope, provider) do
+    %OauthConnection{}
+    |> OauthConnection.changeset(%{
+      workos_organization_id: scope.organization_id,
+      user_id: scope.user.id,
+      provider: provider,
+      status: :active
+    })
+    |> Repo.insert!()
   end
 end

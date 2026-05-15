@@ -27,7 +27,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
   @credential_slot CredentialSlot.api_key(OpenAIApiKey.provider_id())
 
   @default_config %{
-    "model" => "gpt-4.1-mini",
+    "model" => "gpt-5.5",
     "temperature" => 0.2,
     "max_tokens" => 800,
     "credential_ref" => CredentialSlot.declaration(@credential_slot)
@@ -45,7 +45,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
       "model" => %{
         "type" => "string",
         "title" => "Model",
-        "default" => "gpt-4.1-mini",
+        "default" => "gpt-5.5",
         "description" => "OpenAI model name"
       },
       "temperature" => %{
@@ -84,7 +84,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
        %{
          "provider" => "openai_api_key",
          "credential_ref" => credential_ref,
-         "model" => Map.get(config, "model", "gpt-4.1-mini"),
+         "model" => Map.get(config, "model", "gpt-5.5"),
          "temperature" => normalize_temperature(Map.get(config, "temperature", 0.2)),
          "max_tokens" => normalize_max_tokens(Map.get(config, "max_tokens", 800))
        }}
