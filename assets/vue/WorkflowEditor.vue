@@ -40,6 +40,7 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   credentialOptions: () => [],
   debugExecutionId: null,
   validationErrors: () => ({}),
+  widgetToken: null,
 });
 
 const live = useLiveVue();
@@ -276,6 +277,9 @@ interface SlotCandidate {
   owner_user_id?: string;
   owner_display_name?: string;
   display_name?: string;
+  requires_reauth?: boolean;
+  requires_reauthorization?: boolean;
+  status?: string;
 }
 interface SlotBindingDescriptor {
   step_id: string;
@@ -297,8 +301,19 @@ useLiveEvent<{ target_step_id: string | null; descriptors: SlotBindingDescriptor
   }
 );
 
+useLiveEvent<{ target_step_id: string | null }>('slot_bindings_resolved', payload => {
+  if (payload.target_step_id === runLaunchTargetStepId.value) {
+    runLaunchDescriptors.value = [];
+    isRunLaunchModalOpen.value = false;
+  }
+});
+
 function closeRunLaunchModal() {
   isRunLaunchModalOpen.value = false;
+}
+
+function handleReauthConnected(payload: { target_step_id: string | null }) {
+  emit('reauth_connected', payload);
 }
 
 function handleSubmitSlotBindings(payload: {
@@ -856,7 +871,9 @@ useLiveEvent<{
         :is-open="isRunLaunchModalOpen"
         :target-step-id="runLaunchTargetStepId"
         :descriptors="runLaunchDescriptors"
+        :widget-token="widgetToken"
         @close="closeRunLaunchModal"
+        @reauth-connected="handleReauthConnected"
         @submit="handleSubmitSlotBindings"
       />
     </div>

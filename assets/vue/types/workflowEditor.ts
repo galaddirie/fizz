@@ -38,6 +38,7 @@ export interface WorkflowEditorProps {
   credentialOptions?: CredentialOption[];
   debugExecutionId?: string | null;
   validationErrors?: Record<string, WorkflowValidationError[]>;
+  widgetToken?: string | null;
 }
 
 export type WorkflowEditorCommandType =
@@ -68,6 +69,7 @@ export type WorkflowEditorCommandType =
   | 'save_workflow'
   | 'validate_draft'
   | 'publish_workflow'
+  | 'reauth_connected'
   | 'mouse_move'
   | 'mouse_leave'
   | 'selection_changed'
@@ -197,6 +199,7 @@ export type WorkflowEditorEmits = {
   (e: 'save_workflow'): void;
   (e: 'validate_draft'): void;
   (e: 'publish_workflow'): void;
+  (e: 'reauth_connected', payload: { target_step_id: string | null }): void;
   (
     e: 'mouse_move',
     payload: {

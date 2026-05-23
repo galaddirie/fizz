@@ -1,6 +1,18 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { XMarkIcon, RocketLaunchIcon, KeyIcon } from '@heroicons/vue/24/outline';
+import { mountWorkOSWidget } from '../../../js/hooks/workos_react_widgets';
+
+type WorkOSWidgetController = {
+  update: () => void;
+  destroy: () => void;
+};
+
+declare global {
+  interface HTMLElement {
+    __workosWidget?: WorkOSWidgetController;
+  }
+}
 
 interface Candidate {
   id: string;
@@ -10,6 +22,9 @@ interface Candidate {
   owner_user_id?: string;
   owner_display_name?: string;
   display_name?: string;
+  requires_reauth?: boolean;
+  requires_reauthorization?: boolean;
+  status?: string;
 }
 
 interface Descriptor {
@@ -24,12 +39,19 @@ interface Props {
   isOpen: boolean;
   targetStepId: string | null;
   descriptors: Descriptor[];
+  widgetToken: string | null;
 }
 
 const props = defineProps<Props>();
 
 const emit = defineEmits<{
   (e: 'close'): void;
+  (
+    e: 'reauth_connected',
+    payload: {
+      target_step_id: string | null;
+    }
+  ): void;
   (
     e: 'submit',
     payload: {
@@ -46,6 +68,24 @@ const emit = defineEmits<{
 
 const selections = ref<Record<string, string>>({});
 
+const vWorkosWidget = {
+  mounted(element: HTMLElement) {
+    element.__workosWidget = mountWorkOSWidget(element, {
+      defaultWidget: 'scoped-pipes',
+      onConnectionSettled: () => {
+        emit('reauth_connected', { target_step_id: props.targetStepId });
+      },
+    });
+  },
+  updated(element: HTMLElement) {
+    element.__workosWidget?.update();
+  },
+  beforeUnmount(element: HTMLElement) {
+    element.__workosWidget?.destroy();
+    element.__workosWidget = undefined;
+  },
+};
+
 watch(
   () => props.descriptors,
   descriptors => {
@@ -53,10 +93,11 @@ watch(
     for (const d of descriptors) {
       const key = descriptorKey(d);
       const existing = selections.value[key];
-      if (existing && d.candidates.some(c => c.id === existing)) {
+      const candidates = usableCandidates(d);
+      if (existing && candidates.some(c => c.id === existing)) {
         next[key] = existing;
-      } else if (d.candidates.length === 1) {
-        next[key] = d.candidates[0].id;
+      } else if (candidates.length === 1 && !descriptorNeedsInlineAuth(d)) {
+        next[key] = candidates[0].id;
       }
     }
     selections.value = next;
@@ -68,12 +109,38 @@ function descriptorKey(d: Descriptor) {
   return `${d.step_id}::${d.slot_key}`;
 }
 
+function descriptorDomId(d: Descriptor) {
+  return `run-launch-pipes-${descriptorKey(d).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
+function candidateRequiresReauth(c: Candidate) {
+  return (
+    c.requires_reauth === true ||
+    c.requires_reauthorization === true ||
+    c.status === 'needs_reauthorization' ||
+    c.status === 'needs_reauth' ||
+    c.status === 'reauthorization_required'
+  );
+}
+
+function usableCandidates(d: Descriptor) {
+  return d.candidates.filter(c => !candidateRequiresReauth(c));
+}
+
+function descriptorHasReauthCandidate(d: Descriptor) {
+  return d.candidates.some(candidateRequiresReauth);
+}
+
+function descriptorNeedsInlineAuth(d: Descriptor) {
+  return d.kind === 'credential' && (d.candidates.length === 0 || descriptorHasReauthCandidate(d));
+}
+
 const allSelected = computed(() =>
-  props.descriptors.every(d => !!selections.value[descriptorKey(d)])
+  props.descriptors.every(d => usableCandidates(d).length > 0 && !!selections.value[descriptorKey(d)])
 );
 
 const hasMissingCredentials = computed(() =>
-  props.descriptors.some(d => d.candidates.length === 0)
+  props.descriptors.some(d => d.candidates.length === 0 || descriptorHasReauthCandidate(d))
 );
 
 function specSummary(d: Descriptor) {
@@ -89,8 +156,41 @@ function candidateLabel(c: Candidate) {
   return c.display_name || c.provider_label || c.owner_display_name || c.id;
 }
 
+function providerSlugs(d: Descriptor) {
+  const provider = d.spec['provider'] ?? d.spec['providers'] ?? d.spec['integration_slug'];
+
+  if (Array.isArray(provider)) {
+    return provider.filter(value => typeof value === 'string' && value.trim() !== '');
+  }
+
+  if (typeof provider === 'string' && provider.trim() !== '') {
+    return [provider.trim()];
+  }
+
+  return [];
+}
+
+function canRenderPipesWidget(d: Descriptor) {
+  return props.widgetToken !== null && providerSlugs(d).length > 0;
+}
+
+function widgetProps(d: Descriptor) {
+  const slugs = providerSlugs(d);
+
+  return JSON.stringify({
+    integrationSlugs: slugs,
+    integrationSlug: slugs.length === 1 ? slugs[0] : undefined,
+  });
+}
+
+function reauthMessage(d: Descriptor) {
+  return descriptorHasReauthCandidate(d)
+    ? 'This credential needs to be reauthorized before the workflow can run.'
+    : "You don't have a credential for this slot yet.";
+}
+
 function handleSubmit() {
-  if (!allSelected.value) return;
+  if (!allSelected.value || hasMissingCredentials.value) return;
 
   const bindings = props.descriptors.map(d => {
     const credentialId = selections.value[descriptorKey(d)];
@@ -162,23 +262,43 @@ function handleSubmit() {
               </p>
             </div>
 
-            <div v-if="d.candidates.length > 0" class="mt-2">
+            <div v-if="usableCandidates(d).length > 0 && !descriptorNeedsInlineAuth(d)" class="mt-2">
               <select
                 v-model="selections[descriptorKey(d)]"
                 class="w-full rounded-lg bg-base-100 px-3 py-2 text-sm text-base-content ring-1 ring-base-content/10 transition focus:outline-none focus:ring-2 focus:ring-primary/40"
               >
                 <option value="" disabled>Select a credential</option>
-                <option v-for="c in d.candidates" :key="c.id" :value="c.id">
+                <option v-for="c in usableCandidates(d)" :key="c.id" :value="c.id">
                   {{ candidateLabel(c) }}
                 </option>
               </select>
+            </div>
+            <div v-else-if="descriptorNeedsInlineAuth(d) && canRenderPipesWidget(d)" class="mt-3">
+              <p class="mb-2 text-[12px] leading-relaxed text-base-content/60">
+                {{ reauthMessage(d) }} Connect the required provider below, then this list will
+                refresh automatically.
+              </p>
+              <div
+                :id="descriptorDomId(d)"
+                v-workos-widget
+                phx-hook="WorkOSReactWidget"
+                phx-update="ignore"
+                data-widget="scoped-pipes"
+                :data-auth-token="widgetToken"
+                :data-integration-slugs="JSON.stringify(providerSlugs(d))"
+                :data-widget-props="widgetProps(d)"
+                class="rounded-lg border border-base-content/[0.08] bg-base-100 p-3"
+              >
+                <div class="flex items-center justify-center py-8 text-sm text-base-content/50">
+                  Loading…
+                </div>
+              </div>
             </div>
             <div
               v-else
               class="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] leading-relaxed text-warning"
             >
-              You don't have a credential for this slot yet. Add one in Settings, then come
-              back.
+              {{ reauthMessage(d) }} Add or reconnect it in Settings, then come back.
             </div>
           </div>
         </div>

@@ -35,6 +35,9 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
              }
            }}
 
+        {:post, "/widgets/token"} ->
+          {:ok, %Req.Response{status: 200, body: %{"token" => "widget_token_123"}}}
+
         _ ->
           {:ok, %Req.Response{status: 404, body: %{"message" => "Not found"}}}
       end
@@ -91,6 +94,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert vue.props["workflow"]["draft"]["version"] == draft.version
     assert vue.props["workflow"]["draft"]["status"] == "draft"
     assert vue.props["workflow"]["draft"]["step_groups"] == []
+    assert vue.props["widgetToken"] == "widget_token_123"
     refute Map.has_key?(vue.props["workflow"], "current_version_tag")
     refute Map.has_key?(vue.props["workflow"], "public")
     refute Map.has_key?(vue.props["workflow"], "user_id")

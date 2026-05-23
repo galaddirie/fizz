@@ -80,6 +80,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         expressionPreviews={@expression_previews}
         credentialOptions={@credential_options}
         debugExecutionId={@debug_execution_id}
+        widgetToken={@widget_token}
       />
     <% else %>
       <div id="workflow-editor-loading" />
@@ -137,6 +138,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
       "submit_slot_bindings" ->
         {:noreply, submit_slot_bindings(socket, payload)}
+
+      "reauth_connected" ->
+        {:noreply, refresh_slot_bindings(socket, payload)}
 
       "cancel_execution" ->
         {:noreply, cancel_execution(socket)}
@@ -322,6 +326,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> assign(:credential_options, [])
     |> assign(:validation_errors, %{})
     |> assign(:debug_execution_id, nil)
+    |> assign(:widget_token, nil)
     |> assign(:current_user_id, current_user_id)
     |> assign(:preview_timers, %{})
   end
@@ -360,6 +365,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       |> assign(:save_error, encode_optional_reason(Map.get(persistence, :error)))
       |> assign(:credential_options, [])
       |> assign(:debug_execution_id, debug_execution_id)
+      |> assign_widget_token()
     else
       {:error, :project_not_found} ->
         redirect_with_error(socket, "Project not found", ~p"/projects")
@@ -632,6 +638,30 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
       {:error, changeset} ->
         put_flash(socket, :error, "Could not save bindings: #{inspect(changeset.errors)}")
+    end
+  end
+
+  defp refresh_slot_bindings(socket, payload) do
+    target_step_id = Map.get(payload, "target_step_id")
+
+    with {:ok, execution_draft} <- editor_execution_draft(socket.assigns.draft, target_step_id) do
+      case Readiness.check(
+             execution_draft,
+             socket.assigns.current_user_id,
+             socket.assigns.current_scope
+           ) do
+        :ready ->
+          push_event(socket, "slot_bindings_resolved", %{target_step_id: target_step_id})
+
+        {:needs_bindings, descriptors} ->
+          push_event(socket, "slot_bindings_needed", %{
+            target_step_id: target_step_id,
+            descriptors: descriptors
+          })
+      end
+    else
+      {:error, :step_not_found} ->
+        put_flash(socket, :error, "Could not refresh credentials: step not found")
     end
   end
 
@@ -2378,6 +2408,18 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       _ -> nil
     end
   end
+
+  defp assign_widget_token(
+         %{assigns: %{current_scope: %{organization_id: organization_id}}} = socket
+       )
+       when is_binary(organization_id) do
+    case Accounts.generate_widget_token(socket.assigns.current_scope, organization_id) do
+      {:ok, widget_token} -> assign(socket, :widget_token, widget_token)
+      {:error, _reason} -> assign(socket, :widget_token, nil)
+    end
+  end
+
+  defp assign_widget_token(socket), do: assign(socket, :widget_token, nil)
 
   defp encode_reason(reason) when is_binary(reason), do: reason
   defp encode_reason(reason) when is_atom(reason), do: Atom.to_string(reason)
