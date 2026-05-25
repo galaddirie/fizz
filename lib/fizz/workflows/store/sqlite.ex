@@ -4,6 +4,8 @@ defmodule Fizz.Workflows.Store.Sqlite do
   alias Exqlite.Sqlite3
 
   @type db :: Exqlite.Sqlite3.db()
+  @default_wal_autocheckpoint_pages 1_000
+  @default_journal_size_limit_bytes 16 * 1_024 * 1_024
 
   @spec with_db(String.t(), keyword(), (db() -> result)) :: result | {:error, term()}
         when result: var
@@ -107,8 +109,24 @@ defmodule Fizz.Workflows.Store.Sqlite do
     with {:ok, _} <- query(db, "PRAGMA journal_mode = WAL"),
          :ok <- execute(db, "PRAGMA synchronous = NORMAL"),
          :ok <- execute(db, "PRAGMA foreign_keys = ON"),
-         :ok <- execute(db, "PRAGMA wal_autocheckpoint = 0") do
+         :ok <-
+           execute(db, "PRAGMA wal_autocheckpoint = #{@default_wal_autocheckpoint_pages}"),
+         :ok <- execute(db, "PRAGMA journal_size_limit = #{@default_journal_size_limit_bytes}") do
       :ok
+    end
+  end
+
+  @spec wal_checkpoint(db(), :passive | :truncate) :: :ok | {:error, term()}
+  def wal_checkpoint(db, mode \\ :passive) do
+    pragma =
+      case mode do
+        :truncate -> "PRAGMA wal_checkpoint(TRUNCATE)"
+        :passive -> "PRAGMA wal_checkpoint(PASSIVE)"
+      end
+
+    case query(db, pragma) do
+      {:ok, _rows} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

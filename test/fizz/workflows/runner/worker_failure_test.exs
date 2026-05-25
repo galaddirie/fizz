@@ -80,6 +80,51 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
       assert {:ok, %{status: :failed}} = Workflows.get_run(scope, run.id)
     end
+
+    test "large errors are summarized in step failure broadcasts",
+         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+      workflow =
+        Runic.Workflow.new()
+        |> Runic.Workflow.add(
+          Runic.step(
+            fn _input ->
+              raise RuntimeError, message: String.duplicate("x", 5_000)
+            end,
+            name: :large_failure
+          )
+        )
+
+      %{version: version} = published_version_fixture(scope)
+      run = insert_running_run(scope, version, %{compiled_hash: nil})
+      run_id = run.id
+
+      Phoenix.PubSub.subscribe(Fizz.PubSub, "workflow_run:#{run_id}")
+
+      pid =
+        start_worker!(workflow, run, scope,
+          registry: registry,
+          task_supervisor: task_supervisor,
+          tmp_dir: tmp_dir
+        )
+
+      Worker.run(pid, %{"large" => String.duplicate("y", 5_000)})
+
+      assert_receive {:step_failed,
+                      %{
+                        run_id: ^run_id,
+                        input_summary: input_summary,
+                        error: %{message: message, details: %{inspect: inspect_summary}}
+                      } = payload},
+                     5_000
+
+      assert byte_size(input_summary) <= 1_027
+      assert byte_size(message) <= 1_027
+      assert byte_size(inspect_summary) <= 1_027
+      refute Map.has_key?(payload, :input)
+
+      assert_receive {:run_status_changed, %{run_id: ^run_id, status: :failed}}, 5_000
+      assert {:ok, %{status: :failed}} = Workflows.get_run(scope, run.id)
+    end
   end
 
   describe "fail_and_stop/2 broadcasts :step_cancelled for active siblings" do

@@ -6,6 +6,7 @@ defmodule Fizz.Workflows.Store.SqliteStoreTest do
   alias Fizz.Workflows.Store.SqliteMigrations
   alias Fizz.Workflows.Store.SqliteStore
   alias Fizz.Workflows.Store.StaleOwnerError
+  alias Runic.Workflow.Events.FactProduced
 
   setup do
     tmp_dir =
@@ -67,6 +68,89 @@ defmodule Fizz.Workflows.Store.SqliteStoreTest do
     assert {:ok, ^log} = SqliteStore.load(run_id, state)
 
     assert %{checkpoint_seq: 1, fence_token: 1} = lease_row(run_id)
+  end
+
+  test "save replaces the previous workflow log snapshot", %{run_id: run_id, opts: opts} do
+    insert_lease(run_id, 1, "NOW() + interval '30 seconds'")
+    assert {:ok, state} = SqliteStore.init(run_id, opts)
+
+    first_log = [%{event: :started}, %{event: :middle}]
+    second_log = first_log ++ [%{event: :completed}]
+
+    assert :ok = SqliteStore.save(run_id, first_log, state)
+    assert :ok = SqliteStore.save(run_id, second_log, state)
+    assert :ok = SqliteStore.save(run_id, second_log, state)
+    assert {:ok, ^second_log} = SqliteStore.load(run_id, state)
+
+    assert :ok =
+             Sqlite.with_db(state.db_path, fn db ->
+               assert {:ok, rows} =
+                        Sqlite.query(db, "SELECT data FROM workflow_log ORDER BY id ASC")
+
+               assert [snapshot] = Enum.map(rows, fn [blob] -> :erlang.binary_to_term(blob) end)
+               assert snapshot == second_log
+
+               :ok
+             end)
+
+    assert %{checkpoint_seq: 3, fence_token: 1} = lease_row(run_id)
+  end
+
+  test "save does not duplicate fact rows across snapshots", %{run_id: run_id, opts: opts} do
+    insert_lease(run_id, 1, "NOW() + interval '30 seconds'")
+    assert {:ok, state} = SqliteStore.init(run_id, opts)
+
+    first_fact = %FactProduced{hash: "fact-1", value: %{number: 1}}
+    second_fact = %FactProduced{hash: "fact-2", value: %{number: 2}}
+
+    assert :ok = SqliteStore.save(run_id, [first_fact], state)
+    assert :ok = SqliteStore.save(run_id, [first_fact, second_fact], state)
+
+    assert :ok =
+             Sqlite.with_db(state.db_path, fn db ->
+               assert {:ok, [[2]]} = Sqlite.query(db, "SELECT COUNT(*) FROM facts")
+               :ok
+             end)
+  end
+
+  test "legacy snapshot logs load and are replaced by the next snapshot", %{
+    run_id: run_id,
+    opts: opts
+  } do
+    insert_lease(run_id, 1, "NOW() + interval '30 seconds'")
+    assert {:ok, state} = SqliteStore.init(run_id, opts)
+
+    legacy_log = [%{event: :legacy}]
+
+    assert :ok =
+             Sqlite.with_db(state.db_path, fn db ->
+               assert {:ok, _rows} =
+                        Sqlite.query(
+                          db,
+                          "INSERT INTO workflow_log (data, created_at) VALUES (?, ?)",
+                          [
+                            {:blob, :erlang.term_to_binary(legacy_log, [:compressed])},
+                            DateTime.utc_now() |> DateTime.to_iso8601()
+                          ]
+                        )
+
+               :ok
+             end)
+
+    assert {:ok, ^legacy_log} = SqliteStore.load(run_id, state)
+
+    migrated_log = legacy_log ++ [%{event: :after_legacy}]
+    assert :ok = SqliteStore.save(run_id, migrated_log, state)
+
+    assert :ok =
+             Sqlite.with_db(state.db_path, fn db ->
+               assert {:ok, rows} =
+                        Sqlite.query(db, "SELECT data FROM workflow_log ORDER BY id ASC")
+
+               assert [snapshot] = Enum.map(rows, fn [blob] -> :erlang.binary_to_term(blob) end)
+               assert snapshot == migrated_log
+               :ok
+             end)
   end
 
   test "save with a stale fence token raises StaleOwnerError", %{run_id: run_id, opts: opts} do

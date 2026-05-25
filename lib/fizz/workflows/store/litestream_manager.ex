@@ -101,10 +101,7 @@ defmodule Fizz.Workflows.Store.LitestreamManager do
   @spec wal_checkpoint(String.t()) :: :ok | {:error, term()}
   def wal_checkpoint(db_path) do
     Sqlite.with_db(db_path, [configure?: false], fn db ->
-      case Sqlite.query(db, "PRAGMA wal_checkpoint(TRUNCATE)") do
-        {:ok, _rows} -> :ok
-        {:error, reason} -> {:error, reason}
-      end
+      Sqlite.wal_checkpoint(db, :truncate)
     end)
   end
 

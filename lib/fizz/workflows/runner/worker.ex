@@ -39,6 +39,7 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   @default_idle_timeout_ms 60_000
   @output_summary_limit 1_024
+  @inspect_collection_limit 50
 
   defstruct [
     :run_id,
@@ -898,7 +899,7 @@ defmodule Fizz.Workflows.Runner.Worker do
           runnable_id: runnable.id,
           step_id: step_id,
           attempt: 0,
-          input: runnable.input_fact.value,
+          input_summary: summarize_value(runnable.input_fact.value),
           input_fact_hash: runnable.input_fact.hash,
           started_at: DateTime.utc_now()
         }
@@ -933,12 +934,11 @@ defmodule Fizz.Workflows.Runner.Worker do
               runnable_id: runnable.id,
               step_id: step_id,
               attempt: 0,
-              input: runnable.input_fact.value,
+              input_summary: summarize_value(runnable.input_fact.value),
               input_fact_hash: runnable.input_fact.hash,
-              output: output,
               output_item_count: output_item_count(output),
               output_fact_hash: output_fact_hash(runnable),
-              output_summary: truncate_output(output),
+              output_summary: summarize_value(output),
               duration_us: duration_us,
               completed_at: DateTime.utc_now()
             }
@@ -959,7 +959,7 @@ defmodule Fizz.Workflows.Runner.Worker do
           runnable_id: runnable.id,
           step_id: step_id,
           attempt: 0,
-          input: runnable.input_fact.value,
+          input_summary: summarize_value(runnable.input_fact.value),
           input_fact_hash: runnable.input_fact.hash,
           error: encode_error(runnable.error),
           duration_us: duration_us,
@@ -1067,12 +1067,11 @@ defmodule Fizz.Workflows.Runner.Worker do
             execution_key: "#{runnable.id}:#{item_index}",
             step_id: step_id,
             attempt: 0,
-            input: runnable.input_fact.value,
+            input_summary: summarize_value(runnable.input_fact.value),
             input_fact_hash: runnable.input_fact.hash,
-            output: fact.value,
             output_item_count: 1,
             output_fact_hash: fact.hash,
-            output_summary: truncate_output(fact.value),
+            output_summary: summarize_value(fact.value),
             duration_us: per_item_duration,
             started_at: started_at,
             completed_at: completed_at,
@@ -1111,36 +1110,64 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   defp per_item_duration_us(_duration_us, _items_total), do: 0
 
-  defp truncate_output(output) do
-    rendered = inspect(output, pretty: true, limit: :infinity, printable_limit: :infinity)
+  defp summarize_value(value) do
+    rendered =
+      inspect(value,
+        pretty: true,
+        limit: @inspect_collection_limit,
+        printable_limit: @output_summary_limit
+      )
 
-    if byte_size(rendered) <= @output_summary_limit do
-      rendered
-    else
-      binary_part(rendered, 0, @output_summary_limit) <> "..."
+    limit_summary(rendered)
+  end
+
+  defp summarize_text(value) when is_binary(value), do: limit_summary(value)
+  defp summarize_text(value), do: summarize_value(value)
+
+  defp limit_summary(value) when byte_size(value) <= @output_summary_limit, do: value
+
+  defp limit_summary(value) do
+    value
+    |> binary_part(0, @output_summary_limit)
+    |> valid_utf8_prefix()
+    |> Kernel.<>("...")
+  end
+
+  defp valid_utf8_prefix(value) do
+    cond do
+      String.valid?(value) ->
+        value
+
+      byte_size(value) == 0 ->
+        value
+
+      true ->
+        value
+        |> binary_part(0, byte_size(value) - 1)
+        |> valid_utf8_prefix()
     end
   end
 
   defp encode_error(%{__struct__: module} = error) do
     %{
       type: module |> Module.split() |> List.last() |> Macro.underscore(),
-      message: Exception.message(error),
-      details: %{inspect: inspect(error)}
+      message: error |> Exception.message() |> summarize_text(),
+      details: %{inspect: summarize_value(error)}
     }
   end
 
   defp encode_error({type, message, details}) do
     %{
       type: to_string(type),
-      message: inspect(message),
-      details: %{value: inspect(details)}
+      message: summarize_text(message),
+      details: %{value: summarize_value(details)}
     }
   end
 
   defp encode_error({type, message}) do
     %{
       type: to_string(type),
-      message: inspect(message),
+      message: summarize_text(message),
       details: %{}
     }
   end
@@ -1150,11 +1177,11 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp encode_error(message) when is_binary(message) do
-    %{type: "runtime_error", message: message, details: %{}}
+    %{type: "runtime_error", message: summarize_text(message), details: %{}}
   end
 
   defp encode_error(error) do
-    %{type: "runtime_error", message: inspect(error), details: %{}}
+    %{type: "runtime_error", message: summarize_value(error), details: %{}}
   end
 
   defp workflow_output(%Workflow{} = workflow) do

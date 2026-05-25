@@ -13,10 +13,11 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   @spec assemble(map()) :: {:ok, Runic.Workflow.t()} | {:error, [map()]}
   def assemble(ir) when is_map(ir) do
+    connection_indexes = build_connection_indexes(ir.connections)
     referenced_step_ids = referenced_step_ids(ir.steps)
     accumulators = build_accumulators(referenced_step_ids)
-    subnode_input_assemblies = compute_subnode_input_assemblies(ir)
-    step_scopes = compute_step_scopes(ir, subnode_input_assemblies)
+    subnode_input_assemblies = compute_subnode_input_assemblies(ir, connection_indexes)
+    step_scopes = compute_step_scopes(ir, subnode_input_assemblies, connection_indexes)
     steps = build_steps(ir.steps, accumulators, step_scopes, subnode_input_assemblies)
 
     workflow =
@@ -24,9 +25,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       |> Map.put(:fizz_metadata, %{
         compiler_version: ir.compiler_version,
         trigger_manifest: trigger_manifest(ir.steps),
-        result_step_ids: result_step_ids(ir)
+        result_step_ids: result_step_ids(ir, connection_indexes)
       })
-      |> add_steps(ir, steps, accumulators, subnode_input_assemblies)
+      |> add_steps(ir, steps, accumulators, subnode_input_assemblies, connection_indexes)
       |> draw_meta_ref_edges(steps)
 
     {:ok, workflow}
@@ -35,7 +36,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       {:error, [%{message: Exception.message(exception)}]}
   end
 
-  defp add_steps(workflow, ir, steps, accumulators, subnode_input_assemblies) do
+  defp add_steps(workflow, ir, steps, accumulators, subnode_input_assemblies, connection_indexes) do
     Enum.reduce(ir.topo_order, workflow, fn step_id, acc ->
       step_data = Map.fetch!(steps, step_id)
 
@@ -46,25 +47,49 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
           :join ->
             {acc, parent_sources} =
-              resolve_parent_sources(acc, ir, steps, step_id, subnode_input_assemblies)
+              resolve_parent_sources(
+                acc,
+                steps,
+                step_id,
+                subnode_input_assemblies,
+                connection_indexes
+              )
 
             add_explicit_join_step(acc, step_data, parent_sources)
 
           :aggregator_join ->
             {acc, parent_sources} =
-              resolve_parent_sources(acc, ir, steps, step_id, subnode_input_assemblies)
+              resolve_parent_sources(
+                acc,
+                steps,
+                step_id,
+                subnode_input_assemblies,
+                connection_indexes
+              )
 
             add_implicit_join_aggregator_step(acc, step_data, parent_sources)
 
           :root_with_subnodes ->
             {acc, parent_sources} =
-              resolve_parent_sources(acc, ir, steps, step_id, subnode_input_assemblies)
+              resolve_parent_sources(
+                acc,
+                steps,
+                step_id,
+                subnode_input_assemblies,
+                connection_indexes
+              )
 
             add_root_with_subnodes_step(acc, step_data, parent_sources)
 
           _ ->
             {acc, parent_sources} =
-              resolve_parent_sources(acc, ir, steps, step_id, subnode_input_assemblies)
+              resolve_parent_sources(
+                acc,
+                steps,
+                step_id,
+                subnode_input_assemblies,
+                connection_indexes
+              )
 
             parent_refs = Enum.map(parent_sources, & &1.parent_ref)
 
@@ -265,6 +290,43 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Workflow.add(workflow, component, to: parent_refs, validate: :off)
   end
 
+  defp build_connection_indexes(connections) do
+    Enum.reduce(
+      connections,
+      %{incoming: %{}, outgoing: %{}, source_step_ids: MapSet.new()},
+      fn connection, indexes ->
+        %{
+          incoming:
+            Map.update(
+              indexes.incoming,
+              connection.target_step_id,
+              [connection],
+              &[
+                connection | &1
+              ]
+            ),
+          outgoing:
+            Map.update(
+              indexes.outgoing,
+              connection.source_step_id,
+              [connection],
+              &[
+                connection | &1
+              ]
+            ),
+          source_step_ids: MapSet.put(indexes.source_step_ids, connection.source_step_id)
+        }
+      end
+    )
+  end
+
+  defp indexed_connections(connection_indexes, direction, step_id) do
+    connection_indexes
+    |> Map.fetch!(direction)
+    |> Map.get(step_id, [])
+    |> Enum.reverse()
+  end
+
   defp trigger_manifest(steps) do
     steps
     |> Map.values()
@@ -279,7 +341,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp result_step_ids(ir) do
+  defp result_step_ids(ir, connection_indexes) do
     output_step_ids =
       ir.steps
       |> Map.values()
@@ -288,21 +350,16 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       |> Enum.sort()
 
     case output_step_ids do
-      [] -> terminal_step_ids(ir)
+      [] -> terminal_step_ids(ir, connection_indexes)
       _ -> output_step_ids
     end
   end
 
-  defp terminal_step_ids(ir) do
-    source_step_ids =
-      ir.connections
-      |> Enum.map(& &1.source_step_id)
-      |> MapSet.new()
-
+  defp terminal_step_ids(ir, connection_indexes) do
     ir.steps
     |> Map.values()
     |> Enum.reject(&(&1.node_role == :subnode))
-    |> Enum.reject(&MapSet.member?(source_step_ids, &1.id))
+    |> Enum.reject(&MapSet.member?(connection_indexes.source_step_ids, &1.id))
     |> Enum.map(& &1.id)
     |> Enum.sort()
   end
@@ -324,9 +381,15 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp resolve_parent_sources(workflow, ir, steps, step_id, subnode_input_assemblies) do
+  defp resolve_parent_sources(
+         workflow,
+         steps,
+         step_id,
+         subnode_input_assemblies,
+         connection_indexes
+       ) do
     step_id
-    |> incoming_flow_connections(ir.connections, subnode_input_assemblies)
+    |> incoming_flow_connections(connection_indexes, subnode_input_assemblies)
     |> ordered_connection_groups()
     |> Enum.reduce({workflow, []}, fn {source_step_id, connections},
                                       {workflow_acc, parent_sources} ->
@@ -1106,7 +1169,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     step_refs ++ runtime_refs
   end
 
-  defp compute_subnode_input_assemblies(ir) do
+  defp compute_subnode_input_assemblies(ir, connection_indexes) do
     root_defs =
       ir.steps
       |> Enum.reduce(%{}, fn {step_id, step}, acc ->
@@ -1156,7 +1219,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         end
       end)
 
-    validate_subnode_ownership!(ir, owners)
+    validate_subnode_ownership!(ir, owners, connection_indexes)
 
     roots =
       Map.new(root_defs, fn {root_step_id, root} ->
@@ -1185,12 +1248,12 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     %{roots: roots, owners: owners}
   end
 
-  defp compute_step_scopes(ir, subnode_input_assemblies) do
+  defp compute_step_scopes(ir, subnode_input_assemblies, connection_indexes) do
     Enum.reduce(ir.topo_order, %{}, fn step_id, scopes ->
       step = Map.fetch!(ir.steps, step_id)
 
       parent_contexts =
-        incoming_parent_contexts(step_id, ir.connections, scopes, subnode_input_assemblies)
+        incoming_parent_contexts(step_id, connection_indexes, scopes, subnode_input_assemblies)
 
       validate_split_convergence!(step, parent_contexts)
 
@@ -1211,9 +1274,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp incoming_parent_contexts(step_id, connections, scopes, subnode_input_assemblies) do
+  defp incoming_parent_contexts(step_id, connection_indexes, scopes, subnode_input_assemblies) do
     step_id
-    |> incoming_flow_connections(connections, subnode_input_assemblies)
+    |> incoming_flow_connections(connection_indexes, subnode_input_assemblies)
     |> ordered_connection_groups()
     |> Enum.map(fn {source_step_id, source_connections} ->
       parent_scope = Map.get(scopes, source_step_id, %{outgoing_lineage: []})
@@ -1296,21 +1359,21 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end
   end
 
-  defp validate_subnode_ownership!(ir, owners) do
+  defp validate_subnode_ownership!(ir, owners, connection_indexes) do
     Enum.each(ir.steps, fn
       {step_id, %{node_role: :subnode}} = _entry ->
         unless Map.has_key?(owners, step_id) do
           raise ArgumentError, "subnode step `#{step_id}` must be connected to a root input"
         end
 
-        incoming = incoming_connections(step_id, ir.connections)
+        incoming = incoming_connections(step_id, connection_indexes)
 
         if incoming != [] do
           raise ArgumentError,
                 "subnode step `#{step_id}` cannot have authored incoming connections"
         end
 
-        outgoing = outgoing_connections(step_id, ir.connections)
+        outgoing = outgoing_connections(step_id, connection_indexes)
         owner = Map.fetch!(owners, step_id)
 
         valid_outgoing? =
@@ -1494,25 +1557,27 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Map.get(source_refs, output_handle, [])
   end
 
-  defp incoming_flow_connections(step_id, connections, subnode_input_assemblies) do
+  defp incoming_flow_connections(step_id, connection_indexes, subnode_input_assemblies) do
     input_ids =
       subnode_input_assemblies.roots
       |> Map.get(step_id, %{input_ids: MapSet.new()})
       |> Map.get(:input_ids, MapSet.new())
 
-    Enum.filter(connections, fn connection ->
+    connection_indexes
+    |> indexed_connections(:incoming, step_id)
+    |> Enum.filter(fn connection ->
       connection.target_step_id == step_id and
         (connection.target_input == "main" or
            not MapSet.member?(input_ids, connection.target_input))
     end)
   end
 
-  defp incoming_connections(step_id, connections) do
-    Enum.filter(connections, &(&1.target_step_id == step_id))
+  defp incoming_connections(step_id, connection_indexes) do
+    indexed_connections(connection_indexes, :incoming, step_id)
   end
 
-  defp outgoing_connections(step_id, connections) do
-    Enum.filter(connections, &(&1.source_step_id == step_id))
+  defp outgoing_connections(step_id, connection_indexes) do
+    indexed_connections(connection_indexes, :outgoing, step_id)
   end
 
   defp ordered_connection_groups(connections) do
@@ -1521,13 +1586,17 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         source_step_id = connection.source_step_id
 
         if Map.has_key?(grouped, source_step_id) do
-          {order, Map.update!(grouped, source_step_id, &(&1 ++ [connection]))}
+          {order, Map.update!(grouped, source_step_id, &[connection | &1])}
         else
-          {order ++ [source_step_id], Map.put(grouped, source_step_id, [connection])}
+          {[source_step_id | order], Map.put(grouped, source_step_id, [connection])}
         end
       end)
 
-    Enum.map(order, fn source_step_id -> {source_step_id, Map.fetch!(grouped, source_step_id)} end)
+    order
+    |> Enum.reverse()
+    |> Enum.map(fn source_step_id ->
+      {source_step_id, grouped |> Map.fetch!(source_step_id) |> Enum.reverse()}
+    end)
   end
 
   defp base_step_context(step) do

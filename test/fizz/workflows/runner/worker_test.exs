@@ -132,10 +132,18 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
                    2_000
 
     assert_receive {:step_started,
-                    %{run_id: ^run_id, step_id: step_id, started_at: %DateTime{}, attempt: 0}},
+                    %{
+                      run_id: ^run_id,
+                      step_id: step_id,
+                      started_at: %DateTime{},
+                      attempt: 0,
+                      input_summary: input_summary
+                    } = started_payload},
                    2_000
 
     assert is_binary(step_id)
+    assert is_binary(input_summary)
+    refute Map.has_key?(started_payload, :input)
 
     assert_receive {:step_completed,
                     %{
@@ -145,16 +153,62 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
                       duration_us: duration_us,
                       output_item_count: output_item_count,
                       output_summary: output_summary
-                    }},
+                    } = completed_payload},
                    2_000
 
     assert is_integer(duration_us)
     assert output_item_count == 1
     assert is_binary(output_summary)
+    refute Map.has_key?(completed_payload, :input)
+    refute Map.has_key?(completed_payload, :output)
 
     assert_receive {:run_status_changed,
                     %{run_id: ^run_id, status: :completed, timestamp: %DateTime{}}},
                    2_000
+
+    assert %{status: :completed} = wait_for_run_status(scope, run_id, registry)
+    cleanup_worker(run_id, registry)
+  end
+
+  test "step lifecycle payloads summarize large values", %{
+    scope: scope,
+    registry: registry,
+    task_supervisor: task_supervisor,
+    tmp_dir: tmp_dir
+  } do
+    workflow =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(
+        Runic.step(fn _input -> Enum.to_list(1..5_000) end, name: :large_output)
+      )
+
+    %{version: version} = published_version_fixture(scope)
+    run = insert_running_run(scope, version, %{compiled_hash: nil})
+    run_id = run.id
+
+    :ok = Phoenix.PubSub.subscribe(Fizz.PubSub, "workflow_run:#{run_id}")
+
+    pid =
+      start_worker!(
+        workflow,
+        run,
+        scope,
+        registry: registry,
+        task_supervisor: task_supervisor,
+        tmp_dir: tmp_dir
+      )
+
+    assert :ok = Worker.run(pid, %{"large" => Enum.to_list(1..5_000)})
+
+    assert_receive {:step_started, %{input_summary: input_summary} = started_payload}, 2_000
+    assert byte_size(input_summary) <= 1_027
+    refute Map.has_key?(started_payload, :input)
+
+    assert_receive {:step_completed, %{output_summary: output_summary} = completed_payload}, 2_000
+    assert byte_size(output_summary) <= 1_027
+    refute Map.has_key?(completed_payload, :input)
+    refute Map.has_key?(completed_payload, :output)
+    refute String.contains?(output_summary, "5000")
 
     assert %{status: :completed} = wait_for_run_status(scope, run_id, registry)
     cleanup_worker(run_id, registry)

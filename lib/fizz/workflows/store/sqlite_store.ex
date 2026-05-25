@@ -12,6 +12,7 @@ defmodule Fizz.Workflows.Store.SqliteStore do
   alias Runic.Workflow.Events.FactProduced
 
   @meta_entries ~w(run_id org_id project_id)a
+  @fact_lookup_chunk_size 250
 
   @type state :: %{
           data_dir: String.t(),
@@ -114,12 +115,8 @@ defmodule Fizz.Workflows.Store.SqliteStore do
   def load(run_id, store_state) do
     case open_existing_db(run_id, store_state, fn _state, db ->
            with :ok <- SqliteMigrations.migrate(db),
-                {:ok, blob} <-
-                  Sqlite.first_value(
-                    db,
-                    "SELECT data FROM workflow_log ORDER BY id DESC LIMIT 1"
-                  ) do
-             {:ok, :erlang.binary_to_term(blob)}
+                {:ok, log} <- load_workflow_log(db) do
+             {:ok, log}
            end
          end) do
       {:ok, _} = ok -> ok
@@ -206,23 +203,56 @@ defmodule Fizz.Workflows.Store.SqliteStore do
 
   defp persist_checkpoint(state, log) do
     serialized_log = :erlang.term_to_binary(log, [:compressed])
-    facts = facts_from_log(log)
 
     with_db(state, fn db ->
-      Sqlite.transaction(db, fn ->
-        with :ok <- upsert_fence(db, state.fence_token),
-             :ok <- upsert_meta(db, state),
-             :ok <- persist_facts_rows(db, facts),
-             {:ok, _rows} <-
-               Sqlite.query(
-                 db,
-                 "INSERT INTO workflow_log (data, created_at) VALUES (?, ?)",
-                 [{:blob, serialized_log}, DateTime.utc_now() |> DateTime.to_iso8601()]
-               ) do
-          :ok
-        end
-      end)
+      result =
+        Sqlite.transaction(db, fn ->
+          with :ok <- upsert_fence(db, state.fence_token),
+               :ok <- upsert_meta(db, state),
+               :ok <- persist_facts_rows(db, facts_from_log(log)),
+               :ok <- reset_workflow_log(db),
+               :ok <- persist_snapshot(db, serialized_log) do
+            :ok
+          end
+        end)
+
+      with :ok <- result,
+           :ok <- Sqlite.wal_checkpoint(db, :passive) do
+        :ok
+      end
     end)
+  end
+
+  defp load_workflow_log(db) do
+    load_latest_snapshot(db)
+  end
+
+  defp load_latest_snapshot(db) do
+    with {:ok, blob} <-
+           Sqlite.first_value(
+             db,
+             "SELECT data FROM workflow_log ORDER BY id DESC LIMIT 1"
+           ) do
+      {:ok, :erlang.binary_to_term(blob)}
+    end
+  end
+
+  defp persist_snapshot(db, serialized_log) do
+    case Sqlite.query(
+           db,
+           "INSERT INTO workflow_log (data, created_at) VALUES (?, ?)",
+           [{:blob, serialized_log}, DateTime.utc_now() |> DateTime.to_iso8601()]
+         ) do
+      {:ok, _rows} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp reset_workflow_log(db) do
+    case Sqlite.query(db, "DELETE FROM workflow_log") do
+      {:ok, _rows} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp persist_fact(state, hash, value) do
@@ -240,7 +270,8 @@ defmodule Fizz.Workflows.Store.SqliteStore do
                ON CONFLICT(hash) DO UPDATE SET value = excluded.value
                """,
                [hash, {:blob, value_blob}]
-             ) do
+             ),
+           :ok <- Sqlite.wal_checkpoint(db, :passive) do
         :ok
       end
     end)
@@ -304,43 +335,78 @@ defmodule Fizz.Workflows.Store.SqliteStore do
           :project_id -> state.project_id
         end
 
-      case Sqlite.query(
-             db,
-             """
-             INSERT INTO meta (key, value) VALUES (?, ?)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value
-             """,
-             [Atom.to_string(key), value]
-           ) do
-        {:ok, _rows} -> {:cont, :ok}
+      case upsert_meta_entry(db, Atom.to_string(key), value) do
+        :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  defp persist_facts_rows(_db, []), do: :ok
+  defp upsert_meta_entry(db, key, value) do
+    case Sqlite.query(
+           db,
+           """
+           INSERT INTO meta (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value
+           """,
+           [key, value]
+         ) do
+      {:ok, _rows} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp persist_facts_rows(_db, facts) when map_size(facts) == 0, do: :ok
 
   defp persist_facts_rows(db, facts) do
-    Enum.reduce_while(facts, :ok, fn {hash, blob}, :ok ->
-      case Sqlite.query(
-             db,
-             """
-             INSERT INTO facts (hash, value) VALUES (?, ?)
-             ON CONFLICT(hash) DO UPDATE SET value = excluded.value
-             """,
-             [hash, {:blob, blob}]
-           ) do
-        {:ok, _rows} -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
+    with {:ok, existing_hashes} <- existing_fact_hashes(db, Map.keys(facts)) do
+      facts
+      |> Enum.reject(fn {hash, _value} -> MapSet.member?(existing_hashes, hash) end)
+      |> Enum.reduce_while(:ok, fn {hash, value}, :ok ->
+        blob = :erlang.term_to_binary(value, [:compressed])
+
+        case Sqlite.query(
+               db,
+               """
+               INSERT INTO facts (hash, value) VALUES (?, ?)
+               ON CONFLICT(hash) DO NOTHING
+               """,
+               [hash, {:blob, blob}]
+             ) do
+          {:ok, _rows} -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+    end
+  end
+
+  defp existing_fact_hashes(_db, []), do: {:ok, MapSet.new()}
+
+  defp existing_fact_hashes(db, hashes) do
+    hashes
+    |> Enum.chunk_every(@fact_lookup_chunk_size)
+    |> Enum.reduce_while({:ok, MapSet.new()}, fn chunk, {:ok, acc} ->
+      placeholders = chunk |> Enum.map(fn _hash -> "?" end) |> Enum.join(",")
+
+      case Sqlite.query(db, "SELECT hash FROM facts WHERE hash IN (#{placeholders})", chunk) do
+        {:ok, rows} ->
+          found = rows |> Enum.map(&hd/1) |> MapSet.new()
+          {:cont, {:ok, MapSet.union(acc, found)}}
+
+        {:error, reason} ->
+          {:halt, {:error, reason}}
       end
     end)
   end
 
   defp facts_from_log(log) do
-    for %FactProduced{hash: hash, value: value} <- log,
-        not is_nil(value) do
-      {hash, :erlang.term_to_binary(value, [:compressed])}
-    end
+    Enum.reduce(log, %{}, fn
+      %FactProduced{hash: hash, value: value}, acc when not is_nil(hash) and not is_nil(value) ->
+        Map.put(acc, hash, value)
+
+      _event, acc ->
+        acc
+    end)
   end
 
   defp present_string(value, _key) when is_binary(value) and byte_size(value) > 0,
