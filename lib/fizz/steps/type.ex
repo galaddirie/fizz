@@ -34,6 +34,7 @@ defmodule Fizz.Steps.Type do
           icon: String.t(),
           node_role: node_role(),
           config_schema: map(),
+          default_config: map(),
           input_schema: map(),
           output_schema: map(),
           subnode_inputs: [map()],
@@ -53,6 +54,7 @@ defmodule Fizz.Steps.Type do
              :node_role,
              :step_kind,
              :executor,
+             :default_config,
              :config_schema,
              :input_schema,
              :output_schema,
@@ -71,6 +73,7 @@ defmodule Fizz.Steps.Type do
     :updated_at,
     node_role: :root,
     config_schema: %{},
+    default_config: %{},
     input_schema: %{},
     output_schema: %{},
     subnode_inputs: []

@@ -53,6 +53,7 @@ defmodule Fizz.Application do
         {Phoenix.PubSub, name: Fizz.PubSub},
         FizzWeb.Presence,
         Fizz.Integrations.Registry,
+        Fizz.Integrations.Catalog,
 
         # Step type registry - must start before endpoint so types are available
         Fizz.Steps.Registry

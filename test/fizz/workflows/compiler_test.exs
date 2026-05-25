@@ -124,6 +124,10 @@ defmodule Fizz.Workflows.CompilerTest do
       settings: %{}
     }
 
+    assert {:ok, ir} = Normalizer.normalize(version)
+    assert ir.steps[append_id].operation_id == "google_sheets.append_row"
+    assert ir.steps[append_id].operation_version == 1
+
     assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
 
     context_keys =

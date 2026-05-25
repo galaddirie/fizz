@@ -1,0 +1,21 @@
+defmodule Fizz.TestSupport.CatalogValidation.AcmeDocs do
+  @behaviour Fizz.Integrations.Integration
+
+  @impl true
+  def id, do: "acme_docs"
+
+  @impl true
+  def display_name, do: "Acme Docs"
+
+  @impl true
+  def provider_id, do: "google_oauth"
+
+  @impl true
+  def actions, do: [Fizz.TestSupport.CatalogValidation.AcmeDocsAction]
+
+  @impl true
+  def triggers, do: [Fizz.TestSupport.CatalogValidation.AcmeDocsTrigger]
+
+  @impl true
+  def required_scopes(_operation), do: []
+end

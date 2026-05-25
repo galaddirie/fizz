@@ -533,11 +533,15 @@
                 placeholder="e.g. Acme AI"
               />
               <.input
-                field={@credential_form[:secret]}
-                type="password"
-                label="API key"
-                placeholder="sk-..."
-                autocomplete="new-password"
+                :for={credential_field <- credential_fields(@credential_form[:provider].value)}
+                id={credential_field_id(@credential_form, credential_field)}
+                name={credential_field_name(@credential_form, credential_field)}
+                value={credential_field_value(@credential_form, credential_field)}
+                type={credential_field.input_type}
+                label={credential_field.label}
+                placeholder={credential_field.placeholder}
+                autocomplete={credential_field.autocomplete}
+                required={credential_field.required}
               />
               <div class="flex items-center justify-end gap-2 pt-2">
                 <button
@@ -624,11 +628,15 @@
               label="Custom provider name (optional)"
             />
             <.input
-              field={@rotate_credential_form[:secret]}
-              type="password"
-              label="New API key"
-              placeholder="sk-..."
-              autocomplete="new-password"
+              :for={credential_field <- credential_fields_for(selected_credential)}
+              id={credential_field_id(@rotate_credential_form, credential_field)}
+              name={credential_field_name(@rotate_credential_form, credential_field)}
+              value={credential_field_value(@rotate_credential_form, credential_field)}
+              type={credential_field.input_type}
+              label={"New #{credential_field.label}"}
+              placeholder={credential_field.placeholder}
+              autocomplete={credential_field.autocomplete}
+              required={credential_field.required}
             />
             <div class="flex items-center justify-end gap-2 pt-2">
               <button

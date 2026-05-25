@@ -5,6 +5,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   alias Fizz.Steps.Executors.Aggregator, as: AggregatorExecutor
   alias Fizz.Steps.Executors.Join, as: JoinExecutor
+  alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.Expressions.AccessPlan
   alias Fizz.Workflows.Runtime.ConfigResolver
   alias Runic.Workflow
@@ -1603,7 +1604,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     %{
       step_id: step.id,
       step_name: step.name,
-      type_id: step.type_id
+      type_id: step.type_id,
+      operation_id: Map.get(step, :operation_id),
+      operation_version: Map.get(step, :operation_version)
     }
   end
 
@@ -1611,6 +1614,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   def resolution_context(input, meta_ctx, dependencies) do
     workflow = Map.get(meta_ctx, :workflow) || %{}
     metadata = Map.get(meta_ctx, :metadata) || %{}
+    execution_context = ExecutionContext.from_map(Map.put(meta_ctx, :input, input))
 
     %{
       input: input,
@@ -1622,19 +1626,21 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       workflow: workflow,
       env: Map.get(meta_ctx, :env) || %{},
       metadata: metadata,
-      scope: Map.get(meta_ctx, :scope),
-      current_scope: Map.get(meta_ctx, :current_scope),
+      scope: execution_context.scope,
+      current_scope: execution_context.scope,
       user_id: runtime_context_value(meta_ctx, workflow, metadata, :user_id),
       project_id: runtime_context_value(meta_ctx, workflow, metadata, :project_id),
       workos_organization_id:
         runtime_context_value(meta_ctx, workflow, metadata, :workos_organization_id),
-      _slot_resolver: Map.get(meta_ctx, :_slot_resolver)
+      _slot_resolver: Map.get(meta_ctx, :_slot_resolver),
+      execution_context: execution_context
     }
   end
 
   @doc false
   def executor_context(input, resolution_context, step_context) do
-    Map.merge(step_context, %{
+    step_context
+    |> Map.merge(%{
       input: input,
       steps: Map.get(resolution_context, :steps, %{}),
       workflow: Map.get(resolution_context, :workflow, %{}),
@@ -1644,8 +1650,10 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       current_scope: Map.get(resolution_context, :current_scope),
       user_id: Map.get(resolution_context, :user_id),
       project_id: Map.get(resolution_context, :project_id),
-      workos_organization_id: Map.get(resolution_context, :workos_organization_id)
+      workos_organization_id: Map.get(resolution_context, :workos_organization_id),
+      _slot_resolver: Map.get(resolution_context, :_slot_resolver)
     })
+    |> ExecutionContext.put_legacy_aliases()
   end
 
   defp runtime_context_value(meta_ctx, workflow, metadata, key) do

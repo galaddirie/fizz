@@ -102,6 +102,58 @@ defmodule Fizz.IntegrationsTest do
     refute Repo.get(ApiCredential, credential.id)
   end
 
+  test "credential lifecycle accepts legacy direct value secret aliases" do
+    user = user_fixture()
+    org_id = "org_value_alias"
+
+    _owner_scope =
+      organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
+
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "vault_obj_value_alias",
+           "metadata" => %{"version_id" => "version_1"}
+         }
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok, %Req.Response{status: 200, body: %{"metadata" => %{"version_id" => "version_2"}}}}
+    ])
+
+    assert {:ok, credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               "provider" => "openai_api_key",
+               "provider_label" => "OpenAI Value Alias",
+               "value" => "sk-value-create"
+             })
+
+    assert_receive {:workos_http_request, membership_request}
+    assert membership_request[:url] == "/user_management/organization_memberships"
+
+    assert_receive {:workos_http_request, create_request}
+    assert create_request[:url] == "/vault/v1/kv"
+    assert create_request[:json][:value] == "sk-value-create"
+
+    assert {:ok, rotated} =
+             AccountExternalAuth.rotate_credential(scope, org_id, credential.id, %{
+               value: "sk-value-rotate"
+             })
+
+    assert rotated.vault_version == "version_2"
+
+    assert_receive {:workos_http_request, rotate_membership_request}
+    assert rotate_membership_request[:url] == "/user_management/organization_memberships"
+
+    assert_receive {:workos_http_request, rotate_request}
+    assert rotate_request[:url] == "/vault/v1/kv/vault_obj_value_alias"
+    assert rotate_request[:json][:value] == "sk-value-rotate"
+  end
+
   test "provider catalog resolves openai API-key module" do
     assert {:ok, Fizz.Integrations.Providers.OpenAIApiKey} =
              ProviderCatalog.api_key_provider_module("openai_api_key")
@@ -330,6 +382,100 @@ defmodule Fizz.IntegrationsTest do
                "org_missing_ref",
                "openai:gpt-5.5",
                "Say hello"
+             )
+  end
+
+  test "resolve_org_auth_for_execution/4 resolves explicit API credential refs" do
+    user = user_fixture()
+    org_id = "org_openai_org_auth"
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "vault_obj_openai_org_auth",
+           "metadata" => %{"version_id" => "version_1"}
+         }
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_org_auth", "value" => "sk-org-auth"}
+       }}
+    ])
+
+    assert {:ok, credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Org Auth",
+               credentials: %{"secret" => "sk-org-auth"}
+             })
+
+    credential_ref = %{
+      id: credential.id,
+      provider: "openai_api_key",
+      auth_type: "api_key",
+      owner_user_id: user.id
+    }
+
+    assert {:ok, auth} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               org_id,
+               "openai_api_key",
+               credential_ref
+             )
+
+    assert auth.auth_method == :api_key
+    assert auth.api_key == "sk-org-auth"
+    assert auth.api_credential_id == credential.id
+  end
+
+  test "resolve_org_auth_for_execution/4 validates credential refs before organization lookup" do
+    user = user_fixture()
+    other_user = user_fixture()
+    scope = Scope.for_user(user)
+
+    assert {:error, :credential_ref_required} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               "org_no_lookup",
+               "openai_api_key",
+               nil
+             )
+
+    owner_mismatch_ref = %{
+      id: Ecto.UUID.generate(),
+      provider: "openai_api_key",
+      auth_type: "api_key",
+      owner_user_id: other_user.id
+    }
+
+    assert {:error, :credential_ref_owner_mismatch} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               "org_no_lookup",
+               "openai_api_key",
+               owner_mismatch_ref
+             )
+
+    provider_mismatch_ref = %{
+      id: Ecto.UUID.generate(),
+      provider: "anthropic_api_key",
+      auth_type: "api_key",
+      owner_user_id: user.id
+    }
+
+    assert {:error, :credential_ref_provider_mismatch} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               "org_no_lookup",
+               "openai_api_key",
+               provider_mismatch_ref
              )
   end
 

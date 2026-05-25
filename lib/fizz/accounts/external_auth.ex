@@ -9,8 +9,13 @@ defmodule Fizz.Accounts.ExternalAuth do
   alias Fizz.Accounts
   alias Fizz.Accounts.{ApiCredential, OauthConnection, Scope, User, WorkOS}
   alias Fizz.Accounts.WorkOS.Vault
-  alias Fizz.Integrations.ProviderCatalog
   alias Fizz.Repo
+
+  @provider_catalog Application.compile_env(
+                      :fizz,
+                      :accounts_auth_provider_catalog,
+                      Fizz.Integrations.AuthProviderCatalog
+                    )
 
   @doc """
   Returns the indexed auth connection for a user/provider in an organization.
@@ -268,7 +273,7 @@ defmodule Fizz.Accounts.ExternalAuth do
       when is_binary(organization_id) and is_binary(credential_id) and is_map(attrs) do
     with {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id),
          {:ok, credential} <- get_credential(resolved_scope, organization_id, credential_id),
-         {:ok, secret_value} <- secret_value_from_attrs(attrs),
+         {:ok, secret_value} <- secret_value_from_attrs(credential.provider, attrs),
          {:ok, vault_response} <-
            Vault.update_object(resolved_scope, organization_id, credential.vault_object_id, %{
              value: secret_value,
@@ -378,7 +383,7 @@ defmodule Fizz.Accounts.ExternalAuth do
        do: Accounts.build_scope(scope, organization_id)
 
   defp resolve_oauth_provider(provider) when is_binary(provider),
-    do: ProviderCatalog.resolve_provider_id_for_type(provider, :oauth)
+    do: @provider_catalog.resolve_provider_id_for_type(provider, :oauth)
 
   defp get_credential(%Scope{} = resolved_scope, organization_id, api_credential_id)
        when is_binary(organization_id) and is_binary(api_credential_id) do
@@ -489,7 +494,7 @@ defmodule Fizz.Accounts.ExternalAuth do
     provider_custom_name = attrs[:provider_custom_name] || attrs["provider_custom_name"]
 
     with {:ok, normalized_provider} <- resolve_api_key_provider(provider),
-         {:ok, secret_value} <- secret_value_from_attrs(attrs),
+         {:ok, secret_value} <- secret_value_from_attrs(normalized_provider, attrs),
          :ok <- validate_provider_custom_name(normalized_provider, provider_custom_name),
          :ok <- validate_provider_label(provider_label) do
       {:ok,
@@ -503,28 +508,13 @@ defmodule Fizz.Accounts.ExternalAuth do
   end
 
   defp resolve_api_key_provider(provider) when is_binary(provider) do
-    ProviderCatalog.resolve_provider_id_for_type(provider, :api_key)
+    @provider_catalog.resolve_provider_id_for_type(provider, :api_key)
   end
 
   defp resolve_api_key_provider(_provider), do: {:error, :invalid_provider}
 
-  defp secret_value_from_attrs(attrs) when is_map(attrs) do
-    value = attrs[:secret] || attrs["secret"] || attrs[:value] || attrs["value"]
-
-    case value do
-      secret when is_binary(secret) ->
-        trimmed_secret = String.trim(secret)
-
-        if byte_size(trimmed_secret) > 0 do
-          {:ok, trimmed_secret}
-        else
-          {:error, :missing_secret_value}
-        end
-
-      _ ->
-        {:error, :missing_secret_value}
-    end
-  end
+  defp secret_value_from_attrs(provider, attrs) when is_binary(provider) and is_map(attrs),
+    do: @provider_catalog.credential_secret_value(provider, attrs)
 
   defp validate_provider_label(provider_label) when is_binary(provider_label) do
     if byte_size(String.trim(provider_label)) > 1,
@@ -535,7 +525,7 @@ defmodule Fizz.Accounts.ExternalAuth do
   defp validate_provider_label(_provider_label), do: {:error, :invalid_provider_label}
 
   defp validate_provider_custom_name(provider, provider_custom_name) when is_binary(provider) do
-    case ProviderCatalog.provider_for_type(provider, :api_key) do
+    case @provider_catalog.provider_for_type(provider, :api_key) do
       {:ok, %{custom: true}} ->
         if is_binary(provider_custom_name) and byte_size(String.trim(provider_custom_name)) > 1 do
           :ok
@@ -676,9 +666,9 @@ defmodule Fizz.Accounts.ExternalAuth do
   end
 
   defp provider_display_name(provider_id) when is_binary(provider_id) do
-    case ProviderCatalog.provider(provider_id) do
+    case @provider_catalog.provider(provider_id) do
       {:ok, provider} -> provider.label
-      {:error, :unknown_provider} -> provider_id
+      {:error, _reason} -> provider_id
     end
   end
 

@@ -10,6 +10,7 @@ defmodule Fizz.Integrations.Registry do
   use GenServer
 
   @table :fizz_integrations
+  @replacement_config_key :replace_integrations_for_test
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -37,25 +38,65 @@ defmodule Fizz.Integrations.Registry do
 
     opts
     |> integration_modules()
-    |> Enum.map(&entry!/1)
+    |> entries_for_modules!()
+    |> validate_entries!()
     |> Enum.each(&:ets.insert(@table, {&1.id, &1}))
 
     {:ok, %{}}
   end
 
+  @doc false
+  @spec modules_for_load(keyword()) :: [module()]
+  def modules_for_load(opts \\ []) when is_list(opts) do
+    integration_modules(opts)
+  end
+
+  @doc false
+  @spec entries_for_modules!([module()]) :: [map()]
+  def entries_for_modules!(modules) when is_list(modules) do
+    Enum.map(modules, &entry!/1)
+  end
+
+  def entries_for_modules!(modules) do
+    raise ArgumentError, "integration modules must be a list, got: #{inspect(modules)}"
+  end
+
+  @doc false
+  @spec validate_entries!([map()]) :: [map()]
+  def validate_entries!(entries) when is_list(entries) do
+    entries
+    |> validate_unique_ids!()
+    |> Enum.each(&validate_entry!/1)
+
+    entries
+  end
+
+  def validate_entries!(_entries) do
+    raise ArgumentError, "integration entries must be a list"
+  end
+
   defp integration_modules(opts) do
-    configured = Keyword.get(opts, :modules) || Application.get_env(:fizz, :integrations)
+    configured = Keyword.get(opts, :modules) || Application.get_env(:fizz, :integrations, [])
 
     case configured do
-      modules when is_list(modules) -> modules
-      _ -> builtin_modules()
+      modules when is_list(modules) ->
+        if replace_integrations?(opts), do: modules, else: builtin_modules() ++ modules
+
+      nil ->
+        builtin_modules()
+
+      other ->
+        raise ArgumentError, ":integrations must be a list, got: #{inspect(other)}"
     end
   end
 
+  defp replace_integrations?(opts) do
+    Keyword.get(opts, :replace_modules, false) == true ||
+      Application.get_env(:fizz, @replacement_config_key, false) == true
+  end
+
   defp builtin_modules do
-    [
-      Fizz.Integrations.Google.Sheets
-    ]
+    Fizz.Integrations.Manifest.integration_modules()
   end
 
   defp entry!(module) when is_atom(module) do
@@ -91,5 +132,92 @@ defmodule Fizz.Integrations.Registry do
     end
 
     :ets.new(@table, [:named_table, :set, :protected, read_concurrency: true])
+  end
+
+  defp validate_unique_ids!(entries) do
+    duplicate_ids =
+      entries
+      |> Enum.map(& &1.id)
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_id, count} -> count > 1 end)
+      |> Enum.map(fn {id, _count} -> id end)
+      |> Enum.sort()
+
+    case duplicate_ids do
+      [] -> entries
+      ids -> raise ArgumentError, "duplicate integration IDs: #{inspect(ids)}"
+    end
+  end
+
+  defp validate_entry!(entry) do
+    validate_required_fields!(entry)
+    validate_provider!(entry)
+    validate_operation_modules!(entry.actions, Fizz.Integrations.Operation, :action, entry.id)
+    validate_operation_modules!(entry.triggers, Fizz.Triggers.Source, :trigger, entry.id)
+  end
+
+  defp validate_required_fields!(%{
+         id: id,
+         display_name: display_name,
+         provider_id: provider_id,
+         module: module,
+         actions: actions,
+         triggers: triggers
+       })
+       when is_binary(id) and id != "" and is_binary(display_name) and display_name != "" and
+              is_binary(provider_id) and provider_id != "" and is_atom(module) and
+              is_list(actions) and is_list(triggers),
+       do: :ok
+
+  defp validate_required_fields!(entry) do
+    raise ArgumentError, "invalid integration entry: #{inspect(entry)}"
+  end
+
+  defp validate_provider!(%{id: id, provider_id: provider_id}) do
+    case Fizz.Integrations.ProviderCatalog.provider(provider_id) do
+      {:ok, _provider} ->
+        :ok
+
+      {:error, :unknown_provider} ->
+        raise ArgumentError, "integration #{id} uses unknown provider #{provider_id}"
+    end
+  end
+
+  defp validate_operation_modules!(modules, behaviour, kind, integration_id) do
+    Enum.each(modules, fn module ->
+      validate_operation_module!(module, behaviour, kind, integration_id)
+    end)
+  end
+
+  defp validate_operation_module!(module, behaviour, kind, integration_id) when is_atom(module) do
+    case Code.ensure_loaded(module) do
+      {:module, ^module} ->
+        validate_operation_behaviour!(module, behaviour, kind, integration_id)
+
+      _ ->
+        raise ArgumentError,
+              "integration #{integration_id} #{kind} module #{inspect(module)} is not loaded"
+    end
+  end
+
+  defp validate_operation_module!(module, _behaviour, kind, integration_id) do
+    raise ArgumentError,
+          "integration #{integration_id} #{kind} module is invalid: #{inspect(module)}"
+  end
+
+  defp validate_operation_behaviour!(module, behaviour, kind, integration_id) do
+    behaviours =
+      module.module_info(:attributes)
+      |> Keyword.get_values(:behaviour)
+      |> List.flatten()
+
+    case behaviour in behaviours do
+      true ->
+        :ok
+
+      false ->
+        raise ArgumentError,
+              "integration #{integration_id} #{kind} module #{inspect(module)} must implement #{inspect(behaviour)}"
+    end
   end
 end

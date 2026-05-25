@@ -3,6 +3,7 @@ defmodule FizzWeb.UserManagementLive do
 
   alias Fizz.Accounts
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
+  alias Fizz.Integrations.CredentialSchema
   alias Fizz.Integrations.ProviderCatalog
 
   @user_tabs [
@@ -162,14 +163,14 @@ defmodule FizzWeb.UserManagementLive do
         "provider" => provider.id,
         "provider_label" => provider.label,
         "provider_custom_name" => "",
-        "secret" => ""
+        "credentials" => CredentialSchema.defaults(provider.id)
       }
 
       {:noreply,
        socket
        |> assign(:credential_modal_step, :configure)
        |> assign(:selected_provider, provider)
-       |> assign(:credential_form, to_form(form_params, as: :credential))}
+       |> assign(:credential_form, credential_form(catalog, form_params))}
     else
       {:noreply, socket}
     end
@@ -488,10 +489,10 @@ defmodule FizzWeb.UserManagementLive do
       "provider" => provider,
       "provider_label" => provider_label,
       "provider_custom_name" => Map.get(params, "provider_custom_name", ""),
-      "secret" => Map.get(params, "secret", "")
+      "credentials" => CredentialSchema.defaults(provider)
     }
 
-    to_form(Map.merge(defaults, params), as: :credential)
+    to_form(merge_credential_form_params(defaults, params), as: :credential)
   end
 
   defp rotate_credential_form(credential \\ nil)
@@ -501,7 +502,8 @@ defmodule FizzWeb.UserManagementLive do
       %{
         "provider_label" => "",
         "provider_custom_name" => "",
-        "secret" => ""
+        "provider" => "",
+        "credentials" => %{}
       },
       as: :rotate_credential
     )
@@ -512,7 +514,8 @@ defmodule FizzWeb.UserManagementLive do
       %{
         "provider_label" => credential.provider_label || "",
         "provider_custom_name" => credential.provider_custom_name || "",
-        "secret" => ""
+        "provider" => credential.provider || "",
+        "credentials" => CredentialSchema.defaults(credential.provider)
       },
       as: :rotate_credential
     )
@@ -528,7 +531,7 @@ defmodule FizzWeb.UserManagementLive do
       provider: provider,
       provider_label: provider_label,
       provider_custom_name: Map.get(params, "provider_custom_name"),
-      secret: Map.get(params, "secret")
+      credentials: Map.get(params, "credentials", %{})
     }
   end
 
@@ -536,8 +539,17 @@ defmodule FizzWeb.UserManagementLive do
     %{
       provider_label: Map.get(params, "provider_label"),
       provider_custom_name: Map.get(params, "provider_custom_name"),
-      secret: Map.get(params, "secret")
+      credentials: Map.get(params, "credentials", %{})
     }
+  end
+
+  defp merge_credential_form_params(defaults, params) do
+    defaults
+    |> Map.merge(params)
+    |> Map.put(
+      "credentials",
+      Map.merge(Map.get(defaults, "credentials", %{}), Map.get(params, "credentials", %{}))
+    )
   end
 
   defp default_provider(provider_catalog) do
@@ -585,6 +597,47 @@ defmodule FizzWeb.UserManagementLive do
       provider -> provider.logo_path
     end
   end
+
+  defp credential_fields(provider_id) when is_binary(provider_id),
+    do: CredentialSchema.fields(provider_id)
+
+  defp credential_fields(_provider_id), do: []
+
+  defp credential_fields_for(%{provider: provider}), do: credential_fields(provider)
+  defp credential_fields_for(_credential), do: []
+
+  defp credential_field_name(form, field) do
+    "#{form.name}[credentials][#{field.key}]"
+  end
+
+  defp credential_field_id(form, field) do
+    "#{form.id}_credentials_#{field.key}"
+  end
+
+  defp credential_field_value(form, field) do
+    form
+    |> credential_form_values()
+    |> Map.get(field.key, "")
+  end
+
+  defp credential_form_values(form) do
+    case credential_values_from_form_source(form.params) ||
+           credential_values_from_form_source(form.source) do
+      values when is_map(values) -> values
+      _values -> %{}
+    end
+  end
+
+  defp credential_values_from_form_source(%Ecto.Changeset{}), do: nil
+
+  defp credential_values_from_form_source(source) when is_map(source) do
+    case Map.get(source, "credentials") || Map.get(source, :credentials) do
+      values when is_map(values) -> values
+      _values -> nil
+    end
+  end
+
+  defp credential_values_from_form_source(_source), do: nil
 
   defp credential_error_message(:organization_load_failed),
     do: "Could not load organization credentials right now."

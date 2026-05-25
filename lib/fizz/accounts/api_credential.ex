@@ -9,7 +9,12 @@ defmodule Fizz.Accounts.ApiCredential do
   use Fizz.Schema
 
   alias Fizz.Accounts.User
-  alias Fizz.Integrations.ProviderCatalog
+
+  @provider_catalog Application.compile_env(
+                      :fizz,
+                      :accounts_auth_provider_catalog,
+                      Fizz.Integrations.AuthProviderCatalog
+                    )
 
   @type t :: %__MODULE__{}
 
@@ -82,7 +87,7 @@ defmodule Fizz.Accounts.ApiCredential do
   end
 
   defp custom_provider?(provider_id) when is_binary(provider_id) do
-    case ProviderCatalog.provider(provider_id) do
+    case @provider_catalog.provider(provider_id) do
       {:ok, %{custom: true}} -> true
       _ -> false
     end

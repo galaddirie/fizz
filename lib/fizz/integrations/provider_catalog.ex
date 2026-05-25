@@ -6,28 +6,13 @@ defmodule Fizz.Integrations.ProviderCatalog do
   cleanly separated (for example `github_oauth` vs `github_api_key`).
   """
 
-  @builtin_provider_modules [
-    Fizz.Integrations.Providers.GitHubOAuth,
-    Fizz.Integrations.Providers.GitHubApiKey,
-    Fizz.Integrations.Providers.OpenAIApiKey,
-    Fizz.Integrations.Providers.AnthropicApiKey,
-    Fizz.Integrations.Providers.SlackOAuth,
-    Fizz.Integrations.Providers.GoogleOAuth,
-    Fizz.Integrations.Providers.MicrosoftOAuth,
-    Fizz.Integrations.Providers.NotionOAuth,
-    Fizz.Integrations.Providers.BoxOAuth,
-    Fizz.Integrations.Providers.CustomApiKey
-  ]
+  @replacement_config_key :replace_integration_providers_for_test
 
   @spec providers() :: [map()]
   def providers do
-    case Application.get_env(:fizz, :integration_providers) do
-      entries when is_list(entries) ->
-        normalize_entries(entries)
-
-      _ ->
-        builtin_providers()
-    end
+    configured_providers()
+    |> provider_entries()
+    |> validate_providers!()
   end
 
   @spec provider(String.t()) :: {:ok, map()} | {:error, :unknown_provider}
@@ -113,14 +98,48 @@ defmodule Fizz.Integrations.ProviderCatalog do
     |> Enum.map(fn entry -> {entry.label, entry.id} end)
   end
 
-  defp normalize_entries(entries) when is_list(entries) do
-    entries
-    |> Enum.flat_map(&normalize_entry/1)
-    |> Enum.uniq_by(& &1.id)
-    |> Enum.reject(&is_nil/1)
+  @doc false
+  @spec validate_providers!([map()]) :: [map()]
+  def validate_providers!(providers) when is_list(providers) do
+    providers
+    |> validate_unique_ids!()
+    |> Enum.each(&validate_provider!/1)
+
+    providers
   end
 
-  defp normalize_entries(_entries), do: builtin_providers()
+  def validate_providers!(_providers) do
+    raise ArgumentError, "integration providers must be a list"
+  end
+
+  defp provider_entries(configured_providers) do
+    if replace_provider_catalog?() do
+      configured_providers
+    else
+      builtin_providers() ++ configured_providers
+    end
+  end
+
+  defp configured_providers do
+    case Application.get_env(:fizz, :integration_providers, []) do
+      entries when is_list(entries) ->
+        normalize_entries(entries)
+
+      nil ->
+        []
+
+      other ->
+        raise ArgumentError, ":integration_providers must be a list, got: #{inspect(other)}"
+    end
+  end
+
+  defp replace_provider_catalog? do
+    Application.get_env(:fizz, @replacement_config_key, false) == true
+  end
+
+  defp normalize_entries(entries) when is_list(entries) do
+    Enum.map(entries, &normalize_entry/1)
+  end
 
   defp normalize_entry(entry) when is_map(entry) do
     id = normalize_provider_id(entry[:id] || entry["id"] || "")
@@ -138,42 +157,31 @@ defmodule Fizz.Integrations.ProviderCatalog do
     api_key_module =
       normalize_api_key_module(entry[:api_key_module] || entry["api_key_module"])
 
-    cond do
-      id == "" or label == "" ->
-        []
-
-      type not in [:oauth, :api_key] ->
-        []
-
-      not provider_id_has_type_suffix?(id, type) ->
-        []
-
-      true ->
-        [
-          %{
-            id: id,
-            label: label,
-            logo_path: logo_path,
-            custom: custom in [true, "true", 1],
-            type: type,
-            oauth_module: if(type == :oauth, do: oauth_module, else: nil),
-            api_key_module: if(type == :api_key, do: api_key_module, else: nil)
-          }
-        ]
-    end
+    %{
+      id: id,
+      label: label,
+      logo_path: logo_path,
+      custom: custom in [true, "true", 1],
+      type: type,
+      oauth_module: if(type == :oauth, do: oauth_module, else: nil),
+      api_key_module: if(type == :api_key, do: api_key_module, else: nil)
+    }
   end
 
   defp normalize_entry(module) when is_atom(module) do
     case provider_definition(module) do
       {:ok, definition} -> normalize_entry(definition)
-      :error -> []
+      :error -> raise ArgumentError, "provider module #{inspect(module)} must define definition/0"
     end
   end
 
-  defp normalize_entry(_entry), do: []
+  defp normalize_entry(entry) do
+    raise ArgumentError, "invalid provider catalog entry: #{inspect(entry)}"
+  end
 
   defp builtin_providers do
-    Enum.map(@builtin_provider_modules, &provider_definition!/1)
+    Fizz.Integrations.Manifest.provider_modules()
+    |> Enum.map(&provider_definition!/1)
   end
 
   defp provider_definition!(module) do
@@ -230,4 +238,82 @@ defmodule Fizz.Integrations.ProviderCatalog do
 
   defp normalize_api_key_module(module) when is_atom(module), do: module
   defp normalize_api_key_module(_module), do: nil
+
+  defp validate_unique_ids!(providers) do
+    duplicate_ids =
+      providers
+      |> Enum.map(& &1.id)
+      |> Enum.frequencies()
+      |> Enum.filter(fn {_id, count} -> count > 1 end)
+      |> Enum.map(fn {id, _count} -> id end)
+      |> Enum.sort()
+
+    case duplicate_ids do
+      [] -> providers
+      ids -> raise ArgumentError, "duplicate integration provider IDs: #{inspect(ids)}"
+    end
+  end
+
+  defp validate_provider!(provider) do
+    validate_required_provider_fields!(provider)
+    validate_provider_auth_type!(provider)
+    validate_provider_icon!(provider)
+    validate_provider_modules!(provider)
+  end
+
+  defp validate_required_provider_fields!(%{id: id, label: label})
+       when is_binary(id) and id != "" and is_binary(label) and label != "",
+       do: :ok
+
+  defp validate_required_provider_fields!(provider) do
+    raise ArgumentError, "provider entry requires non-empty id and label: #{inspect(provider)}"
+  end
+
+  defp validate_provider_auth_type!(%{id: id, type: type}) when type in [:oauth, :api_key] do
+    case provider_id_has_type_suffix?(id, type) do
+      true -> :ok
+      false -> raise ArgumentError, "provider #{id} ID does not match auth type #{type}"
+    end
+  end
+
+  defp validate_provider_auth_type!(provider) do
+    raise ArgumentError, "provider entry has unsupported auth type: #{inspect(provider)}"
+  end
+
+  defp validate_provider_icon!(%{custom: true}), do: :ok
+
+  defp validate_provider_icon!(%{id: id, logo_path: logo_path})
+       when is_binary(logo_path) and logo_path != "" do
+    case String.starts_with?(logo_path, "/") do
+      true -> :ok
+      false -> raise ArgumentError, "provider #{id} logo_path must be an absolute asset path"
+    end
+  end
+
+  defp validate_provider_icon!(%{id: id}) do
+    raise ArgumentError, "provider #{id} is missing logo_path"
+  end
+
+  defp validate_provider_modules!(%{type: :oauth, id: id, oauth_module: module})
+       when is_atom(module) and not is_nil(module) do
+    validate_provider_module_loaded!(id, module)
+  end
+
+  defp validate_provider_modules!(%{type: :oauth, id: id}) do
+    raise ArgumentError, "OAuth provider #{id} is missing oauth_module"
+  end
+
+  defp validate_provider_modules!(%{type: :api_key, id: id, api_key_module: module})
+       when is_atom(module) and not is_nil(module) do
+    validate_provider_module_loaded!(id, module)
+  end
+
+  defp validate_provider_modules!(%{type: :api_key}), do: :ok
+
+  defp validate_provider_module_loaded!(id, module) do
+    case Code.ensure_loaded(module) do
+      {:module, ^module} -> :ok
+      _ -> raise ArgumentError, "provider #{id} module #{inspect(module)} is not loaded"
+    end
+  end
 end

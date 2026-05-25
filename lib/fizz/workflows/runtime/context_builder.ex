@@ -13,6 +13,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
 
   alias Fizz.Accounts.Scope
   alias Fizz.Slots
+  alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.WorkflowRun
 
   @doc """
@@ -72,6 +73,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
     |> Map.put(:scope, scope)
     |> Map.put(:current_scope, scope)
     |> Map.put(:metadata, metadata)
+    |> put_execution_context()
   end
 
   defp maybe_put_scope(context, _scope), do: context
@@ -86,7 +88,13 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
   defp maybe_put_slot_resolver(context, _scope, _run_or_attrs), do: context
 
   defp put_global_context(context) do
-    Map.put(context, :_global, Map.drop(context, [:_global]))
+    context
+    |> put_execution_context()
+    |> then(&Map.put(&1, :_global, Map.drop(&1, [:_global])))
+  end
+
+  defp put_execution_context(context) do
+    Map.put(context, :execution_context, ExecutionContext.from_map(context))
   end
 
   defp fetch_value(map, key) when is_map(map) and is_atom(key) do

@@ -47,5 +47,8 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
     assert context.workos_organization_id == "org_123"
     assert context.workflow.project_id == "project_123"
     assert context.metadata.user_id == "user_123"
+    assert %Fizz.Workflows.ExecutionContext{} = context.execution_context
+    assert context.execution_context.scope == scope
+    assert context.execution_context.project_id == "project_123"
   end
 end

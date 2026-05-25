@@ -153,12 +153,40 @@ defmodule Fizz.Integrations do
              }}
           | {:error, term()}
   def resolve_auth_for_execution(%Scope{} = scope, project_id, provider, credential_ref)
-      when is_binary(provider) and is_map(credential_ref) do
+      when is_binary(provider) do
     with {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
-         organization_id when is_binary(organization_id) <- resolved_scope.organization_id,
-         {:ok, normalized_ref} <- CredentialRef.normalize(credential_ref),
-         :ok <- CredentialRef.ensure_owner(normalized_ref, resolved_scope.user.id),
-         :ok <- ensure_ref_provider_matches_requested(provider, normalized_ref["provider"]) do
+         organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
+      resolve_org_auth_for_execution(resolved_scope, organization_id, provider, credential_ref)
+    end
+  end
+
+  @doc """
+  Resolves provider auth for execution from an organization-scoped caller.
+  """
+  @spec resolve_org_auth_for_execution(Scope.t(), String.t(), String.t(), map()) ::
+          {:ok,
+           %{
+             auth_method: :oauth,
+             provider: String.t(),
+             token_result: map(),
+             scope: Scope.t(),
+             organization_id: String.t(),
+             oauth_connection_id: String.t()
+           }}
+          | {:ok,
+             %{
+               auth_method: :api_key,
+               provider: String.t(),
+               api_key: String.t(),
+               api_credential_id: String.t()
+             }}
+          | {:error, term()}
+  def resolve_org_auth_for_execution(%Scope{} = scope, organization_id, provider, credential_ref)
+      when is_binary(organization_id) and is_binary(provider) do
+    with {:ok, normalized_ref} <- CredentialRef.normalize(credential_ref),
+         :ok <- ensure_scope_owner_matches_ref(scope, normalized_ref),
+         :ok <- ensure_ref_provider_matches_requested(provider, normalized_ref["provider"]),
+         {:ok, resolved_scope} <- resolve_organization_scope(scope, organization_id) do
       case normalized_ref["auth_type"] do
         "oauth" ->
           fetch_oauth_token_with_ref(
@@ -229,6 +257,24 @@ defmodule Fizz.Integrations do
   def resolve_project_scope(scope, project_id) do
     Accounts.build_scope_for_project(scope, project_id)
   end
+
+  defp resolve_organization_scope(
+         %Scope{organization_id: organization_id} = scope,
+         organization_id
+       )
+       when is_binary(organization_id),
+       do: {:ok, scope}
+
+  defp resolve_organization_scope(%Scope{} = scope, organization_id)
+       when is_binary(organization_id),
+       do: Accounts.build_scope(scope, organization_id)
+
+  defp ensure_scope_owner_matches_ref(%Scope{user: %{id: user_id}}, credential_ref)
+       when is_binary(user_id) do
+    CredentialRef.ensure_owner(credential_ref, user_id)
+  end
+
+  defp ensure_scope_owner_matches_ref(_scope, _credential_ref), do: {:error, :scope_not_available}
 
   defp fetch_oauth_token(resolved_scope, organization_id, provider) do
     with {:ok, provider_mod} <- provider_module(provider),

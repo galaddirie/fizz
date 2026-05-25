@@ -26,6 +26,9 @@ defmodule Fizz.Workflows.Runtime.ContextBuilderTest do
     assert context.user_id == user.id
     assert context.project_id == run_attrs.project_id
     assert context.workos_organization_id == scope.organization_id
+    assert %Fizz.Workflows.ExecutionContext{} = context.execution_context
+    assert context.execution_context.scope == scope
+    assert context.execution_context.project_id == run_attrs.project_id
 
     workflow =
       Workflow.new(name: "context-test")

@@ -8,7 +8,7 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   @behaviour Fizz.Integrations.Provider
 
   alias Fizz.Accounts.{ExternalAuth, Scope}
-  alias Fizz.Integrations.CredentialRef
+  alias Fizz.Integrations
   alias Fizz.Integrations.ProviderDefinition
 
   @type model_spec ::
@@ -162,40 +162,17 @@ defmodule Fizz.Integrations.Providers.OpenAIApiKey do
   defp req_llm_opts(%Scope{} = scope, organization_id, opts) when is_list(opts) do
     credential_ref = Keyword.get(opts, :credential_ref)
 
-    with {:ok, normalized_ref} <-
-           CredentialRef.normalize_for_provider(credential_ref, provider_id(), :api_key),
-         :ok <- ensure_scope_owner_matches_ref(scope, normalized_ref),
-         {:ok, %{access_token: api_key}} <-
-           fetch_token_for_credential_ref(scope, organization_id, normalized_ref) do
+    with {:ok, %{auth_method: :api_key, api_key: api_key}} <-
+           Integrations.resolve_org_auth_for_execution(
+             scope,
+             organization_id,
+             provider_id(),
+             credential_ref
+           ) do
       filtered_opts = Keyword.delete(opts, :credential_ref)
       {:ok, Keyword.put(filtered_opts, :api_key, api_key)}
     end
   end
-
-  defp fetch_token_for_credential_ref(scope, organization_id, credential_ref) do
-    with {:ok, credential_id} <- CredentialRef.id(credential_ref),
-         {:ok, credential_result} <-
-           ExternalAuth.resolve_credential_for_use(scope, organization_id, provider_id(),
-             api_credential_id: credential_id
-           ) do
-      {:ok,
-       %{
-         access_token: credential_result.api_key,
-         expires_at: nil,
-         scopes: [],
-         missing_scopes: [],
-         api_credential_id: credential_result.api_credential_id,
-         credential_id: credential_result.credential_id
-       }}
-    end
-  end
-
-  defp ensure_scope_owner_matches_ref(%Scope{user: %{id: user_id}}, credential_ref)
-       when is_binary(user_id) do
-    CredentialRef.ensure_owner(credential_ref, user_id)
-  end
-
-  defp ensure_scope_owner_matches_ref(_scope, _credential_ref), do: {:error, :scope_not_available}
 
   defp normalize_model_spec(model) when is_binary(model) do
     trimmed_model = String.trim(model)

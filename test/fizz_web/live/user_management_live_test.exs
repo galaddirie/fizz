@@ -150,6 +150,7 @@ defmodule FizzWeb.UserManagementLiveTest do
       |> render_click()
 
       assert has_element?(view, "#create-credential-form")
+      assert has_element?(view, "#credential_credentials_secret")
 
       view
       |> element("#create-credential-form")
@@ -158,7 +159,7 @@ defmodule FizzWeb.UserManagementLiveTest do
           "provider" => "openai_api_key",
           "provider_label" => "OpenAI Key",
           "provider_custom_name" => "",
-          "secret" => "sk-openai-1"
+          "credentials" => %{"secret" => "sk-openai-1"}
         }
       })
 
@@ -175,7 +176,7 @@ defmodule FizzWeb.UserManagementLiveTest do
         "rotate_credential" => %{
           "provider_label" => "OpenAI Key Rotated",
           "provider_custom_name" => "",
-          "secret" => "sk-openai-2"
+          "credentials" => %{"secret" => "sk-openai-2"}
         }
       })
 
@@ -190,6 +191,59 @@ defmodule FizzWeb.UserManagementLiveTest do
       |> render_click()
 
       refute Repo.get(ApiCredential, credential.id)
+    end
+
+    test "keeps create credential form mounted after duplicate label error", %{conn: conn} do
+      put_http_responses([
+        {:repeat, &org_scoped_credential_flow_response/1}
+      ])
+
+      {:ok, view, _html} = live(conn, ~p"/settings/")
+
+      view
+      |> element("#settings-tab-api-keys")
+      |> render_click()
+
+      view
+      |> element("#open-create-credential-modal")
+      |> render_click()
+
+      view
+      |> element("#select-provider-openai_api_key")
+      |> render_click()
+
+      view
+      |> element("#create-credential-form")
+      |> render_submit(%{
+        "credential" => %{
+          "provider" => "openai_api_key",
+          "provider_label" => "OpenAI Duplicate",
+          "provider_custom_name" => "",
+          "credentials" => %{"secret" => "sk-openai-first"}
+        }
+      })
+
+      view
+      |> element("#open-create-credential-modal")
+      |> render_click()
+
+      view
+      |> element("#select-provider-openai_api_key")
+      |> render_click()
+
+      view
+      |> element("#create-credential-form")
+      |> render_submit(%{
+        "credential" => %{
+          "provider" => "openai_api_key",
+          "provider_label" => "OpenAI Duplicate",
+          "provider_custom_name" => "",
+          "credentials" => %{"secret" => "sk-openai-second"}
+        }
+      })
+
+      assert has_element?(view, "#create-credential-form")
+      assert has_element?(view, "#credential_credentials_secret")
     end
 
     test "switches organizations and refreshes token", %{conn: conn, user: user} do

@@ -43,11 +43,13 @@ defmodule Fizz.Steps.Registry do
 
   use GenServer
 
+  alias Fizz.Integrations.StepTypeAdapter
   alias Fizz.Steps.Type
 
   require Logger
 
   @ets_table :fizz_step_types
+  @supported_ui_components ~w(hidden json map number search select slot string)
 
   # ============================================================================
   # Client API
@@ -62,7 +64,16 @@ defmodule Fizz.Steps.Registry do
   """
   @spec register(Type.t()) :: :ok
   def register(%Type{} = type) do
-    GenServer.call(__MODULE__, {:register, type})
+    validate_step_types!([type])
+    validate_type_not_registered!(type)
+
+    case GenServer.call(__MODULE__, {:register, type}) do
+      :ok ->
+        :ok
+
+      {:error, :already_registered} ->
+        raise ArgumentError, "step type #{type.id} is already registered"
+    end
   end
 
   @doc """
@@ -111,16 +122,11 @@ defmodule Fizz.Steps.Registry do
   """
   @spec get_default_config(String.t()) :: map()
   def get_default_config(type_id) when is_binary(type_id) do
-    case Fizz.Steps.Executors.Behaviour.resolve(type_id) do
-      {:ok, module} ->
-        if function_exported?(module, :default_config, 0) do
-          module.default_config()
-        else
-          %{}
-        end
-
-      _ ->
-        %{}
+    with {:ok, %Type{} = type} <- get(type_id),
+         default_config when is_map(default_config) <- get_type_default_config(type) do
+      default_config
+    else
+      _ -> %{}
     end
   end
 
@@ -226,8 +232,14 @@ defmodule Fizz.Steps.Registry do
 
   @impl true
   def handle_call({:register, %Type{} = type}, _from, state) do
-    :ets.insert(@ets_table, {type.id, type})
-    {:reply, :ok, state}
+    case :ets.member(@ets_table, type.id) do
+      true ->
+        {:reply, {:error, :already_registered}, state}
+
+      false ->
+        :ets.insert(@ets_table, {type.id, type})
+        {:reply, :ok, state}
+    end
   end
 
   @impl true
@@ -240,12 +252,42 @@ defmodule Fizz.Steps.Registry do
   # Step Type Discovery
   # ============================================================================
 
+  @doc false
+  @spec types_for_modules!([module()]) :: [Type.t()]
+  def types_for_modules!(modules) when is_list(modules) do
+    modules
+    |> Enum.filter(&has_step_definition?/1)
+    |> Enum.map(& &1.__step_definition__())
+    |> validate_step_types!()
+  end
+
+  def types_for_modules!(modules) do
+    raise ArgumentError, "step executor modules must be a list, got: #{inspect(modules)}"
+  end
+
   defp discover_step_types do
     # Get all executor modules and load their definitions
     builtin_executor_modules()
-    |> Enum.filter(&has_step_definition?/1)
-    |> Enum.map(& &1.__step_definition__())
-    |> validate_unique_ids()
+    |> types_for_modules!()
+    |> replace_with_operation_backed_types()
+    |> validate_step_types!()
+  end
+
+  defp replace_with_operation_backed_types(types) do
+    operation_types = operation_backed_step_types()
+    operation_type_ids = Enum.map(operation_types, & &1.id)
+
+    types
+    |> Enum.reject(&(&1.id in operation_type_ids))
+    |> Kernel.++(operation_types)
+  end
+
+  defp operation_backed_step_types do
+    Enum.map(Fizz.Integrations.Catalog.operations(), fn operation ->
+      StepTypeAdapter.from_operation_definition!(operation,
+        executor: Fizz.Integrations.OperationExecutor
+      )
+    end)
   end
 
   defp library_item_from_type(%Type{} = type) do
@@ -260,117 +302,22 @@ defmodule Fizz.Steps.Registry do
     }
   end
 
-  # Explicit list of builtin executor modules.
-  # This ensures they are loaded before the registry tries to discover them.
-  # Add new executor modules here as they are created.
+  @spec builtin_executor_modules() :: [module()]
   defp builtin_executor_modules do
-    [
-      # -- Core / Built-in --
-      Fizz.Steps.Executors.ManualInput,
-      Fizz.Steps.Executors.OnChatTrigger,
-      Fizz.Steps.Executors.HttpRequest,
-      Fizz.Steps.Executors.JsonParser,
-      Fizz.Steps.Executors.DataFilter,
-      Fizz.Steps.Executors.DataTransform,
-      Fizz.Steps.Executors.DataOutput,
-      Fizz.Steps.Executors.Condition,
-      Fizz.Steps.Executors.Switch,
-      Fizz.Steps.Executors.Format,
-      Fizz.Steps.Executors.Debug,
-      Fizz.Steps.Executors.Math,
-      Fizz.Steps.Executors.Aggregator,
-      Fizz.Steps.Executors.Splitter,
-      Fizz.Steps.Executors.Join,
-      Fizz.Steps.Executors.ScheduleTrigger,
-      Fizz.Steps.Executors.Wait,
-
-      # -- AI --
-      Fizz.Steps.Executors.AIAgent,
-      Fizz.Steps.Executors.OpenAIModel,
-      Fizz.Steps.Executors.AnthropicModel,
-      Fizz.Steps.Executors.AIStructureSchema,
-      Fizz.Steps.Executors.AIToolHttp,
-      # TODO: implement
-      Fizz.Steps.Executors.OpenAIImageGeneration,
-      Fizz.Steps.Executors.AnthropicVisionAnalysis,
-
-      # -- Gmail --
-      # TODO: implement
-      Fizz.Steps.Executors.GmailTrigger,
-      Fizz.Steps.Executors.GmailSendEmail,
-      Fizz.Steps.Executors.GmailReplyEmail,
-
-      # -- Slack --
-      # TODO: implement
-      Fizz.Steps.Executors.SlackTrigger,
-      Fizz.Steps.Executors.SlackSendMessage,
-      Fizz.Steps.Executors.SlackCreateChannel,
-
-      # -- Google Docs --
-      # TODO: implement
-      Fizz.Steps.Executors.GoogleDocsTrigger,
-      Fizz.Steps.Executors.GoogleDocsCreateDoc,
-      Fizz.Steps.Executors.GoogleDocsAppendText,
-
-      # -- Google Sheets --
-      # TODO: implement
-      Fizz.Steps.Executors.GoogleSheetsTrigger,
-      Fizz.Steps.Executors.GoogleSheetsAppendRow,
-      Fizz.Steps.Executors.GoogleSheetsReadRows,
-
-      # -- Google Slides --
-      # TODO: implement
-      Fizz.Steps.Executors.GoogleSlidesCreatePresentation,
-      Fizz.Steps.Executors.GoogleSlidesAddSlide,
-
-      # -- Google Drive --
-      # TODO: implement
-      Fizz.Steps.Executors.GoogleDriveUploadFile,
-
-      # -- Notion --
-      # TODO: implement
-      Fizz.Steps.Executors.NotionTrigger,
-      Fizz.Steps.Executors.NotionCreatePage,
-      Fizz.Steps.Executors.NotionUpdatePage,
-
-      # -- GitHub --
-      # TODO: implement
-      Fizz.Steps.Executors.GitHubTrigger,
-      Fizz.Steps.Executors.GitHubCreateIssue,
-      Fizz.Steps.Executors.GitHubCreatePR,
-
-      # -- Microsoft Outlook --
-      # TODO: implement
-      Fizz.Steps.Executors.OutlookTrigger,
-      Fizz.Steps.Executors.OutlookSendEmail,
-
-      # -- Microsoft Teams --
-      # TODO: implement
-      Fizz.Steps.Executors.TeamsTrigger,
-      Fizz.Steps.Executors.TeamsSendMessage,
-
-      # -- Microsoft SharePoint --
-      # TODO: implement
-      Fizz.Steps.Executors.SharePointUploadFile,
-
-      # -- Microsoft OneDrive --
-      # TODO: implement
-      Fizz.Steps.Executors.OneDriveUploadFile,
-
-      # -- Microsoft PowerPoint --
-      # TODO: implement
-      Fizz.Steps.Executors.PowerPointCreatePresentation,
-
-      # -- Box --
-      # TODO: implement
-      Fizz.Steps.Executors.BoxUploadFile
-    ]
+    Fizz.Integrations.Manifest.step_executor_modules()
   end
 
   defp has_step_definition?(module) do
     # Ensure module is loaded
     Code.ensure_loaded(module)
     function_exported?(module, :__step_definition__, 0)
+  end
+
+  defp validate_step_types!(types) do
+    types
+    |> validate_unique_ids()
+    |> validate_icons!()
+    |> validate_config_schemas!()
   end
 
   defp validate_unique_ids(types) do
@@ -384,5 +331,154 @@ defmodule Fizz.Steps.Registry do
     end
 
     types
+  end
+
+  defp validate_type_not_registered!(type) do
+    case exists?(type.id) do
+      true -> raise ArgumentError, "step type #{type.id} is already registered"
+      false -> :ok
+    end
+  end
+
+  defp validate_icons!(types) do
+    Enum.each(types, fn type ->
+      case type.icon do
+        icon when is_binary(icon) and icon != "" ->
+          :ok
+
+        _ ->
+          raise ArgumentError, "step type #{type.id} is missing icon"
+      end
+    end)
+
+    types
+  end
+
+  defp validate_config_schemas!(types) do
+    Enum.each(types, fn type ->
+      default_config = get_type_default_config(type)
+
+      type.config_schema
+      |> Map.get("properties", %{})
+      |> Enum.each(fn {field, schema} ->
+        validate_schema_property!(type, [field], schema, default_config)
+      end)
+    end)
+
+    types
+  end
+
+  defp validate_schema_property!(type, path, schema, default_config) when is_map(schema) do
+    validate_ui_component!(type, path, schema)
+    validate_credential_slot!(type, path, schema, default_config)
+
+    schema
+    |> Map.get("properties", %{})
+    |> Enum.each(fn {field, nested_schema} ->
+      validate_schema_property!(type, path ++ [field], nested_schema, default_config)
+    end)
+  end
+
+  defp validate_schema_property!(_type, _path, _schema, _default_config), do: :ok
+
+  defp validate_ui_component!(type, path, schema) do
+    case get_in(schema, ["ui", "component"]) do
+      nil ->
+        :ok
+
+      component when component in @supported_ui_components ->
+        :ok
+
+      component ->
+        raise ArgumentError,
+              "step type #{type.id} field #{Enum.join(path, ".")} uses unsupported ui.component #{inspect(component)}"
+    end
+  end
+
+  defp validate_credential_slot!(type, path, schema, default_config) do
+    case get_in(schema, ["ui", "component"]) do
+      "slot" -> validate_credential_slot_shape!(type, path, schema, default_config)
+      _component -> :ok
+    end
+  end
+
+  defp validate_credential_slot_shape!(type, path, schema, default_config) do
+    ui = Map.get(schema, "ui", %{})
+    spec = Map.get(ui, "spec", %{})
+    provider = Map.get(spec, "provider")
+    auth_type = Map.get(spec, "auth_type")
+    slot_key = Map.get(ui, "slot_key")
+    field = Enum.join(path, ".")
+
+    with "credential" <- Map.get(ui, "slot_kind"),
+         true <- is_binary(slot_key) and slot_key != "",
+         true <- is_binary(provider) and provider != "",
+         {:ok, auth_atom} <- credential_auth_type(auth_type),
+         {:ok, _provider} <-
+           Fizz.Integrations.ProviderCatalog.provider_for_type(provider, auth_atom),
+         {:ok, default_value} <- fetch_nested(default_config, path),
+         :ok <- validate_credential_default(default_value, provider, auth_type, slot_key) do
+      :ok
+    else
+      {:error, reason} ->
+        raise ArgumentError,
+              "step type #{type.id} credential field #{field} is invalid: #{inspect(reason)}"
+
+      false ->
+        raise ArgumentError,
+              "step type #{type.id} credential field #{field} is missing slot metadata"
+
+      other ->
+        raise ArgumentError,
+              "step type #{type.id} credential field #{field} is invalid: #{inspect(other)}"
+    end
+  end
+
+  defp credential_auth_type("api_key"), do: {:ok, :api_key}
+  defp credential_auth_type("oauth"), do: {:ok, :oauth}
+  defp credential_auth_type(auth_type), do: {:error, {:unsupported_auth_type, auth_type}}
+
+  defp validate_credential_default(
+         %{
+           "$slot" => true,
+           "kind" => "credential",
+           "slot_key" => slot_key,
+           "spec" => %{"provider" => provider, "auth_type" => auth_type}
+         },
+         provider,
+         auth_type,
+         slot_key
+       ),
+       do: :ok
+
+  defp validate_credential_default(default_value, _provider, _auth_type, _slot_key) do
+    {:error, {:missing_credential_default, default_value}}
+  end
+
+  defp fetch_nested(map, path) do
+    case get_in(map, path) do
+      nil -> {:error, {:missing_default_config, path}}
+      value -> {:ok, value}
+    end
+  end
+
+  defp get_type_default_config(type) do
+    case type.default_config do
+      default_config when is_map(default_config) and default_config != %{} ->
+        default_config
+
+      _default_config ->
+        executor_default_config(type)
+    end
+  end
+
+  defp executor_default_config(type) do
+    with {:ok, module} <- Type.executor_module(type),
+         true <- function_exported?(module, :default_config, 0),
+         default_config when is_map(default_config) <- module.default_config() do
+      default_config
+    else
+      _ -> %{}
+    end
   end
 end

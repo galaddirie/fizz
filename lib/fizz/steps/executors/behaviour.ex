@@ -146,7 +146,7 @@ defmodule Fizz.Steps.Executors.Behaviour do
   def execute(type_id, config, input, context) do
     case resolve(type_id) do
       {:ok, module} ->
-        module.execute(config, input, context)
+        module.execute(config, input, Map.put(context, :type_id, type_id))
 
       {:error, reason} ->
         {:error, {:executor_not_found, reason}}

@@ -158,6 +158,7 @@ defmodule Fizz.Steps.Definition do
           step_kind: @step_kind,
           executor: Atom.to_string(__MODULE__),
           config_schema: @config_schema,
+          default_config: @default_config,
           input_schema: @input_schema,
           output_schema: @output_schema,
           subnode_inputs: @subnode_inputs,
