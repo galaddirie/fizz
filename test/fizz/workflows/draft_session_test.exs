@@ -483,6 +483,37 @@ defmodule Fizz.Workflows.DraftSessionTest do
     refute Enum.any?(preview_after_two_undos.steps, &(&1.id == first_added_step.id))
   end
 
+  test "undo history is capped by configured depth" do
+    previous_env = Application.get_env(:fizz, DraftSession, [])
+    Application.put_env(:fizz, DraftSession, Keyword.merge(previous_env, history_limit: 2))
+
+    on_exit(fn ->
+      Application.put_env(:fizz, DraftSession, previous_env)
+    end)
+
+    scope = project_scope_fixture()
+    %{draft: draft} = draft_fixture(scope)
+
+    register_session_cleanup(draft.id)
+
+    assert {:ok, _draft, 0, _undo_state, _editor_state} =
+             DraftSession.join(draft.id, scope, scope.user.id)
+
+    for index <- 1..3 do
+      assert {:ok, _draft, ^index, _undo_state} =
+               DraftSession.apply_operation(draft.id, scope.user.id, %{
+                 type: :add_step,
+                 params: %{type_id: "debug", position: %{x: index * 20, y: index * 20}}
+               })
+    end
+
+    assert {:ok, undo_state} = DraftSession.get_undo_state(draft.id, scope.user.id)
+    assert Enum.map(undo_state.undoStack, & &1.depth) == [1, 2]
+
+    assert {:error, :revision_not_found} =
+             DraftSession.preview_revision(draft.id, scope.user.id, {:undo, 3})
+  end
+
   test "restore_snapshot applies a revision as a single undoable operation" do
     scope = project_scope_fixture()
     %{draft: draft} = draft_fixture(scope)

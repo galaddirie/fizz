@@ -220,6 +220,47 @@ defmodule Fizz.Workflows.SignalRouterTest do
     assert {:ok, _cancelled_run} = Workflows.cancel_run(scope, run.id)
   end
 
+  test "pending signal claims are disjoint and recover stale deliveries", %{scope: scope} do
+    run = insert_run(scope, :running)
+
+    signal_ids =
+      for index <- 1..4 do
+        {:ok, signal} =
+          Workflows.create_signal_inbox(run.id, "claim-#{index}", "poke", %{"index" => index})
+
+        signal.id
+      end
+
+    task_a =
+      Task.async(fn ->
+        Workflows.claim_pending_signals(limit: 2, claimed_by: "router-a")
+      end)
+
+    task_b =
+      Task.async(fn ->
+        Workflows.claim_pending_signals(limit: 2, claimed_by: "router-b")
+      end)
+
+    assert {:ok, claimed_a} = Task.await(task_a, 2_000)
+    assert {:ok, claimed_b} = Task.await(task_b, 2_000)
+
+    claimed_a_ids = Enum.map(claimed_a, & &1.id)
+    claimed_b_ids = Enum.map(claimed_b, & &1.id)
+
+    assert length(claimed_a_ids) == 2
+    assert length(claimed_b_ids) == 2
+    assert MapSet.disjoint?(MapSet.new(claimed_a_ids), MapSet.new(claimed_b_ids))
+    assert MapSet.new(claimed_a_ids ++ claimed_b_ids) == MapSet.new(signal_ids)
+
+    assert {:ok, 4} = Workflows.recover_stale_signals(claim_ttl_ms: 0)
+
+    statuses =
+      Repo.all(from(signal in SignalInbox, where: signal.id in ^signal_ids))
+      |> Enum.map(& &1.status)
+
+    assert Enum.all?(statuses, &(&1 == :pending))
+  end
+
   defp put_workflow_runtime(opts) do
     current = Application.get_env(:fizz, Fizz.Workflows, [])
     Application.put_env(:fizz, Fizz.Workflows, Keyword.merge(current, opts))

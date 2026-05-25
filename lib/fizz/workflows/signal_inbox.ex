@@ -8,7 +8,7 @@ defmodule Fizz.Workflows.SignalInbox do
   alias Fizz.Accounts.Project
   alias Fizz.Workflows.WorkflowRun
 
-  @statuses ~w(pending delivered skipped)a
+  @statuses ~w(pending delivering delivered skipped)a
 
   schema "signal_inbox" do
     field :signal_id, :string
@@ -17,6 +17,8 @@ defmodule Fizz.Workflows.SignalInbox do
     field :status, Ecto.Enum, values: @statuses, default: :pending
     field :workos_organization_id, :string
     field :delivered_at, :utc_datetime_usec
+    field :claimed_at, :utc_datetime_usec
+    field :claimed_by, :string
 
     belongs_to :run, WorkflowRun
     belongs_to :project, Project
@@ -36,7 +38,9 @@ defmodule Fizz.Workflows.SignalInbox do
       :status,
       :project_id,
       :workos_organization_id,
-      :delivered_at
+      :delivered_at,
+      :claimed_at,
+      :claimed_by
     ])
     |> validate_required([
       :run_id,

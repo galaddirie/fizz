@@ -133,6 +133,32 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     assert File.exists?(db_path)
   end
 
+  test "sweep passivates at most the configured batch size", ctx do
+    sweeper = start_sweeper!(ctx, batch_size: 2, max_concurrency: 2)
+
+    runs =
+      for _index <- 1..3 do
+        run = insert_run(ctx.scope, ctx.version, :running, old_time())
+        pid = start_idle_worker!(run, ctx)
+        {run, Process.monitor(pid)}
+      end
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    assert length(passivated_run_ids) == 2
+
+    for {run, ref} <- runs, run.id in passivated_run_ids do
+      assert_receive {:DOWN, ^ref, :process, _pid, :normal}, 2_000
+    end
+
+    statuses =
+      runs
+      |> Enum.map(fn {run, _ref} -> Fizz.Workflows.get_run(ctx.scope, run.id) end)
+      |> Enum.map(fn {:ok, run} -> run.status end)
+
+    assert Enum.count(statuses, &(&1 == :passivated)) == 2
+    assert Enum.count(statuses, &(&1 == :running)) == 1
+  end
+
   test "wal_checkpoint failure does not block passivation", ctx do
     fake_litestream = start_fake_litestream!()
     sweeper = start_sweeper!(ctx, litestream_server: fake_litestream)

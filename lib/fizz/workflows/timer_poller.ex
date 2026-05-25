@@ -14,6 +14,9 @@ defmodule Fizz.Workflows.TimerPoller do
   @default_interval_ms 1_000
   @default_batch_size 50
   @default_claim_ttl_ms 30_000
+  @default_max_concurrency 10
+  @default_delivery_timeout_ms 30_000
+  @default_call_timeout_ms :timer.minutes(3)
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -32,7 +35,7 @@ defmodule Fizz.Workflows.TimerPoller do
   Triggers a single poll cycle immediately.
   """
   def poll(opts \\ []) do
-    GenServer.call(server_name(opts), :poll, :infinity)
+    GenServer.call(server_name(opts), :poll, call_timeout_ms())
   end
 
   @impl true
@@ -42,6 +45,8 @@ defmodule Fizz.Workflows.TimerPoller do
       batch_size: Keyword.get(opts, :batch_size, @default_batch_size),
       claim_ttl_ms: Keyword.get(opts, :claim_ttl_ms, @default_claim_ttl_ms),
       claimed_by: Keyword.get(opts, :claimed_by, "#{Atom.to_string(node())}:timer_poller"),
+      max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
+      delivery_timeout_ms: Keyword.get(opts, :delivery_timeout_ms, @default_delivery_timeout_ms),
       worker_opts: Keyword.get(opts, :worker_opts, [])
     }
 
@@ -73,27 +78,41 @@ defmodule Fizz.Workflows.TimerPoller do
              claimed_by: state.claimed_by
            ) do
       fired_timer_ids =
-        Enum.reduce(timers, [], fn %DurableTimer{} = timer, acc ->
-          case Workflows.deliver_run_event(timer.run_id, {:timer_fired, timer}, state.worker_opts) do
-            :ok ->
-              :ok = Workflows.mark_timer_fired(timer.id)
-              [timer.id | acc]
-
-            {:ok, :skipped} ->
-              :ok = Workflows.mark_timer_fired(timer.id)
-              [timer.id | acc]
-
-            {:error, reason} ->
-              Logger.error(
-                "failed to deliver timer #{timer.id} for run #{timer.run_id}: #{inspect(reason)}"
-              )
-
-              acc
-          end
+        timers
+        |> Task.async_stream(
+          &deliver_timer(&1, state.worker_opts),
+          max_concurrency: state.max_concurrency,
+          timeout: state.delivery_timeout_ms,
+          on_timeout: :kill_task
+        )
+        |> Enum.reduce([], fn
+          {:ok, {:ok, timer_id}}, acc -> [timer_id | acc]
+          _result, acc -> acc
         end)
         |> Enum.reverse()
 
       {:ok, fired_timer_ids}
+    end
+  end
+
+  defp deliver_timer(%DurableTimer{} = timer, worker_opts) do
+    case Workflows.deliver_run_event(timer.run_id, {:timer_fired, timer}, worker_opts) do
+      :ok ->
+        :ok = Workflows.mark_timer_fired(timer.id)
+        {:ok, timer.id}
+
+      {:ok, :skipped} ->
+        :ok = Workflows.mark_timer_fired(timer.id)
+        {:ok, timer.id}
+
+      {:error, reason} ->
+        _ = Workflows.release_timer_claim(timer.id)
+
+        Logger.error(
+          "failed to deliver timer #{timer.id} for run #{timer.run_id}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
     end
   end
 
@@ -104,4 +123,9 @@ defmodule Fizz.Workflows.TimerPoller do
   defp schedule_poll(_interval_ms), do: :ok
 
   defp server_name(opts), do: Keyword.get(opts, :server, __MODULE__)
+
+  defp call_timeout_ms do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:call_timeout_ms, @default_call_timeout_ms)
+  end
 end

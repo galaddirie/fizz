@@ -483,6 +483,23 @@ defmodule Fizz.Workflows do
   end
 
   @doc false
+  def release_timer_claim(timer_id) when is_binary(timer_id) do
+    now = DateTime.utc_now()
+
+    {count, _rows} =
+      DurableTimer
+      |> where([timer], timer.id == ^timer_id and timer.status == :firing)
+      |> Repo.update_all(
+        set: [status: :pending, claimed_at: nil, claimed_by: nil, updated_at: now]
+      )
+
+    case count do
+      1 -> :ok
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc false
   def get_timer(timer_id) when is_binary(timer_id) do
     case Repo.get(DurableTimer, timer_id) do
       %DurableTimer{} = timer -> {:ok, timer}
@@ -579,13 +596,91 @@ defmodule Fizz.Workflows do
   end
 
   @doc false
-  def list_pending_signal_ids(limit \\ 50) do
-    SignalInbox
-    |> where([signal], signal.status == :pending)
-    |> order_by([signal], asc: signal.inserted_at)
-    |> limit(^limit)
-    |> select([signal], signal.id)
-    |> Repo.all()
+  def claim_pending_signals(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    limit = Keyword.get(opts, :limit, 50)
+    claimed_by = Keyword.get(opts, :claimed_by, owner_node())
+
+    Repo.transaction(fn ->
+      SignalInbox
+      |> where([signal], signal.status == :pending)
+      |> order_by([signal], asc: signal.inserted_at)
+      |> limit(^limit)
+      |> lock("FOR UPDATE SKIP LOCKED")
+      |> Repo.all()
+      |> Enum.map(fn signal ->
+        signal
+        |> SignalInbox.changeset(%{
+          status: :delivering,
+          claimed_at: now,
+          claimed_by: claimed_by
+        })
+        |> Repo.update!()
+      end)
+    end)
+  end
+
+  @doc false
+  def claim_signal(signal_id, opts \\ []) when is_binary(signal_id) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    claimed_by = Keyword.get(opts, :claimed_by, owner_node())
+
+    Repo.transaction(fn ->
+      case SignalInbox
+           |> where([signal], signal.id == ^signal_id and signal.status == :pending)
+           |> lock("FOR UPDATE SKIP LOCKED")
+           |> Repo.one() do
+        nil ->
+          Repo.rollback(:not_found)
+
+        %SignalInbox{} = signal ->
+          signal
+          |> SignalInbox.changeset(%{
+            status: :delivering,
+            claimed_at: now,
+            claimed_by: claimed_by
+          })
+          |> Repo.update!()
+      end
+    end)
+    |> case do
+      {:ok, signal} -> {:ok, signal}
+      {:error, :not_found} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc false
+  def recover_stale_signals(opts \\ []) do
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    claim_ttl_ms = Keyword.get(opts, :claim_ttl_ms, 30_000)
+    cutoff = DateTime.add(now, -claim_ttl_ms, :millisecond)
+
+    {count, _rows} =
+      SignalInbox
+      |> where([signal], signal.status == :delivering and signal.claimed_at < ^cutoff)
+      |> Repo.update_all(
+        set: [status: :pending, claimed_at: nil, claimed_by: nil, updated_at: now]
+      )
+
+    {:ok, count}
+  end
+
+  @doc false
+  def release_signal_claim(signal_id) when is_binary(signal_id) do
+    now = DateTime.utc_now()
+
+    {count, _rows} =
+      SignalInbox
+      |> where([signal], signal.id == ^signal_id and signal.status == :delivering)
+      |> Repo.update_all(
+        set: [status: :pending, claimed_at: nil, claimed_by: nil, updated_at: now]
+      )
+
+    case count do
+      1 -> :ok
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc false
@@ -602,8 +697,16 @@ defmodule Fizz.Workflows do
 
     {count, _rows} =
       SignalInbox
-      |> where([signal], signal.id == ^signal_id and signal.status == :pending)
-      |> Repo.update_all(set: [status: :delivered, delivered_at: now, updated_at: now])
+      |> where([signal], signal.id == ^signal_id and signal.status in ^[:pending, :delivering])
+      |> Repo.update_all(
+        set: [
+          status: :delivered,
+          delivered_at: now,
+          claimed_at: nil,
+          claimed_by: nil,
+          updated_at: now
+        ]
+      )
 
     case count do
       1 -> :ok
@@ -617,8 +720,16 @@ defmodule Fizz.Workflows do
 
     {count, _rows} =
       SignalInbox
-      |> where([signal], signal.id == ^signal_id and signal.status == :pending)
-      |> Repo.update_all(set: [status: :skipped, delivered_at: now, updated_at: now])
+      |> where([signal], signal.id == ^signal_id and signal.status in ^[:pending, :delivering])
+      |> Repo.update_all(
+        set: [
+          status: :skipped,
+          delivered_at: now,
+          claimed_at: nil,
+          claimed_by: nil,
+          updated_at: now
+        ]
+      )
 
     case count do
       1 -> :ok
@@ -707,10 +818,11 @@ defmodule Fizz.Workflows do
   end
 
   @doc false
-  def list_passivation_candidates(%DateTime{} = idle_before) do
+  def list_passivation_candidates(%DateTime{} = idle_before, limit \\ 50) do
     from(run in WorkflowRun,
       where: run.status in ^[:running, :sleeping] and run.last_active_at < ^idle_before,
-      order_by: [asc: run.last_active_at]
+      order_by: [asc: run.last_active_at],
+      limit: ^limit
     )
     |> Repo.all()
   end
@@ -908,6 +1020,7 @@ defmodule Fizz.Workflows do
                  fence_token: fence_token,
                  checkpoint_strategy: checkpoint_strategy(),
                  max_concurrency: max_run_concurrency(),
+                 task_supervisor_max_children: max_task_children(),
                  idle_timeout_ms: worker_idle_timeout_ms()
                ],
                worker_process_opts([])
@@ -1029,8 +1142,16 @@ defmodule Fizz.Workflows do
   end
 
   defp max_run_concurrency do
-    Application.get_env(:fizz, __MODULE__, [])
-    |> Keyword.get(:max_concurrency, System.schedulers_online())
+    workflow_opts = Application.get_env(:fizz, __MODULE__, [])
+
+    global_task_limit = max_task_children(workflow_opts)
+    default_run_limit = min(System.schedulers_online(), global_task_limit)
+
+    Keyword.get(workflow_opts, :max_concurrency, default_run_limit)
+  end
+
+  defp max_task_children(workflow_opts \\ Application.get_env(:fizz, __MODULE__, [])) do
+    Keyword.get(workflow_opts, :max_task_children, System.schedulers_online() * 4)
   end
 
   defp worker_idle_timeout_ms do
@@ -1062,6 +1183,7 @@ defmodule Fizz.Workflows do
                  fence_token: fence_token,
                  checkpoint_strategy: checkpoint_strategy(),
                  max_concurrency: max_run_concurrency(),
+                 task_supervisor_max_children: max_task_children(),
                  idle_timeout_ms: worker_idle_timeout_ms()
                ],
                worker_process_opts(opts)

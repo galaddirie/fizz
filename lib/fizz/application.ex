@@ -26,7 +26,9 @@ defmodule Fizz.Application do
          s3_skip_verify: Application.get_env(:fizz, :litestream_s3_skip_verify, false),
          log_level: Application.get_env(:fizz, :litestream_log_level, "warn")},
         {Registry, keys: :unique, name: Fizz.Workflows.Runner.Registry},
-        {Task.Supervisor, name: Fizz.Workflows.Runner.TaskSupervisor},
+        {Task.Supervisor,
+         name: Fizz.Workflows.Runner.TaskSupervisor,
+         max_children: workflow_task_supervisor_max_children()},
         {Fizz.Workflows.Runner.WorkerSupervisor, name: Fizz.Workflows.Runner.WorkerSupervisor}
       ])
       |> maybe_add_child(
@@ -81,4 +83,9 @@ defmodule Fizz.Application do
 
   defp maybe_add_child(children, _child, false), do: children
   defp maybe_add_child(children, child, true), do: children ++ [child]
+
+  defp workflow_task_supervisor_max_children do
+    Application.get_env(:fizz, Fizz.Workflows, [])
+    |> Keyword.get(:max_task_children, System.schedulers_online() * 4)
+  end
 end

@@ -18,6 +18,10 @@ defmodule Fizz.Workflows.PassivationSweeper do
 
   @default_interval_ms 60_000
   @default_idle_threshold_ms 10 * 60 * 1_000
+  @default_batch_size 25
+  @default_max_concurrency 4
+  @default_passivation_timeout_ms 30_000
+  @default_call_timeout_ms :timer.minutes(5)
 
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
@@ -30,7 +34,7 @@ defmodule Fizz.Workflows.PassivationSweeper do
   Primarily useful in tests and operational tooling.
   """
   def sweep(opts \\ []) do
-    GenServer.call(server_name(opts), :sweep, :infinity)
+    GenServer.call(server_name(opts), :sweep, call_timeout_ms())
   end
 
   @impl true
@@ -44,6 +48,10 @@ defmodule Fizz.Workflows.PassivationSweeper do
     state = %{
       interval_ms: Keyword.get(opts, :interval_ms, @default_interval_ms),
       idle_threshold_ms: Keyword.get(opts, :idle_threshold_ms, @default_idle_threshold_ms),
+      batch_size: Keyword.get(opts, :batch_size, @default_batch_size),
+      max_concurrency: Keyword.get(opts, :max_concurrency, @default_max_concurrency),
+      passivation_timeout_ms:
+        Keyword.get(opts, :passivation_timeout_ms, @default_passivation_timeout_ms),
       worker_opts: Keyword.get(opts, :worker_opts, []),
       data_dir: data_dir,
       litestream_server: Keyword.get(opts, :litestream_server, LitestreamManager)
@@ -68,35 +76,46 @@ defmodule Fizz.Workflows.PassivationSweeper do
 
   defp do_sweep(state) do
     idle_before = DateTime.add(DateTime.utc_now(), -state.idle_threshold_ms, :millisecond)
+    litestream_running? = LitestreamManager.status(server: state.litestream_server) == :running
 
     passivated_run_ids =
       idle_before
-      |> Workflows.list_passivation_candidates()
-      |> Enum.reduce([], fn run, acc ->
-        case prepare_run_for_passivation(run, state) do
-          :ok ->
-            if LitestreamManager.status(server: state.litestream_server) == :running do
-              cold_evict(run, state)
-            end
+      |> Workflows.list_passivation_candidates(state.batch_size)
+      |> Task.async_stream(
+        &passivate_candidate(&1, state, litestream_running?),
+        max_concurrency: state.max_concurrency,
+        timeout: state.passivation_timeout_ms,
+        on_timeout: :kill_task
+      )
+      |> Enum.flat_map(fn
+        {:ok, {:ok, run_id}} ->
+          [run_id]
 
-            case Workflows.passivate_run(run.id) do
-              {:ok, _run} ->
-                _ = Workflows.release_run_lease(run.id)
-                [run.id | acc]
+        {:ok, :skipped} ->
+          []
 
-              {:error, _reason} ->
-                acc
-            end
+        {:ok, {:error, _reason}} ->
+          []
 
-          {:error, reason} ->
-            Logger.warning("skipping passivation for run #{run.id}: #{inspect(reason)}")
-
-            acc
-        end
+        {:exit, reason} ->
+          Logger.warning("passivation candidate task exited: #{inspect(reason)}")
+          []
       end)
-      |> Enum.reverse()
 
     {:ok, passivated_run_ids}
+  end
+
+  defp passivate_candidate(run, state, litestream_running?) do
+    with :ok <- prepare_run_for_passivation(run, state),
+         :ok <- maybe_cold_evict(run, state, litestream_running?),
+         {:ok, _run} <- Workflows.passivate_run(run.id) do
+      _ = Workflows.release_run_lease(run.id)
+      {:ok, run.id}
+    else
+      {:error, reason} ->
+        Logger.warning("skipping passivation for run #{run.id}: #{inspect(reason)}")
+        :skipped
+    end
   end
 
   defp prepare_run_for_passivation(run, state) do
@@ -147,6 +166,9 @@ defmodule Fizz.Workflows.PassivationSweeper do
     delete_local_files(db_path)
   end
 
+  defp maybe_cold_evict(run, state, true), do: cold_evict(run, state)
+  defp maybe_cold_evict(_run, _state, false), do: :ok
+
   defp db_path(run, state) do
     Paths.db_path(state.data_dir, run.id, run.workos_organization_id, run.project_id)
   end
@@ -167,4 +189,9 @@ defmodule Fizz.Workflows.PassivationSweeper do
   defp schedule_sweep(_interval_ms), do: :ok
 
   defp server_name(opts), do: Keyword.get(opts, :server, __MODULE__)
+
+  defp call_timeout_ms do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:call_timeout_ms, @default_call_timeout_ms)
+  end
 end

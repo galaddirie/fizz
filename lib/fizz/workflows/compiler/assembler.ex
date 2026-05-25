@@ -677,7 +677,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         empty_default =
           build_aggregate_empty_component(
             empty_default_name,
-            step.compiled_config,
+            operation,
             step.dependencies,
             meta_refs
           )
@@ -845,7 +845,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp build_aggregator_reduce_component(
          name,
          operation,
-         compiled_config,
+         _compiled_config,
          _dependencies,
          [],
          mapped_from
@@ -853,7 +853,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Runic.reduce(
       AggregatorExecutor.init_for_operation(operation),
       fn item, acc ->
-        __MODULE__.aggregate_reduce(item, acc, ^compiled_config)
+        __MODULE__.aggregate_reduce(item, acc, ^operation)
       end,
       name: ^name,
       map: ^mapped_from
@@ -863,15 +863,15 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp build_aggregator_reduce_component(
          name,
          operation,
-         compiled_config,
-         dependencies,
+         _compiled_config,
+         _dependencies,
          meta_refs,
          mapped_from
        ) do
     Runic.reduce(
       AggregatorExecutor.init_for_operation(operation),
       fn item, acc, meta_ctx ->
-        __MODULE__.aggregate_reduce(item, acc, meta_ctx, ^compiled_config, ^dependencies)
+        __MODULE__.aggregate_reduce(item, acc, meta_ctx, ^operation)
       end,
       name: ^name,
       map: ^mapped_from
@@ -890,19 +890,19 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     )
   end
 
-  defp build_aggregate_empty_component(name, compiled_config, _dependencies, []) do
+  defp build_aggregate_empty_component(name, operation, _dependencies, []) do
     Runic.step(
       fn input ->
-        __MODULE__.aggregate_empty_result(input, compiled_config)
+        __MODULE__.aggregate_empty_result(input, operation)
       end,
       name: ^name
     )
   end
 
-  defp build_aggregate_empty_component(name, compiled_config, dependencies, meta_refs) do
+  defp build_aggregate_empty_component(name, operation, _dependencies, meta_refs) do
     Runic.step(
       fn input, meta_ctx ->
-        __MODULE__.aggregate_empty_result(input, meta_ctx, compiled_config, dependencies)
+        __MODULE__.aggregate_empty_result(input, meta_ctx, operation)
       end,
       name: ^name
     )
@@ -1662,12 +1662,21 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end
   end
 
-  defp matched_switch_branch(config) do
-    value = Map.get(config, "value")
-    cases = Map.get(config, "cases", [])
+  defp matched_switch_branch(compiled_config, resolution_context) do
+    value =
+      compiled_config
+      |> Map.get("value")
+      |> ConfigResolver.resolve_value(resolution_context)
+
+    cases = Map.get(compiled_config, "cases", [])
 
     case Enum.find_index(cases, fn case_def ->
-           normalize_switch_value(value) == normalize_switch_value(Map.get(case_def, "match"))
+           match_value =
+             case_def
+             |> Map.get("match")
+             |> ConfigResolver.resolve_value(resolution_context)
+
+           normalize_switch_value(value) == normalize_switch_value(match_value)
          end) do
       nil -> :default
       index -> {:case, index}
@@ -1726,56 +1735,27 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   end
 
   @doc false
-  def aggregate_reduce(item, acc, compiled_config) do
-    config =
-      ConfigResolver.resolve_config(compiled_config, %{
-        input: item,
-        steps: %{},
-        workflow: %{},
-        env: %{}
-      })
-
-    operation =
-      config
-      |> Map.get("operation", "collect")
-      |> normalize_aggregator_operation()
-
+  def aggregate_reduce(item, acc, operation) do
+    operation = normalize_aggregator_operation(operation)
     AggregatorExecutor.reducer_for_operation(operation).(item, acc)
   end
 
   @doc false
-  def aggregate_reduce(item, acc, meta_ctx, compiled_config, dependencies) do
-    resolution_context = resolution_context(item, meta_ctx, dependencies)
-    config = ConfigResolver.resolve_config(compiled_config, resolution_context)
-
-    operation =
-      config
-      |> Map.get("operation", "collect")
-      |> normalize_aggregator_operation()
-
+  def aggregate_reduce(item, acc, _meta_ctx, operation) do
+    operation = normalize_aggregator_operation(operation)
     AggregatorExecutor.reducer_for_operation(operation).(item, acc)
   end
 
   @doc false
-  def aggregate_empty_result(input, compiled_config) do
-    compiled_config
-    |> ConfigResolver.resolve_config(%{
-      input: input,
-      steps: %{},
-      workflow: %{},
-      env: %{}
-    })
-    |> Map.get("operation", "collect")
+  def aggregate_empty_result(_input, operation) do
+    operation
     |> normalize_aggregator_operation()
     |> AggregatorExecutor.init_for_operation()
   end
 
   @doc false
-  def aggregate_empty_result(input, meta_ctx, compiled_config, dependencies) do
-    input
-    |> resolution_context(meta_ctx, dependencies)
-    |> then(&ConfigResolver.resolve_config(compiled_config, &1))
-    |> Map.get("operation", "collect")
+  def aggregate_empty_result(_input, _meta_ctx, operation) do
+    operation
     |> normalize_aggregator_operation()
     |> AggregatorExecutor.init_for_operation()
   end
@@ -1834,23 +1814,21 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   @doc false
   def switch_branch_matches(input, compiled_config, branch_match) do
-    config =
-      ConfigResolver.resolve_config(compiled_config, %{
-        input: input,
-        steps: %{},
-        workflow: %{},
-        env: %{}
-      })
+    resolution_context = %{
+      input: input,
+      steps: %{},
+      workflow: %{},
+      env: %{}
+    }
 
-    branch_match?(matched_switch_branch(config), branch_match)
+    branch_match?(matched_switch_branch(compiled_config, resolution_context), branch_match)
   end
 
   @doc false
   def switch_branch_matches(input, meta_ctx, compiled_config, dependencies, branch_match) do
     resolution_context = resolution_context(input, meta_ctx, dependencies)
-    config = ConfigResolver.resolve_config(compiled_config, resolution_context)
 
-    branch_match?(matched_switch_branch(config), branch_match)
+    branch_match?(matched_switch_branch(compiled_config, resolution_context), branch_match)
   end
 
   defp validate_implicit_aggregator_operation!(_step_id, operation)

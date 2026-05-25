@@ -38,6 +38,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   require Logger
 
   @default_idle_timeout_ms 60_000
+  @default_dispatch_retry_ms 25
   @output_summary_limit 1_024
   @inspect_collection_limit 50
 
@@ -49,9 +50,11 @@ defmodule Fizz.Workflows.Runner.Worker do
     :checkpoint_strategy,
     :max_concurrency,
     :task_supervisor,
+    :task_supervisor_max_children,
     :registry,
     :idle_timeout_ms,
     :idle_timer_ref,
+    :dispatch_retry_ref,
     :status,
     cycle_count: 0,
     active_tasks: %{},
@@ -171,6 +174,7 @@ defmodule Fizz.Workflows.Runner.Worker do
       checkpoint_strategy: Keyword.get(opts, :checkpoint_strategy, :every_cycle),
       max_concurrency: normalize_max_concurrency(Keyword.get(opts, :max_concurrency)),
       task_supervisor: Keyword.get(opts, :task_supervisor, Fizz.Workflows.Runner.TaskSupervisor),
+      task_supervisor_max_children: Keyword.get(opts, :task_supervisor_max_children),
       registry: Keyword.get(opts, :registry, Fizz.Workflows.Runner.Registry),
       idle_timeout_ms: Keyword.get(opts, :idle_timeout_ms, @default_idle_timeout_ms),
       status: :idle
@@ -193,6 +197,7 @@ defmodule Fizz.Workflows.Runner.Worker do
     state =
       state
       |> cancel_idle_timeout()
+      |> cancel_dispatch_retry()
       |> cancel_local_timers()
       |> maybe_checkpoint_before_stop(opts)
       |> shutdown_active_tasks()
@@ -261,6 +266,15 @@ defmodule Fizz.Workflows.Runner.Worker do
     {:noreply, schedule_idle_timeout(state)}
   end
 
+  def handle_info(:dispatch_retry, state) do
+    state = %{state | dispatch_retry_ref: nil}
+
+    case dispatch_cycle(state) do
+      {:continue, next_state} -> {:noreply, next_state}
+      {:stop, next_state} -> {:stop, :normal, next_state}
+    end
+  end
+
   def handle_info({:local_timer_due, timer_id}, state) do
     state = drop_local_timer(state, timer_id)
 
@@ -303,6 +317,7 @@ defmodule Fizz.Workflows.Runner.Worker do
     state =
       state
       |> cancel_idle_timeout()
+      |> cancel_dispatch_retry()
       |> cancel_local_timers()
       |> broadcast_active_tasks_cancelled()
       |> shutdown_active_tasks()
@@ -355,13 +370,23 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp dispatch_runnables(state, runnables) do
-    available_slots = max(state.max_concurrency - map_size(state.active_tasks), 0)
+    local_slots = max(state.max_concurrency - map_size(state.active_tasks), 0)
+    global_slots = global_available_task_slots(state)
+    available_slots = min(local_slots, global_slots)
 
     active_runnable_ids =
       Map.values(state.active_tasks) |> Enum.map(& &1.runnable.id) |> MapSet.new()
 
-    runnables
-    |> Enum.reject(&MapSet.member?(active_runnable_ids, &1.id))
+    pending_runnables = Enum.reject(runnables, &MapSet.member?(active_runnable_ids, &1.id))
+
+    state =
+      if local_slots > 0 and pending_runnables != [] and global_slots == 0 do
+        schedule_dispatch_retry(state)
+      else
+        cancel_dispatch_retry(state)
+      end
+
+    pending_runnables
     |> Enum.take(available_slots)
     |> Enum.reduce(state, fn runnable, acc -> dispatch_runnable(acc, runnable) end)
   end
@@ -369,6 +394,39 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp dispatch_runnable(state, %Runnable{} = runnable) do
     dispatched_at_us = System.monotonic_time(:microsecond)
 
+    case start_runnable_task(state, runnable) do
+      {:ok, task} ->
+        task_state = %{
+          dispatched_at_us: dispatched_at_us,
+          pid: task.pid,
+          runnable: runnable
+        }
+
+        event = %RunnableDispatched{
+          runnable_id: runnable.id,
+          node_name: Map.get(runnable.node, :name),
+          node_hash: Map.get(runnable.node, :hash),
+          input_fact: runnable.input_fact,
+          dispatched_at: System.convert_time_unit(dispatched_at_us, :microsecond, :millisecond),
+          policy: SchedulerPolicy.default_policy(),
+          attempt: 0
+        }
+
+        state = %{
+          state
+          | workflow: Workflow.append_runnable_events(state.workflow, [event]),
+            active_tasks: Map.put(state.active_tasks, task.ref, task_state)
+        }
+
+        maybe_broadcast_step_started(state, runnable)
+        state
+
+      {:error, :max_children} ->
+        schedule_dispatch_retry(state)
+    end
+  end
+
+  defp start_runnable_task(state, runnable) do
     task =
       Task.Supervisor.async_nolink(
         state.task_supervisor,
@@ -377,30 +435,24 @@ defmodule Fizz.Workflows.Runner.Worker do
         [runnable]
       )
 
-    task_state = %{
-      dispatched_at_us: dispatched_at_us,
-      pid: task.pid,
-      runnable: runnable
-    }
+    {:ok, task}
+  rescue
+    error in RuntimeError ->
+      if String.contains?(Exception.message(error), "maximum number of tasks") do
+        {:error, :max_children}
+      else
+        reraise(error, __STACKTRACE__)
+      end
+  end
 
-    event = %RunnableDispatched{
-      runnable_id: runnable.id,
-      node_name: Map.get(runnable.node, :name),
-      node_hash: Map.get(runnable.node, :hash),
-      input_fact: runnable.input_fact,
-      dispatched_at: System.convert_time_unit(dispatched_at_us, :microsecond, :millisecond),
-      policy: SchedulerPolicy.default_policy(),
-      attempt: 0
-    }
+  defp global_available_task_slots(%__MODULE__{task_supervisor_max_children: nil} = state),
+    do: state.max_concurrency
 
-    state = %{
-      state
-      | workflow: Workflow.append_runnable_events(state.workflow, [event]),
-        active_tasks: Map.put(state.active_tasks, task.ref, task_state)
-    }
-
-    maybe_broadcast_step_started(state, runnable)
-    state
+  defp global_available_task_slots(%__MODULE__{} = state) do
+    count = DynamicSupervisor.count_children(state.task_supervisor)
+    max(state.task_supervisor_max_children - count.active, 0)
+  rescue
+    _error -> state.max_concurrency
   end
 
   defp process_event(state, {:input, input}) do
@@ -886,6 +938,23 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp cancel_idle_timeout(%__MODULE__{idle_timer_ref: timer_ref} = state) do
     Process.cancel_timer(timer_ref)
     %{state | idle_timer_ref: nil}
+  end
+
+  defp schedule_dispatch_retry(%__MODULE__{dispatch_retry_ref: nil} = state) do
+    %{
+      state
+      | dispatch_retry_ref:
+          Process.send_after(self(), :dispatch_retry, @default_dispatch_retry_ms)
+    }
+  end
+
+  defp schedule_dispatch_retry(state), do: state
+
+  defp cancel_dispatch_retry(%__MODULE__{dispatch_retry_ref: nil} = state), do: state
+
+  defp cancel_dispatch_retry(%__MODULE__{dispatch_retry_ref: timer_ref} = state) do
+    Process.cancel_timer(timer_ref)
+    %{state | dispatch_retry_ref: nil}
   end
 
   defp normalize_max_concurrency(value) when is_integer(value) and value > 0, do: value

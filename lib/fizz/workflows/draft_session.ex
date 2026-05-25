@@ -14,6 +14,10 @@ defmodule Fizz.Workflows.DraftSession do
   @default_persist_retry_base_ms 1_000
   @default_persist_retry_max_ms 30_000
   @default_idle_timeout_ms :timer.minutes(5)
+  @default_call_timeout_ms 30_000
+  @default_history_limit 50
+  @default_history_max_bytes 5 * 1_024 * 1_024
+  @default_history_entry_max_bytes 1 * 1_024 * 1_024
 
   defstruct [
     :version_id,
@@ -76,14 +80,14 @@ defmodule Fizz.Workflows.DraftSession do
           {:ok, WorkflowDefinitionVersion.t(), non_neg_integer(), map(), map()} | {:error, term()}
   def join(version_id, scope, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- ensure_started(version_id, scope) do
-      GenServer.call(pid, {:join, scope, user_id}, :infinity)
+      call(pid, {:join, scope, user_id})
     end
   end
 
   @spec leave(String.t(), String.t()) :: :ok | {:error, :not_found}
   def leave(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:leave, user_id}, :infinity)
+      call(pid, {:leave, user_id})
     end
   end
 
@@ -92,7 +96,7 @@ defmodule Fizz.Workflows.DraftSession do
   def apply_operation(version_id, user_id, operation)
       when is_binary(version_id) and is_binary(user_id) and is_map(operation) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:apply_operation, user_id, operation}, :infinity)
+      call(pid, {:apply_operation, user_id, operation})
     end
   end
 
@@ -100,7 +104,7 @@ defmodule Fizz.Workflows.DraftSession do
           {:ok, WorkflowDefinitionVersion.t(), non_neg_integer(), map()} | {:error, term()}
   def undo(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:undo, user_id}, :infinity)
+      call(pid, {:undo, user_id})
     end
   end
 
@@ -108,7 +112,7 @@ defmodule Fizz.Workflows.DraftSession do
           {:ok, WorkflowDefinitionVersion.t(), non_neg_integer(), map()} | {:error, term()}
   def redo(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:redo, user_id}, :infinity)
+      call(pid, {:redo, user_id})
     end
   end
 
@@ -116,28 +120,28 @@ defmodule Fizz.Workflows.DraftSession do
           {:ok, WorkflowDefinitionVersion.t(), non_neg_integer()} | {:error, term()}
   def persist_now(version_id) when is_binary(version_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, :persist_now, :infinity)
+      call(pid, :persist_now)
     end
   end
 
   @spec get_undo_state(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def get_undo_state(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:get_undo_state, user_id}, :infinity)
+      call(pid, {:get_undo_state, user_id})
     end
   end
 
   @spec get_persistence_state(String.t()) :: {:ok, persistence_state()} | {:error, term()}
   def get_persistence_state(version_id) when is_binary(version_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, :get_persistence_state, :infinity)
+      call(pid, :get_persistence_state)
     end
   end
 
   @spec get_editor_state(String.t()) :: {:ok, map()} | {:error, term()}
   def get_editor_state(version_id) when is_binary(version_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, :get_editor_state, :infinity)
+      call(pid, :get_editor_state)
     end
   end
 
@@ -150,7 +154,7 @@ defmodule Fizz.Workflows.DraftSession do
   def preview_revision(version_id, user_id, revision)
       when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:preview_revision, user_id, revision}, :infinity)
+      call(pid, {:preview_revision, user_id, revision})
     end
   end
 
@@ -158,28 +162,28 @@ defmodule Fizz.Workflows.DraftSession do
   def pin_output(version_id, step_id, output_data)
       when is_binary(version_id) and is_binary(step_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:pin_output, step_id, output_data}, :infinity)
+      call(pid, {:pin_output, step_id, output_data})
     end
   end
 
   @spec unpin_output(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def unpin_output(version_id, step_id) when is_binary(version_id) and is_binary(step_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:unpin_output, step_id}, :infinity)
+      call(pid, {:unpin_output, step_id})
     end
   end
 
   @spec disable_step(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def disable_step(version_id, step_id) when is_binary(version_id) and is_binary(step_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:disable_step, step_id}, :infinity)
+      call(pid, {:disable_step, step_id})
     end
   end
 
   @spec enable_step(String.t(), String.t()) :: {:ok, map()} | {:error, term()}
   def enable_step(version_id, step_id) when is_binary(version_id) and is_binary(step_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:enable_step, step_id}, :infinity)
+      call(pid, {:enable_step, step_id})
     end
   end
 
@@ -195,7 +199,7 @@ defmodule Fizz.Workflows.DraftSession do
           | {:error, term()}
   def snapshot(version_id, user_id) when is_binary(version_id) and is_binary(user_id) do
     with {:ok, pid} <- lookup_pid(version_id) do
-      GenServer.call(pid, {:snapshot, user_id}, :infinity)
+      call(pid, {:snapshot, user_id})
     end
   end
 
@@ -557,7 +561,7 @@ defmodule Fizz.Workflows.DraftSession do
       | draft: draft,
         seq: next_seq,
         dirty?: true,
-        undo_stacks: Map.update(state.undo_stacks, user_id, [entry], &[entry | &1])
+        undo_stacks: push_stack_entry(state.undo_stacks, user_id, entry)
     }
   end
 
@@ -604,11 +608,11 @@ defmodule Fizz.Workflows.DraftSession do
   end
 
   defp push_inverse_stack_entry(state, :undo, user_id, entry) do
-    %{state | redo_stacks: Map.update(state.redo_stacks, user_id, [entry], &[entry | &1])}
+    %{state | redo_stacks: push_stack_entry(state.redo_stacks, user_id, entry)}
   end
 
   defp push_inverse_stack_entry(state, :redo, user_id, entry) do
-    %{state | undo_stacks: Map.update(state.undo_stacks, user_id, [entry], &[entry | &1])}
+    %{state | undo_stacks: push_stack_entry(state.undo_stacks, user_id, entry)}
   end
 
   defp pop_stack_entry(stacks, user_id) do
@@ -625,6 +629,41 @@ defmodule Fizz.Workflows.DraftSession do
       seq: seq,
       timestamp: DateTime.utc_now()
     }
+  end
+
+  defp push_stack_entry(stacks, user_id, entry) do
+    if stack_entry_size(entry) > history_entry_max_bytes() do
+      stacks
+    else
+      Map.update(stacks, user_id, [entry], fn entries ->
+        [entry | entries] |> trim_stack()
+      end)
+    end
+  end
+
+  defp trim_stack(entries) do
+    entries
+    |> Enum.take(history_limit())
+    |> trim_stack_bytes(0, [])
+  end
+
+  defp trim_stack_bytes([], _total_bytes, kept), do: Enum.reverse(kept)
+
+  defp trim_stack_bytes([entry | rest], total_bytes, kept) do
+    entry_bytes = stack_entry_size(entry)
+    next_total = total_bytes + entry_bytes
+
+    if next_total <= history_max_bytes() do
+      trim_stack_bytes(rest, next_total, [entry | kept])
+    else
+      Enum.reverse(kept)
+    end
+  end
+
+  defp stack_entry_size(entry) do
+    entry
+    |> :erlang.term_to_binary([:compressed])
+    |> byte_size()
   end
 
   # --- Timers ---
@@ -770,22 +809,26 @@ defmodule Fizz.Workflows.DraftSession do
 
   defp preview_revision_state(%__MODULE__{} = state, user_id, {:undo, depth})
        when is_binary(user_id) and is_integer(depth) and depth > 0 do
-    undo_stack = Map.get(state.undo_stacks, user_id, [])
+    if depth > history_limit() do
+      {:error, :revision_not_found}
+    else
+      undo_stack = Map.get(state.undo_stacks, user_id, [])
 
-    case Enum.take(undo_stack, depth) do
-      entries when length(entries) == depth ->
-        Enum.reduce_while(entries, {:ok, state.draft}, fn entry, {:ok, draft} ->
-          case Operation.apply(draft, entry.operation) do
-            {:ok, preview_draft, _inverse_operation} ->
-              {:cont, {:ok, preview_draft}}
+      case Enum.take(undo_stack, depth) do
+        entries when length(entries) == depth ->
+          Enum.reduce_while(entries, {:ok, state.draft}, fn entry, {:ok, draft} ->
+            case Operation.apply(draft, entry.operation) do
+              {:ok, preview_draft, _inverse_operation} ->
+                {:cont, {:ok, preview_draft}}
 
-            {:error, _reason} = error ->
-              {:halt, error}
-          end
-        end)
+              {:error, _reason} = error ->
+                {:halt, error}
+            end
+          end)
 
-      _entries ->
-        {:error, :revision_not_found}
+        _entries ->
+          {:error, :revision_not_found}
+      end
     end
   end
 
@@ -868,9 +911,31 @@ defmodule Fizz.Workflows.DraftSession do
 
   # --- Configuration ---
 
+  defp call(pid, request), do: GenServer.call(pid, request, call_timeout_ms())
+
+  defp call_timeout_ms do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:call_timeout_ms, @default_call_timeout_ms)
+  end
+
   defp persist_debounce_ms do
     Application.get_env(:fizz, __MODULE__, [])
     |> Keyword.get(:persist_debounce_ms, @default_persist_debounce_ms)
+  end
+
+  defp history_limit do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:history_limit, @default_history_limit)
+  end
+
+  defp history_max_bytes do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:history_max_bytes, @default_history_max_bytes)
+  end
+
+  defp history_entry_max_bytes do
+    Application.get_env(:fizz, __MODULE__, [])
+    |> Keyword.get(:history_entry_max_bytes, @default_history_entry_max_bytes)
   end
 
   defp persist_retry_delay_ms(attempt) do

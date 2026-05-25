@@ -307,6 +307,52 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     cleanup_worker(run.id, registry)
   end
 
+  test "defers dispatch when the global task supervisor is saturated", %{
+    scope: scope,
+    registry: registry,
+    tmp_dir: tmp_dir
+  } do
+    test_pid = self()
+    limited_task_supervisor = unique_name(:limited_task_supervisor)
+
+    start_supervised!({Task.Supervisor, name: limited_task_supervisor, max_children: 1})
+
+    workflow =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(blocking_step(:one, test_pid))
+      |> Runic.Workflow.add(blocking_step(:two, test_pid))
+
+    %{version: version} = published_version_fixture(scope)
+    run = insert_running_run(scope, version, %{})
+
+    pid =
+      start_worker!(
+        workflow,
+        run,
+        scope,
+        registry: registry,
+        task_supervisor: limited_task_supervisor,
+        task_supervisor_max_children: 1,
+        tmp_dir: tmp_dir,
+        max_concurrency: 2
+      )
+
+    assert :ok = Worker.run(pid, %{"value" => 1})
+
+    assert_receive {:step_started, first_step, first_task_pid}, 2_000
+    refute_receive {:step_started, _second_step, _second_task_pid}, 100
+
+    send(first_task_pid, :release)
+
+    assert_receive {:step_started, second_step, second_task_pid}, 2_000
+    assert first_step != second_step
+
+    send(second_task_pid, :release)
+
+    assert %{status: :completed} = wait_for_run_status(scope, run.id, registry)
+    cleanup_worker(run.id, registry)
+  end
+
   defp start_worker!(workflow, run, scope, opts) do
     registry = Keyword.fetch!(opts, :registry)
     task_supervisor = Keyword.fetch!(opts, :task_supervisor)
@@ -334,6 +380,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
          fence_token: fence_token,
          registry: registry,
          task_supervisor: task_supervisor,
+         task_supervisor_max_children: Keyword.get(opts, :task_supervisor_max_children),
          max_concurrency: Keyword.get(opts, :max_concurrency, 2),
          checkpoint_strategy: :every_cycle,
          idle_timeout_ms: 5_000
@@ -380,6 +427,19 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
 
   defp old_time do
     DateTime.add(DateTime.utc_now(), -10, :minute)
+  end
+
+  defp blocking_step(name, test_pid) do
+    Runic.step(
+      fn input ->
+        send(test_pid, {:step_started, name, self()})
+
+        receive do
+          :release -> input
+        end
+      end,
+      name: name
+    )
   end
 
   defp unique_name(name) do
