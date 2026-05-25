@@ -1020,7 +1020,6 @@ defmodule Fizz.Workflows do
                  fence_token: fence_token,
                  checkpoint_strategy: checkpoint_strategy(),
                  max_concurrency: max_run_concurrency(),
-                 task_supervisor_max_children: max_task_children(),
                  idle_timeout_ms: worker_idle_timeout_ms()
                ],
                worker_process_opts([])
@@ -1150,7 +1149,7 @@ defmodule Fizz.Workflows do
     Keyword.get(workflow_opts, :max_concurrency, default_run_limit)
   end
 
-  defp max_task_children(workflow_opts \\ Application.get_env(:fizz, __MODULE__, [])) do
+  defp max_task_children(workflow_opts) do
     Keyword.get(workflow_opts, :max_task_children, System.schedulers_online() * 4)
   end
 
@@ -1166,6 +1165,23 @@ defmodule Fizz.Workflows do
   end
 
   defp start_run_worker(run, opts) do
+    registry = Keyword.get(opts, :registry, Fizz.Workflows.Runner.Registry)
+    start_key = {:starting_worker, run.id}
+
+    case Registry.register(registry, start_key, nil) do
+      {:ok, _owner} ->
+        try do
+          do_start_run_worker(run, opts)
+        after
+          Registry.unregister(registry, start_key)
+        end
+
+      {:error, {:already_registered, _pid}} ->
+        await_run_worker(run, opts, start_key)
+    end
+  end
+
+  defp do_start_run_worker(run, opts) do
     with {:ok, fence_token} <-
            Fizz.Workflows.LeaseManager.acquire(run.id, lease_manager_opts(opts)),
          :ok <- maybe_restore_from_s3(run, opts),
@@ -1183,7 +1199,6 @@ defmodule Fizz.Workflows do
                  fence_token: fence_token,
                  checkpoint_strategy: checkpoint_strategy(),
                  max_concurrency: max_run_concurrency(),
-                 task_supervisor_max_children: max_task_children(),
                  idle_timeout_ms: worker_idle_timeout_ms()
                ],
                worker_process_opts(opts)
@@ -1201,6 +1216,33 @@ defmodule Fizz.Workflows do
           {:already_started, pid} -> {:ok, pid}
           _ -> error
         end
+    end
+  end
+
+  defp await_run_worker(run, opts, start_key, attempts \\ 100)
+
+  defp await_run_worker(run, opts, _start_key, attempts) when attempts <= 0 do
+    start_run_worker(run, opts)
+  end
+
+  defp await_run_worker(run, opts, start_key, attempts) do
+    registry = Keyword.get(opts, :registry, Fizz.Workflows.Runner.Registry)
+
+    case Worker.lookup(run.id, worker_lookup_opts(opts)) do
+      nil ->
+        case Registry.lookup(registry, start_key) do
+          [] ->
+            start_run_worker(run, opts)
+
+          _starting ->
+            receive do
+            after
+              10 -> await_run_worker(run, opts, start_key, attempts - 1)
+            end
+        end
+
+      pid ->
+        {:ok, pid}
     end
   end
 
@@ -1224,7 +1266,7 @@ defmodule Fizz.Workflows do
 
   defp worker_process_opts(opts) do
     opts
-    |> Keyword.take([:registry, :task_supervisor, :supervisor])
+    |> Keyword.take([:registry, :runnable_dispatcher, :supervisor])
   end
 
   defp worker_lookup_opts(opts) do

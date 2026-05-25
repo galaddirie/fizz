@@ -5,6 +5,8 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   alias Fizz.Workflows
   alias Fizz.Workflows.Compiler
+  alias Fizz.Workflows.Runner.RunnableConsumerSupervisor
+  alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Runtime.ContextBuilder
   alias Fizz.Workflows.Store.SqliteStore
@@ -16,12 +18,23 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
     scope = project_scope_fixture()
     registry = unique_name(:registry)
     task_supervisor = unique_name(:task_supervisor)
+    runnable_dispatcher = unique_name(:runnable_dispatcher)
+    runnable_consumer_supervisor = unique_name(:runnable_consumer_supervisor)
 
     tmp_dir =
       Path.join(System.tmp_dir!(), "fizz-worker-failure-#{System.unique_integer([:positive])}")
 
     start_supervised!({Registry, keys: :unique, name: registry})
     start_supervised!({Task.Supervisor, name: task_supervisor})
+    start_supervised!({RunnableDispatcher, name: runnable_dispatcher})
+
+    start_supervised!(
+      {RunnableConsumerSupervisor,
+       name: runnable_consumer_supervisor,
+       dispatcher: runnable_dispatcher,
+       task_supervisor: task_supervisor,
+       max_concurrency: 4}
+    )
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
@@ -29,13 +42,20 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
       scope: scope,
       registry: registry,
       task_supervisor: task_supervisor,
+      runnable_dispatcher: runnable_dispatcher,
       tmp_dir: tmp_dir
     }
   end
 
   describe "task crash (:DOWN)" do
     test "task crash -> step :failed, run :failed",
-         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
       test_pid = self()
 
       workflow =
@@ -62,6 +82,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
         start_worker!(workflow, run, scope,
           registry: registry,
           task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
           tmp_dir: tmp_dir
         )
 
@@ -82,7 +103,13 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
     end
 
     test "large errors are summarized in step failure broadcasts",
-         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
       workflow =
         Runic.Workflow.new()
         |> Runic.Workflow.add(
@@ -104,6 +131,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
         start_worker!(workflow, run, scope,
           registry: registry,
           task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
           tmp_dir: tmp_dir
         )
 
@@ -129,7 +157,13 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   describe "fail_and_stop/2 broadcasts :step_cancelled for active siblings" do
     test "step fails with concurrent siblings -> causal step :failed, siblings :cancelled, run :failed",
-         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
       test_pid = self()
 
       # Build a workflow where :entry fans out to :sibling_a and :sibling_b
@@ -167,6 +201,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
         start_worker!(workflow, run, scope,
           registry: registry,
           task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
           tmp_dir: tmp_dir,
           max_concurrency: 4
         )
@@ -199,7 +234,13 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   describe "checkpoint failure resilience" do
     test "checkpoint failure during fail_and_stop -> run still :failed in DB",
-         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
       test_pid = self()
 
       workflow =
@@ -223,6 +264,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
         start_worker!(workflow, run, scope,
           registry: registry,
           task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
           tmp_dir: tmp_dir
         )
 
@@ -244,7 +286,13 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   describe "terminate/2 safety net" do
     test "worker stopped via GenServer.stop marks run :failed in DB",
-         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
       test_pid = self()
 
       workflow =
@@ -268,6 +316,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
         start_worker!(workflow, run, scope,
           registry: registry,
           task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
           tmp_dir: tmp_dir
         )
 
@@ -283,7 +332,13 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   describe "cancellation from non-running states" do
     test "cancel from :sleeping state -> run :cancelled",
-         %{scope: scope, registry: registry, task_supervisor: task_supervisor, tmp_dir: tmp_dir} do
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
       %{version: version} = published_version_fixture(scope, long_running_snapshot_attrs(30_000))
       {:ok, workflow, compiled_hash} = Compiler.compile(version)
       run = insert_running_run(scope, version, %{compiled_hash: compiled_hash})
@@ -292,6 +347,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
         start_worker!(workflow, run, scope,
           registry: registry,
           task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
           tmp_dir: tmp_dir
         )
 
@@ -337,7 +393,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   defp start_worker!(workflow, run, scope, opts) do
     registry = Keyword.fetch!(opts, :registry)
-    task_supervisor = Keyword.fetch!(opts, :task_supervisor)
+    runnable_dispatcher = Keyword.fetch!(opts, :runnable_dispatcher)
     tmp_dir = Keyword.fetch!(opts, :tmp_dir)
     fence_token = Keyword.get(opts, :fence_token, 1)
 
@@ -361,7 +417,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
          store: store_state,
          fence_token: fence_token,
          registry: registry,
-         task_supervisor: task_supervisor,
+         runnable_dispatcher: runnable_dispatcher,
          max_concurrency: Keyword.get(opts, :max_concurrency, 2),
          checkpoint_strategy: :every_cycle,
          idle_timeout_ms: Keyword.get(opts, :idle_timeout_ms, 5_000)

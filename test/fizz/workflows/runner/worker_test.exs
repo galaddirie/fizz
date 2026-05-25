@@ -4,6 +4,8 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
   import Fizz.WorkflowsFixtures
 
   alias Fizz.Workflows.Compiler
+  alias Fizz.Workflows.Runner.RunnableConsumerSupervisor
+  alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Runtime.ContextBuilder
   alias Fizz.Workflows.Store.SqliteStore
@@ -15,12 +17,23 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope = project_scope_fixture()
     registry = unique_name(:registry)
     task_supervisor = unique_name(:task_supervisor)
+    runnable_dispatcher = unique_name(:runnable_dispatcher)
+    runnable_consumer_supervisor = unique_name(:runnable_consumer_supervisor)
 
     tmp_dir =
       Path.join(System.tmp_dir!(), "fizz-worker-#{System.unique_integer([:positive])}")
 
     start_supervised!({Registry, keys: :unique, name: registry})
     start_supervised!({Task.Supervisor, name: task_supervisor})
+    start_supervised!({RunnableDispatcher, name: runnable_dispatcher})
+
+    start_supervised!(
+      {RunnableConsumerSupervisor,
+       name: runnable_consumer_supervisor,
+       dispatcher: runnable_dispatcher,
+       task_supervisor: task_supervisor,
+       max_concurrency: 4}
+    )
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
@@ -28,6 +41,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
       scope: scope,
       registry: registry,
       task_supervisor: task_supervisor,
+      runnable_dispatcher: runnable_dispatcher,
       tmp_dir: tmp_dir
     }
   end
@@ -36,6 +50,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope: scope,
     registry: registry,
     task_supervisor: task_supervisor,
+    runnable_dispatcher: runnable_dispatcher,
     tmp_dir: tmp_dir
   } do
     %{version: version} = published_version_fixture(scope)
@@ -54,6 +69,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         scope,
         registry: registry,
         task_supervisor: task_supervisor,
+        runnable_dispatcher: runnable_dispatcher,
         tmp_dir: tmp_dir
       )
 
@@ -71,6 +87,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope: scope,
     registry: registry,
     task_supervisor: task_supervisor,
+    runnable_dispatcher: runnable_dispatcher,
     tmp_dir: tmp_dir
   } do
     %{version: version} = published_version_fixture(scope)
@@ -90,6 +107,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         scope,
         registry: registry,
         task_supervisor: task_supervisor,
+        runnable_dispatcher: runnable_dispatcher,
         tmp_dir: tmp_dir
       )
 
@@ -106,6 +124,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope: scope,
     registry: registry,
     task_supervisor: task_supervisor,
+    runnable_dispatcher: runnable_dispatcher,
     tmp_dir: tmp_dir
   } do
     %{version: version} = published_version_fixture(scope)
@@ -122,6 +141,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         scope,
         registry: registry,
         task_supervisor: task_supervisor,
+        runnable_dispatcher: runnable_dispatcher,
         tmp_dir: tmp_dir
       )
 
@@ -174,6 +194,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope: scope,
     registry: registry,
     task_supervisor: task_supervisor,
+    runnable_dispatcher: runnable_dispatcher,
     tmp_dir: tmp_dir
   } do
     workflow =
@@ -195,6 +216,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         scope,
         registry: registry,
         task_supervisor: task_supervisor,
+        runnable_dispatcher: runnable_dispatcher,
         tmp_dir: tmp_dir
       )
 
@@ -218,6 +240,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope: scope,
     registry: registry,
     task_supervisor: task_supervisor,
+    runnable_dispatcher: runnable_dispatcher,
     tmp_dir: tmp_dir
   } do
     %{version: version} = published_version_fixture(scope)
@@ -231,6 +254,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         scope,
         registry: registry,
         task_supervisor: task_supervisor,
+        runnable_dispatcher: runnable_dispatcher,
         tmp_dir: tmp_dir
       )
 
@@ -244,6 +268,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     scope: scope,
     registry: registry,
     task_supervisor: task_supervisor,
+    runnable_dispatcher: runnable_dispatcher,
     tmp_dir: tmp_dir
   } do
     test_pid = self()
@@ -286,6 +311,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         scope,
         registry: registry,
         task_supervisor: task_supervisor,
+        runnable_dispatcher: runnable_dispatcher,
         tmp_dir: tmp_dir,
         max_concurrency: 1
       )
@@ -307,15 +333,32 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     cleanup_worker(run.id, registry)
   end
 
-  test "defers dispatch when the global task supervisor is saturated", %{
+  test "global saturation defers runnable execution without crashing", %{
     scope: scope,
     registry: registry,
+    task_supervisor: task_supervisor,
     tmp_dir: tmp_dir
   } do
     test_pid = self()
-    limited_task_supervisor = unique_name(:limited_task_supervisor)
+    limited_dispatcher = unique_name(:limited_runnable_dispatcher)
+    limited_consumer_supervisor = unique_name(:limited_runnable_consumer_supervisor)
 
-    start_supervised!({Task.Supervisor, name: limited_task_supervisor, max_children: 1})
+    start_supervised!(
+      Supervisor.child_spec({RunnableDispatcher, name: limited_dispatcher},
+        id: limited_dispatcher
+      )
+    )
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {RunnableConsumerSupervisor,
+         name: limited_consumer_supervisor,
+         dispatcher: limited_dispatcher,
+         task_supervisor: task_supervisor,
+         max_concurrency: 1},
+        id: limited_consumer_supervisor
+      )
+    )
 
     workflow =
       Runic.Workflow.new()
@@ -331,8 +374,8 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
         run,
         scope,
         registry: registry,
-        task_supervisor: limited_task_supervisor,
-        task_supervisor_max_children: 1,
+        task_supervisor: task_supervisor,
+        runnable_dispatcher: limited_dispatcher,
         tmp_dir: tmp_dir,
         max_concurrency: 2
       )
@@ -353,9 +396,158 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     cleanup_worker(run.id, registry)
   end
 
+  test "multiple runs share global runnable capacity fairly", %{
+    scope: scope,
+    registry: registry,
+    task_supervisor: task_supervisor,
+    tmp_dir: tmp_dir
+  } do
+    test_pid = self()
+    limited_dispatcher = unique_name(:fair_runnable_dispatcher)
+    limited_consumer_supervisor = unique_name(:fair_runnable_consumer_supervisor)
+
+    start_supervised!(
+      Supervisor.child_spec({RunnableDispatcher, name: limited_dispatcher},
+        id: limited_dispatcher
+      )
+    )
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {RunnableConsumerSupervisor,
+         name: limited_consumer_supervisor,
+         dispatcher: limited_dispatcher,
+         task_supervisor: task_supervisor,
+         max_concurrency: 1},
+        id: limited_consumer_supervisor
+      )
+    )
+
+    %{version: version} = published_version_fixture(scope)
+    run_a = insert_running_run(scope, version, %{})
+    run_b = insert_running_run(scope, version, %{})
+    run_a_id = run_a.id
+    run_b_id = run_b.id
+
+    workflow_a =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(blocking_step(:a_one, test_pid, {run_a_id, :one}))
+      |> Runic.Workflow.add(blocking_step(:a_two, test_pid, {run_a_id, :two}))
+
+    workflow_b =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(blocking_step(:b_one, test_pid, {run_b_id, :one}))
+
+    pid_a =
+      start_worker!(
+        workflow_a,
+        run_a,
+        scope,
+        registry: registry,
+        task_supervisor: task_supervisor,
+        runnable_dispatcher: limited_dispatcher,
+        tmp_dir: tmp_dir,
+        max_concurrency: 2
+      )
+
+    pid_b =
+      start_worker!(
+        workflow_b,
+        run_b,
+        scope,
+        registry: registry,
+        task_supervisor: task_supervisor,
+        runnable_dispatcher: limited_dispatcher,
+        tmp_dir: tmp_dir,
+        max_concurrency: 1
+      )
+
+    assert :ok = Worker.run(pid_a, %{"value" => "a"})
+    assert_receive {:step_started, {^run_a_id, _first_step}, first_task_pid}, 2_000
+
+    assert :ok = Worker.run(pid_b, %{"value" => "b"})
+    refute_receive {:step_started, {^run_b_id, :one}, _pid}, 100
+
+    send(first_task_pid, :release)
+
+    assert_receive {:step_started, next_label, run_b_task_pid}, 2_000
+    assert next_label == {run_b_id, :one}
+
+    send(run_b_task_pid, :release)
+
+    assert_receive {:step_started, final_label, run_a_task_pid}, 2_000
+    assert elem(final_label, 0) == run_a_id
+
+    send(run_a_task_pid, :release)
+
+    assert %{status: :completed} = wait_for_run_status(scope, run_a_id, registry)
+    assert %{status: :completed} = wait_for_run_status(scope, run_b_id, registry)
+    cleanup_worker(run_a_id, registry)
+    cleanup_worker(run_b_id, registry)
+  end
+
+  test "worker shutdown cancels running work and drops queued work", %{
+    scope: scope,
+    registry: registry,
+    task_supervisor: task_supervisor,
+    tmp_dir: tmp_dir
+  } do
+    test_pid = self()
+    limited_dispatcher = unique_name(:shutdown_runnable_dispatcher)
+    limited_consumer_supervisor = unique_name(:shutdown_runnable_consumer_supervisor)
+
+    start_supervised!(
+      Supervisor.child_spec({RunnableDispatcher, name: limited_dispatcher},
+        id: limited_dispatcher
+      )
+    )
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {RunnableConsumerSupervisor,
+         name: limited_consumer_supervisor,
+         dispatcher: limited_dispatcher,
+         task_supervisor: task_supervisor,
+         max_concurrency: 1},
+        id: limited_consumer_supervisor
+      )
+    )
+
+    workflow =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(blocking_step(:one, test_pid))
+      |> Runic.Workflow.add(blocking_step(:two, test_pid))
+
+    %{version: version} = published_version_fixture(scope)
+    run = insert_running_run(scope, version, %{})
+
+    pid =
+      start_worker!(
+        workflow,
+        run,
+        scope,
+        registry: registry,
+        task_supervisor: task_supervisor,
+        runnable_dispatcher: limited_dispatcher,
+        tmp_dir: tmp_dir,
+        max_concurrency: 2
+      )
+
+    assert :ok = Worker.run(pid, %{"value" => 1})
+    assert_receive {:step_started, :one, first_task_pid}, 2_000
+
+    worker_ref = Process.monitor(pid)
+    task_ref = Process.monitor(first_task_pid)
+
+    assert :ok = Worker.stop(pid, persist: false)
+    assert_receive {:DOWN, ^worker_ref, :process, ^pid, _reason}, 2_000
+    assert_receive {:DOWN, ^task_ref, :process, ^first_task_pid, _reason}, 2_000
+    refute_receive {:step_started, :two, _pid}, 200
+  end
+
   defp start_worker!(workflow, run, scope, opts) do
     registry = Keyword.fetch!(opts, :registry)
-    task_supervisor = Keyword.fetch!(opts, :task_supervisor)
+    runnable_dispatcher = Keyword.fetch!(opts, :runnable_dispatcher)
     tmp_dir = Keyword.fetch!(opts, :tmp_dir)
     fence_token = Keyword.get(opts, :fence_token, 1)
 
@@ -379,8 +571,7 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
          store: store_state,
          fence_token: fence_token,
          registry: registry,
-         task_supervisor: task_supervisor,
-         task_supervisor_max_children: Keyword.get(opts, :task_supervisor_max_children),
+         runnable_dispatcher: runnable_dispatcher,
          max_concurrency: Keyword.get(opts, :max_concurrency, 2),
          checkpoint_strategy: :every_cycle,
          idle_timeout_ms: 5_000
@@ -429,10 +620,12 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     DateTime.add(DateTime.utc_now(), -10, :minute)
   end
 
-  defp blocking_step(name, test_pid) do
+  defp blocking_step(name, test_pid), do: blocking_step(name, test_pid, name)
+
+  defp blocking_step(name, test_pid, label) do
     Runic.step(
       fn input ->
-        send(test_pid, {:step_started, name, self()})
+        send(test_pid, {:step_started, label, self()})
 
         receive do
           :release -> input
