@@ -4,7 +4,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   use FizzWeb, :verified_routes
 
   alias Fizz.Accounts
-  alias Fizz.Integrations.CredentialsResolver
+  alias Fizz.Integrations.{CredentialsResolver, DynamicResolver}
   alias Fizz.Slots
   alias Fizz.Steps
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
@@ -171,8 +171,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   @impl true
   def handle_event("resolve_field_options", payload, socket) do
     case resolve_field_options(socket, payload) do
-      {:ok, socket, options} ->
-        {:reply, %{options: options}, socket}
+      {:ok, socket, result} ->
+        {:reply, %{options: result.options, meta: result.meta}, socket}
 
       {:error, socket, reason} ->
         {:reply, %{options: [], error: encode_reason(reason)}, socket}
@@ -997,14 +997,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp resolve_field_options(socket, payload) do
-    with {:ok, resolver, params} <- field_resolver_request(socket.assigns.draft, payload),
-         {:ok, options} <-
-           resolver.resolve(%{
-             q: resolver_query(payload),
-             params: params,
-             context: resolver_context(socket)
-           }) do
-      {:ok, maybe_push_credential_results(socket, resolver, payload, options), options}
+    with {:ok, result} <-
+           DynamicResolver.resolve(socket.assigns.draft, payload, resolver_context(socket), []) do
+      {:ok, maybe_push_credential_results(socket, result.resolver, payload, result.options),
+       result}
     else
       {:error, reason} ->
         {:error, maybe_push_credential_results(socket, nil, payload, []), reason}
@@ -2182,6 +2178,13 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> Enum.sort_by(&Map.get(step_order, &1, map_size(step_order)))
   end
 
+  defp fetch_step(%WorkflowDefinitionVersion{} = draft, step_id) do
+    case Enum.find(draft.steps, &(&1.id == step_id)) do
+      %Step{} = step -> {:ok, step}
+      nil -> {:error, :step_not_found}
+    end
+  end
+
   defp do_upstream_step_ids(step_id, direct_parents, visited) do
     direct_parents
     |> Map.get(step_id, [])
@@ -2202,111 +2205,6 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp workflow_preview_context(_definition), do: %{}
-
-  defp field_resolver_request(%WorkflowDefinitionVersion{} = draft, payload) do
-    with {:ok, step_id} <- resolver_step_id(payload),
-         {:ok, field_key} <- resolver_field_key(payload),
-         {:ok, step} <- fetch_step(draft, step_id),
-         {:ok, type} <- Steps.get_type(step.type_id),
-         {:ok, field_schema} <- fetch_config_field_schema(type, field_key),
-         {:ok, resolver} <- fetch_field_resolver(field_schema) do
-      {:ok, resolver, merge_resolver_params(field_schema, payload)}
-    end
-  end
-
-  defp field_resolver_request(_draft, _payload), do: {:error, :draft_not_loaded}
-
-  defp resolver_step_id(payload) do
-    case Map.get(payload, "node_id") || Map.get(payload, :node_id) ||
-           Map.get(payload, "step_id") || Map.get(payload, :step_id) do
-      step_id when is_binary(step_id) -> {:ok, step_id}
-      _ -> {:error, :step_id_required}
-    end
-  end
-
-  defp resolver_field_key(payload) do
-    case Map.get(payload, "field_key") || Map.get(payload, :field_key) do
-      field_key when is_binary(field_key) -> {:ok, field_key}
-      _ -> {:error, :field_key_required}
-    end
-  end
-
-  defp fetch_step(%WorkflowDefinitionVersion{} = draft, step_id) do
-    case Enum.find(draft.steps, &(&1.id == step_id)) do
-      %Step{} = step -> {:ok, step}
-      nil -> {:error, :step_not_found}
-    end
-  end
-
-  defp fetch_config_field_schema(%Type{} = type, field_key) do
-    case get_in(type.config_schema, ["properties", field_key]) do
-      field_schema when is_map(field_schema) -> {:ok, field_schema}
-      _ -> {:error, :field_not_found}
-    end
-  end
-
-  defp fetch_field_resolver(field_schema) do
-    case get_in(field_schema, ["ui", "resolver"]) do
-      resolver when is_atom(resolver) and not is_nil(resolver) ->
-        case Code.ensure_loaded(resolver) do
-          {:module, _module} ->
-            case function_exported?(resolver, :resolve, 1) do
-              true -> {:ok, resolver}
-              false -> {:error, :resolver_not_found}
-            end
-
-          _ ->
-            {:error, :resolver_not_found}
-        end
-
-      _ ->
-        fetch_slot_field_resolver(field_schema)
-    end
-  end
-
-  defp fetch_slot_field_resolver(field_schema) do
-    case field_ui_value(field_schema, :slot_kind) do
-      "credential" -> {:ok, CredentialsResolver}
-      _ -> {:error, :resolver_not_found}
-    end
-  end
-
-  defp merge_resolver_params(field_schema, payload) do
-    schema_resolver_params(field_schema)
-    |> Map.merge(payload_resolver_params(payload))
-  end
-
-  defp schema_resolver_params(field_schema) do
-    field_schema
-    |> slot_field_resolver_params()
-    |> Map.merge(resolver_ui_params(field_schema))
-  end
-
-  defp slot_field_resolver_params(field_schema) do
-    case field_ui_value(field_schema, :slot_kind) do
-      "credential" ->
-        spec = field_ui_value(field_schema, :spec) || %{}
-
-        %{}
-        |> maybe_put("provider_filter", Map.get(spec, "provider") || Map.get(spec, :provider))
-        |> maybe_put("auth_types", Map.get(spec, "auth_type") || Map.get(spec, :auth_type))
-
-      _ ->
-        %{}
-    end
-  end
-
-  defp field_ui_value(field_schema, key) when is_map(field_schema) and is_atom(key) do
-    ui = Map.get(field_schema, "ui") || Map.get(field_schema, :ui) || %{}
-    Map.get(ui, Atom.to_string(key)) || Map.get(ui, key)
-  end
-
-  defp resolver_ui_params(field_schema) do
-    case get_in(field_schema, ["ui", "params"]) do
-      params when is_map(params) -> params
-      _ -> %{}
-    end
-  end
 
   defp payload_resolver_params(payload) do
     params =

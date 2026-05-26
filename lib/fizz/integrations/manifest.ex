@@ -211,6 +211,8 @@ defmodule Fizz.Integrations.Manifest do
       module: operation_module,
       auth: credential_requirements(step_type.config_schema),
       default_config: step_module.default_config(),
+      depends_on: schema_extension_index(step_type.config_schema, "depends_on"),
+      field_display: schema_extension_index(step_type.config_schema, "display"),
       input_schema: step_type.input_schema,
       display: %{
         name: step_type.name,
@@ -220,9 +222,29 @@ defmodule Fizz.Integrations.Manifest do
       },
       config_schema: step_type.config_schema,
       output_schema: step_type.output_schema,
+      resource_locators: schema_extension_index(step_type.config_schema, "resource_locator"),
+      resource_mappers: schema_extension_index(step_type.config_schema, "resource_mapper"),
       retry: %RetryPolicy{max_attempts: 1, backoff: :none}
     }
   end
+
+  defp schema_extension_index(config_schema, key) do
+    config_schema
+    |> Map.get("properties", %{})
+    |> Enum.flat_map(fn {field, property} ->
+      case schema_extension(property, key) do
+        nil -> []
+        value -> [{field, value}]
+      end
+    end)
+    |> Map.new()
+  end
+
+  defp schema_extension(property, key) when is_map(property) do
+    Map.get(property, key) || get_in(property, ["ui", key])
+  end
+
+  defp schema_extension(_property, _key), do: nil
 
   defp credential_requirements(config_schema) do
     config_schema

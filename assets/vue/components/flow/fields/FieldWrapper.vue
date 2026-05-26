@@ -54,7 +54,7 @@ import JsonField from './JsonField.vue';
 import SelectField from './SelectField.vue';
 import SearchField from './SearchField.vue';
 import SlotField from './SlotField.vue';
-import MapEditor from './MapEditor.vue';
+import ResourceMapperField from './ResourceMapperField.vue';
 
 import type { ConfigField } from '@/types/configSchema';
 
@@ -74,7 +74,8 @@ const componentMap: Record<string, any> = {
   'json': JsonField,
   'select': SelectField,
   'search': SearchField,
-  'map': MapEditor,
+  'resource_locator': StringField,
+  'resource_mapper': ResourceMapperField,
   // Fallbacks:
   'default': StringField
 };

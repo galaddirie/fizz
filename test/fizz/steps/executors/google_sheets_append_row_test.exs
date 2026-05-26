@@ -80,11 +80,20 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRowTest do
   end
 
   describe "config schema" do
-    test "exposes the column mapper UI hint on the values field" do
+    test "exposes the resource mapper UI hint on the values field" do
       schema = GoogleSheetsAppendRow.__step_definition__().config_schema
       values_field = get_in(schema, ["properties", "values"])
 
-      assert get_in(values_field, ["ui", "component"]) == "map"
+      assert get_in(values_field, ["ui", "component"]) == "resource_mapper"
+
+      assert values_field["depends_on"] == [
+               "credential_ref",
+               "spreadsheet_id",
+               "sheet_name",
+               "table_id"
+             ]
+
+      assert get_in(values_field, ["resource_mapper", "kind"]) == "google_sheets.row_values"
 
       assert get_in(values_field, ["ui", "resolver"]) ==
                Fizz.Integrations.Google.Sheets.ColumnsResolver

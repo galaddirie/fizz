@@ -263,7 +263,8 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
 
             let inferredType: ExtendedFieldType = 'text';
             if (uiComponent === 'slot') inferredType = 'json';
-            else if (uiComponent === 'map') inferredType = 'map';
+            else if (uiComponent === 'resource_mapper') inferredType = 'resource_mapper';
+            else if (uiComponent === 'resource_locator') inferredType = 'resource_locator';
             else if (uiComponent === 'search') inferredType = 'search';
             else if (uiComponent === 'select') inferredType = 'select';
             else if (uiComponent === 'json') inferredType = 'json';

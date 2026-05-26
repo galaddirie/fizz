@@ -49,7 +49,7 @@ defmodule Fizz.Steps.Registry do
   require Logger
 
   @ets_table :fizz_step_types
-  @supported_ui_components ~w(hidden json map number search select slot string)
+  @supported_ui_components ~w(hidden json number resource_locator resource_mapper search select slot string)
 
   # ============================================================================
   # Client API
@@ -357,12 +357,13 @@ defmodule Fizz.Steps.Registry do
   defp validate_config_schemas!(types) do
     Enum.each(types, fn type ->
       default_config = get_type_default_config(type)
+      properties = Map.get(type.config_schema, "properties", %{})
 
-      type.config_schema
-      |> Map.get("properties", %{})
-      |> Enum.each(fn {field, schema} ->
+      Enum.each(properties, fn {field, schema} ->
         validate_schema_property!(type, [field], schema, default_config)
       end)
+
+      validate_schema_property_references!(type, properties)
     end)
 
     types
@@ -370,6 +371,7 @@ defmodule Fizz.Steps.Registry do
 
   defp validate_schema_property!(type, path, schema, default_config) when is_map(schema) do
     validate_ui_component!(type, path, schema)
+    validate_schema_property_extensions!(type, path, schema)
     validate_credential_slot!(type, path, schema, default_config)
 
     schema
@@ -394,6 +396,269 @@ defmodule Fizz.Steps.Registry do
               "step type #{type.id} field #{Enum.join(path, ".")} uses unsupported ui.component #{inspect(component)}"
     end
   end
+
+  defp validate_schema_property_extensions!(type, path, schema) do
+    field = Enum.join(path, ".")
+
+    validate_depends_on!(
+      type,
+      field,
+      Map.get(schema, "depends_on") || get_in(schema, ["ui", "depends_on"])
+    )
+
+    validate_optional_map!(type, field, "display", Map.get(schema, "display"))
+
+    validate_resource_locator!(
+      type,
+      field,
+      "resource_locator",
+      Map.get(schema, "resource_locator")
+    )
+
+    validate_resource_mapper!(type, field, "resource_mapper", Map.get(schema, "resource_mapper"))
+    validate_optional_map!(type, field, "ui.display", get_in(schema, ["ui", "display"]))
+
+    validate_optional_map!(
+      type,
+      field,
+      "ui.resource_locator",
+      get_in(schema, ["ui", "resource_locator"])
+    )
+
+    validate_resource_locator!(
+      type,
+      field,
+      "ui.resource_locator",
+      get_in(schema, ["ui", "resource_locator"])
+    )
+
+    validate_resource_mapper!(
+      type,
+      field,
+      "ui.resource_mapper",
+      get_in(schema, ["ui", "resource_mapper"])
+    )
+  end
+
+  defp validate_depends_on!(_type, _field, nil), do: :ok
+
+  defp validate_depends_on!(type, field, depends_on) when is_list(depends_on) do
+    unless Enum.all?(depends_on, &is_binary/1) do
+      raise ArgumentError,
+            "step type #{type.id} field #{field} depends_on must contain only strings"
+    end
+  end
+
+  defp validate_depends_on!(type, field, depends_on) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} depends_on must be a list, got: #{inspect(depends_on)}"
+  end
+
+  defp validate_optional_map!(_type, _field, _key, nil), do: :ok
+  defp validate_optional_map!(_type, _field, _key, value) when is_map(value), do: :ok
+
+  defp validate_optional_map!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key} must be a map, got: #{inspect(value)}"
+  end
+
+  defp validate_resource_locator!(_type, _field, _key, nil), do: :ok
+
+  defp validate_resource_locator!(type, field, key, locator) when is_map(locator) do
+    validate_required_string!(type, field, "#{key}.kind", Map.get(locator, "kind"))
+    validate_optional_string!(type, field, "#{key}.value_key", Map.get(locator, "value_key"))
+  end
+
+  defp validate_resource_locator!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key} must be a map, got: #{inspect(value)}"
+  end
+
+  defp validate_resource_mapper!(_type, _field, _key, nil), do: :ok
+
+  defp validate_resource_mapper!(type, field, key, mapper) when is_map(mapper) do
+    validate_required_string!(type, field, "#{key}.kind", Map.get(mapper, "kind"))
+    validate_string_value_map!(type, field, "#{key}.fields", Map.get(mapper, "fields"))
+    validate_string_value_map!(type, field, "#{key}.labels", Map.get(mapper, "labels"))
+    validate_resource_mapper_lookups!(type, field, key, Map.get(mapper, "lookups"))
+    validate_resource_mapper_errors!(type, field, key, Map.get(mapper, "errors"))
+  end
+
+  defp validate_resource_mapper!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key} must be a map, got: #{inspect(value)}"
+  end
+
+  defp validate_resource_mapper_lookups!(_type, _field, _key, nil), do: :ok
+
+  defp validate_resource_mapper_lookups!(type, field, key, lookups) when is_map(lookups) do
+    Enum.each(lookups, fn {lookup_name, lookup} ->
+      lookup_label = "#{key}.lookups.#{lookup_name}"
+
+      case lookup do
+        %{} ->
+          validate_required_string!(type, field, "#{lookup_label}.mode", Map.get(lookup, "mode"))
+
+          validate_string_value_map!(
+            type,
+            field,
+            "#{lookup_label}.params",
+            Map.get(lookup, "params")
+          )
+
+          validate_optional_string!(
+            type,
+            field,
+            "#{lookup_label}.parent_option_field",
+            Map.get(lookup, "parent_option_field")
+          )
+
+        _ ->
+          raise ArgumentError,
+                "step type #{type.id} field #{field} #{lookup_label} must be a map, got: #{inspect(lookup)}"
+      end
+    end)
+  end
+
+  defp validate_resource_mapper_lookups!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key}.lookups must be a map, got: #{inspect(value)}"
+  end
+
+  defp validate_resource_mapper_errors!(_type, _field, _key, nil), do: :ok
+
+  defp validate_resource_mapper_errors!(type, field, key, errors) when is_map(errors) do
+    Enum.each(errors, fn {scope, messages} ->
+      case messages do
+        %{} ->
+          validate_string_value_map!(type, field, "#{key}.errors.#{scope}", messages)
+
+        _ ->
+          raise ArgumentError,
+                "step type #{type.id} field #{field} #{key}.errors.#{scope} must be a map, got: #{inspect(messages)}"
+      end
+    end)
+  end
+
+  defp validate_resource_mapper_errors!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key}.errors must be a map, got: #{inspect(value)}"
+  end
+
+  defp validate_string_value_map!(_type, _field, _key, nil), do: :ok
+
+  defp validate_string_value_map!(type, field, key, value) when is_map(value) do
+    Enum.each(value, fn {entry_key, entry_value} ->
+      validate_required_string!(type, field, "#{key}.#{entry_key}", entry_value)
+    end)
+  end
+
+  defp validate_string_value_map!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key} must be a map, got: #{inspect(value)}"
+  end
+
+  defp validate_required_string!(_type, _field, _key, value)
+       when is_binary(value) and value != "",
+       do: :ok
+
+  defp validate_required_string!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key} must be a non-empty string, got: #{inspect(value)}"
+  end
+
+  defp validate_optional_string!(_type, _field, _key, nil), do: :ok
+
+  defp validate_optional_string!(_type, _field, _key, value)
+       when is_binary(value) and value != "",
+       do: :ok
+
+  defp validate_optional_string!(type, field, key, value) do
+    raise ArgumentError,
+          "step type #{type.id} field #{field} #{key} must be a non-empty string, got: #{inspect(value)}"
+  end
+
+  defp validate_schema_property_references!(type, properties) when is_map(properties) do
+    field_names = MapSet.new(Map.keys(properties))
+
+    Enum.each(properties, fn {field, property} ->
+      validate_property_references!(type, field, property, field_names)
+    end)
+  end
+
+  defp validate_property_references!(type, field, property, field_names) when is_map(property) do
+    property
+    |> metadata_references()
+    |> Enum.each(fn {metadata_path, field_name} ->
+      unless MapSet.member?(field_names, field_name) do
+        raise ArgumentError,
+              "step type #{type.id} field #{field} #{metadata_path} references unknown field #{inspect(field_name)}"
+      end
+    end)
+  end
+
+  defp validate_property_references!(_type, _field, _property, _field_names), do: :ok
+
+  defp metadata_references(property) do
+    depends_on =
+      property
+      |> schema_depends_on()
+      |> Enum.map(&{"depends_on", &1})
+
+    mapper_references(schema_extension(property, "resource_mapper")) ++ depends_on
+  end
+
+  defp mapper_references(mapper) when is_map(mapper) do
+    field_references =
+      mapper
+      |> Map.get("fields", %{})
+      |> string_map_values("resource_mapper.fields")
+
+    lookup_references =
+      mapper
+      |> Map.get("lookups", %{})
+      |> Enum.flat_map(fn {lookup_name, lookup} ->
+        case lookup do
+          %{} ->
+            lookup
+            |> Map.get("params", %{})
+            |> string_map_values("resource_mapper.lookups.#{lookup_name}.params")
+            |> maybe_append_reference(
+              "resource_mapper.lookups.#{lookup_name}.parent_option_field",
+              Map.get(lookup, "parent_option_field")
+            )
+
+          _ ->
+            []
+        end
+      end)
+
+    field_references ++ lookup_references
+  end
+
+  defp mapper_references(_mapper), do: []
+
+  defp string_map_values(value, path) when is_map(value) do
+    Enum.map(value, fn {_key, field_name} -> {path, field_name} end)
+  end
+
+  defp string_map_values(_value, _path), do: []
+
+  defp maybe_append_reference(references, _path, nil), do: references
+  defp maybe_append_reference(references, path, value), do: [{path, value} | references]
+
+  defp schema_depends_on(property) do
+    case Map.get(property, "depends_on") || get_in(property, ["ui", "depends_on"]) do
+      depends_on when is_list(depends_on) -> depends_on
+      _ -> []
+    end
+  end
+
+  defp schema_extension(property, key) when is_map(property) do
+    Map.get(property, key) || get_in(property, ["ui", key])
+  end
+
+  defp schema_extension(_property, _key), do: nil
 
   defp validate_credential_slot!(type, path, schema, default_config) do
     case get_in(schema, ["ui", "component"]) do

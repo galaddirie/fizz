@@ -146,7 +146,7 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
 
     case Client.get_tables(client_params, client_context) do
       {:ok, tables} ->
-        {:ok, tables}
+        {:ok, Enum.map(tables, &table_option/1)}
 
       {:backoff, reason} ->
         Logger.warning(
@@ -342,6 +342,18 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
   end
 
   defp owned_by_scope?(_option, _scope), do: false
+
+  defp table_option(table) when is_map(table) do
+    columns = Map.get(table, "columns") || Map.get(table, :columns) || []
+    sheet_name = Map.get(table, "sheet_name") || Map.get(table, :sheet_name) || ""
+
+    table
+    |> Map.put_new("parent_id", sheet_name)
+    |> Map.put_new("parent_label", sheet_name)
+    |> Map.put_new("schema", %{"columns" => columns})
+  end
+
+  defp table_option(table), do: table
 
   defp header_row_param(params) do
     case Map.get(params, "header_row") || Map.get(params, :header_row) do

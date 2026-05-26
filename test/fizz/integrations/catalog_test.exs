@@ -77,6 +77,24 @@ defmodule Fizz.Integrations.CatalogTest do
                  auth_type: :oauth
                }
              ] = operation.auth
+
+      assert operation.depends_on["values"] == [
+               "credential_ref",
+               "spreadsheet_id",
+               "sheet_name",
+               "table_id"
+             ]
+
+      assert operation.resource_locators["spreadsheet_id"]["kind"] ==
+               "google_sheets.spreadsheet"
+
+      assert operation.resource_mappers["values"]["kind"] == "google_sheets.row_values"
+
+      assert operation.resource_mappers["values"]["lookups"]["primary_resource"]["mode"] ==
+               "sheets"
+
+      assert operation.resource_mappers["values"]["lookups"]["schema_resource"]["mode"] ==
+               "tables"
     end
   end
 

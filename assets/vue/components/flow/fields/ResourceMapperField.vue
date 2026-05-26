@@ -18,7 +18,7 @@
                   class="rounded-full px-2 py-0.5 text-[10px] font-medium"
                   :class="schemaLocked ? 'bg-primary/10 text-primary' : 'bg-base-200/70 text-base-content/45'"
                 >
-                  {{ schemaLocked ? 'Schema locked' : 'Freeform' }}
+                  {{ schemaLocked ? schemaLockedLabel : freeformLabel }}
                 </span>
               </div>
               <div class="mt-0.5 text-[10px] text-base-content/35">
@@ -48,7 +48,7 @@
               class="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-base-content/35"
               :for="sheetSelectId"
             >
-              Sheet
+              {{ primaryResourceLabel }}
             </label>
             <select
               :id="sheetSelectId"
@@ -57,7 +57,7 @@
               :disabled="field.disabled || field.readOnly"
               @change="onSheetSelectionChange(($event.target as HTMLSelectElement).value)"
             >
-              <option value="">No sheet</option>
+              <option value="">{{ noPrimaryResourceLabel }}</option>
               <option
                 v-for="option in sheetSelectOptions"
                 :key="option.id"
@@ -79,7 +79,7 @@
               class="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-base-content/35"
               :for="tableSelectId"
             >
-              Table
+              {{ schemaResourceLabel }}
             </label>
             <select
               :id="tableSelectId"
@@ -88,7 +88,7 @@
               :disabled="field.disabled || field.readOnly"
               @change="onTableSelectionChange(($event.target as HTMLSelectElement).value)"
             >
-              <option value="">No table</option>
+              <option value="">{{ noSchemaResourceLabel }}</option>
               <option
                 v-for="option in tableSelectOptions"
                 :key="option.id"
@@ -241,12 +241,48 @@ type TableColumnOption = {
 type TableOption = {
   id: string;
   label: string;
-  sheetName: string;
-  sheetId?: number;
+  parentId: string;
+  parentLabel?: string;
   columns: TableColumnOption[];
 };
+type LookupName = 'primary_resource' | 'schema_resource';
+type LookupConfig = {
+  mode?: string;
+  params?: Record<string, string>;
+  parent_option_field?: string;
+};
+type MapperConfig = Record<string, any>;
 
 const DEFAULT_COLUMN_COUNT = 3;
+const fallbackMapperConfig: MapperConfig = {
+  fields: {
+    primary_resource: 'primary_resource',
+    schema_resource: 'schema_resource',
+  },
+  labels: {
+    primary_resource: 'Resource',
+    schema_resource: 'Schema',
+    no_primary_resource: 'No resource',
+    no_schema_resource: 'No schema',
+    selected_schema_fallback: 'No schema selected',
+    schema_locked: 'Schema locked',
+    freeform: 'Freeform',
+    empty_state: 'Flexible fields',
+    lookup_loading: 'Loading schema; editing stays available',
+    lookup_failed: 'Schema lookup failed; editing stays available',
+    schema_unavailable: 'Schema unavailable; editing stays available',
+    refresh_idle: 'Refresh resources',
+    refresh_loading: 'Refreshing resource metadata',
+  },
+  errors: {
+    primary_resource: {
+      fetch_failed: 'Could not load resources.',
+    },
+    schema_resource: {
+      fetch_failed: 'Could not load schemas.',
+    },
+  },
+};
 
 const props = defineProps<{
   modelValue: unknown;
@@ -259,6 +295,7 @@ const emit = defineEmits(['update:modelValue', 'validation']);
 
 const live = useLiveVue();
 const state = inject(StepConfigKey, null);
+const resolverMapperConfig = ref<MapperConfig | null>(null);
 
 const sheetOptions = ref<SheetOption[]>([]);
 const tableOptions = ref<TableOption[]>([]);
@@ -273,31 +310,129 @@ const tableRequestSeq = ref(0);
 const freeformMode = ref<'positional' | 'named'>('positional');
 const lastEmittedJson = ref<string | null>(null);
 
-const credentialRef = computed(() => state?.fieldValues.value?.credential_ref);
-const spreadsheetId = computed(() => state?.fieldValues.value?.spreadsheet_id);
-const sheetName = computed(() => state?.fieldValues.value?.sheet_name);
-const tableId = computed(() => state?.fieldValues.value?.table_id);
+const mapperConfig = computed(() =>
+  deepMerge(
+    fallbackMapperConfig,
+    deepMerge(
+      asRecord(props.field.resource_mapper) ?? asRecord(props.field.ui?.resource_mapper) ?? {},
+      resolverMapperConfig.value ?? {}
+    )
+  )
+);
+const mapperFields = computed(() => asRecord(mapperConfig.value.fields) ?? {});
+const mapperLabels = computed(() => asRecord(mapperConfig.value.labels) ?? {});
+const mapperLookups = computed(() => asRecord(mapperConfig.value.lookups) ?? {});
+const mapperErrors = computed(() => asRecord(mapperConfig.value.errors) ?? {});
+const primaryResourceKey = computed(() => stringConfig(mapperFields.value.primary_resource, 'primary_resource'));
+const schemaResourceKey = computed(() => stringConfig(mapperFields.value.schema_resource, 'schema_resource'));
+const primaryLookup = computed(() => lookupConfig('primary_resource'));
+const schemaLookup = computed(() => lookupConfig('schema_resource'));
+const primaryResourceValue = computed(() => fieldValue(primaryResourceKey.value));
+const schemaResourceValue = computed(() => fieldValue(schemaResourceKey.value));
 
 const isFilledString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim() !== '';
 
-const hasCredential = computed(() => {
-  const ref = credentialRef.value;
-  return !!ref && typeof ref === 'object';
-});
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+
+const asRecord = (value: unknown): Record<string, any> | null =>
+  isRecord(value) ? value as Record<string, any> : null;
+
+const deepMerge = (base: MapperConfig, override: MapperConfig): MapperConfig => {
+  const next: MapperConfig = { ...base };
+
+  Object.entries(override).forEach(([key, value]) => {
+    const baseValue = next[key];
+    if (isRecord(baseValue) && isRecord(value)) {
+      next[key] = deepMerge(baseValue as MapperConfig, value as MapperConfig);
+      return;
+    }
+
+    next[key] = value;
+  });
+
+  return next;
+};
+
+const stringConfig = (value: unknown, fallback: string) =>
+  typeof value === 'string' && value.trim() !== '' ? value.trim() : fallback;
+
+const fieldValue = (key: string) => state?.fieldValues.value?.[key];
+
+const lookupConfig = (name: LookupName): LookupConfig => {
+  const lookup = asRecord(mapperLookups.value[name]);
+  if (!lookup) return {};
+
+  return {
+    mode: stringConfig(lookup.mode, ''),
+    params: asRecord(lookup.params) ?? {},
+    parent_option_field: stringConfig(lookup.parent_option_field, ''),
+  };
+};
+
+const canResolveLookup = (lookup: LookupConfig) => {
+  if (!lookup.mode || !lookup.params) return false;
+
+  return Object.values(lookup.params).every(sourceKey => {
+    const value = fieldValue(sourceKey);
+    if (isRecord(value)) return true;
+    return isFilledString(value);
+  });
+};
+
+const resolverParamsFor = (lookup: LookupConfig) => {
+  const params: Record<string, unknown> = {};
+
+  if (lookup.mode) {
+    params.mode = lookup.mode;
+  }
+
+  Object.entries(lookup.params ?? {}).forEach(([paramKey, sourceKey]) => {
+    params[paramKey] = fieldValue(sourceKey);
+  });
+
+  return params;
+};
+
+const labelText = (key: string) => {
+  const value = mapperLabels.value[key];
+  return typeof value === 'string' && value.trim() !== ''
+    ? value.trim()
+    : String(fallbackMapperConfig.labels[key] ?? key);
+};
+
+const errorText = (lookup: LookupName, err: unknown) => {
+  const defaultMessage =
+    lookup === 'primary_resource'
+      ? String(fallbackMapperConfig.errors.primary_resource.fetch_failed)
+      : String(fallbackMapperConfig.errors.schema_resource.fetch_failed);
+
+  if (typeof err !== 'string') return defaultMessage;
+
+  const trimmed = err.trim();
+  const key = trimmed.startsWith('fetch_failed:') ? 'fetch_failed' : trimmed;
+  const scopedErrors = asRecord(mapperErrors.value[lookup]) ?? {};
+  const configured = scopedErrors[key];
+
+  if (typeof configured === 'string' && configured.trim() !== '') {
+    return configured.trim();
+  }
+
+  return trimmed !== '' ? trimmed : defaultMessage;
+};
 
 const canResolveLookups = computed(() =>
-  hasCredential.value &&
-  isFilledString(spreadsheetId.value)
+  canResolveLookup(primaryLookup.value) || canResolveLookup(schemaLookup.value)
 );
 
 const selectedSheetName = computed(() => {
-  if (isFilledString(sheetName.value)) return sheetName.value.trim();
+  if (isFilledString(primaryResourceValue.value)) return primaryResourceValue.value.trim();
   return '';
 });
 
 const selectedTableId = computed(() => {
-  if (isFilledString(tableId.value)) return tableId.value.trim();
+  if (isFilledString(schemaResourceValue.value)) return schemaResourceValue.value.trim();
   return '';
 });
 
@@ -336,17 +471,24 @@ const gridTemplateColumns = computed(
 const selectedTableLabel = computed(() => {
   if (selectedTableOption.value) return selectedTableOption.value.label;
   if (selectedTableId.value !== '') return selectedTableId.value;
-  return 'No table selected';
+  return labelText('selected_schema_fallback');
 });
+
+const schemaLockedLabel = computed(() => labelText('schema_locked'));
+const freeformLabel = computed(() => labelText('freeform'));
+const primaryResourceLabel = computed(() => labelText('primary_resource'));
+const schemaResourceLabel = computed(() => labelText('schema_resource'));
+const noPrimaryResourceLabel = computed(() => labelText('no_primary_resource'));
+const noSchemaResourceLabel = computed(() => labelText('no_schema_resource'));
 
 const sheetStatusLabel = computed(() => {
   if (schemaLocked.value) {
     return `${schemaHeaders.value.length} fixed ${schemaHeaders.value.length === 1 ? 'column' : 'columns'}`;
   }
-  if (isLoadingTables.value) return 'Loading table schema; editing stays available';
-  if (tableErrorMessage.value) return 'Table lookup failed; editing stays available';
-  if (selectedTableId.value !== '') return 'Table schema unavailable; editing stays available';
-  return 'Flexible columns';
+  if (isLoadingTables.value) return labelText('lookup_loading');
+  if (tableErrorMessage.value) return labelText('lookup_failed');
+  if (selectedTableId.value !== '') return labelText('schema_unavailable');
+  return labelText('empty_state');
 });
 
 const sheetSelectId = computed(() => `${props.nodeId}-${props.field.key}-sheet`);
@@ -385,14 +527,14 @@ const tableSelectOptions = computed(() => {
       selectedTableOption.value ?? {
         id: selected,
         label: selected,
-        sheetName: selectedSheet,
+        parentId: selectedSheet,
         columns: [],
       }
     );
   }
 
   tableOptions.value.forEach(option => {
-    if (selectedSheet !== '' && option.sheetName !== selectedSheet) return;
+    if (selectedSheet !== '' && option.parentId !== selectedSheet) return;
     if (option.id === '' || seen.has(option.id)) return;
     seen.add(option.id);
     options.push(option);
@@ -404,8 +546,8 @@ const tableSelectOptions = computed(() => {
 const canRefreshLookup = computed(() => canResolveLookups.value);
 const isRefreshingLookup = computed(() => isLoadingSheets.value || isLoadingTables.value);
 const refreshLabel = computed(() => {
-  if (isRefreshingLookup.value) return 'Refreshing Google Sheets metadata';
-  return 'Refresh sheets and tables';
+  if (isRefreshingLookup.value) return labelText('refresh_loading');
+  return labelText('refresh_idle');
 });
 
 const rowSummary = computed(() => {
@@ -428,9 +570,6 @@ const toCellString = (value: unknown): string => {
     return String(value);
   }
 };
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object' && !Array.isArray(value);
 
 const isListOfRecords = (value: unknown): value is Record<string, unknown>[] =>
   Array.isArray(value) && value.length > 0 && value.every(isRecord);
@@ -633,7 +772,7 @@ const updateSelectedSheet = (value: string) => {
   if (!state) return;
   state.fieldValues.value = {
     ...state.fieldValues.value,
-    sheet_name: normalized,
+    [primaryResourceKey.value]: normalized,
   };
 };
 
@@ -642,10 +781,13 @@ const updateSelectedTable = (value: string) => {
   const table = tableOptions.value.find(option => option.id === normalized);
 
   if (!state) return;
+
+  const parentKey = schemaLookup.value.parent_option_field || primaryResourceKey.value;
+
   state.fieldValues.value = {
     ...state.fieldValues.value,
-    table_id: normalized,
-    sheet_name: table?.sheetName ?? selectedSheetName.value,
+    [schemaResourceKey.value]: normalized,
+    [parentKey]: table?.parentId ?? selectedSheetName.value,
   };
 };
 
@@ -754,8 +896,9 @@ const cellInputId = (rowIndex: number, columnIndex: number) =>
 const fetchSheets = () => {
   sheetRequestSeq.value += 1;
   const seq = sheetRequestSeq.value;
+  const lookup = primaryLookup.value;
 
-  if (!canResolveLookups.value) {
+  if (!canResolveLookup(lookup)) {
     sheetOptions.value = [];
     isLoadingSheets.value = false;
     sheetErrorMessage.value = null;
@@ -771,19 +914,16 @@ const fetchSheets = () => {
       {
         node_id: props.nodeId,
         field_key: props.field.key,
-        params: {
-          mode: 'sheets',
-          credential_ref: credentialRef.value,
-          spreadsheet_id: spreadsheetId.value,
-        },
+        params: resolverParamsFor(lookup),
         q: '',
       },
       (reply: any) => {
         if (seq !== sheetRequestSeq.value) return;
+        updateMapperConfigFromReply(reply);
 
         isLoadingSheets.value = false;
         if (reply?.error) {
-          sheetErrorMessage.value = describeSheetError(reply.error);
+          sheetErrorMessage.value = errorText('primary_resource', reply.error);
           sheetOptions.value = [];
           return;
         }
@@ -794,17 +934,18 @@ const fetchSheets = () => {
   } catch (error) {
     if (seq !== sheetRequestSeq.value) return;
     isLoadingSheets.value = false;
-    sheetErrorMessage.value = 'Could not load sheets from this spreadsheet.';
+    sheetErrorMessage.value = errorText('primary_resource', 'fetch_failed');
     sheetOptions.value = [];
-    console.error('MapEditor: sheet resolve_field_options failed', error);
+    console.error('ResourceMapperField: primary resource resolve_field_options failed', error);
   }
 };
 
 const fetchTables = () => {
   tableRequestSeq.value += 1;
   const seq = tableRequestSeq.value;
+  const lookup = schemaLookup.value;
 
-  if (!canResolveLookups.value) {
+  if (!canResolveLookup(lookup)) {
     tableOptions.value = [];
     isLoadingTables.value = false;
     tableErrorMessage.value = null;
@@ -820,19 +961,16 @@ const fetchTables = () => {
       {
         node_id: props.nodeId,
         field_key: props.field.key,
-        params: {
-          mode: 'tables',
-          credential_ref: credentialRef.value,
-          spreadsheet_id: spreadsheetId.value,
-        },
+        params: resolverParamsFor(lookup),
         q: '',
       },
       (reply: any) => {
         if (seq !== tableRequestSeq.value) return;
+        updateMapperConfigFromReply(reply);
 
         isLoadingTables.value = false;
         if (reply?.error) {
-          tableErrorMessage.value = describeTableError(reply.error);
+          tableErrorMessage.value = errorText('schema_resource', reply.error);
           tableOptions.value = [];
           return;
         }
@@ -843,9 +981,9 @@ const fetchTables = () => {
   } catch (error) {
     if (seq !== tableRequestSeq.value) return;
     isLoadingTables.value = false;
-    tableErrorMessage.value = 'Could not load tables from this spreadsheet.';
+    tableErrorMessage.value = errorText('schema_resource', 'fetch_failed');
     tableOptions.value = [];
-    console.error('MapEditor: table resolve_field_options failed', error);
+    console.error('ResourceMapperField: schema resource resolve_field_options failed', error);
   }
 };
 
@@ -853,6 +991,13 @@ const refreshLookups = () => {
   if (!canResolveLookups.value) return;
   fetchSheets();
   fetchTables();
+};
+
+const updateMapperConfigFromReply = (reply: any) => {
+  const metaConfig = asRecord(reply?.meta?.resource_mapper);
+  if (metaConfig) {
+    resolverMapperConfig.value = metaConfig;
+  }
 };
 
 const normalizeSheetOptions = (options: unknown): SheetOption[] => {
@@ -889,9 +1034,9 @@ const normalizeTableOptions = (options: unknown): TableOption[] => {
     normalized.push({
       id,
       label: firstString(opt?.label, opt?.id, opt?.value) || id,
-      sheetName: firstString(opt?.sheet_name, opt?.sheetName),
-      sheetId: numberValue(opt?.sheet_id ?? opt?.sheetId),
-      columns: normalizeTableColumns(opt?.columns),
+      parentId: firstString(opt?.parent_id, opt?.parentId),
+      parentLabel: firstString(opt?.parent_label, opt?.parentLabel),
+      columns: normalizeTableColumns(opt?.schema?.columns ?? opt?.columns),
     });
   });
 
@@ -920,62 +1065,9 @@ const firstString = (...values: unknown[]) => {
   return '';
 };
 
-const numberValue = (value: unknown) => {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
-};
-
 const tableOptionLabel = (option: TableOption) => {
-  if (selectedSheetName.value !== '' || option.sheetName === '') return option.label;
-  return `${option.label} (${option.sheetName})`;
-};
-
-const describeSheetError = (err: unknown): string => {
-  if (typeof err === 'string') {
-    switch (err) {
-      case 'no_google_credential':
-        return "Connect a Google account to load this spreadsheet's sheets.";
-      case 'unauthorized':
-      case 'forbidden':
-        return 'Your Google account does not have access to this spreadsheet.';
-      case 'spreadsheet_not_found':
-        return "Couldn't find that spreadsheet. Double-check the Spreadsheet ID.";
-      case 'invalid_range_or_sheet':
-        return "Couldn't read that sheet. Make sure the Sheet Name matches the tab in Google Sheets exactly.";
-      case 'rate_limited':
-        return 'Google rate-limited the lookup. Try again in a moment.';
-      case 'fetch_failed':
-        return 'Could not load sheets from this spreadsheet.';
-      default:
-        return err.trim() !== '' ? err : 'Could not load sheets from this spreadsheet.';
-    }
-  }
-  return 'Could not load sheets from this spreadsheet.';
-};
-
-const describeTableError = (err: unknown): string => {
-  if (typeof err === 'string') {
-    switch (err) {
-      case 'no_google_credential':
-        return "Connect a Google account to load this spreadsheet's tables.";
-      case 'unauthorized':
-      case 'forbidden':
-        return 'Your Google account does not have access to this spreadsheet.';
-      case 'spreadsheet_not_found':
-        return "Couldn't find that spreadsheet. Double-check the Spreadsheet ID.";
-      case 'rate_limited':
-        return 'Google rate-limited the lookup. Try again in a moment.';
-      case 'fetch_failed':
-        return 'Could not load tables from this spreadsheet.';
-      default:
-        return err.trim() !== '' ? err : 'Could not load tables from this spreadsheet.';
-    }
-  }
-  return 'Could not load tables from this spreadsheet.';
+  if (selectedSheetName.value !== '' || option.parentId === '') return option.label;
+  return `${option.label} (${option.parentLabel || option.parentId})`;
 };
 
 watch(
@@ -989,8 +1081,20 @@ watch(
 
 watch(schemaHeaders, () => hydrateFromModel(), { deep: true });
 
+const lookupDependencySignature = computed(() => {
+  const keys = new Set<string>();
+
+  Object.values(primaryLookup.value.params ?? {}).forEach(key => keys.add(key));
+  Object.values(schemaLookup.value.params ?? {}).forEach(key => keys.add(key));
+
+  return Array.from(keys)
+    .sort()
+    .map(key => `${key}:${safeJson(fieldValue(key))}`)
+    .join('|');
+});
+
 watchDebounced(
-  [credentialRef, spreadsheetId],
+  lookupDependencySignature,
   () => refreshLookups(),
   { debounce: 400, immediate: true, deep: true }
 );

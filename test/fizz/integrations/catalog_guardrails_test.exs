@@ -116,8 +116,9 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
 
   @expected_ui_components [
     {"google_sheets_append_row", "sheet_name", "hidden"},
+    {"google_sheets_append_row", "spreadsheet_id", "resource_locator"},
     {"google_sheets_append_row", "table_id", "hidden"},
-    {"google_sheets_append_row", "values", "map"},
+    {"google_sheets_append_row", "values", "resource_mapper"},
     {"manual_input", "test_data", "json"}
   ]
 

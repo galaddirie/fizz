@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported UI component types for field rendering. */
-export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'slot' | 'map' | 'hidden';
+export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'slot' | 'resource_locator' | 'resource_mapper' | 'hidden';
 
 /** Resolver-based configuration for dynamic option loading. */
 export interface UIResolverConfig {
@@ -47,6 +47,12 @@ export interface FieldUIConfig extends Partial<UIResolverConfig> {
     slot_key?: string;
     /** For component='slot': kind-specific spec (e.g. provider + auth_type). */
     spec?: Record<string, unknown>;
+    /** Field keys that must be present before resolver-backed UI can load. */
+    depends_on?: string[];
+    /** Resource locator metadata for generic resource fields. */
+    resource_locator?: Record<string, unknown>;
+    /** Resource mapper metadata for generic table/row mapping fields. */
+    resource_mapper?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +68,10 @@ export interface ConfigSchemaField {
     description?: string;
     placeholder?: string;
     enum?: unknown[];
+    depends_on?: string[];
+    display?: Record<string, unknown>;
+    resource_locator?: Record<string, unknown>;
+    resource_mapper?: Record<string, unknown>;
     ui?: FieldUIConfig;
 }
 
@@ -77,7 +87,7 @@ export interface ConfigSchema {
 // ---------------------------------------------------------------------------
 
 /** Field types after UI component inference. */
-export type ExtendedFieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json' | 'search' | 'select' | 'map';
+export type ExtendedFieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json' | 'search' | 'select' | 'resource_locator' | 'resource_mapper';
 
 /** A config field with all metadata needed for rendering. */
 export interface ConfigField {
@@ -86,6 +96,10 @@ export interface ConfigField {
     type: ExtendedFieldType;
     description?: string;
     placeholder?: string;
+    depends_on?: string[];
+    display?: Record<string, unknown>;
+    resource_locator?: Record<string, unknown>;
+    resource_mapper?: Record<string, unknown>;
     expressionCapable: boolean;
     disabled?: boolean;
     readOnly?: boolean;

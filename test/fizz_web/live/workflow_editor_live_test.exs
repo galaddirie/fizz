@@ -1414,6 +1414,40 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     })
   end
 
+  test "resolve_field_options replies with resource mapper metadata", %{conn: conn} do
+    append_step =
+      WorkflowsFixtures.step(%{type_id: "google_sheets_append_row", name: "Append Row"})
+
+    snapshot_attrs = WorkflowsFixtures.snapshot_attrs(%{steps: [append_step]})
+
+    %{conn: conn, definition: definition} = editor_fixture(conn, snapshot_attrs)
+
+    {:ok, view, _html} = live_editor(conn, definition)
+
+    render_hook(view, "resolve_field_options", %{
+      "node_id" => append_step.id,
+      "field_key" => "values",
+      "params" => %{"mode" => "sheets"}
+    })
+
+    assert_reply(view, %{
+      options: [],
+      meta: %{
+        depends_on: depends_on,
+        resource_mapper: %{
+          "kind" => "google_sheets.row_values",
+          "lookups" => %{
+            "primary_resource" => %{"mode" => "sheets"},
+            "schema_resource" => %{"mode" => "tables"}
+          }
+        }
+      }
+    })
+
+    assert "credential_ref" in depends_on
+    assert "spreadsheet_id" in depends_on
+  end
+
   defp editor_fixture(conn, snapshot_attrs \\ nil) do
     user = Fizz.AccountsFixtures.user_fixture()
     organization_scope = Fizz.AccountsFixtures.organization_scope_fixture(user: user)
