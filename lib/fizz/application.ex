@@ -52,11 +52,11 @@ defmodule Fizz.Application do
         {Oban, Application.fetch_env!(:fizz, Oban)},
         {Phoenix.PubSub, name: Fizz.PubSub},
         FizzWeb.Presence,
-        Fizz.Integrations.Registry,
-        Fizz.Integrations.Catalog,
+        Fizz.Integrations.Catalog.IntegrationRegistry,
+        Fizz.Integrations.Catalog.Store,
 
         # Integration-owned step type index - must start before endpoint so types are available.
-        Fizz.Integrations.StepRegistry
+        Fizz.Integrations.Steps.Registry
       ])
       |> maybe_add_child(
         Fizz.Triggers.Supervisor,

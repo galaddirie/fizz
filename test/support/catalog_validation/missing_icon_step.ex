@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.MissingIconStep do
-  use Fizz.Integrations.StepDefinition,
+  use Fizz.Integrations.Steps.Definition,
     id: "missing_icon_step",
     name: "Missing Icon Step",
     category: "Test",

@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.UnknownProviderIntegration do
-  @behaviour Fizz.Integrations.Integration
+  @behaviour Fizz.Integrations.Contracts.Integration
 
   @impl true
   def id, do: "unknown_provider_docs"

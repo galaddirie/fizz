@@ -5,7 +5,7 @@ defmodule Fizz.Accounts.ExternalAuthBoundaryTest do
     external_auth_source = File.read!("lib/fizz/accounts/external_auth.ex")
     api_credential_source = File.read!("lib/fizz/accounts/api_credential.ex")
 
-    refute external_auth_source =~ "Fizz.Integrations.ProviderCatalog"
-    refute api_credential_source =~ "Fizz.Integrations.ProviderCatalog"
+    refute external_auth_source =~ "Fizz.Integrations.Auth.ProviderCatalog"
+    refute api_credential_source =~ "Fizz.Integrations.Auth.ProviderCatalog"
   end
 end

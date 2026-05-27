@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
   use Fizz.Schema
 
   alias Fizz.Graph
-  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.PublishValidation
   alias Fizz.Workflows.WorkflowDefinition

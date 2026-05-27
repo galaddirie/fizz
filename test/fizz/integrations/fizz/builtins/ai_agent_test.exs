@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.AIAgentTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgentTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.AIAgent
+  alias Fizz.Integrations.Library.Fizz.Builtins.AIAgent
 
   test "unwraps nested structured schema subnode output when assembling payload" do
     json_schema = %{

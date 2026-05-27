@@ -8,7 +8,7 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
   alias Fizz.Fields.Credential
-  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
   alias Fizz.TestSupport.Executors.FailingWebhookTrigger
   alias Fizz.Triggers.Registry
   alias Fizz.Triggers.TriggerRegistration
@@ -133,7 +133,7 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
           name: "GitHub Trigger",
           config:
             "github_trigger"
-            |> Fizz.Integrations.StepRegistry.get_default_config()
+            |> Fizz.Integrations.Steps.Registry.get_default_config()
             |> Map.merge(%{"events" => ["push"], "repository" => "acme/site"})
         })
       ]

@@ -32,9 +32,9 @@ defmodule Fizz.Workflows.StepExecutor do
   Resolves the executor module for a given step type ID.
   """
   def resolve(type_id) when is_binary(type_id) do
-    case Fizz.Integrations.StepRegistry.get(type_id) do
+    case Fizz.Integrations.Steps.Registry.get(type_id) do
       {:ok, type} ->
-        Fizz.Integrations.StepType.executor_module(type)
+        Fizz.Integrations.Steps.Type.executor_module(type)
 
       {:error, :not_found} ->
         {:error, {:not_found, type_id}}

@@ -5,9 +5,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   alias Fizz.Accounts
   alias Fizz.Fields.Credential
-  alias Fizz.Integrations.DynamicResolver
-  alias Fizz.Integrations.StepRegistry
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Resolvers.Dynamic, as: DynamicResolver
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
+  alias Fizz.Integrations.Steps.Type, as: StepType
   alias Fizz.Triggers
   alias Fizz.Workflows
   alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour

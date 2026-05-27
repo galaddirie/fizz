@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.SwitchTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.SwitchTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.Switch
+  alias Fizz.Integrations.Library.Fizz.Builtins.Switch
 
   test "routes to matched branch using pre-resolved value" do
     config = %{

@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.UnsupportedComponentStep do
-  use Fizz.Integrations.StepDefinition,
+  use Fizz.Integrations.Steps.Definition,
     id: "unsupported_component_step",
     name: "Unsupported Component Step",
     category: "Test",

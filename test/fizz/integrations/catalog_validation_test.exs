@@ -1,9 +1,9 @@
 defmodule Fizz.Integrations.CatalogValidationTest do
   use ExUnit.Case, async: false
 
-  alias Fizz.Integrations.ProviderCatalog
-  alias Fizz.Integrations.Registry, as: IntegrationRegistry
-  alias Fizz.Integrations.StepRegistry, as: StepRegistry
+  alias Fizz.Integrations.Auth.ProviderCatalog
+  alias Fizz.Integrations.Catalog.IntegrationRegistry, as: IntegrationRegistry
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
 
   setup do
     previous_providers = Application.get_env(:fizz, :integration_providers)
@@ -82,7 +82,7 @@ defmodule Fizz.Integrations.CatalogValidationTest do
           modules: [Fizz.TestSupport.CatalogValidation.AcmeDocs]
         )
 
-      assert Fizz.Integrations.Google.Sheets in modules
+      assert Fizz.Integrations.Library.Google.Sheets in modules
       assert Fizz.TestSupport.CatalogValidation.AcmeDocs in modules
     end
 
@@ -95,7 +95,9 @@ defmodule Fizz.Integrations.CatalogValidationTest do
     end
 
     test "duplicate integration IDs raise during catalog load" do
-      modules = IntegrationRegistry.modules_for_load(modules: [Fizz.Integrations.Google.Sheets])
+      modules =
+        IntegrationRegistry.modules_for_load(modules: [Fizz.Integrations.Library.Google.Sheets])
+
       entries = IntegrationRegistry.entries_for_modules!(modules)
 
       assert_raise ArgumentError, ~r/duplicate integration IDs/, fn ->
@@ -119,8 +121,8 @@ defmodule Fizz.Integrations.CatalogValidationTest do
     test "duplicate step type IDs raise during catalog load" do
       assert_raise RuntimeError, ~r/Duplicate step type IDs/, fn ->
         StepRegistry.types_for_modules!([
-          Fizz.Integrations.Fizz.Builtins.ManualInput,
-          Fizz.Integrations.Fizz.Builtins.ManualInput
+          Fizz.Integrations.Library.Fizz.Builtins.ManualInput,
+          Fizz.Integrations.Library.Fizz.Builtins.ManualInput
         ])
       end
     end

@@ -1,9 +1,9 @@
-defmodule Fizz.Integrations.Google.Sheets.ClientTest do
+defmodule Fizz.Integrations.Library.Google.Sheets.ClientTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Workflows.StepError
-  alias Fizz.Integrations.Google.Sheets.Client
+  alias Fizz.Integrations.Library.Google.Sheets.Client
   alias Fizz.Repo
   alias Fizz.Workflows.ExecutionContext
   alias Fizz.WorkOSHTTPMock

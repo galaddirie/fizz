@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMetadataStep do
-  use Fizz.Integrations.StepDefinition,
+  use Fizz.Integrations.Steps.Definition,
     id: "invalid_resource_metadata_step",
     name: "Invalid Resource Metadata Step",
     category: "Test",

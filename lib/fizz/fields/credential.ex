@@ -14,7 +14,7 @@ defmodule Fizz.Fields.Credential do
   alias Fizz.Accounts.{ExternalAuth, Scope}
   alias Fizz.Fields
   alias Fizz.Fields.Definition
-  alias Fizz.Integrations.ProviderCatalog
+  alias Fizz.Integrations.Auth.ProviderCatalog
   alias Fizz.Repo
   alias Fizz.Workflows.{CredentialBinding, WorkflowDefinitionVersion, WorkflowRun}
 

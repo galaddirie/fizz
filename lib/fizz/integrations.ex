@@ -9,8 +9,9 @@ defmodule Fizz.Integrations do
   alias Fizz.Accounts
   alias Fizz.Accounts.{OauthConnection, Scope}
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
-  alias Fizz.Integrations.CredentialRef
-  alias Fizz.Integrations.ProviderCatalog
+  alias Fizz.Integrations.Auth.CredentialRef
+  alias Fizz.Integrations.Auth.ProviderCatalog
+  alias Fizz.Integrations.Library.GitHub.Client, as: GitHubClient
 
   @doc """
   Returns the OAuth provider module for the given provider ID.
@@ -216,11 +217,11 @@ defmodule Fizz.Integrations do
   @spec list_repos(Scope.t(), String.t(), String.t(), keyword()) ::
           {:ok, [map()]} | {:error, term()}
   def list_repos(%Scope{} = scope, project_id, provider, opts \\ []) do
-    with {:ok, provider_mod} <- provider_module(provider),
+    with :ok <- ensure_github_provider(provider),
          {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
       opts = Keyword.put(opts, :organization_id, organization_id)
-      provider_mod.list_repos(resolved_scope, opts)
+      GitHubClient.list_repos(resolved_scope, opts)
     end
   end
 
@@ -230,10 +231,10 @@ defmodule Fizz.Integrations do
   @spec create_pull_request(Scope.t(), String.t(), String.t(), map()) ::
           {:ok, map()} | {:error, term()}
   def create_pull_request(%Scope{} = scope, project_id, provider, params) do
-    with {:ok, provider_mod} <- provider_module(provider),
+    with :ok <- ensure_github_provider(provider),
          {:ok, resolved_scope} <- resolve_project_scope(scope, project_id),
          organization_id when is_binary(organization_id) <- resolved_scope.organization_id do
-      provider_mod.create_pull_request(
+      GitHubClient.create_pull_request(
         resolved_scope,
         Map.put(params, "organization_id", organization_id)
       )
@@ -401,6 +402,14 @@ defmodule Fizz.Integrations do
 
       {:error, _reason} ->
         ProviderCatalog.api_key_provider_module(provider)
+    end
+  end
+
+  defp ensure_github_provider(provider) do
+    case ProviderCatalog.resolve_provider_id_for_type(provider, :oauth) do
+      {:ok, "github_oauth"} -> :ok
+      {:ok, _provider} -> {:error, :unsupported_provider_operation}
+      {:error, reason} -> {:error, reason}
     end
   end
 

@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.AggregatorTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.AggregatorTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.Aggregator
+  alias Fizz.Integrations.Library.Fizz.Builtins.Aggregator
 
   test "collect returns the list unchanged" do
     assert {:ok, [1, 2, 3]} = Aggregator.execute(%{"operation" => "collect"}, [1, 2, 3], %{})

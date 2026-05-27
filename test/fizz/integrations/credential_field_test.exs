@@ -3,7 +3,7 @@ defmodule Fizz.Integrations.CredentialFieldTest do
 
   describe "credential fields" do
     test "credential fields use the credential component in config schema" do
-      {:ok, openai_type} = Fizz.Integrations.StepRegistry.get("openai_model")
+      {:ok, openai_type} = Fizz.Integrations.Steps.Registry.get("openai_model")
 
       ui = get_in(openai_type.config_schema, ["properties", "credential_ref", "ui"])
 
@@ -14,9 +14,9 @@ defmodule Fizz.Integrations.CredentialFieldTest do
     end
 
     test "credential field default config is a credential declaration" do
-      {:ok, openai_type} = Fizz.Integrations.StepRegistry.get("openai_model")
+      {:ok, openai_type} = Fizz.Integrations.Steps.Registry.get("openai_model")
 
-      default_config = Fizz.Integrations.StepRegistry.get_default_config(openai_type.id)
+      default_config = Fizz.Integrations.Steps.Registry.get_default_config(openai_type.id)
 
       assert %{
                "$credential" => true,

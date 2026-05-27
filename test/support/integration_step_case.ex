@@ -9,12 +9,12 @@ defmodule Fizz.IntegrationStepCase do
     quote do
       import Fizz.IntegrationStepCase
 
-      alias Fizz.Integrations.StepType
+      alias Fizz.Integrations.Steps.Type, as: StepType
     end
   end
 
-  alias Fizz.Integrations.StepRegistry, as: Registry
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Steps.Registry, as: Registry
+  alias Fizz.Integrations.Steps.Type, as: StepType
 
   @spec step_type!(String.t()) :: StepType.t()
   def step_type!(step_type_id) when is_binary(step_type_id) do

@@ -1,4 +1,4 @@
-defmodule Fizz.Integrations.ManifestTaskTest do
+defmodule Fizz.Integrations.Catalog.ManifestTaskTest do
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
@@ -17,9 +17,9 @@ defmodule Fizz.Integrations.ManifestTaskTest do
            end) =~ "Generated"
 
     assert {:ok, content} = File.read(output_path)
-    assert content =~ "defmodule Fizz.Integrations.Manifest"
-    assert content =~ "Fizz.Integrations.Providers.GoogleOAuth"
-    assert content =~ "Fizz.Integrations.Fizz"
+    assert content =~ "defmodule Fizz.Integrations.Catalog.Manifest"
+    assert content =~ "Fizz.Integrations.Auth.Providers.GoogleOAuth"
+    assert content =~ "Fizz.Integrations.Library.Fizz"
     assert content =~ "Enum.flat_map(& &1.step_modules())"
   end
 

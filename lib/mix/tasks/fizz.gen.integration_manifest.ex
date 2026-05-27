@@ -8,9 +8,9 @@ defmodule Mix.Tasks.Fizz.Gen.IntegrationManifest do
 
   use Mix.Task
 
-  @shortdoc "Generates Fizz.Integrations.Manifest"
-  @default_output "lib/fizz/integrations/manifest.ex"
-  @source_output "lib/fizz/integrations/manifest.ex"
+  @shortdoc "Generates Fizz.Integrations.Catalog.Manifest"
+  @default_output "lib/fizz/integrations/catalog/manifest.ex"
+  @source_output "lib/fizz/integrations/catalog/manifest.ex"
 
   @impl true
   def run(args) do

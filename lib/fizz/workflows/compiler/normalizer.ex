@@ -2,8 +2,8 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
   @moduledoc false
 
   alias Fizz.Graph
-  alias Fizz.Integrations.StepRegistry
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
+  alias Fizz.Integrations.Steps.Type, as: StepType
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
   @spec normalize(WorkflowDefinitionVersion.t()) :: {:ok, map()} | {:error, [map()]}

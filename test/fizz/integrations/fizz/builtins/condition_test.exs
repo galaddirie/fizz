@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.ConditionTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.ConditionTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.Condition
+  alias Fizz.Integrations.Library.Fizz.Builtins.Condition
 
   test "passes input through when condition is truthy" do
     input = %{"status" => "active"}

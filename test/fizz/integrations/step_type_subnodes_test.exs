@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.StepTypeSubnodesTest do
+defmodule Fizz.Integrations.Steps.TypeSubnodesTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.StepRegistry, as: Registry
+  alias Fizz.Integrations.Steps.Registry, as: Registry
 
   test "ai_agent exposes declared subnode inputs in registry metadata" do
     assert {:ok, type} = Registry.get("ai_agent")

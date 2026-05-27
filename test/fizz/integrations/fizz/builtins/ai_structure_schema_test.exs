@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.AIStructureSchemaTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.AIStructureSchemaTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.AIStructureSchema
+  alias Fizz.Integrations.Library.Fizz.Builtins.AIStructureSchema
 
   test "unwraps a full structure schema pasted into the json_schema field" do
     json_schema = %{

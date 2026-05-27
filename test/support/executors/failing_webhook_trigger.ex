@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.Executors.FailingWebhookTrigger do
-  use Fizz.Integrations.StepDefinition,
+  use Fizz.Integrations.Steps.Definition,
     id: "failing_webhook_trigger",
     name: "Failing Webhook Trigger",
     category: "Test",

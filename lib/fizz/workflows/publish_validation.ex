@@ -4,8 +4,8 @@ defmodule Fizz.Workflows.PublishValidation do
   alias Fizz.Graph
   alias Fizz.Fields.Credential
   alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour
-  alias Fizz.Integrations.StepRegistry
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
+  alias Fizz.Integrations.Steps.Type, as: StepType
   alias Fizz.Workflows.Compiler.ExpressionCompiler
 
   @type issue :: %{

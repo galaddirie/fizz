@@ -179,7 +179,7 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
         name: "GitHub Trigger",
         config:
           "github_trigger"
-          |> Fizz.Integrations.StepRegistry.get_default_config()
+          |> Fizz.Integrations.Steps.Registry.get_default_config()
           |> Map.merge(%{"events" => ["push"], "repository" => repository})
       })
 

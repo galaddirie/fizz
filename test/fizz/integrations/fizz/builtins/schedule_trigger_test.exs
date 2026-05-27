@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.ScheduleTriggerTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.ScheduleTriggerTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.ScheduleTrigger
+  alias Fizz.Integrations.Library.Fizz.Builtins.ScheduleTrigger
   alias Fizz.Triggers.RegistrationSpec
 
   test "registration_spec/2 returns a schedule registration spec with cron params" do

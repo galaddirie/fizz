@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMapperReferenceStep do
-  use Fizz.Integrations.StepDefinition,
+  use Fizz.Integrations.Steps.Definition,
     id: "invalid_resource_mapper_reference_step",
     name: "Invalid Resource Mapper Reference Step",
     category: "Test",

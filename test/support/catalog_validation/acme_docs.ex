@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.AcmeDocs do
-  @behaviour Fizz.Integrations.Integration
+  @behaviour Fizz.Integrations.Contracts.Integration
 
   @impl true
   def id, do: "acme_docs"

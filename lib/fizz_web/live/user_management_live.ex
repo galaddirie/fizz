@@ -4,7 +4,7 @@ defmodule FizzWeb.UserManagementLive do
   alias Fizz.Accounts
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Fields.Credential
-  alias Fizz.Integrations.ProviderCatalog
+  alias Fizz.Integrations.Auth.ProviderCatalog
 
   @user_tabs [
     %{

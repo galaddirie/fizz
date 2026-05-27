@@ -1,9 +1,11 @@
 defmodule Fizz.Integrations.CatalogGuardrailsTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.ProviderCatalog
-  alias Fizz.Integrations.StepRegistry, as: Registry
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Auth.ProviderCatalog
+  alias Fizz.Integrations.Catalog.Manifest
+  alias Fizz.Integrations.Steps.Registry, as: Registry
+  alias Fizz.Integrations.Steps.Type, as: StepType
+  alias Fizz.Workflows.StepExecutor
 
   @expected_provider_ids [
     "anthropic_api_key",
@@ -162,11 +164,63 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
       assert {:ok, append_row} = Registry.get("google_sheets_append_row")
       assert {:ok, read_rows} = Registry.get("google_sheets_read_rows")
 
-      assert {:ok, Fizz.Integrations.Google.Sheets.Actions.AppendRow} =
+      assert {:ok, Fizz.Integrations.Library.Google.Sheets.Actions.AppendRow} =
                StepType.executor_module(append_row)
 
-      assert {:ok, Fizz.Integrations.Google.Sheets.Actions.ReadRows} =
+      assert {:ok, Fizz.Integrations.Library.Google.Sheets.Actions.ReadRows} =
                StepType.executor_module(read_rows)
+    end
+
+    test "manifest modules load and expose required callbacks" do
+      for module <- Manifest.provider_modules() do
+        assert {:module, ^module} = Code.ensure_loaded(module)
+        assert function_exported?(module, :definition, 0)
+      end
+
+      for module <- Manifest.integration_modules() do
+        assert {:module, ^module} = Code.ensure_loaded(module)
+
+        for callback <- [:id, :display_name, :provider_id, :actions, :triggers, :step_modules] do
+          assert function_exported?(module, callback, 0)
+        end
+
+        assert function_exported?(module, :required_scopes, 1)
+      end
+
+      for module <- Manifest.step_executor_modules() do
+        assert {:module, ^module} = Code.ensure_loaded(module)
+        assert function_exported?(module, :__step_definition__, 0)
+      end
+
+      for trigger <- Manifest.trigger_definitions() do
+        assert {:module, trigger.module} == Code.ensure_loaded(trigger.module)
+        assert function_exported?(trigger.module, :source_key, 2)
+        assert function_exported?(trigger.module, :poll, 3)
+      end
+
+      for resolver <- Manifest.resolver_definitions() do
+        assert {:module, resolver.module} == Code.ensure_loaded(resolver.module)
+        assert function_exported?(resolver.module, :resolve, 1)
+      end
+    end
+
+    test "integration actions are backed by owned registered step modules" do
+      for integration <- Fizz.Integrations.Catalog.IntegrationRegistry.all(),
+          action_id <- integration.actions do
+        assert {:ok, step_type} = Registry.get(action_id)
+        assert step_type.integration == integration.id
+
+        assert Enum.any?(integration.step_modules, fn module ->
+                 function_exported?(module, :__step_id__, 0) and module.__step_id__() == action_id
+               end)
+      end
+    end
+
+    test "every registered step resolves to an executable module" do
+      for %StepType{} = step_type <- Registry.all() do
+        assert {:ok, module} = StepExecutor.resolve(step_type.id)
+        assert function_exported?(module, :execute, 3)
+      end
     end
   end
 
@@ -223,7 +277,7 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
   end
 
   defp integration_ids do
-    Fizz.Integrations.Registry.all()
+    Fizz.Integrations.Catalog.IntegrationRegistry.all()
     |> Enum.map(& &1.id)
     |> Enum.sort()
   end

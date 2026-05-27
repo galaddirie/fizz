@@ -1,8 +1,8 @@
 defmodule Fizz.Integrations.ExternalStepsTest do
   use Fizz.IntegrationStepCase, async: true
 
-  alias Fizz.Integrations.Registry, as: IntegrationRegistry
-  alias Fizz.Integrations.StepRegistry, as: StepRegistry
+  alias Fizz.Integrations.Catalog.IntegrationRegistry, as: IntegrationRegistry
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
 
   @expected_integrations [
     {"anthropic", "anthropic_api_key", ["anthropic_vision_analysis"]},
@@ -124,7 +124,7 @@ defmodule Fizz.Integrations.ExternalStepsTest do
 
         assert module
                |> Atom.to_string()
-               |> String.starts_with?("Elixir.Fizz.Integrations.Fizz.Builtins.")
+               |> String.starts_with?("Elixir.Fizz.Integrations.Library.Fizz.Builtins.")
       end
     end
 
@@ -151,7 +151,7 @@ defmodule Fizz.Integrations.ExternalStepsTest do
         module_name = Atom.to_string(module)
 
         assert String.starts_with?(module_name, "Elixir.Fizz.Integrations.")
-        refute String.starts_with?(module_name, "Elixir.Fizz.Integrations.Fizz.")
+        refute String.starts_with?(module_name, "Elixir.Fizz.Integrations.Library.Fizz.")
       end
     end
   end

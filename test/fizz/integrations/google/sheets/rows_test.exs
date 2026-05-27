@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Google.Sheets.RowsTest do
+defmodule Fizz.Integrations.Library.Google.Sheets.RowsTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Google.Sheets.Rows
+  alias Fizz.Integrations.Library.Google.Sheets.Rows
 
   test "snapshots normalize rows with header values and primary key identity" do
     now = DateTime.utc_now()

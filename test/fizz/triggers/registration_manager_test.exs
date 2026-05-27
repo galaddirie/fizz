@@ -39,7 +39,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
         name: "GitHub Trigger",
         config:
           "github_trigger"
-          |> Fizz.Integrations.StepRegistry.get_default_config()
+          |> Fizz.Integrations.Steps.Registry.get_default_config()
           |> Map.put("repository", "acme/site")
       })
 
@@ -150,7 +150,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
     assert registration.kind == "polling"
     assert source.provider == "google_oauth"
-    assert source.source_module == "Fizz.Integrations.Google.Sheets.Triggers.RowChange"
+    assert source.source_module == "Fizz.Integrations.Library.Google.Sheets.Triggers.RowChange"
     assert source.params["spreadsheet_id"] == "spreadsheet_1"
     assert source.cursor == %{"initialized" => false}
   end
@@ -274,7 +274,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
           name: "GitHub Trigger",
           config:
             "github_trigger"
-            |> Fizz.Integrations.StepRegistry.get_default_config()
+            |> Fizz.Integrations.Steps.Registry.get_default_config()
             |> Map.merge(%{"events" => ["push"], "repository" => repository})
         })
       ]

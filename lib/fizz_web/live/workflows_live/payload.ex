@@ -1,7 +1,7 @@
 defmodule FizzWeb.WorkflowsLive.Payload do
   @moduledoc false
 
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Steps.Type, as: StepType
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion}
 

@@ -96,7 +96,7 @@ defmodule Fizz.Triggers.TriggerSourceTest do
       user_id: scope.user.id,
       kind: "polling",
       provider: "google_oauth",
-      source_module: "Fizz.Integrations.Google.Sheets.Triggers.RowChange",
+      source_module: "Fizz.Integrations.Library.Google.Sheets.Triggers.RowChange",
       source_key: source_key,
       status: "active",
       params: %{"spreadsheet_id" => "spreadsheet_1", "sheet_name" => "Sheet1"},

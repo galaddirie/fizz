@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.SplitterTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.SplitterTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.Splitter
+  alias Fizz.Integrations.Library.Fizz.Builtins.Splitter
 
   test "returns an empty list when input is nil" do
     assert {:ok, []} = Splitter.execute(%{}, nil, %{})

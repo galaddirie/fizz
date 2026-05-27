@@ -1,9 +1,9 @@
-defmodule Fizz.Integrations.DynamicResolverTest do
+defmodule Fizz.Integrations.Resolvers.DynamicTest do
   use Fizz.DataCase, async: true
 
   alias Fizz.Accounts.{ApiCredential, Scope}
-  alias Fizz.Integrations.DynamicResolver
-  alias Fizz.Integrations.Google.Sheets.ColumnsResolver
+  alias Fizz.Integrations.Resolvers.Dynamic, as: DynamicResolver
+  alias Fizz.Integrations.Library.Google.Sheets.ColumnsResolver
   alias Fizz.Workflows.Embeds.Step
   alias Fizz.Workflows.WorkflowDefinitionVersion
 

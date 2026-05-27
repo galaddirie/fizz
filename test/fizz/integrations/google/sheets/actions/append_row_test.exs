@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRowTest do
+defmodule Fizz.Integrations.Library.Google.Sheets.Actions.AppendRowTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Google.Sheets.Actions.AppendRow
+  alias Fizz.Integrations.Library.Google.Sheets.Actions.AppendRow
   alias Fizz.Workflows.StepExecutor, as: Executor
   alias Fizz.Workflows.StepError
 
@@ -98,7 +98,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRowTest do
       assert get_in(values_field, ["resource_mapper", "kind"]) == "google_sheets.row_values"
 
       assert get_in(values_field, ["ui", "resolver"]) ==
-               Fizz.Integrations.Google.Sheets.ColumnsResolver
+               Fizz.Integrations.Library.Google.Sheets.ColumnsResolver
     end
 
     test "keeps sheet and table selection state hidden because the mapper owns it" do

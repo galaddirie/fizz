@@ -5,8 +5,8 @@ defmodule Fizz.IntegrationsTest do
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Accounts.ApiCredential
   alias Fizz.Integrations
-  alias Fizz.Integrations.ProviderCatalog
-  alias Fizz.Integrations.Providers.OpenAIApiKey
+  alias Fizz.Integrations.Auth.ProviderCatalog
+  alias Fizz.Integrations.Library.OpenAI.Client, as: OpenAIClient
   alias Fizz.WorkOSHTTPMock
 
   import Fizz.AccountsFixtures
@@ -155,7 +155,7 @@ defmodule Fizz.IntegrationsTest do
   end
 
   test "provider catalog resolves openai API-key module" do
-    assert {:ok, Fizz.Integrations.Providers.OpenAIApiKey} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.OpenAIApiKey} =
              ProviderCatalog.api_key_provider_module("openai_api_key")
 
     assert {:ok, ["api.openai.com"]} =
@@ -174,19 +174,19 @@ defmodule Fizz.IntegrationsTest do
   end
 
   test "provider catalog resolves typed OAuth providers only" do
-    assert {:ok, Fizz.Integrations.Providers.SlackOAuth} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.SlackOAuth} =
              ProviderCatalog.oauth_provider_module("slack_oauth")
 
-    assert {:ok, Fizz.Integrations.Providers.GoogleOAuth} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.GoogleOAuth} =
              ProviderCatalog.oauth_provider_module("google_oauth")
 
-    assert {:ok, Fizz.Integrations.Providers.MicrosoftOAuth} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.MicrosoftOAuth} =
              ProviderCatalog.oauth_provider_module("microsoft_oauth")
 
-    assert {:ok, Fizz.Integrations.Providers.NotionOAuth} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.NotionOAuth} =
              ProviderCatalog.oauth_provider_module("notion_oauth")
 
-    assert {:ok, Fizz.Integrations.Providers.BoxOAuth} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.BoxOAuth} =
              ProviderCatalog.oauth_provider_module("box_oauth")
 
     assert {:error, :unknown_provider} = ProviderCatalog.oauth_provider_module("slack")
@@ -303,7 +303,7 @@ defmodule Fizz.IntegrationsTest do
     }
 
     assert {:ok, %{operation: :generate_text}} =
-             OpenAIApiKey.generate_text(
+             OpenAIClient.generate_text(
                scope,
                org_id,
                "openai:gpt-5.5",
@@ -319,7 +319,7 @@ defmodule Fizz.IntegrationsTest do
     assert generate_text_opts[:temperature] == 0.2
 
     assert {:ok, %{operation: :generate_text}} =
-             OpenAIApiKey.generate_text(
+             OpenAIClient.generate_text(
                scope,
                org_id,
                "gpt-5",
@@ -333,7 +333,7 @@ defmodule Fizz.IntegrationsTest do
     assert bare_generate_text_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :stream_text}} =
-             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-5.5", "Stream hello",
+             OpenAIClient.stream_text(scope, org_id, "openai:gpt-5.5", "Stream hello",
                credential_ref: credential_ref
              )
 
@@ -343,7 +343,7 @@ defmodule Fizz.IntegrationsTest do
     assert stream_text_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :generate_object}} =
-             OpenAIApiKey.generate_object(
+             OpenAIClient.generate_object(
                scope,
                org_id,
                "openai:gpt-5.5",
@@ -358,7 +358,7 @@ defmodule Fizz.IntegrationsTest do
     assert generate_object_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :generate_image}} =
-             OpenAIApiKey.generate_image(
+             OpenAIClient.generate_image(
                scope,
                org_id,
                "openai:gpt-image-1",
@@ -377,7 +377,7 @@ defmodule Fizz.IntegrationsTest do
     scope = Scope.for_user(user)
 
     assert {:error, :credential_ref_required} =
-             OpenAIApiKey.generate_text(
+             OpenAIClient.generate_text(
                scope,
                "org_missing_ref",
                "openai:gpt-5.5",

@@ -13,7 +13,7 @@ defmodule Fizz.Accounts.ApiCredential do
   @provider_catalog Application.compile_env(
                       :fizz,
                       :accounts_auth_provider_catalog,
-                      Fizz.Integrations.AuthProviderCatalog
+                      Fizz.Integrations.Auth.AccountsProviderCatalog
                     )
 
   @type t :: %__MODULE__{}

@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.ManualInputTriggerTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.ManualInputTriggerTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.ManualInput
+  alias Fizz.Integrations.Library.Fizz.Builtins.ManualInput
   alias Fizz.Triggers.RegistrationSpec
 
   test "registration_spec/2 returns a manual registration spec" do

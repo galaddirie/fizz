@@ -3,7 +3,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
   use LiveVue, :live_view
 
   alias Fizz.Accounts
-  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows
   alias Fizz.Workflows.DraftSession
   alias Fizz.Workflows.WorkflowDefinitionVersion

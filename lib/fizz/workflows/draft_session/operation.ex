@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.DraftSession.Operation do
   @moduledoc false
 
   alias Ecto.Changeset
-  alias Fizz.Integrations.StepRegistry, as: StepRegistry
+  alias Fizz.Integrations.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.WorkflowDefinitionVersion
 

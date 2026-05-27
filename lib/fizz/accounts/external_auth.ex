@@ -14,7 +14,7 @@ defmodule Fizz.Accounts.ExternalAuth do
   @provider_catalog Application.compile_env(
                       :fizz,
                       :accounts_auth_provider_catalog,
-                      Fizz.Integrations.AuthProviderCatalog
+                      Fizz.Integrations.Auth.AccountsProviderCatalog
                     )
 
   @doc """

@@ -1,9 +1,9 @@
-defmodule Fizz.Integrations.Google.Sheets.ColumnsResolverTest do
+defmodule Fizz.Integrations.Library.Google.Sheets.ColumnsResolverTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Accounts.Scope
-  alias Fizz.Integrations.Google.Sheets.ColumnsResolver
+  alias Fizz.Integrations.Library.Google.Sheets.ColumnsResolver
   alias Fizz.Repo
   alias Fizz.WorkOSHTTPMock
 

@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.Fizz.Builtins.JoinTest do
+defmodule Fizz.Integrations.Library.Fizz.Builtins.JoinTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.Fizz.Builtins.Join
+  alias Fizz.Integrations.Library.Fizz.Builtins.Join
 
   test "wait_all flattens one value from each branch" do
     assert {:ok, ["left", "right"]} =

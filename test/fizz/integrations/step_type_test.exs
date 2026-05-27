@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.StepTypeTest do
+defmodule Fizz.Integrations.Steps.TypeTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.StepType
+  alias Fizz.Integrations.Steps.Type, as: StepType
 
   describe "default_step_name/1" do
     test "strips brand for em dash separated names" do
