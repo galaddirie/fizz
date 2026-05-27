@@ -4,6 +4,7 @@ defmodule Fizz.Workflows.CompilerTest do
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Compiler.Normalizer
   alias Fizz.Workflows.Expressions.AccessPlan
+  alias Fizz.Workflows.RetryPolicy
   alias Fizz.Workflows.WorkflowDefinitionVersion
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Runic.Workflow
@@ -125,8 +126,7 @@ defmodule Fizz.Workflows.CompilerTest do
     }
 
     assert {:ok, ir} = Normalizer.normalize(version)
-    assert ir.steps[append_id].operation_id == "google_sheets.append_row"
-    assert ir.steps[append_id].operation_version == 1
+    assert %RetryPolicy{max_attempts: 3} = ir.steps[append_id].retry
 
     assert {:ok, workflow, _compiled_hash} = Compiler.compile(version)
 

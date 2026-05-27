@@ -7,20 +7,15 @@ defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMetadataStep do
     icon: "hero-table-cells",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "resource" => %{
-        "type" => "string",
-        "ui" => %{
-          "component" => "resource_locator",
-          "resource_locator" => "not a map"
-        }
-      }
+  @fields [
+    %Fizz.Fields.Definition{
+      key: "resource",
+      type: :resource_locator,
+      resource_locator: "not a map"
     }
-  }
+  ]
 
   @impl true
   def execute(_config, _input, _context), do: {:ok, %{}}

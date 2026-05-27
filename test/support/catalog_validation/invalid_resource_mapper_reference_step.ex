@@ -7,23 +7,18 @@ defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMapperReferenceStep 
     icon: "hero-table-cells",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "values" => %{
-        "type" => "object",
-        "ui" => %{
-          "component" => "resource_mapper",
-          "resource_mapper" => %{
-            "kind" => "test.row_values",
-            "fields" => %{"primary_resource" => "missing_resource"}
-          }
-        }
+  @fields [
+    %Fizz.Fields.Definition{
+      key: "values",
+      type: :resource_mapper,
+      resource_mapper: %{
+        "kind" => "test.row_values",
+        "fields" => %{"primary_resource" => "missing_resource"}
       }
     }
-  }
+  ]
 
   @impl true
   def execute(_config, _input, _context), do: {:ok, %{}}

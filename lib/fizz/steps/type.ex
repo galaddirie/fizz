@@ -28,16 +28,21 @@ defmodule Fizz.Steps.Type do
 
   @type t :: %__MODULE__{
           id: String.t(),
+          version: pos_integer(),
           name: String.t(),
           category: String.t(),
           description: String.t(),
           icon: String.t(),
+          provider: String.t() | nil,
+          integration: String.t() | nil,
           node_role: node_role(),
+          fields: [Fizz.Fields.Definition.t()],
           config_schema: map(),
           default_config: map(),
           input_schema: map(),
           output_schema: map(),
           subnode_inputs: [map()],
+          retry: Fizz.Workflows.RetryPolicy.t(),
           executor: String.t(),
           step_kind: step_kind(),
           inserted_at: DateTime.t() | nil,
@@ -47,10 +52,13 @@ defmodule Fizz.Steps.Type do
   @derive {LiveVue.Encoder,
            only: [
              :id,
+             :version,
              :name,
              :category,
              :description,
              :icon,
+             :provider,
+             :integration,
              :node_role,
              :step_kind,
              :executor,
@@ -63,20 +71,25 @@ defmodule Fizz.Steps.Type do
   @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
     :id,
+    :version,
     :name,
     :category,
     :description,
     :icon,
+    :provider,
+    :integration,
     :executor,
     :step_kind,
     :inserted_at,
     :updated_at,
+    fields: [],
     node_role: :root,
     config_schema: %{},
     default_config: %{},
     input_schema: %{},
     output_schema: %{},
-    subnode_inputs: []
+    subnode_inputs: [],
+    retry: %Fizz.Workflows.RetryPolicy{}
   ]
 
   @doc """

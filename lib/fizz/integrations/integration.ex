@@ -9,7 +9,7 @@ defmodule Fizz.Integrations.Integration do
   @callback id() :: String.t()
   @callback display_name() :: String.t()
   @callback provider_id() :: String.t()
-  @callback actions() :: [module()]
+  @callback actions() :: [String.t()]
   @callback triggers() :: [module()]
   @callback required_scopes(operation :: atom()) :: [String.t()]
 end

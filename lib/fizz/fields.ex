@@ -22,7 +22,7 @@ defmodule Fizz.Fields do
     password
   )a
 
-  @supported_components Enum.map(@supported_types, &Atom.to_string/1)
+  @supported_components Enum.map(@supported_types, &Atom.to_string/1) ++ ["textarea"]
 
   @schema_types %{
     string: "string",
@@ -43,6 +43,11 @@ defmodule Fizz.Fields do
 
   @spec supported_components() :: [String.t()]
   def supported_components, do: @supported_components
+
+  @spec options([term()]) :: [map()]
+  def options(values) when is_list(values) do
+    Enum.map(values, &%{label: to_string(&1), value: &1})
+  end
 
   @spec field(map() | keyword() | Definition.t()) :: Definition.t()
   def field(%Definition{} = field), do: normalize_field(field) |> validate!()
@@ -170,6 +175,9 @@ defmodule Fizz.Fields do
     }
     |> maybe_put("description", field.description)
     |> maybe_put("default", field.default)
+    |> maybe_put("format", field.format)
+    |> maybe_put("minimum", field.minimum)
+    |> maybe_put("maximum", field.maximum)
     |> maybe_put("writeOnly", true, field.write_only?)
     |> maybe_put("secret", true, field.secret?)
     |> maybe_put("enum", enum_values(field.options))
@@ -623,6 +631,9 @@ defmodule Fizz.Fields do
   defp field_attr({"component", value}), do: [{:component, value}]
   defp field_attr({"placeholder", value}), do: [{:placeholder, value}]
   defp field_attr({"autocomplete", value}), do: [{:autocomplete, value}]
+  defp field_attr({"format", value}), do: [{:format, value}]
+  defp field_attr({"minimum", value}), do: [{:minimum, value}]
+  defp field_attr({"maximum", value}), do: [{:maximum, value}]
   defp field_attr({"order", value}), do: [{:order, value}]
   defp field_attr({"resolver", value}), do: [{:resolver, value}]
   defp field_attr({"depends_on", value}), do: [{:depends_on, value}]

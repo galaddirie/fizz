@@ -14,15 +14,13 @@ defmodule Fizz.Steps.Executors.HttpRequest do
     icon: "hero-globe-alt",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["url"],
-    "properties" => %{
-      "url" => %{"type" => "string", "title" => "URL"}
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("url", label: "URL", required?: true)
+  ]
 
   @impl true
   def execute(config, _input, _context) do

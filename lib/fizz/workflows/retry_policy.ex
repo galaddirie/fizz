@@ -1,12 +1,12 @@
-defmodule Fizz.Integrations.RetryPolicy do
+defmodule Fizz.Workflows.RetryPolicy do
   @moduledoc """
-  Declarative retry metadata for an integration operation.
+  Declarative retry metadata for executable workflow steps.
   """
 
-  alias Fizz.Integrations.OperationError
+  alias Fizz.Workflows.StepError
 
   @type backoff :: :none | :linear | :exponential
-  @type retry_match :: OperationError.category() | atom()
+  @type retry_match :: StepError.category() | atom()
 
   defstruct max_attempts: 1,
             backoff: :none,
@@ -53,8 +53,8 @@ defmodule Fizz.Integrations.RetryPolicy do
 
   def validate(policy), do: {:error, {:invalid_policy, policy}}
 
-  @spec retryable?(t(), OperationError.t(), pos_integer()) :: boolean()
-  def retryable?(%__MODULE__{} = policy, %OperationError{} = error, attempt)
+  @spec retryable?(t(), StepError.t(), pos_integer()) :: boolean()
+  def retryable?(%__MODULE__{} = policy, %StepError{} = error, attempt)
       when is_integer(attempt) and attempt > 0 do
     attempt < policy.max_attempts and error.retryable? and
       (error.category in policy.retry_on or error.code in policy.retry_on)
@@ -62,8 +62,8 @@ defmodule Fizz.Integrations.RetryPolicy do
 
   def retryable?(_policy, _error, _attempt), do: false
 
-  @spec next_delay_ms(t(), OperationError.t(), pos_integer()) :: non_neg_integer() | nil
-  def next_delay_ms(%__MODULE__{} = policy, %OperationError{} = error, attempt) do
+  @spec next_delay_ms(t(), StepError.t(), pos_integer()) :: non_neg_integer() | nil
+  def next_delay_ms(%__MODULE__{} = policy, %StepError{} = error, attempt) do
     if retryable?(policy, error, attempt) do
       case error.retry_after_ms do
         retry_after_ms when is_integer(retry_after_ms) and retry_after_ms >= 0 ->

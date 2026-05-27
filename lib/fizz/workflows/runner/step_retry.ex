@@ -1,16 +1,14 @@
-defmodule Fizz.Workflows.Runner.OperationRetry do
+defmodule Fizz.Workflows.Runner.StepRetry do
   @moduledoc false
 
-  alias Fizz.Integrations.{Catalog, OperationError, RetryPolicy}
-  alias Fizz.Workflows.{DurableTimer, StepExecutionError}
+  alias Fizz.Workflows.{DurableTimer, RetryPolicy, StepError, StepExecutionError}
   alias Runic.Workflow.{Fact, Invokable, Runnable}
 
-  @format "operation_retry_v1"
+  @format "step_retry_v1"
 
   @type retry :: %{
-          operation_id: String.t(),
-          operation_version: pos_integer() | nil,
-          error: OperationError.t(),
+          step_type_id: String.t() | nil,
+          error: StepError.t(),
           failed_attempt: pos_integer(),
           next_attempt: non_neg_integer(),
           delay_ms: non_neg_integer(),
@@ -21,9 +19,7 @@ defmodule Fizz.Workflows.Runner.OperationRetry do
   def next_retry(%Runnable{} = runnable, error, attempt_index)
       when is_integer(attempt_index) and attempt_index >= 0 do
     with {:ok, step_error} <- step_error(error),
-         {:ok, operation_id} <- operation_id(step_error),
-         {:ok, operation} <- Catalog.operation(operation_id),
-         %RetryPolicy{} = policy <- operation.retry,
+         %RetryPolicy{} = policy <- step_error.retry,
          failed_attempt <- attempt_index + 1,
          true <- RetryPolicy.retryable?(policy, step_error.reason, failed_attempt),
          delay_ms when is_integer(delay_ms) <-
@@ -32,14 +28,12 @@ defmodule Fizz.Workflows.Runner.OperationRetry do
 
       {:ok,
        %{
-         operation_id: operation.id,
-         operation_version: operation.version,
+         step_type_id: step_error.step_type_id,
          error: step_error.reason,
          failed_attempt: failed_attempt,
          next_attempt: next_attempt,
          delay_ms: delay_ms,
-         timer_payload:
-           timer_payload(runnable, operation, step_error.reason, next_attempt, delay_ms)
+         timer_payload: timer_payload(runnable, step_error, next_attempt, delay_ms)
        }}
     else
       _reason -> :halt
@@ -53,7 +47,7 @@ defmodule Fizz.Workflows.Runner.OperationRetry do
   def timer?(_timer), do: false
 
   @spec timer_name(Runnable.t()) :: String.t()
-  def timer_name(%Runnable{id: runnable_id}), do: "operation_retry:#{runnable_id}"
+  def timer_name(%Runnable{id: runnable_id}), do: "step_retry:#{runnable_id}"
 
   @spec retry_step_id(Runnable.t()) :: String.t()
   def retry_step_id(%Runnable{node: %{name: name}}) when is_atom(name), do: Atom.to_string(name)
@@ -70,74 +64,56 @@ defmodule Fizz.Workflows.Runner.OperationRetry do
          attempt when is_integer(attempt) and attempt >= 0 <- Map.get(data, :attempt) do
       {:ok, %{runnable: runnable, attempt: attempt}}
     else
-      _reason -> {:error, :invalid_operation_retry_payload}
+      _reason -> {:error, :invalid_step_retry_payload}
     end
   end
 
   @spec run_error_payload(retry(), DateTime.t()) :: map()
   def run_error_payload(retry, %DateTime{} = retry_at) when is_map(retry) do
     %{
-      type: "operation_retry",
-      operation_id: retry.operation_id,
-      operation_version: retry.operation_version,
+      type: "step_retry",
+      step_type_id: retry.step_type_id,
       failed_attempt: retry.failed_attempt,
       next_attempt: retry.next_attempt,
       delay_ms: retry.delay_ms,
       retry_at: DateTime.to_iso8601(retry_at),
-      error: operation_error_payload(retry.error)
+      error: step_error_payload(retry.error)
     }
   end
 
-  @spec operation_error_payload(OperationError.t()) :: map()
-  def operation_error_payload(%OperationError{} = error) do
+  @spec step_error_payload(StepError.t()) :: map()
+  def step_error_payload(%StepError{} = error) do
     %{
-      type: "operation_error",
+      type: "step_error",
       code: stringify(error.code),
       category: stringify(error.category),
       message: error.message,
       status: error.status,
-      source: stringify(error.source),
+      source: stringify_source(error.source),
       retry_after_ms: error.retry_after_ms,
       retryable: error.retryable?,
       details: stringify_values(error.details || %{})
     }
   end
 
-  def operation_error_payload(error) do
-    %{type: "operation_error", message: inspect(error)}
+  def step_error_payload(error) do
+    %{type: "step_error", message: inspect(error)}
   end
 
-  defp step_error(%StepExecutionError{reason: %OperationError{} = reason} = error) do
+  defp step_error(%StepExecutionError{reason: %StepError{} = reason} = error) do
     {:ok, %{error | reason: reason}}
   end
 
   defp step_error(_error), do: :error
 
-  defp operation_id(%StepExecutionError{operation_id: operation_id})
-       when is_binary(operation_id) and operation_id != "",
-       do: {:ok, operation_id}
-
-  defp operation_id(%StepExecutionError{reason: %OperationError{source: source}})
-       when is_binary(source) and source != "",
-       do: {:ok, source}
-
-  defp operation_id(_error), do: :error
-
-  defp timer_payload(
-         %Runnable{} = runnable,
-         operation,
-         %OperationError{} = error,
-         attempt,
-         delay_ms
-       ) do
+  defp timer_payload(%Runnable{} = runnable, %StepExecutionError{} = error, attempt, delay_ms) do
     data = %{
       node_hash: Map.fetch!(runnable.node, :hash),
       input_fact_hash: runnable.input_fact.hash,
-      operation_id: operation.id,
-      operation_version: operation.version,
+      step_type_id: error.step_type_id,
       attempt: attempt,
       delay_ms: delay_ms,
-      error: operation_error_payload(error)
+      error: step_error_payload(error.reason)
     }
 
     %{
@@ -151,11 +127,15 @@ defmodule Fizz.Workflows.Runner.OperationRetry do
          data when is_map(data) <- :erlang.binary_to_term(binary) do
       {:ok, data}
     else
-      _reason -> {:error, :invalid_operation_retry_payload}
+      _reason -> {:error, :invalid_step_retry_payload}
     end
   end
 
-  defp decode_payload(_payload), do: {:error, :invalid_operation_retry_payload}
+  defp decode_payload(_payload), do: {:error, :invalid_step_retry_payload}
+
+  defp stringify_source(nil), do: nil
+  defp stringify_source(%{} = source), do: stringify_values(source)
+  defp stringify_source(value), do: stringify(value)
 
   defp stringify(nil), do: nil
   defp stringify(value) when is_atom(value), do: Atom.to_string(value)

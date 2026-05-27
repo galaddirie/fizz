@@ -1,10 +1,10 @@
 defmodule Fizz.Steps.ConfigSchema do
   @moduledoc """
-  Type definitions for the declarative step configuration schema system.
+  Type definitions for generated step configuration JSON Schema.
 
-  Each step executor defines a `@config_schema` module attribute using standard
-  JSON Schema with an optional `"ui"` extension that controls how the field
-  is rendered in the frontend config modal.
+  Step executors declare `@fields` with `Fizz.Fields.Definition` values.
+  `Fizz.Fields.to_schema/1` generates the JSON Schema plus `"ui"` extension
+  consumed by the frontend config modal.
 
   ## UI Extension
 

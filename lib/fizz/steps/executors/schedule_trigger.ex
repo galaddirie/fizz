@@ -18,32 +18,27 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
     icon: "hero-clock",
     kind: :trigger
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "cron_expression" => %{
-        "type" => "string",
-        "title" => "Cron Expression",
-        "description" => "Cron syntax for recurring runs, e.g. 0 9 * * MON-FRI"
-      },
-      "interval_seconds" => %{
-        "type" => "integer",
-        "title" => "Interval (seconds)",
-        "minimum" => 1,
-        "default" => 3600
-      },
-      "timezone" => %{
-        "type" => "string",
-        "title" => "Timezone",
-        "default" => "UTC"
-      },
-      "output_schema" => %{
-        "type" => "object",
-        "title" => "Output Schema",
-        "description" => "JSON Schema describing the trigger output"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("cron_expression",
+      label: "Cron Expression",
+      description: "Cron syntax for recurring runs, e.g. 0 9 * * MON-FRI"
+    ),
+    Fields.number("interval_seconds",
+      label: "Interval (seconds)",
+      minimum: 1,
+      default: 3600
+    ),
+    Fields.string("timezone",
+      label: "Timezone",
+      default: "UTC"
+    ),
+    Fields.json("output_schema",
+      label: "Output Schema",
+      description: "JSON Schema describing the trigger output"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -52,7 +47,7 @@ defmodule Fizz.Steps.Executors.ScheduleTrigger do
     }
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
   alias Fizz.Triggers.RegistrationSpec
 
   @impl true

@@ -7,7 +7,7 @@ defmodule Fizz.Steps.Executors.DataOutput do
     icon: "hero-arrow-down-tray",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(_config, input, _context) do

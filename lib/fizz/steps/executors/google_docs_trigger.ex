@@ -11,31 +11,24 @@ defmodule Fizz.Steps.Executors.GoogleDocsTrigger do
     icon: "/images/google_docs.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Google Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Google Account"),
-      "document_id" => %{
-        "type" => "string",
-        "title" => "Document ID",
-        "description" => "Leave blank to watch any doc in Drive"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("document_id",
+      label: "Document ID",
+      description: "Leave blank to watch any doc in Drive"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

@@ -3,18 +3,26 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
   Reads rows from a Google Sheet range.
   """
 
-  @behaviour Fizz.Integrations.Operation
+  use Fizz.Steps.Definition,
+    id: "google_sheets_read_rows",
+    version: 1,
+    name: "Google Sheets — Read Rows",
+    category: "Documents",
+    description: "Read one or more rows from a Google Sheet range",
+    icon: "/images/google_sheets.svg",
+    kind: :action,
+    provider: Fizz.Integrations.Providers.GoogleOAuth.provider_id(),
+    integration: "google_sheets"
 
   alias Fizz.Fields
 
-  alias Fizz.Integrations.{
-    OperationDefinition,
-    Providers.GoogleOAuth,
-    RetryPolicy
-  }
+  alias Fizz.Integrations.Providers.GoogleOAuth
 
   alias Fizz.Integrations.Google.Sheets.Client
   alias Fizz.Integrations.Google.Sheets.Rows
+  alias Fizz.Workflows.RetryPolicy
+
+  @behaviour Fizz.Steps.Executor
 
   @fields [
     Fields.credential(GoogleOAuth.provider_id(), :oauth,
@@ -37,9 +45,6 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
     )
   ]
 
-  @default_config Fields.defaults(@fields)
-  @config_schema Fields.to_schema(@fields)
-
   @output_schema %{
     "type" => "object",
     "properties" => %{
@@ -55,41 +60,10 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
     retry_on: [:rate_limit, :network, :transient]
   }
 
-  @impl true
-  def id, do: "google_sheets.read_rows"
-
-  @impl true
-  def definition do
-    %OperationDefinition{
-      id: id(),
-      step_type_id: "google_sheets_read_rows",
-      version: 1,
-      provider: GoogleOAuth.provider_id(),
-      integration: "google_sheets",
-      kind: :action,
-      module: __MODULE__,
-      default_config: default_config(),
-      fields: fields(),
-      display: %{
-        name: "Google Sheets — Read Rows",
-        category: "Documents",
-        icon: "/images/google_sheets.svg",
-        description: "Read one or more rows from a Google Sheet range"
-      },
-      config_schema: config_schema(),
-      output_schema: output_schema(),
-      retry: @retry_policy
-    }
-  end
-
-  @doc false
-  def default_config, do: @default_config
+  @retry @retry_policy
 
   @doc false
   def fields, do: @fields
-
-  @doc false
-  def config_schema, do: @config_schema
 
   @doc false
   def output_schema, do: @output_schema

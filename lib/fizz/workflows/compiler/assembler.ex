@@ -1606,8 +1606,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       step_id: step.id,
       step_name: step.name,
       type_id: step.type_id,
-      operation_id: Map.get(step, :operation_id),
-      operation_version: Map.get(step, :operation_version)
+      retry: Map.get(step, :retry)
     }
   end
 
@@ -1676,8 +1675,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       reason: reason,
       step_id: Map.get(context, :step_id),
       step_type_id: Map.get(context, :type_id),
-      operation_id: Map.get(context, :operation_id),
-      operation_version: Map.get(context, :operation_version)
+      retry: Map.get(context, :retry)
     )
   end
 

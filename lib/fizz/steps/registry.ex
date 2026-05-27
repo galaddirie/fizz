@@ -34,7 +34,7 @@ defmodule Fizz.Steps.Registry do
           icon: "hero-sparkles",
           kind: :action
 
-        @behaviour Fizz.Steps.Executors.Behaviour
+        @behaviour Fizz.Steps.Executor
         # ... implementation
       end
 
@@ -44,7 +44,7 @@ defmodule Fizz.Steps.Registry do
   use GenServer
 
   alias Fizz.Fields
-  alias Fizz.Integrations.StepTypeAdapter
+  alias Fizz.Workflows.RetryPolicy
   alias Fizz.Steps.Type
 
   require Logger
@@ -270,25 +270,7 @@ defmodule Fizz.Steps.Registry do
     # Get all executor modules and load their definitions
     builtin_executor_modules()
     |> types_for_modules!()
-    |> replace_with_operation_backed_types()
     |> validate_step_types!()
-  end
-
-  defp replace_with_operation_backed_types(types) do
-    operation_types = operation_backed_step_types()
-    operation_type_ids = Enum.map(operation_types, & &1.id)
-
-    types
-    |> Enum.reject(&(&1.id in operation_type_ids))
-    |> Kernel.++(operation_types)
-  end
-
-  defp operation_backed_step_types do
-    Enum.map(Fizz.Integrations.Catalog.operations(), fn operation ->
-      StepTypeAdapter.from_operation_definition!(operation,
-        executor: Fizz.Integrations.OperationExecutor
-      )
-    end)
   end
 
   defp library_item_from_type(%Type{} = type) do
@@ -318,6 +300,8 @@ defmodule Fizz.Steps.Registry do
     types
     |> validate_unique_ids()
     |> validate_icons!()
+    |> validate_fields!()
+    |> validate_retry_policies!()
     |> validate_config_schemas!()
   end
 
@@ -350,6 +334,22 @@ defmodule Fizz.Steps.Registry do
         _ ->
           raise ArgumentError, "step type #{type.id} is missing icon"
       end
+    end)
+
+    types
+  end
+
+  defp validate_fields!(types) do
+    Enum.each(types, fn type ->
+      Fields.validate!(type.fields)
+    end)
+
+    types
+  end
+
+  defp validate_retry_policies!(types) do
+    Enum.each(types, fn type ->
+      RetryPolicy.validate!(type.retry)
     end)
 
     types

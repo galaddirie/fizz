@@ -6,11 +6,12 @@ This audit started as a read-only baseline for integration scalability. Since th
 refactor has shipped metadata-first catalog foundations, resource locator/mapper support,
 a credential ownership cleanup, and a shared typed field contract.
 
-Current useful primitives include `Fizz.Steps.Definition`, `Fizz.Steps.Registry`,
-`Fizz.Integrations.ProviderDefinition`, `Fizz.Integrations.Operation`,
-`Fizz.Integrations.DynamicResolver`, `Fizz.Fields`, `Fizz.Fields.Credential`, and
-schema-driven Vue field rendering. The main remaining issue is that operation definitions
-are not yet the single source of truth for every step family.
+Current useful primitives include `Fizz.Steps.Definition`, `Fizz.Steps.Type`,
+`Fizz.Steps.Executor`, `Fizz.Steps.Registry`,
+`Fizz.Integrations.ProviderDefinition`, `Fizz.Integrations.DynamicResolver`,
+`Fizz.Fields`, `Fizz.Fields.Credential`, and schema-driven Vue field rendering.
+The main remaining issue is migrating every older executor family to typed field
+definitions and normalized step errors.
 
 ## 0. Refactor Updates
 
@@ -22,7 +23,7 @@ Resolved since the original audit:
   resolution, and API-key secret extraction now live under `Fizz.Fields.Credential`.
 - Credential fields use explicit `"$credential"` declarations plus `"ui"."component" ==
   "credential"` schema metadata.
-- Provider credential creation inputs and operation inputs now use the same
+- Provider credential creation inputs and step inputs now use the same
   `Fizz.Fields.Definition` contract, with JSON Schema plus `"ui"` generated as adapter
   output.
 - `Fizz.Steps.Resolver` was deleted; edit-time dynamic values now route through
@@ -33,43 +34,41 @@ Resolved since the original audit:
 Still open:
 
 - provider modules still duplicate OAuth/API-key declaration boilerplate
-- many non-Google integrations are still executor-first rather than operation-first
-- execution context and Google Sheets operation errors are now normalized; retryable
-  operation failures now persist through `workflow_runs.error` plus durable retry timers,
-  but crash/passivation recovery coverage still needs hardening
+- many non-Google integrations still need typed field cleanup
+- execution context and Google Sheets step errors are now normalized; retryable step
+  failures now persist through `workflow_runs.error` plus durable retry timers, but
+  crash/passivation recovery coverage still needs hardening
 - dynamic field state is reply-based, not durable server-side state
-- Google Sheets append/read operation definitions now own their step metadata directly;
-  the old Google Sheets step wrapper executors were deleted
-- Google Sheets operations now publish retry metadata and the client returns
-  `Fizz.Integrations.OperationError` instead of raw `{:backoff, ...}` or HTTP maps
+- Google Sheets append/read are normal step executors that own their fields, retry
+  metadata, and step metadata directly
+- Google Sheets now publishes retry metadata on step definitions and the client returns
+  `Fizz.Workflows.StepError` instead of raw `{:backoff, ...}` or HTTP maps
 
 ## 1. Current Declarations and Boilerplate
 
-Integration declarations are split across three registries. Auth providers are listed in `Fizz.Integrations.ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`). Product integrations are listed separately in `Fizz.Integrations.Registry` (`lib/fizz/integrations/registry.ex:55`). Workflow step types are listed again in `Fizz.Steps.Registry.builtin_executor_modules/0` (`lib/fizz/steps/registry.ex:263`). Adding a real integration can require a provider module, provider catalog edit, product integration module, operation modules, executor wrapper modules, step registry edit, image assets, UI field support, and tests.
+Integration declarations are split across registries. Auth providers are listed in `Fizz.Integrations.ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`). Product integrations are listed separately in `Fizz.Integrations.Registry` (`lib/fizz/integrations/registry.ex:55`). Workflow step types are loaded from the manifest into `Fizz.Steps.Registry`. Adding a real integration can still require a provider module, provider catalog edit, product integration module, step module, manifest edit, image assets, UI field support, and tests.
 
-The product-level integration abstraction is only partially the source of node
-availability. Google Sheets append/read operations now publish operation definitions
-directly, and `Fizz.Steps.Registry` adapts those definitions into step types. Other
-providers such as Gmail, Slack, Notion, GitHub, and Microsoft are still mostly step
-executor modules rather than product integrations.
+The product-level integration abstraction is product metadata, not executable ownership.
+Google Sheets advertises action step type IDs, and append/read are ordinary step
+executors. Other providers such as Gmail, Slack, Notion, GitHub, and Microsoft are still
+mostly older step executor modules that need typed field cleanup.
 
 OAuth provider modules repeat the same shape. Slack, Google, Microsoft, Notion, and Box define `provider_id/0`, `display_name/0`, `definition/0`, `check_connection/2`, `fetch_token/2`, and `network_domains/0`, differing mainly by slug/logo/domains (`lib/fizz/integrations/providers/google_oauth.ex:14`, `lib/fizz/integrations/providers/slack_oauth.ex:14`, `lib/fizz/integrations/providers/box_oauth.ex:14`). `PipesOAuth` centralizes WorkOS token/status calls (`lib/fizz/integrations/providers/pipes_oauth.ex:6`), but not provider declaration boilerplate.
 
 API-key providers have inconsistent implementation status. OpenAI implements `Fizz.Integrations.Provider` (`lib/fizz/integrations/providers/openai_api_key.ex:8`), while Anthropic, GitHub API key, and custom API key are catalog-only definitions with no provider behavior (`lib/fizz/integrations/providers/anthropic_api_key.ex:1`, `lib/fizz/integrations/providers/github_api_key.ex:1`). `ProviderDefinition.api_key/1` supports nil-module providers (`lib/fizz/integrations/provider_definition.ex:31`), and runtime auth falls back to generic vault resolution (`lib/fizz/integrations.ex:305`). This works, but it leaks "implemented vs definition-only" into execution branching.
 
-Credential declarations are now explicit field definitions. Legacy executor modules still
-repeat the same pattern: build a `Fizz.Fields.credential/2`, add its default declaration,
-and add its generated schema property. That is much thinner than the old credential
-module stack, but it is still boilerplate that should disappear as those executors move
-to operation definitions.
+Credential declarations are now explicit field definitions. Legacy executor modules
+still repeat the same pattern: build a `Fizz.Fields.credential/2` and let
+`Fizz.Steps.Definition` generate defaults and schema. That is much thinner than the old
+credential module stack, but it is still boilerplate that should disappear as common
+provider step helpers emerge.
 
 ## 2. Shared Abstractions vs. Copy-Paste
 
 The code has several good abstractions that are not consistently used as the source of truth:
 
-- `Fizz.Integrations.Operation` says step executors should delegate API work to operation modules (`lib/fizz/integrations/operation.ex:5`), but only Google Sheets substantially follows this pattern.
 - `Fizz.Fields` now owns typed field definitions and adapts them to the JSON Schema plus
-  `ui` extension model used by Vue, but most non-Google operation fields are still
+  `ui` extension model used by Vue, but most non-Google step fields are still
   generated from legacy executor modules.
 - `Fizz.Fields.Credential` wraps credential declaration/schema generation, but each
   legacy executor still wires it manually.
@@ -88,18 +87,18 @@ lookup is now centralized in `Fizz.Integrations.DynamicResolver`. Credential fie
 handled as a field component type and dispatch to `Fizz.Fields.Credential`.
 The remaining improvement is field-state ownership: loading and error state are still
 transient Vue request state rather than durable LiveView/server state. Google Sheets
-resolver failures now read normalized operation errors, but no server process owns field
-state across clients or reconnects.
+resolver failures now read normalized step errors, but no server process owns field state
+across clients or reconnects.
 
 The resource mapper is now generic enough for the next integration family:
 `ResourceMapperField.vue` receives lookup fields, labels, and async error copy through
 schema/resolver metadata. Continue keeping provider vocabulary out of Vue components.
 
 The credentials settings UI now reads provider `credential_fields` through the same
-field contract as operation inputs. API-key providers get a generated password/secret
+field contract as step inputs. API-key providers get a generated password/secret
 field by default, and providers can declare multiple secret or non-secret creation
 fields without adding a credential-specific schema module. The next UI improvement is to
-render those fields through the same component registry used by workflow operation fields
+render those fields through the same component registry used by workflow step fields
 instead of keeping credential-form-specific markup.
 
 OAuth connection UI is delegated to WorkOS widget strings instead of internal provider definitions. Settings hardcode the `pipes` tab (`lib/fizz_web/live/user_management_live.ex:29`, `lib/fizz_web/live/user_management_live.html.heex:289`), and the JS hook maps widget names to React widgets (`assets/js/hooks/workos_react_widgets.js:30`). Workspace repository cloning is also GitHub-specific: the LiveView calls `Integrations.list_repos(..., "github_oauth", ...)` (`lib/fizz_web/live/workspaces_live/show.ex:432`) and renders GitHub-specific errors (`show.ex:461`, `show.html.heex:146`).
@@ -126,4 +125,4 @@ Coverage gaps line up with abstraction gaps. GitHub provider HTTP behavior is ha
 
 Some tests are brittle. Several mutate global application config, forcing `async: false` and increasing leakage risk (`test/fizz/accounts/workos_test.exs:22`, `test/fizz/integrations_test.exs:14`, `test/fizz_web/live/workflow_editor_live_test.exs:47`). Sleep/poll synchronization appears despite the project testing guidance (`test/fizz/workflows/runner/worker_failure_test.exs:467`, `test/fizz_web/live/workflow_editor_live_test.exs:1591`, `test/fizz/triggers/basic_triggers_integration_test.exs:276`). Some LiveView tests modify process internals with `:sys.replace_state/2` (`test/fizz_web/live/workflow_editor_live_test.exs:1577`), and raw SQL lease setup is duplicated in workflow tests (`test/fizz/workflows_test.exs:768`, `test/fizz/workflows/runner/worker_test.exs:605`).
 
-The refactor should add test seams as first-class design goals: `Req.Test`-friendly transport modules, operation-level fake contexts, catalog validation tests, workflow golden fixtures, and LiveVue component tests for schema rendering.
+The refactor should add test seams as first-class design goals: `Req.Test`-friendly transport modules, step-level fake contexts, catalog validation tests, workflow golden fixtures, and LiveVue component tests for schema rendering.

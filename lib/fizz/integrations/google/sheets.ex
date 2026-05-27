@@ -19,8 +19,8 @@ defmodule Fizz.Integrations.Google.Sheets do
   @impl true
   def actions do
     [
-      Fizz.Integrations.Google.Sheets.Actions.ReadRows,
-      Fizz.Integrations.Google.Sheets.Actions.AppendRow
+      "google_sheets_read_rows",
+      "google_sheets_append_row"
     ]
   end
 

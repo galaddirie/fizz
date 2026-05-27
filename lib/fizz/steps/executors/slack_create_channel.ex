@@ -11,41 +11,27 @@ defmodule Fizz.Steps.Executors.SlackCreateChannel do
     icon: "/images/slack.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.SlackOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(SlackOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Slack Workspace",
+                      description: "Slack workspace. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["channel_name"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Slack Workspace",
-          description: "Slack workspace. Bound at run time per user."
-        ),
-      "channel_name" => %{
-        "type" => "string",
-        "title" => "Channel Name",
-        "description" => "Lowercase, hyphen-separated (e.g. project-alpha)"
-      },
-      "is_private" => %{
-        "type" => "boolean",
-        "title" => "Private Channel",
-        "default" => false
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("channel_name",
+      label: "Channel Name",
+      required?: true,
+      description: "Lowercase, hyphen-separated (e.g. project-alpha)"
+    ),
+    Fields.boolean("is_private", label: "Private Channel", default: false)
+  ]
 
   @output_schema %{
     "type" => "object",

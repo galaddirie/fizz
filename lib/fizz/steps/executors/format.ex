@@ -19,22 +19,20 @@ defmodule Fizz.Steps.Executors.Format do
     icon: "hero-document-text",
     kind: :transform
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["template"],
-    "properties" => %{
-      "template" => %{
-        "type" => "string",
-        "title" => "Template",
-        "description" =>
-          "Template string with {{field}} placeholders. Supports nested paths like {{user.name}}"
-      },
-      "data" => %{
-        "title" => "Data",
-        "description" => "Data object used for placeholder replacement (supports expressions)"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("template",
+      label: "Template",
+      required?: true,
+      description:
+        "Template string with {{field}} placeholders. Supports nested paths like {{user.name}}"
+    ),
+    Fields.json("data",
+      label: "Data",
+      description: "Data object used for placeholder replacement (supports expressions)"
+    )
+  ]
 
   @input_schema %{
     "description" => "Populates {{ json }} for expressions"
@@ -45,7 +43,7 @@ defmodule Fizz.Steps.Executors.Format do
     "description" => "The formatted string"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, _input, _execution) do

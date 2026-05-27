@@ -12,32 +12,21 @@ defmodule Fizz.Steps.Executors.AIToolHttp do
     kind: :transform,
     role: :subnode
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
-  @default_config %{
-    "name" => "http_tool",
-    "description" => "HTTP tool",
-    "method" => "GET",
-    "url" => "",
-    "headers" => %{}
-  }
+  alias Fizz.Fields
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["name", "url"],
-    "properties" => %{
-      "name" => %{"type" => "string", "title" => "Tool Name"},
-      "description" => %{"type" => "string", "title" => "Description"},
-      "method" => %{
-        "type" => "string",
-        "title" => "Method",
-        "enum" => ["GET", "POST", "PUT", "PATCH", "DELETE"],
-        "default" => "GET"
-      },
-      "url" => %{"type" => "string", "title" => "URL"},
-      "headers" => %{"title" => "Headers"}
-    }
-  }
+  @fields [
+    Fields.string("name", label: "Tool Name", required?: true, default: "http_tool"),
+    Fields.string("description", label: "Description", default: "HTTP tool"),
+    Fields.select("method",
+      label: "Method",
+      default: "GET",
+      options: Fields.options(~w(GET POST PUT PATCH DELETE))
+    ),
+    Fields.string("url", label: "URL", required?: true),
+    Fields.json("headers", label: "Headers", default: %{})
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -48,9 +37,6 @@ defmodule Fizz.Steps.Executors.AIToolHttp do
       "request" => %{"type" => "object"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(config, _input, _ctx) do

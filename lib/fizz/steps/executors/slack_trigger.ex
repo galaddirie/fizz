@@ -11,40 +11,29 @@ defmodule Fizz.Steps.Executors.SlackTrigger do
     icon: "/images/slack.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.SlackOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(SlackOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Slack Workspace",
+                      description: "Slack workspace. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Slack Workspace",
-          description: "Slack workspace. Bound at run time per user."
-        ),
-      "channel_id" => %{
-        "type" => "string",
-        "title" => "Channel",
-        "description" => "Channel ID to watch (e.g. C0123456)"
-      },
-      "bot_mention_only" => %{
-        "type" => "boolean",
-        "title" => "Only when bot is mentioned",
-        "default" => false
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("channel_id",
+      label: "Channel",
+      description: "Channel ID to watch (e.g. C0123456)"
+    ),
+    Fields.boolean("bot_mention_only",
+      label: "Only when bot is mentioned",
+      default: false
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

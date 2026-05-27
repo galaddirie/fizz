@@ -7,7 +7,6 @@ defmodule Fizz.Integrations.Manifest do
 
   alias Fizz.Integrations.{
     Definition,
-    OperationDefinition,
     ResolverDefinition,
     TriggerDefinition
   }
@@ -72,6 +71,8 @@ defmodule Fizz.Integrations.Manifest do
       Fizz.Steps.Executors.GoogleDocsCreateDoc,
       Fizz.Steps.Executors.GoogleDocsAppendText,
       Fizz.Steps.Executors.GoogleSheetsTrigger,
+      Fizz.Integrations.Google.Sheets.Actions.ReadRows,
+      Fizz.Integrations.Google.Sheets.Actions.AppendRow,
       Fizz.Steps.Executors.GoogleSlidesCreatePresentation,
       Fizz.Steps.Executors.GoogleSlidesAddSlide,
       Fizz.Steps.Executors.GoogleDriveUploadFile,
@@ -94,28 +95,15 @@ defmodule Fizz.Integrations.Manifest do
 
   @spec definitions() :: map()
   def definitions do
-    operations = operation_definitions()
-
     %{
       providers:
         Fizz.Integrations.ProviderCatalog.providers()
         |> Enum.map(&provider_definition/1)
         |> Definition.validate_providers!(),
       integrations: integration_definitions(),
-      operations: operations,
       triggers: trigger_definitions(),
-      resolvers: resolver_definitions(),
-      versions: operation_versions(operations)
+      resolvers: resolver_definitions()
     }
-  end
-
-  @spec operation_definitions() :: [OperationDefinition.t()]
-  def operation_definitions do
-    [
-      Fizz.Integrations.Google.Sheets.Actions.AppendRow.definition(),
-      Fizz.Integrations.Google.Sheets.Actions.ReadRows.definition()
-    ]
-    |> Definition.validate_operations!()
   end
 
   @spec trigger_definitions() :: [map()]
@@ -172,12 +160,5 @@ defmodule Fizz.Integrations.Manifest do
         triggers: module.triggers()
       }
     end)
-  end
-
-  defp operation_versions(operations) do
-    operations
-    |> Enum.group_by(& &1.step_type_id, & &1.version)
-    |> Enum.map(fn {step_type_id, versions} -> {step_type_id, Enum.sort(versions)} end)
-    |> Map.new()
   end
 end

@@ -11,46 +11,31 @@ defmodule Fizz.Steps.Executors.GitHubTrigger do
     icon: "/images/github.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GitHubOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GitHubOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "GitHub Account",
+                      description: "GitHub account. Bound at run time per user.",
                       requirement_key: "auth"
                     )
   alias Fizz.Triggers.RegistrationSpec
 
-  @default_config %{
-    "events" => ["push"],
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "GitHub Account",
-          description: "GitHub account. Bound at run time per user."
-        ),
-      "repository" => %{
-        "type" => "string",
-        "title" => "Repository",
-        "description" => "owner/repo format (e.g. acme/website)"
-      },
-      "events" => %{
-        "type" => "array",
-        "title" => "Events",
-        "items" => %{
-          "type" => "string",
-          "enum" => ["push", "pull_request", "issues", "release", "workflow_run"]
-        },
-        "default" => ["push"]
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("repository",
+      label: "Repository",
+      description: "owner/repo format (e.g. acme/website)"
+    ),
+    Fields.json("events",
+      label: "Events",
+      default: ["push"],
+      description: "GitHub event names to subscribe to"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -64,9 +49,6 @@ defmodule Fizz.Steps.Executors.GitHubTrigger do
       "payload" => %{"type" => "object", "description" => "Full GitHub webhook payload"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def registration_spec(config, _context) do

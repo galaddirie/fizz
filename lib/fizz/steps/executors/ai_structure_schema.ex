@@ -12,7 +12,7 @@ defmodule Fizz.Steps.Executors.AIStructureSchema do
     kind: :transform,
     role: :subnode
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @default_json_schema %{
     "type" => "object",
@@ -20,37 +20,27 @@ defmodule Fizz.Steps.Executors.AIStructureSchema do
     "properties" => %{}
   }
 
-  @default_config %{
-    "name" => "structured_response",
-    "json_schema" => @default_json_schema,
-    "strict" => true
-  }
+  alias Fizz.Fields
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["json_schema"],
-    "properties" => %{
-      "name" => %{
-        "type" => "string",
-        "title" => "Schema Name",
-        "default" => "structured_response",
-        "description" => "Provider-safe name for the structured response"
-      },
-      "json_schema" => %{
-        "type" => "object",
-        "title" => "Structure Schema",
-        "format" => "json",
-        "default" => @default_json_schema,
-        "description" => "JSON Schema describing the expected agent response"
-      },
-      "strict" => %{
-        "type" => "boolean",
-        "title" => "Strict Mode",
-        "default" => true,
-        "description" => "Ask the provider to follow the schema strictly when supported"
-      }
-    }
-  }
+  @fields [
+    Fields.string("name",
+      label: "Schema Name",
+      default: "structured_response",
+      description: "Provider-safe name for the structured response"
+    ),
+    Fields.json("json_schema",
+      label: "Structure Schema",
+      format: "json",
+      required?: true,
+      default: @default_json_schema,
+      description: "JSON Schema describing the expected agent response"
+    ),
+    Fields.boolean("strict",
+      label: "Strict Mode",
+      default: true,
+      description: "Ask the provider to follow the schema strictly when supported"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -61,9 +51,6 @@ defmodule Fizz.Steps.Executors.AIStructureSchema do
       "response_format" => %{"type" => "object", "description" => "Provider response format hint"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(config, _input, _ctx) do

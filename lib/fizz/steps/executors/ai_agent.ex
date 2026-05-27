@@ -31,7 +31,7 @@ defmodule Fizz.Steps.Executors.AIAgent do
   alias Fizz.Accounts.Scope
   alias Fizz.Integrations.Providers.OpenAIApiKey
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @subnode_inputs [
     %{
@@ -63,39 +63,29 @@ defmodule Fizz.Steps.Executors.AIAgent do
     }
   ]
 
-  @default_config %{
-    "mode" => "assemble_only",
-    "system_prompt" => "You are a helpful assistant.",
-    "user_message" => "{{ json }}"
-  }
+  alias Fizz.Fields
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["user_message"],
-    "properties" => %{
-      "mode" => %{
-        "type" => "string",
-        "title" => "Execution Mode",
-        "enum" => ["assemble_only", "provider_chat"],
-        "default" => "assemble_only",
-        "description" => "Assemble payload only or call provider integrations"
-      },
-      "system_prompt" => %{
-        "type" => "string",
-        "title" => "System Prompt",
-        "format" => "textarea",
-        "default" => "You are a helpful assistant.",
-        "description" => "Optional system instruction sent before the user message"
-      },
-      "user_message" => %{
-        "type" => "string",
-        "title" => "User Message",
-        "format" => "textarea",
-        "default" => "{{ json }}",
-        "description" => "User message template resolved against the primary input"
-      }
-    }
-  }
+  @fields [
+    Fields.select("mode",
+      label: "Execution Mode",
+      default: "assemble_only",
+      description: "Assemble payload only or call provider integrations",
+      options: Fields.options(~w(assemble_only provider_chat))
+    ),
+    Fields.string("system_prompt",
+      label: "System Prompt",
+      format: "textarea",
+      default: "You are a helpful assistant.",
+      description: "Optional system instruction sent before the user message"
+    ),
+    Fields.string("user_message",
+      label: "User Message",
+      format: "textarea",
+      required?: true,
+      default: "{{ json }}",
+      description: "User message template resolved against the primary input"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -113,9 +103,6 @@ defmodule Fizz.Steps.Executors.AIAgent do
       "response" => %{"description" => "Provider response (provider_chat mode only)"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(config, input, ctx) when is_map(ctx) do

@@ -34,29 +34,25 @@ defmodule Fizz.Steps.Executors.Condition do
     icon: "hero-arrows-right-left",
     kind: :control_flow
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["condition"],
-    "properties" => %{
-      "condition" => %{
-        "type" => "string",
-        "title" => "Condition",
-        "description" => "Expression that evaluates to true/false (e.g., {{ json.value }} > 10)"
-      },
-      "true_output" => %{
-        "type" => "string",
-        "title" => "True Output Name",
-        "default" => "true",
-        "description" => "Name for the 'true' output branch"
-      },
-      "false_output" => %{
-        "type" => "string",
-        "title" => "False Output Name",
-        "default" => "false",
-        "description" => "Name for the 'false' output branch"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("condition",
+      label: "Condition",
+      required?: true,
+      description: "Expression that evaluates to true/false (e.g., {{ json.value }} > 10)"
+    ),
+    Fields.string("true_output",
+      label: "True Output Name",
+      default: "true",
+      description: "Name for the 'true' output branch"
+    ),
+    Fields.string("false_output",
+      label: "False Output Name",
+      default: "false",
+      description: "Name for the 'false' output branch"
+    )
+  ]
 
   @input_schema %{"description" => "Any data"}
 
@@ -64,7 +60,7 @@ defmodule Fizz.Steps.Executors.Condition do
     "description" => "Input data, passed through if condition is true"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, input, _ctx) do

@@ -10,7 +10,7 @@ defmodule Fizz.Steps.Executors.OnChatTrigger do
     icon: "hero-chat-bubble-left-right",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
   alias Fizz.Triggers.RegistrationSpec
 
   @impl true

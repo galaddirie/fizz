@@ -152,8 +152,8 @@ defmodule Fizz.Integrations.Registry do
   defp validate_entry!(entry) do
     validate_required_fields!(entry)
     validate_provider!(entry)
-    validate_operation_modules!(entry.actions, Fizz.Integrations.Operation, :action, entry.id)
-    validate_operation_modules!(entry.triggers, Fizz.Triggers.Source, :trigger, entry.id)
+    validate_action_step_ids!(entry.actions, entry.id)
+    validate_trigger_modules!(entry.triggers, Fizz.Triggers.Source, :trigger, entry.id)
   end
 
   defp validate_required_fields!(%{
@@ -183,16 +183,27 @@ defmodule Fizz.Integrations.Registry do
     end
   end
 
-  defp validate_operation_modules!(modules, behaviour, kind, integration_id) do
-    Enum.each(modules, fn module ->
-      validate_operation_module!(module, behaviour, kind, integration_id)
+  defp validate_action_step_ids!(actions, integration_id) do
+    Enum.each(actions, fn
+      action when is_binary(action) and action != "" ->
+        :ok
+
+      action ->
+        raise ArgumentError,
+              "integration #{integration_id} action step type ID is invalid: #{inspect(action)}"
     end)
   end
 
-  defp validate_operation_module!(module, behaviour, kind, integration_id) when is_atom(module) do
+  defp validate_trigger_modules!(modules, behaviour, kind, integration_id) do
+    Enum.each(modules, fn module ->
+      validate_trigger_module!(module, behaviour, kind, integration_id)
+    end)
+  end
+
+  defp validate_trigger_module!(module, behaviour, kind, integration_id) when is_atom(module) do
     case Code.ensure_loaded(module) do
       {:module, ^module} ->
-        validate_operation_behaviour!(module, behaviour, kind, integration_id)
+        validate_trigger_behaviour!(module, behaviour, kind, integration_id)
 
       _ ->
         raise ArgumentError,
@@ -200,12 +211,12 @@ defmodule Fizz.Integrations.Registry do
     end
   end
 
-  defp validate_operation_module!(module, _behaviour, kind, integration_id) do
+  defp validate_trigger_module!(module, _behaviour, kind, integration_id) do
     raise ArgumentError,
           "integration #{integration_id} #{kind} module is invalid: #{inspect(module)}"
   end
 
-  defp validate_operation_behaviour!(module, behaviour, kind, integration_id) do
+  defp validate_trigger_behaviour!(module, behaviour, kind, integration_id) do
     behaviours =
       module.module_info(:attributes)
       |> Keyword.get_values(:behaviour)

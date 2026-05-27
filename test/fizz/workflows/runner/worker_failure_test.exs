@@ -3,9 +3,10 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   import Fizz.WorkflowsFixtures
 
-  alias Fizz.Integrations.OperationError
+  alias Fizz.Workflows.StepError
   alias Fizz.Workflows
   alias Fizz.Workflows.Compiler
+  alias Fizz.Workflows.RetryPolicy
   alias Fizz.Workflows.Runner.RunnableConsumerSupervisor
   alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.Runner.Worker
@@ -157,8 +158,8 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
     end
   end
 
-  describe "operation retries" do
-    test "retryable operation errors sleep the run and resume the runnable",
+  describe "step retries" do
+    test "retryable step errors sleep the run and resume the runnable",
          %{
            scope: scope,
            registry: registry,
@@ -179,7 +180,7 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
                 0 ->
                   raise StepExecutionError.exception(
                           reason:
-                            OperationError.new(
+                            StepError.new(
                               code: :network_error,
                               category: :network,
                               message: "Network request failed",
@@ -187,14 +188,12 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
                               retry_after_ms: 0,
                               retryable?: true,
                               details: %{
-                                reason: :timeout,
-                                operation_id: "google_sheets.append_row"
+                                reason: :timeout
                               }
                             ),
                           step_id: "retry_step",
                           step_type_id: "google_sheets_append_row",
-                          operation_id: "google_sheets.append_row",
-                          operation_version: 1
+                          retry: %RetryPolicy{max_attempts: 3}
                         )
 
                 _ ->
@@ -240,8 +239,8 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
               %{
                 status: :sleeping,
                 error: %{
-                  "type" => "operation_retry",
-                  "operation_id" => "google_sheets.append_row",
+                  "type" => "step_retry",
+                  "step_type_id" => "google_sheets_append_row",
                   "failed_attempt" => 1,
                   "next_attempt" => 1
                 }

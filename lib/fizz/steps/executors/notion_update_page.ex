@@ -11,36 +11,22 @@ defmodule Fizz.Steps.Executors.NotionUpdatePage do
     icon: "/images/notion.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.NotionOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(NotionOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Notion Integration",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["page_id"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Notion Integration"),
-      "page_id" => %{
-        "type" => "string",
-        "title" => "Page ID"
-      },
-      "properties" => %{
-        "type" => "object",
-        "title" => "Properties to Update"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("page_id", label: "Page ID", required?: true),
+    Fields.json("properties", label: "Properties to Update")
+  ]
 
   @output_schema %{
     "type" => "object",

@@ -9,16 +9,23 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
   Positional list rows pass through without requiring headers.
   """
 
-  @behaviour Fizz.Integrations.Operation
+  use Fizz.Steps.Definition,
+    id: "google_sheets_append_row",
+    version: 1,
+    name: "Google Sheets — Append Row",
+    category: "Documents",
+    description: "Append a new row of data to a Google Sheet",
+    icon: "/images/google_sheets.svg",
+    kind: :action,
+    provider: Fizz.Integrations.Providers.GoogleOAuth.provider_id(),
+    integration: "google_sheets"
 
   alias Fizz.Fields
 
-  alias Fizz.Integrations.{
-    Google.Sheets.Client,
-    OperationDefinition,
-    Providers.GoogleOAuth,
-    RetryPolicy
-  }
+  alias Fizz.Integrations.{Google.Sheets.Client, Providers.GoogleOAuth}
+  alias Fizz.Workflows.RetryPolicy
+
+  @behaviour Fizz.Steps.Executor
 
   @spreadsheet_locator %{
     "kind" => "google_sheets.spreadsheet",
@@ -126,7 +133,6 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
       order: 50
     )
   ]
-  @default_config Fields.defaults(@fields)
   @retry_policy %RetryPolicy{
     max_attempts: 3,
     backoff: :exponential,
@@ -135,7 +141,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
     retry_on: [:rate_limit, :network, :transient]
   }
 
-  @config_schema Fields.to_schema(@fields)
+  @retry @retry_policy
 
   @output_schema %{
     "type" => "object",
@@ -145,41 +151,8 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
     }
   }
 
-  @impl true
-  def id, do: "google_sheets.append_row"
-
-  @impl true
-  def definition do
-    %OperationDefinition{
-      id: id(),
-      step_type_id: "google_sheets_append_row",
-      version: 1,
-      provider: GoogleOAuth.provider_id(),
-      integration: "google_sheets",
-      kind: :action,
-      module: __MODULE__,
-      default_config: default_config(),
-      fields: fields(),
-      display: %{
-        name: "Google Sheets — Append Row",
-        category: "Documents",
-        icon: "/images/google_sheets.svg",
-        description: "Append a new row of data to a Google Sheet"
-      },
-      config_schema: config_schema(),
-      output_schema: output_schema(),
-      retry: @retry_policy
-    }
-  end
-
-  @doc false
-  def default_config, do: @default_config
-
   @doc false
   def fields, do: @fields
-
-  @doc false
-  def config_schema, do: @config_schema
 
   @doc false
   def output_schema, do: @output_schema

@@ -24,24 +24,21 @@ defmodule Fizz.Steps.Executors.Debug do
     icon: "hero-bug-ant",
     kind: :action
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "label" => %{
-        "type" => "string",
-        "title" => "Label",
-        "default" => "Debug Step",
-        "description" => "Label to prefix the log message"
-      },
-      "level" => %{
-        "type" => "string",
-        "title" => "Log Level",
-        "enum" => ["debug", "info", "warn", "error"],
-        "default" => "info",
-        "description" => "The log level to use"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("label",
+      label: "Label",
+      default: "Debug Step",
+      description: "Label to prefix the log message"
+    ),
+    Fields.select("level",
+      label: "Log Level",
+      default: "info",
+      description: "The log level to use",
+      options: Fields.options(~w(debug info warn error))
+    )
+  ]
 
   @input_schema %{
     "description" => "Receives previous step output automatically"
@@ -51,7 +48,7 @@ defmodule Fizz.Steps.Executors.Debug do
     "description" => "The input data, unchanged"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
   require Logger
 
   @impl true

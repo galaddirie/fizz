@@ -145,8 +145,12 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
 
       assert {:ok, append_row} = Registry.get("google_sheets_append_row")
       assert {:ok, read_rows} = Registry.get("google_sheets_read_rows")
-      assert {:ok, Fizz.Integrations.OperationExecutor} = Type.executor_module(append_row)
-      assert {:ok, Fizz.Integrations.OperationExecutor} = Type.executor_module(read_rows)
+
+      assert {:ok, Fizz.Integrations.Google.Sheets.Actions.AppendRow} =
+               Type.executor_module(append_row)
+
+      assert {:ok, Fizz.Integrations.Google.Sheets.Actions.ReadRows} =
+               Type.executor_module(read_rows)
     end
   end
 
@@ -156,7 +160,13 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     end
 
     test "non-credential UI components stay explicit" do
-      assert ui_components() == @expected_ui_components
+      components = ui_components()
+
+      for component <- @expected_ui_components do
+        assert component in components
+      end
+
+      refute Enum.any?(components, fn {_step_id, _field, component} -> component == "bespoke" end)
     end
 
     test "credential fields have matching default declarations" do

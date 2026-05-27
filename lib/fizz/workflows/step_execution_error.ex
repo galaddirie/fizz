@@ -3,17 +3,16 @@ defmodule Fizz.Workflows.StepExecutionError do
   Exception raised at the Runic step boundary while preserving Fizz runtime metadata.
 
   Runic captures step exceptions into failed runnables. This wrapper keeps the
-  original executor reason plus step and operation identifiers available to the
-  workflow runner, which lets the runner make retry decisions without parsing a
-  rendered exception string.
+  original executor reason plus step identifiers and retry metadata available to
+  the workflow runner, which lets the runner make retry decisions without parsing
+  a rendered exception string.
   """
 
   defexception [
     :reason,
     :step_id,
     :step_type_id,
-    :operation_id,
-    :operation_version,
+    :retry,
     message: "step execution failed"
   ]
 
@@ -21,8 +20,7 @@ defmodule Fizz.Workflows.StepExecutionError do
           reason: term(),
           step_id: String.t() | nil,
           step_type_id: String.t() | nil,
-          operation_id: String.t() | nil,
-          operation_version: pos_integer() | nil,
+          retry: Fizz.Workflows.RetryPolicy.t() | nil,
           message: String.t()
         }
 
@@ -34,8 +32,7 @@ defmodule Fizz.Workflows.StepExecutionError do
       reason: reason,
       step_id: Keyword.get(opts, :step_id),
       step_type_id: Keyword.get(opts, :step_type_id),
-      operation_id: Keyword.get(opts, :operation_id),
-      operation_version: Keyword.get(opts, :operation_version),
+      retry: Keyword.get(opts, :retry),
       message: "step execution failed: #{inspect(reason)}"
     }
   end

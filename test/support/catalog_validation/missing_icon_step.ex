@@ -7,7 +7,7 @@ defmodule Fizz.TestSupport.CatalogValidation.MissingIconStep do
     icon: "",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(_config, _input, _context), do: {:ok, %{}}

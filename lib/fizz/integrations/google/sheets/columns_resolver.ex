@@ -22,7 +22,7 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
   alias Fizz.Accounts.ExternalAuth
   alias Fizz.Integrations.CredentialRef
   alias Fizz.Integrations.Google.Sheets.Client
-  alias Fizz.Integrations.OperationError
+  alias Fizz.Workflows.StepError
   alias Fizz.Integrations.Providers.GoogleOAuth
 
   def resolve(%{params: params, context: context}) do
@@ -104,7 +104,7 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
       {:ok, names} ->
         {:ok, Enum.map(names, &%{"id" => &1, "label" => &1})}
 
-      {:error, %OperationError{code: :rate_limited} = reason} ->
+      {:error, %StepError{code: :rate_limited} = reason} ->
         Logger.warning(
           "Google Sheets columns resolver: rate-limited fetching sheets " <>
             "(spreadsheet=#{spreadsheet_id}): #{inspect(reason)}"
@@ -146,7 +146,7 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
       {:ok, tables} ->
         {:ok, Enum.map(tables, &table_option/1)}
 
-      {:error, %OperationError{code: :rate_limited} = reason} ->
+      {:error, %StepError{code: :rate_limited} = reason} ->
         Logger.warning(
           "Google Sheets columns resolver: rate-limited fetching tables " <>
             "(spreadsheet=#{spreadsheet_id}): #{inspect(reason)}"
@@ -194,7 +194,7 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
       {:ok, headers} ->
         {:ok, Enum.map(headers, &%{"id" => &1, "label" => &1})}
 
-      {:error, %OperationError{code: :rate_limited} = reason} ->
+      {:error, %StepError{code: :rate_limited} = reason} ->
         Logger.warning(
           "Google Sheets columns resolver: rate-limited fetching headers " <>
             "(spreadsheet=#{spreadsheet_id}, sheet=#{sheet_name}): #{inspect(reason)}"

@@ -33,16 +33,16 @@ All trigger fires route through Oban (`TriggerFireWorker`) for consistent retry,
 
 ## 3. Trigger Behaviour
 
-The existing `Fizz.Steps.Executors.Behaviour` defines `execute/3` for all step types. Triggers need three additional callbacks that describe their relationship to the outside world.
+The existing `Fizz.Steps.Executor` defines `execute/3` for all step types. Triggers need three additional callbacks that describe their relationship to the outside world.
 
-**Behaviour composition**: Trigger executor modules declare both `@behaviour Fizz.Steps.Executors.Behaviour` (for `execute/3`, `validate_config/1`, `effective_output_schema/1`) and `@behaviour Fizz.Triggers.Behaviour` (for the trigger-specific callbacks below). The `use Fizz.Steps.Definition, kind: :trigger` macro should wire both behaviours automatically. `Fizz.Triggers.Behaviour` does NOT inherit from or replace the executor behaviour — they are composed via dual `@behaviour` declarations.
+**Behaviour composition**: Trigger executor modules declare both `@behaviour Fizz.Steps.Executor` (for `execute/3`, `validate_config/1`, `effective_output_schema/1`) and `@behaviour Fizz.Triggers.Behaviour` (for the trigger-specific callbacks below). The `use Fizz.Steps.Definition, kind: :trigger` macro should wire both behaviours automatically. `Fizz.Triggers.Behaviour` does NOT inherit from or replace the executor behaviour — they are composed via dual `@behaviour` declarations.
 
 ```elixir
 defmodule Fizz.Triggers.Behaviour do
   @moduledoc """
   Additional behaviour for trigger step executors.
 
-  Trigger steps implement BOTH Fizz.Steps.Executors.Behaviour (execute/3, etc.)
+  Trigger steps implement BOTH Fizz.Steps.Executor (execute/3, etc.)
   AND this behaviour. The Step Definition macro wires both when kind: :trigger.
   """
 

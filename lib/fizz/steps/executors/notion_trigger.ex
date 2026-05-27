@@ -11,38 +11,29 @@ defmodule Fizz.Steps.Executors.NotionTrigger do
     icon: "/images/notion.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.NotionOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(NotionOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Notion Integration",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Notion Integration"),
-      "database_id" => %{
-        "type" => "string",
-        "title" => "Database ID",
-        "description" => "Notion database to watch"
-      },
-      "event_type" => %{
-        "type" => "string",
-        "title" => "Event Type",
-        "enum" => ["created", "updated", "both"],
-        "default" => "both"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("database_id",
+      label: "Database ID",
+      description: "Notion database to watch"
+    ),
+    Fields.select("event_type",
+      label: "Event Type",
+      default: "both",
+      options: Fields.options(~w(created updated both))
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

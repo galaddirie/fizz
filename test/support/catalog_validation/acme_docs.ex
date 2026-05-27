@@ -11,7 +11,7 @@ defmodule Fizz.TestSupport.CatalogValidation.AcmeDocs do
   def provider_id, do: "google_oauth"
 
   @impl true
-  def actions, do: [Fizz.TestSupport.CatalogValidation.AcmeDocsAction]
+  def actions, do: ["acme_docs_action"]
 
   @impl true
   def triggers, do: [Fizz.TestSupport.CatalogValidation.AcmeDocsTrigger]

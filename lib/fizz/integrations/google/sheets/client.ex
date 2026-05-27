@@ -6,7 +6,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   alias Fizz.Accounts.Scope
   alias Fizz.Accounts.User
   alias Fizz.Integrations
-  alias Fizz.Integrations.OperationError
+  alias Fizz.Workflows.StepError
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Repo
   alias Fizz.Workflows.ExecutionContext
@@ -14,7 +14,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   @sheets_base_url "https://sheets.googleapis.com/v4"
 
   @type execution_context :: ExecutionContext.t() | map()
-  @type error_result :: {:error, OperationError.t()}
+  @type error_result :: {:error, StepError.t()}
 
   @spec get_values(map(), execution_context(), String.t(), keyword()) ::
           {:ok, [list()]} | error_result()
@@ -106,7 +106,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     with {:ok, tables} <- get_tables(params, context, opts) do
       case Enum.find(tables, &(Map.get(&1, "id") == table_id)) do
         nil ->
-          {:error, OperationError.normalize(:table_not_found, source: :google_sheets)}
+          {:error, StepError.normalize(:table_not_found, source: :google_sheets)}
 
         table ->
           {:ok, Enum.map(Map.get(table, "columns", []), &Map.get(&1, "label"))}
@@ -192,10 +192,10 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
         {:ok, body}
 
       {:ok, response} ->
-        {:error, OperationError.http(response, source: :google_sheets)}
+        {:error, StepError.http(response, source: :google_sheets)}
 
       {:error, reason} ->
-        {:error, OperationError.network(reason, source: :google_sheets)}
+        {:error, StepError.network(reason, source: :google_sheets)}
     end
   end
 
@@ -212,11 +212,11 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
              ) do
         {:ok, auth.token_result.access_token}
       else
-        {:error, %OperationError{}} = error ->
+        {:error, %StepError{}} = error ->
           error
 
         {:error, reason} ->
-          {:error, OperationError.normalize(reason, source: :google_sheets)}
+          {:error, StepError.normalize(reason, source: :google_sheets)}
       end
     end
   end
@@ -228,7 +228,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     do: {:ok, credential_ref}
 
   defp credential_ref(_params),
-    do: {:error, OperationError.normalize(:credential_ref_required, source: :google_sheets)}
+    do: {:error, StepError.normalize(:credential_ref_required, source: :google_sheets)}
 
   defp scope_from_context(%ExecutionContext{scope: %Scope{} = scope}), do: {:ok, scope}
 
@@ -249,7 +249,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
          %User{} = user <- Repo.get(User, user_id) do
       {:ok, %Scope{user: user, actor: :user, organization_id: organization_id}}
     else
-      nil -> {:error, OperationError.normalize(:user_not_found, source: :google_sheets)}
+      nil -> {:error, StepError.normalize(:user_not_found, source: :google_sheets)}
       {:error, _reason} = error -> error
     end
   end
@@ -257,7 +257,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   defp context_string(context, key) when is_map(context) and is_atom(key) do
     case context_value(context, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, OperationError.normalize({:missing_context, key}, source: :google_sheets)}
+      _ -> {:error, StepError.normalize({:missing_context, key}, source: :google_sheets)}
     end
   end
 
@@ -295,7 +295,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   defp fetch_string(map, key) when is_map(map) and is_binary(key) do
     case Map.get(map, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, OperationError.normalize({:missing_param, key}, source: :google_sheets)}
+      _ -> {:error, StepError.normalize({:missing_param, key}, source: :google_sheets)}
     end
   end
 

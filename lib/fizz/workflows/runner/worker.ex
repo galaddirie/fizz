@@ -18,7 +18,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   alias Fizz.Workflows
   alias Fizz.Workflows.{DurableTimer, SignalInbox}
   alias Fizz.Workflows.LeaseManager
-  alias Fizz.Workflows.Runner.OperationRetry
+  alias Fizz.Workflows.Runner.StepRetry
   alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.StepExecutionTrace
   alias Fizz.Workflows.Store.{CheckpointStrategy, SqliteStore}
@@ -437,8 +437,8 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp process_event(state, {:timer_fired, %DurableTimer{} = timer}) do
-    if OperationRetry.timer?(timer) do
-      process_operation_retry_timer(state, timer)
+    if StepRetry.timer?(timer) do
+      process_step_retry_timer(state, timer)
     else
       process_delayed_timer(state, timer)
     end
@@ -469,9 +469,9 @@ defmodule Fizz.Workflows.Runner.Worker do
     end
   end
 
-  defp process_operation_retry_timer(state, %DurableTimer{} = timer) do
+  defp process_step_retry_timer(state, %DurableTimer{} = timer) do
     with {:ok, %{runnable: runnable, attempt: attempt}} <-
-           OperationRetry.decode_timer(timer, state.workflow) do
+           StepRetry.decode_timer(timer, state.workflow) do
       state =
         state
         |> cancel_idle_timeout()
@@ -537,7 +537,7 @@ defmodule Fizz.Workflows.Runner.Worker do
 
     _ = Workflows.touch_run_activity(state.run_id)
 
-    case schedule_operation_retry(state, executed, task_state) do
+    case schedule_step_retry(state, executed, task_state) do
       {:ok, retry_state} ->
         {:continue, retry_state}
 
@@ -578,31 +578,31 @@ defmodule Fizz.Workflows.Runner.Worker do
     end
   end
 
-  defp schedule_operation_retry(state, %Runnable{} = failed_runnable, task_state) do
-    case OperationRetry.next_retry(failed_runnable, failed_runnable.error, task_state.attempt) do
+  defp schedule_step_retry(state, %Runnable{} = failed_runnable, task_state) do
+    case StepRetry.next_retry(failed_runnable, failed_runnable.error, task_state.attempt) do
       {:ok, retry} ->
-        create_operation_retry_timer(state, failed_runnable, retry)
+        create_step_retry_timer(state, failed_runnable, retry)
 
       :halt ->
         :halt
     end
   end
 
-  defp create_operation_retry_timer(state, %Runnable{} = failed_runnable, retry) do
+  defp create_step_retry_timer(state, %Runnable{} = failed_runnable, retry) do
     fire_at = DateTime.add(DateTime.utc_now(), retry.delay_ms, :millisecond)
 
     with {:ok, timer} <-
            Workflows.create_timer(
              state.run_id,
-             OperationRetry.retry_step_id(failed_runnable),
+             StepRetry.retry_step_id(failed_runnable),
              fire_at,
-             timer_name: OperationRetry.timer_name(failed_runnable),
+             timer_name: StepRetry.timer_name(failed_runnable),
              payload: retry.timer_payload
            ),
          {:ok, _run} <-
            Workflows.record_run_retry(
              state.run_id,
-             OperationRetry.run_error_payload(retry, fire_at),
+             StepRetry.run_error_payload(retry, fire_at),
              sleep?: map_size(state.active_tasks) == 0
            ) do
       state =

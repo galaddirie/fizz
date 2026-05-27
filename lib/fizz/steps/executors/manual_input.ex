@@ -7,26 +7,20 @@ defmodule Fizz.Steps.Executors.ManualInput do
     icon: "hero-cursor-arrow-rays",
     kind: :trigger
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "input_schema" => %{
-        "type" => "object",
-        "title" => "Input Schema",
-        "description" => "JSON Schema describing expected input data"
-      },
-      "test_data" => %{
-        "type" => "object",
-        "title" => "Test Data",
-        "description" => "JSON payload used for editor test runs and partial runs",
-        "ui" => %{
-          "component" => "json"
-        }
-      }
-    }
-  }
+  alias Fizz.Fields
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @fields [
+    Fields.json("input_schema",
+      label: "Input Schema",
+      description: "JSON Schema describing expected input data"
+    ),
+    Fields.json("test_data",
+      label: "Test Data",
+      description: "JSON payload used for editor test runs and partial runs"
+    )
+  ]
+
+  @behaviour Fizz.Steps.Executor
   alias Fizz.Triggers.RegistrationSpec
 
   @impl true

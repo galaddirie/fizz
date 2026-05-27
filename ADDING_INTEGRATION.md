@@ -18,15 +18,15 @@ This document captures the current integration path before the metadata-first re
    - Expose `id/0`, `display_name/0`, `provider_id/0`, `actions/0`, `triggers/0`, and `required_scopes/1`.
    - Register the module in `Fizz.Integrations.Registry`.
 
-4. Add operation modules for provider API behavior.
-   - Google Sheets currently keeps action and trigger modules under `lib/fizz/integrations/google/sheets/`.
-   - Operation modules own provider-specific API calls and resolver logic, but they do not yet publish workflow step types by themselves.
+4. Add step modules for provider API behavior.
+   - Google Sheets keeps action and trigger modules under `lib/fizz/integrations/google/sheets/`.
+   - Step modules own executable metadata and delegate provider-specific API calls to integration client/resolver helpers.
 
-5. Add one workflow step executor wrapper per operation under `lib/fizz/steps/executors/`.
+5. Declare every executable step with `Fizz.Steps.Definition`.
    - Use `Fizz.Steps.Definition` for the step metadata.
-   - Add `@config_schema`, `@default_config`, `@input_schema`, and `@output_schema`.
-   - Declare credential fields with `Fizz.Slots.CredentialSlot` when the step needs auth.
-   - Delegate runtime work back to the integration operation where possible.
+   - Add `@fields`, `@input_schema`, `@output_schema`, and optional `@retry`.
+   - Declare credential fields with `Fizz.Fields.credential/3` when the step needs auth.
+   - Let `Fizz.Fields.to_schema/1` generate the JSON Schema adapter output.
 
 6. Register the executor module in `Fizz.Steps.Registry`.
    - Add the executor module to the built-in executor list.
@@ -34,7 +34,7 @@ This document captures the current integration path before the metadata-first re
 
 7. Add UI assets and schema support as needed.
    - Add logos or icons under the existing static asset paths.
-   - Use existing config schema `ui.component` values whenever possible.
+   - Use existing `Fizz.Fields` components whenever possible.
    - New field components require coordinated backend schema, LiveVue type, and Vue renderer changes.
 
 8. Add tests at the level touched by the integration.
@@ -45,4 +45,4 @@ This document captures the current integration path before the metadata-first re
 
 ## Baseline Guardrails
 
-`test/fizz/integrations/catalog_guardrails_test.exs` locks the current provider IDs, product integration IDs, step type IDs, slot-backed credential field shapes, and non-slot UI component names. When a new integration is added through the current path, update those anchors intentionally.
+`test/fizz/integrations/catalog_guardrails_test.exs` locks the current provider IDs, product integration IDs, step type IDs, credential field shapes, and notable UI component names. When a new integration is added through the current path, update those anchors intentionally.

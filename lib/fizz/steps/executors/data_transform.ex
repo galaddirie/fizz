@@ -7,7 +7,7 @@ defmodule Fizz.Steps.Executors.DataTransform do
     icon: "hero-adjustments-horizontal",
     kind: :transform
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(_config, input, _context) do

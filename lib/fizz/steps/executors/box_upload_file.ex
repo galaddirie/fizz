@@ -11,42 +11,31 @@ defmodule Fizz.Steps.Executors.BoxUploadFile do
     icon: "/images/box.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.BoxOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(BoxOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Box Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["file_name", "file_content"],
-    "properties" => %{
-      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Box Account"),
-      "parent_folder_id" => %{
-        "type" => "string",
-        "title" => "Parent Folder ID",
-        "description" => "Box folder ID (0 for root)",
-        "default" => "0"
-      },
-      "file_name" => %{
-        "type" => "string",
-        "title" => "File Name"
-      },
-      "file_content" => %{
-        "type" => "string",
-        "title" => "File Content",
-        "description" => "Base64-encoded content or URL"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("parent_folder_id",
+      label: "Parent Folder ID",
+      description: "Box folder ID (0 for root)",
+      default: "0"
+    ),
+    Fields.string("file_name", label: "File Name", required?: true),
+    Fields.string("file_content",
+      label: "File Content",
+      required?: true,
+      description: "Base64-encoded content or URL"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

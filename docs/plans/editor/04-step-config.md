@@ -2,7 +2,7 @@
 
 ## Context
 
-Step configuration is the core authoring experience. Each step type declares a `config_schema` (JSON Schema + `"ui"` extension) that drives the config modal. The POC has a working schema-driven renderer in `StepConfigConfigPane.vue` with `useStepConfig.ts`. This document defines the production step configuration system.
+Step configuration is the core authoring experience. Each step type declares typed `Fizz.Fields` definitions; the backend generates a `config_schema` adapter payload (JSON Schema + `"ui"` extension) that drives the config modal. The POC has a working schema-driven renderer in `StepConfigConfigPane.vue` with `useStepConfig.ts`. This document defines the production step configuration system.
 
 ---
 
@@ -10,35 +10,30 @@ Step configuration is the core authoring experience. Each step type declares a `
 
 ### Backend Definition (exists)
 
-Each executor module defines its config schema:
+Each executor module defines typed fields:
 
 ```elixir
 # Example: lib/fizz/steps/executors/slack_send_message.ex
-@config_schema %{
-  "type" => "object",
-  "required" => ["channel_id", "text"],
-  "properties" => %{
-    "channel_id" => %{
-      "type" => "string",
-      "title" => "Channel",
-      "description" => "Channel ID, user ID, or email"
-    },
-    "text" => %{
-      "type" => "string",
-      "title" => "Message Text",
-      "format" => "textarea"
-    },
-    "credential_ref" => %{
-      "type" => "object",
-      "title" => "Credential",
-      "ui" => %{
-        "component" => "select",
-        "resolver" => "Fizz.Integrations.CredentialsResolver",
-        "params" => %{"provider_filter" => ["slack_oauth"]}
-      }
-    }
-  }
-}
+alias Fizz.Fields
+
+@fields [
+  Fields.credential("slack_oauth", :oauth,
+    key: "credential_ref",
+    label: "Credential",
+    requirement_key: "auth",
+    required?: true
+  ),
+  Fields.string("channel_id",
+    label: "Channel",
+    description: "Channel ID, user ID, or email",
+    required?: true
+  ),
+  Fields.string("text",
+    label: "Message Text",
+    component: "textarea",
+    required?: true
+  )
+]
 ```
 
 ### Field Type Inference (exists in `useStepConfig.ts`)

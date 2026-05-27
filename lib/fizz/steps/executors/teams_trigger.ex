@@ -11,35 +11,22 @@ defmodule Fizz.Steps.Executors.TeamsTrigger do
     icon: "/images/microsoft_teams.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(MicrosoftOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Microsoft Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Microsoft Account"),
-      "team_id" => %{
-        "type" => "string",
-        "title" => "Team ID"
-      },
-      "channel_id" => %{
-        "type" => "string",
-        "title" => "Channel ID"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("team_id", label: "Team ID"),
+    Fields.string("channel_id", label: "Channel ID")
+  ]
 
   @output_schema %{
     "type" => "object",

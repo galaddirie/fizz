@@ -11,49 +11,36 @@ defmodule Fizz.Steps.Executors.OneDriveUploadFile do
     icon: "/images/microsoft.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(MicrosoftOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Microsoft Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["file_name", "file_content"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Microsoft Account"),
-      "folder_path" => %{
-        "type" => "string",
-        "title" => "Folder Path",
-        "description" => "OneDrive folder path (e.g. /Documents/Reports/)",
-        "default" => "/"
-      },
-      "file_name" => %{
-        "type" => "string",
-        "title" => "File Name"
-      },
-      "file_content" => %{
-        "type" => "string",
-        "title" => "File Content",
-        "description" => "Base64-encoded content or URL"
-      },
-      "conflict_behavior" => %{
-        "type" => "string",
-        "title" => "If File Exists",
-        "enum" => ["rename", "replace", "fail"],
-        "default" => "rename"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("folder_path",
+      label: "Folder Path",
+      default: "/",
+      description: "OneDrive folder path (e.g. /Documents/Reports/)"
+    ),
+    Fields.string("file_name", label: "File Name", required?: true),
+    Fields.string("file_content",
+      label: "File Content",
+      required?: true,
+      description: "Base64-encoded content or URL"
+    ),
+    Fields.select("conflict_behavior",
+      label: "If File Exists",
+      default: "rename",
+      options: Fields.options(~w(rename replace fail))
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

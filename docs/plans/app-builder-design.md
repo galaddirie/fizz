@@ -167,7 +167,7 @@ Category: `"App State"`
 | `table_get_row` | `:action` | Get single row by ID |
 | `table_upsert` | `:action` | Insert or update based on unique column |
 
-All executors follow existing patterns: `use Fizz.Steps.Definition`, `@behaviour Fizz.Steps.Executors.Behaviour`, `@config_schema`, `execute/3`. They call `Fizz.AppState` context functions, receiving `org_id` and `project_id` from `context[:metadata]`.
+All executors follow existing patterns: `use Fizz.Steps.Definition`, `@behaviour Fizz.Steps.Executor`, typed `@fields`, and `execute/3`. They call `Fizz.AppState` context functions, receiving `org_id` and `project_id` from `context[:metadata]`.
 
 `kv_increment` uses atomic SQL: `UPDATE ... SET value = value + $amount, version = version + 1 ... RETURNING *` with upsert for non-existent keys.
 

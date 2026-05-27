@@ -8,7 +8,7 @@ This document describes the step type system, executor behaviour, and integratio
 
 - Step types are **compile-time artefacts**, not database rows. The registry is an in-memory ETS table populated at startup from a fixed set of executor modules.
 - Step metadata (id, name, category, icon, kind) is validated at compile time via a macro — invalid definitions fail the build, not runtime.
-- Config schemas are **JSON Schema** documents extended with optional `"ui"` hints for the editor (component type, resolver, response mapping). They drive both validation and UI rendering with a single source of truth.
+- Step fields are **typed `Fizz.Fields.Definition` structs**. JSON Schema documents extended with optional `"ui"` hints are generated adapter output for the editor.
 - **Credentials never flow through the step config.** Credential refs carry only metadata (provider, auth_type, display_name, owner). Secrets stay in the external vault (WorkOS/Vault). The step executor fetches a live token at runtime via the provider behaviour.
 - The **subnode pattern** allows complex composite steps (e.g. AI agent) to accept typed child nodes (model config, prompt template, tools) without baking composition logic into the parent.
 
@@ -53,13 +53,11 @@ defmodule Fizz.Steps.Executors.Format do
     icon: "hero-document-text",
     kind: :transform
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "template" => %{"type" => "string", "title" => "Template"}
-    },
-    "required" => ["template"]
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("template", label: "Template", required?: true)
+  ]
 end
 ```
 
@@ -67,31 +65,24 @@ The macro:
 
 1. Validates that all required fields (`id`, `name`, `category`, `description`, `icon`, `kind`) are present at compile time — a missing field raises a `CompileError`.
 2. Injects `__step_id__/0`, `__step_definition__/0`, and `default_config/0` functions into the module.
-3. Collects optional module attributes (`@config_schema`, `@input_schema`, `@output_schema`, `@subnode_inputs`) into the definition struct.
+3. Collects optional module attributes (`@fields`, `@retry`, `@input_schema`, `@output_schema`, `@subnode_inputs`) into the definition struct.
 
-#### Config Schema
+#### Field Schema Adapter
 
-Config schemas are JSON Schema objects optionally extended with a `"ui"` key per property:
+Step fields generate JSON Schema objects optionally extended with a `"ui"` key per property:
 
 ```elixir
-@config_schema %{
-  "type" => "object",
-  "properties" => %{
-    "credential" => %{
-      "type" => "object",
-      "title" => "GitHub Credential",
-      "ui" => %{
-        "component" => "search_select",
-        "resolver" => "Elixir.Fizz.Integrations.CredentialsResolver",
-        "resolver_params" => %{"provider_filter" => "github"},
-        "response_map" => %{"label" => "display_name", "value" => "id"}
-      }
-    }
-  }
-}
+@fields [
+  Fields.credential("github_oauth", :oauth,
+    key: "credential_ref",
+    label: "GitHub Credential",
+    requirement_key: "auth",
+    required?: true
+  )
+]
 ```
 
-The `"ui"` extension is never passed to a JSON Schema validator — it is only consumed by the editor frontend to render the correct input component (e.g. a searchable credential picker vs. a plain text input).
+The generated `"ui"` extension is never passed to a JSON Schema validator; it is only consumed by the editor frontend to render the correct input component.
 
 #### Subnode Inputs
 
@@ -158,7 +149,7 @@ The module name convention is `Fizz.Steps.Executors.<PascalCase>` where `PascalC
 
 ### Executor Behaviour
 
-`Fizz.Steps.Executors.Behaviour` defines the contract every executor implements:
+`Fizz.Steps.Executor` defines the contract every executor implements:
 
 ```elixir
 @callback execute(config :: map(), input :: map(), context :: map()) ::

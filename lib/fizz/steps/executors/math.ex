@@ -19,39 +19,28 @@ defmodule Fizz.Steps.Executors.Math do
     icon: "hero-calculator",
     kind: :transform
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["operation", "value"],
-    "properties" => %{
-      "operation" => %{
-        "type" => "string",
-        "title" => "Operation",
-        "enum" => [
-          "add",
-          "subtract",
-          "multiply",
-          "divide",
-          "modulo",
-          "power",
-          "square_root",
-          "abs",
-          "round",
-          "ceil",
-          "floor"
-        ],
-        "description" => "The mathematical operation to perform"
-      },
-      "value" => %{
-        "title" => "Value",
-        "description" => "The left-hand value to operate on (supports expressions)"
-      },
-      "operand" => %{
-        "title" => "Operand",
-        "description" =>
-          "The right-hand value for binary operations (not needed for unary operations like square_root, abs, etc.)"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
+
+  @fields [
+    Fields.select("operation",
+      label: "Operation",
+      required?: true,
+      description: "The mathematical operation to perform",
+      options: Fields.options(@supported_operations)
+    ),
+    Fields.number("value",
+      label: "Value",
+      required?: true,
+      description: "The left-hand value to operate on (supports expressions)"
+    ),
+    Fields.number("operand",
+      label: "Operand",
+      description:
+        "The right-hand value for binary operations (not needed for unary operations like square_root, abs, etc.)"
+    )
+  ]
 
   @input_schema %{
     "description" => "Populates {{ json }} for expressions"
@@ -62,9 +51,7 @@ defmodule Fizz.Steps.Executors.Math do
     "description" => "The result of the arithmetic operation"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
-
-  @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, _input, _execution) do

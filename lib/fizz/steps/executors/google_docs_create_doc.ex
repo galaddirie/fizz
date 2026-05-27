@@ -11,41 +11,29 @@ defmodule Fizz.Steps.Executors.GoogleDocsCreateDoc do
     icon: "/images/google_docs.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Google Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["title"],
-    "properties" => %{
-      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Google Account"),
-      "title" => %{
-        "type" => "string",
-        "title" => "Document Title"
-      },
-      "body_text" => %{
-        "type" => "string",
-        "title" => "Initial Content",
-        "description" => "Plain text to insert as the document body"
-      },
-      "folder_id" => %{
-        "type" => "string",
-        "title" => "Destination Folder ID",
-        "description" => "Google Drive folder ID"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("title", label: "Document Title", required?: true),
+    Fields.string("body_text",
+      label: "Initial Content",
+      description: "Plain text to insert as the document body"
+    ),
+    Fields.string("folder_id",
+      label: "Destination Folder ID",
+      description: "Google Drive folder ID"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

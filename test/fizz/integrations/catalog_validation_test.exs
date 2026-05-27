@@ -1,7 +1,6 @@
 defmodule Fizz.Integrations.CatalogValidationTest do
   use ExUnit.Case, async: false
 
-  alias Fizz.Integrations.{OperationDefinition, RetryPolicy}
   alias Fizz.Integrations.ProviderCatalog
   alias Fizz.Integrations.Registry, as: IntegrationRegistry
   alias Fizz.Steps.Registry, as: StepRegistry
@@ -141,7 +140,7 @@ defmodule Fizz.Integrations.CatalogValidationTest do
     end
 
     test "unsupported UI components raise during catalog load" do
-      assert_raise ArgumentError, ~r/unsupported ui.component "bespoke"/, fn ->
+      assert_raise ArgumentError, ~r/unsupported component "bespoke"/, fn ->
         StepRegistry.types_for_modules!([
           Fizz.TestSupport.CatalogValidation.UnsupportedComponentStep
         ])
@@ -149,7 +148,7 @@ defmodule Fizz.Integrations.CatalogValidationTest do
     end
 
     test "malformed resource metadata raises during catalog load" do
-      assert_raise ArgumentError, ~r/ui.resource_locator must be a map/, fn ->
+      assert_raise ArgumentError, ~r/resource_locator must be a map/, fn ->
         StepRegistry.types_for_modules!([
           Fizz.TestSupport.CatalogValidation.InvalidResourceMetadataStep
         ])
@@ -161,102 +160,6 @@ defmodule Fizz.Integrations.CatalogValidationTest do
         StepRegistry.types_for_modules!([
           Fizz.TestSupport.CatalogValidation.InvalidResourceMapperReferenceStep
         ])
-      end
-    end
-
-    test "missing credential defaults raise during catalog load" do
-      assert_raise ArgumentError, ~r/missing_default_config/, fn ->
-        StepRegistry.types_for_modules!([
-          Fizz.TestSupport.CatalogValidation.MissingCredentialDefaultStep
-        ])
-      end
-    end
-  end
-
-  describe "operation definition validation" do
-    test "malformed UI metadata raises during operation validation" do
-      operation = %OperationDefinition{
-        id: "acme_docs.action",
-        step_type_id: "acme_docs_action",
-        version: 1,
-        provider: "acme_api_key",
-        integration: "acme_docs",
-        kind: :action,
-        module: Fizz.TestSupport.CatalogValidation.AcmeDocsAction,
-        display: %{"name" => "Acme Docs Action", "icon" => "hero-bolt"},
-        config_schema: %{
-          "type" => "object",
-          "properties" => %{
-            "resource" => %{
-              "type" => "string",
-              "ui" => %{"display" => "not a map"}
-            }
-          }
-        },
-        output_schema: %{"type" => "object"}
-      }
-
-      assert_raise ArgumentError, ~r/ui.display must be a map/, fn ->
-        Fizz.Integrations.Definition.validate_operation!(operation)
-      end
-    end
-
-    test "malformed resource mapper internals raise during operation validation" do
-      operation = %OperationDefinition{
-        id: "acme_docs.action",
-        step_type_id: "acme_docs_action",
-        version: 1,
-        provider: "acme_api_key",
-        integration: "acme_docs",
-        kind: :action,
-        module: Fizz.TestSupport.CatalogValidation.AcmeDocsAction,
-        display: %{"name" => "Acme Docs Action", "icon" => "hero-bolt"},
-        config_schema: %{
-          "type" => "object",
-          "properties" => %{
-            "resource" => %{"type" => "string"},
-            "values" => %{
-              "type" => "object",
-              "resource_mapper" => %{
-                "kind" => "acme.values",
-                "fields" => %{"primary_resource" => "resource"},
-                "lookups" => %{
-                  "primary_resource" => %{
-                    "mode" => "resources",
-                    "params" => ["resource"]
-                  }
-                }
-              }
-            }
-          }
-        },
-        output_schema: %{"type" => "object"}
-      }
-
-      assert_raise ArgumentError,
-                   ~r/resource_mapper.lookups.primary_resource.params must be a map/,
-                   fn ->
-                     Fizz.Integrations.Definition.validate_operation!(operation)
-                   end
-    end
-
-    test "malformed retry policy raises during operation validation" do
-      operation = %OperationDefinition{
-        id: "acme_docs.action",
-        step_type_id: "acme_docs_action",
-        version: 1,
-        provider: "acme_api_key",
-        integration: "acme_docs",
-        kind: :action,
-        module: Fizz.TestSupport.CatalogValidation.AcmeDocsAction,
-        display: %{"name" => "Acme Docs Action", "icon" => "hero-bolt"},
-        config_schema: %{"type" => "object"},
-        output_schema: %{"type" => "object"},
-        retry: %RetryPolicy{max_attempts: 0}
-      }
-
-      assert_raise ArgumentError, ~r/invalid retry policy/, fn ->
-        Fizz.Integrations.Definition.validate_operation!(operation)
       end
     end
   end

@@ -11,51 +11,32 @@ defmodule Fizz.Steps.Executors.SharePointUploadFile do
     icon: "/images/microsoft_sharepoint.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(MicrosoftOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Microsoft Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["site_id", "file_name", "file_content"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Microsoft Account"),
-      "site_id" => %{
-        "type" => "string",
-        "title" => "SharePoint Site ID"
-      },
-      "drive_id" => %{
-        "type" => "string",
-        "title" => "Drive ID",
-        "description" => "Leave blank for default Documents library"
-      },
-      "folder_path" => %{
-        "type" => "string",
-        "title" => "Folder Path",
-        "default" => "/"
-      },
-      "file_name" => %{
-        "type" => "string",
-        "title" => "File Name"
-      },
-      "file_content" => %{
-        "type" => "string",
-        "title" => "File Content",
-        "description" => "Base64-encoded content or URL"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("site_id", label: "SharePoint Site ID", required?: true),
+    Fields.string("drive_id",
+      label: "Drive ID",
+      description: "Leave blank for default Documents library"
+    ),
+    Fields.string("folder_path", label: "Folder Path", default: "/"),
+    Fields.string("file_name", label: "File Name", required?: true),
+    Fields.string("file_content",
+      label: "File Content",
+      required?: true,
+      description: "Base64-encoded content or URL"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

@@ -7,14 +7,11 @@ defmodule Fizz.TestSupport.CatalogValidation.UnsupportedComponentStep do
     icon: "hero-bolt",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "value" => %{"type" => "string", "ui" => %{"component" => "bespoke"}}
-    }
-  }
+  @fields [
+    %Fizz.Fields.Definition{key: "value", type: :string, component: "bespoke"}
+  ]
 
   @impl true
   def execute(_config, _input, _context), do: {:ok, %{}}

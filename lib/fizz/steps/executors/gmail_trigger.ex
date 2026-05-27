@@ -11,40 +11,29 @@ defmodule Fizz.Steps.Executors.GmailTrigger do
     icon: "/images/gmail.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Gmail Account",
+                      description: "Google account. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Gmail Account",
-          description: "Google account. Bound at run time per user."
-        ),
-      "label_filter" => %{
-        "type" => "string",
-        "title" => "Label Filter",
-        "description" => "Only trigger for emails with this label (e.g. INBOX)"
-      },
-      "from_filter" => %{
-        "type" => "string",
-        "title" => "From Filter",
-        "description" => "Only trigger for emails from this address"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("label_filter",
+      label: "Label Filter",
+      description: "Only trigger for emails with this label (e.g. INBOX)"
+    ),
+    Fields.string("from_filter",
+      label: "From Filter",
+      description: "Only trigger for emails from this address"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

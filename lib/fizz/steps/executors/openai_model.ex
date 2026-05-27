@@ -17,7 +17,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
     kind: :transform,
     role: :subnode
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.CredentialRef
   alias Fizz.Integrations.Providers.OpenAIApiKey
@@ -25,45 +25,30 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
 
   @credential_field Fields.credential(OpenAIApiKey.provider_id(), :api_key,
                       key: "credential_ref",
+                      label: "Credential",
+                      description: "OpenAI credential. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "model" => "gpt-5.5",
-    "temperature" => 0.2,
-    "max_tokens" => 800,
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["model", "credential_ref"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Credential",
-          description: "OpenAI credential. Bound at run time per user."
-        ),
-      "model" => %{
-        "type" => "string",
-        "title" => "Model",
-        "default" => "gpt-5.5",
-        "description" => "OpenAI model name"
-      },
-      "temperature" => %{
-        "type" => "number",
-        "title" => "Temperature",
-        "default" => 0.2,
-        "description" => "Sampling temperature (0-2)"
-      },
-      "max_tokens" => %{
-        "type" => "integer",
-        "title" => "Max Tokens",
-        "default" => 800,
-        "description" => "Maximum completion tokens"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("model",
+      label: "Model",
+      required?: true,
+      default: "gpt-5.5",
+      description: "OpenAI model name"
+    ),
+    Fields.number("temperature",
+      label: "Temperature",
+      default: 0.2,
+      description: "Sampling temperature (0-2)"
+    ),
+    Fields.number("max_tokens",
+      label: "Max Tokens",
+      default: 800,
+      description: "Maximum completion tokens"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -75,9 +60,6 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
       "max_tokens" => %{"type" => "integer"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(config, _input, _ctx) do

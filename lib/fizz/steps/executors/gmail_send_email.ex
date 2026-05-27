@@ -11,49 +11,38 @@ defmodule Fizz.Steps.Executors.GmailSendEmail do
     icon: "/images/gmail.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Gmail Account",
+                      description: "Google account. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["to", "subject", "body"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Gmail Account",
-          description: "Google account. Bound at run time per user."
-        ),
-      "to" => %{
-        "type" => "string",
-        "title" => "To",
-        "description" => "Recipient email address(es), comma-separated"
-      },
-      "cc" => %{"type" => "string", "title" => "CC"},
-      "bcc" => %{"type" => "string", "title" => "BCC"},
-      "subject" => %{"type" => "string", "title" => "Subject"},
-      "body" => %{
-        "type" => "string",
-        "title" => "Body",
-        "description" => "Email body (supports HTML)"
-      },
-      "reply_to_thread_id" => %{
-        "type" => "string",
-        "title" => "Reply-to Thread ID",
-        "description" => "Thread ID to reply within"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("to",
+      label: "To",
+      required?: true,
+      description: "Recipient email address(es), comma-separated"
+    ),
+    Fields.string("cc", label: "CC"),
+    Fields.string("bcc", label: "BCC"),
+    Fields.string("subject", label: "Subject", required?: true),
+    Fields.string("body",
+      label: "Body",
+      required?: true,
+      description: "Email body (supports HTML)"
+    ),
+    Fields.string("reply_to_thread_id",
+      label: "Reply-to Thread ID",
+      description: "Thread ID to reply within"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

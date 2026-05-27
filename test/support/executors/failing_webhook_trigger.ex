@@ -7,7 +7,7 @@ defmodule Fizz.TestSupport.Executors.FailingWebhookTrigger do
     icon: "hero-bolt",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Triggers.RegistrationSpec
 

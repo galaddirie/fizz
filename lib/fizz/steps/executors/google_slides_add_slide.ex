@@ -11,45 +11,28 @@ defmodule Fizz.Steps.Executors.GoogleSlidesAddSlide do
     icon: "/images/google_slides.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Google Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["presentation_id"],
-    "properties" => %{
-      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Google Account"),
-      "presentation_id" => %{
-        "type" => "string",
-        "title" => "Presentation ID"
-      },
-      "layout" => %{
-        "type" => "string",
-        "title" => "Slide Layout",
-        "enum" => ["BLANK", "TITLE", "TITLE_AND_BODY", "SECTION_HEADER"],
-        "default" => "TITLE_AND_BODY"
-      },
-      "title" => %{
-        "type" => "string",
-        "title" => "Slide Title"
-      },
-      "body" => %{
-        "type" => "string",
-        "title" => "Slide Body Text"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("presentation_id", label: "Presentation ID", required?: true),
+    Fields.select("layout",
+      label: "Slide Layout",
+      default: "TITLE_AND_BODY",
+      options: Fields.options(~w(BLANK TITLE TITLE_AND_BODY SECTION_HEADER))
+    ),
+    Fields.string("title", label: "Slide Title"),
+    Fields.string("body", label: "Slide Body Text")
+  ]
 
   @output_schema %{
     "type" => "object",

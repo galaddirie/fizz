@@ -11,7 +11,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
     icon: "/images/google_sheets.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Google.Sheets.Triggers.RowChange
   alias Fizz.Integrations.Providers.GoogleOAuth
@@ -21,70 +21,36 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Google Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field),
-    "event_mode" => "row_added_or_updated",
-    "sheet_name" => "Sheet1",
-    "range" => "A:ZZZ",
-    "header_row" => 1,
-    "first_data_row" => 2,
-    "poll_interval_ms" => 60_000
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["credential_ref", "spreadsheet_id", "sheet_name"],
-    "properties" => %{
-      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Google Account"),
-      "spreadsheet_id" => %{
-        "type" => "string",
-        "title" => "Spreadsheet ID"
-      },
-      "sheet_name" => %{
-        "type" => "string",
-        "title" => "Sheet Name",
-        "default" => "Sheet1"
-      },
-      "event_mode" => %{
-        "type" => "string",
-        "title" => "Trigger On",
-        "enum" => ["row_added", "row_updated", "row_added_or_updated"],
-        "default" => "row_added_or_updated"
-      },
-      "range" => %{
-        "type" => "string",
-        "title" => "Range",
-        "description" => "A1 range inside the sheet, e.g. A:ZZZ",
-        "default" => "A:ZZZ"
-      },
-      "header_row" => %{
-        "type" => "integer",
-        "title" => "Header Row",
-        "minimum" => 1,
-        "default" => 1
-      },
-      "first_data_row" => %{
-        "type" => "integer",
-        "title" => "First Data Row",
-        "minimum" => 1,
-        "default" => 2
-      },
-      "primary_key_column" => %{
-        "type" => "string",
-        "title" => "Primary Key Column",
-        "description" => "Optional stable column name used to identify rows across inserts"
-      },
-      "poll_interval_ms" => %{
-        "type" => "integer",
-        "title" => "Poll Interval (ms)",
-        "minimum" => 15000,
-        "default" => 60000
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("spreadsheet_id", label: "Spreadsheet ID", required?: true),
+    Fields.string("sheet_name", label: "Sheet Name", required?: true, default: "Sheet1"),
+    Fields.select("event_mode",
+      label: "Trigger On",
+      default: "row_added_or_updated",
+      options: Fields.options(~w(row_added row_updated row_added_or_updated))
+    ),
+    Fields.string("range",
+      label: "Range",
+      description: "A1 range inside the sheet, e.g. A:ZZZ",
+      default: "A:ZZZ"
+    ),
+    Fields.number("header_row", label: "Header Row", minimum: 1, default: 1),
+    Fields.number("first_data_row", label: "First Data Row", minimum: 1, default: 2),
+    Fields.string("primary_key_column",
+      label: "Primary Key Column",
+      description: "Optional stable column name used to identify rows across inserts"
+    ),
+    Fields.number("poll_interval_ms",
+      label: "Poll Interval (ms)",
+      minimum: 15_000,
+      default: 60_000
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -99,14 +65,13 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
   }
 
   @impl true
-  def default_config, do: @default_config
-
-  @impl true
   def registration_spec(config, _context) do
+    default_config = default_config()
+
     params =
-      @default_config
+      default_config
       |> Map.merge(
-        Map.take(config, Map.keys(@default_config) ++ ["spreadsheet_id", "primary_key_column"])
+        Map.take(config, Map.keys(default_config) ++ ["spreadsheet_id", "primary_key_column"])
       )
       |> Map.put("provider", GoogleOAuth.provider_id())
 

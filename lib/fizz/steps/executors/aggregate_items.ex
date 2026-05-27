@@ -40,19 +40,17 @@ defmodule Fizz.Steps.Executors.Aggregator do
     icon: "hero-arrows-pointing-in",
     kind: :transform
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["operation"],
-    "properties" => %{
-      "operation" => %{
-        "type" => "string",
-        "title" => "Operation",
-        "enum" => ["collect", "sum", "count", "concat", "first", "last", "min", "max"],
-        "default" => "collect",
-        "description" => "How to aggregate the items"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.select("operation",
+      label: "Operation",
+      required?: true,
+      default: "collect",
+      description: "How to aggregate the items",
+      options: Fields.options(~w(collect sum count concat first last min max))
+    )
+  ]
 
   @input_schema %{
     "description" => "Items from a split operation"
@@ -62,7 +60,7 @@ defmodule Fizz.Steps.Executors.Aggregator do
     "description" => "The aggregated result"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @supported_operations ~w(collect sum count concat first last min max)
 

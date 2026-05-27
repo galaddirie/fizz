@@ -11,7 +11,7 @@ defmodule Fizz.Integrations.Definition.Integration do
           display_name: String.t(),
           provider_id: String.t(),
           module: module(),
-          actions: [module()],
+          actions: [String.t()],
           triggers: [module()]
         }
 end

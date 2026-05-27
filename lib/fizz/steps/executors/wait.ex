@@ -24,26 +24,23 @@ defmodule Fizz.Steps.Executors.Wait do
     icon: "hero-clock",
     kind: :control_flow
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["duration"],
-    "properties" => %{
-      "duration" => %{
-        "type" => "integer",
-        "title" => "Duration",
-        "minimum" => 1,
-        "default" => 1000,
-        "description" => "Amount of time to wait"
-      },
-      "unit" => %{
-        "type" => "string",
-        "title" => "Unit",
-        "enum" => ["milliseconds", "seconds", "minutes"],
-        "default" => "milliseconds",
-        "description" => "Time unit for the duration"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.number("duration",
+      label: "Duration",
+      required?: true,
+      minimum: 1,
+      default: 1000,
+      description: "Amount of time to wait"
+    ),
+    Fields.select("unit",
+      label: "Unit",
+      default: "milliseconds",
+      description: "Time unit for the duration",
+      options: Fields.options(~w(milliseconds seconds minutes))
+    )
+  ]
 
   @input_schema %{
     "description" => "Receives previous step output automatically"
@@ -53,7 +50,7 @@ defmodule Fizz.Steps.Executors.Wait do
     "description" => "The input data, unchanged"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
   require Logger
 
   @impl true
@@ -83,14 +80,6 @@ defmodule Fizz.Steps.Executors.Wait do
       true ->
         :ok
     end
-  end
-
-  @impl true
-  def default_config do
-    %{
-      "duration" => 1000,
-      "unit" => "milliseconds"
-    }
   end
 
   # Convert duration to milliseconds

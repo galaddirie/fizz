@@ -35,16 +35,14 @@ defmodule Fizz.Steps.Executors.Splitter do
     icon: "hero-arrows-pointing-out",
     kind: :transform
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "field" => %{
-        "type" => "string",
-        "title" => "Source Field",
-        "description" => "Dot-path to field containing the collection (optional)"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("field",
+      label: "Source Field",
+      description: "Dot-path to field containing the collection (optional)"
+    )
+  ]
 
   @input_schema %{
     "description" => "A map containing a collection, or the collection itself"
@@ -54,7 +52,7 @@ defmodule Fizz.Steps.Executors.Splitter do
     "description" => "Each item from the collection as a separate output"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, input, _ctx) do

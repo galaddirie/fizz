@@ -11,47 +11,32 @@ defmodule Fizz.Steps.Executors.AnthropicVisionAnalysis do
     icon: "/images/anthropic.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.AnthropicApiKey
   alias Fizz.Fields
 
   @credential_field Fields.credential(AnthropicApiKey.provider_id(), :api_key,
                       key: "credential_ref",
+                      label: "Anthropic Credential",
+                      description: "Anthropic credential. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "model" => "claude-3-5-sonnet-latest",
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["image_url", "prompt"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Anthropic Credential",
-          description: "Anthropic credential. Bound at run time per user."
-        ),
-      "model" => %{
-        "type" => "string",
-        "title" => "Model",
-        "default" => "claude-3-5-sonnet-latest"
-      },
-      "image_url" => %{
-        "type" => "string",
-        "title" => "Image URL",
-        "description" => "URL or base64 data URI of the image to analyze"
-      },
-      "prompt" => %{
-        "type" => "string",
-        "title" => "Analysis Prompt",
-        "description" => "What do you want Claude to do with the image?"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("model", label: "Model", default: "claude-3-5-sonnet-latest"),
+    Fields.string("image_url",
+      label: "Image URL",
+      required?: true,
+      description: "URL or base64 data URI of the image to analyze"
+    ),
+    Fields.string("prompt",
+      label: "Analysis Prompt",
+      required?: true,
+      description: "What do you want Claude to do with the image?"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -61,9 +46,6 @@ defmodule Fizz.Steps.Executors.AnthropicVisionAnalysis do
       "usage" => %{"type" => "object"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(_config, _input, _ctx) do

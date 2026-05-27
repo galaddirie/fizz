@@ -7,7 +7,7 @@ defmodule Fizz.Steps.Executors.JsonParser do
     icon: "hero-code-bracket",
     kind: :transform
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(_config, input, _context) do

@@ -2,7 +2,6 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
   @moduledoc false
 
   alias Fizz.Graph
-  alias Fizz.Integrations.{Catalog, OperationExecutor}
   alias Fizz.Steps.Registry
   alias Fizz.Steps.Type
   alias Fizz.Workflows.WorkflowDefinitionVersion
@@ -28,21 +27,19 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
     steps
     |> Enum.reduce_while({:ok, %{}}, fn step, {:ok, acc} ->
       with {:ok, type} <- Registry.get(step.type_id),
-           {:ok, executor} <- Type.executor_module(type),
-           {:ok, operation_metadata} <- operation_metadata(step.type_id, executor) do
-        normalized_step =
-          %{
-            id: step.id,
-            type_id: step.type_id,
-            name: step.name,
-            config: step.config,
-            executor: executor,
-            step_kind: type.step_kind,
-            node_role: type.node_role,
-            config_schema: type.config_schema,
-            subnode_inputs: type.subnode_inputs
-          }
-          |> Map.merge(operation_metadata)
+           {:ok, executor} <- Type.executor_module(type) do
+        normalized_step = %{
+          id: step.id,
+          type_id: step.type_id,
+          name: step.name,
+          config: step.config,
+          executor: executor,
+          step_kind: type.step_kind,
+          node_role: type.node_role,
+          config_schema: type.config_schema,
+          subnode_inputs: type.subnode_inputs,
+          retry: type.retry
+        }
 
         {:cont, {:ok, Map.put(acc, step.id, normalized_step)}}
       else
@@ -61,14 +58,6 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
       end
     end)
   end
-
-  defp operation_metadata(type_id, OperationExecutor) do
-    with {:ok, operation} <- Catalog.operation_for_step_type(type_id) do
-      {:ok, %{operation_id: operation.id, operation_version: operation.version}}
-    end
-  end
-
-  defp operation_metadata(_type_id, _executor), do: {:ok, %{}}
 
   defp normalize_connections(connections) do
     {:ok,

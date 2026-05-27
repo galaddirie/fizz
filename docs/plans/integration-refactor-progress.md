@@ -13,8 +13,8 @@ dynamic field resolver work and the credential/slot cleanup are now committed.
 - Credential field checkpoint: `d824f3d Replace slot bindings with credential bindings`
 - Operation metadata checkpoint: `4944cce Refactor Google Sheets operations & credential UI`
 - Current committed scope: Phases 0 through 5 plus the credential field ownership cleanup and Google Sheets operation metadata ownership
-- Current uncommitted scope: normalized operation errors, Google Sheets client error normalization, retry policy metadata, and shared `Fizz.Fields` ownership for operation/credential fields
-- Recommended next slice after this diff: runner persistence/resume design for durable operation retries
+- Current uncommitted scope: collapse executable operations into step types, move retry/error handling into `Fizz.Workflows`, and make `Fizz.Fields` the source of truth for step fields
+- Recommended next slice after this diff: migrate the next integration family to typed step fields and add any missing Vue typed-field affordances
 
 ## What Changed Since The Previous Handoff
 
@@ -95,15 +95,19 @@ mix precommit
 `mix precommit` passed with `503 tests, 0 failures`. `mix assets.build` passed with the
 same existing third-party Vite/Tailwind warnings.
 
-### Current Uncommitted Slice - Shared Fields, Operation Errors, And Retry Metadata
+### Current Uncommitted Slice - Shared Fields, Step Errors, And Step Retry
 
-This slice continues Phase 6 and removes the remaining credential-specific field/schema
-path:
+This slice continues Phase 6 and removes the operation execution layer. There is now one
+executable primitive: `Fizz.Steps.Type`, declared by step modules and run by the
+workflow runner. Integrations remain provider/product/resolver/trigger/client/auth
+metadata.
+
+Field ownership changes:
 
 - Added `Fizz.Fields` as the public field API and `Fizz.Fields.Definition` as the
   canonical typed field struct.
 - JSON Schema plus per-field `"ui"` metadata is now adapter output from `Fizz.Fields`,
-  not the source of truth for migrated definitions.
+  not the declaration source for migrated definitions.
 - Added `Fizz.Fields.Credential` as the credential field handler. It owns credential
   declaration maps, option lookup, readiness descriptors, auto-binding, runtime binding
   lookup, and API-key secret extraction.
@@ -113,41 +117,36 @@ path:
   `Fizz.Integrations.CredentialRequirement`, and
   `Fizz.Integrations.Definition.Credential`.
 - Removed the credential catalog kind. Provider definitions now expose
-  `credential_fields`, and operation definitions expose typed `fields`.
-- Google Sheets append/read operation definitions now use `fields` as the source of
-  truth for credential, resource locator, and resource mapper schema metadata.
-- Legacy executor modules still emit JSON Schema, but credential field construction now
-  goes through `Fizz.Fields.credential/2`, `Fizz.Fields.default_value/1`, and
-  `Fizz.Fields.to_schema_property/1`.
+  `credential_fields`, and step definitions expose typed `fields`.
+- Google Sheets append/read steps now use `fields` as the source of truth for credential,
+  resource locator, and resource mapper schema metadata.
+- Raw step `@config_schema` declarations are gone; `Fizz.Fields.to_schema/1` generates
+  JSON Schema adapter output.
 
-The same uncommitted slice also continues operation-error work:
+Execution ownership changes:
 
-- Added `Fizz.Integrations.OperationError` as the normalized runtime operation error
-  shape.
-- Added richer `Fizz.Integrations.RetryPolicy` metadata: max attempts, backoff kind,
-  initial/max delay, and retryable categories/codes.
-- `OperationExecutor` normalizes raw operation module failures before returning them to
-  the workflow runner.
-- Added `Fizz.Workflows.StepExecutionError` so Runic failed runnables preserve the
-  original executor reason plus step and operation identifiers.
-- Added `Fizz.Workflows.Runner.OperationRetry` and worker handling for retryable
-  `OperationError` values. The runner now persists retry state on `workflow_runs.error`,
-  writes an `operation_retry_v1` durable timer, sleeps the run when there is no other
-  active work, and resumes the same runnable with incremented attempt metadata.
-- Google Sheets client failures now return `OperationError` for validation, credential,
-  HTTP rate-limit, transient provider, and transport/network failures.
-- Google Sheets operation definitions publish retry metadata for rate-limit, network,
-  and transient provider failures.
-- Google Sheets field resolvers still return UI-friendly field error codes while reading
-  the normalized operation error shape.
+- Deleted `Fizz.Integrations.Operation`, `OperationDefinition`, `OperationExecutor`,
+  `StepTypeAdapter`, `OperationError`, and integration-owned retry policy modules.
+- Deleted operation catalog APIs and manifest operation/version generation.
+- Added `Fizz.Steps.Executor` as the runtime executor behavior/helper.
+- Added `Fizz.Workflows.StepError` and `Fizz.Workflows.RetryPolicy` as generic workflow
+  runtime primitives.
+- `Fizz.Workflows.StepExecutionError` now preserves the original reason plus step ID,
+  step type ID, and retry policy. It no longer carries operation metadata.
+- Added `Fizz.Workflows.Runner.StepRetry`, which persists `step_retry_v1` timers and
+  retries only normalized `%Fizz.Workflows.StepError{}` failures with a compiled retry
+  policy.
+- Google Sheets append/read modules are normal step executor modules using
+  `Fizz.Steps.Definition`; their client/resolver/domain code remains under
+  integrations.
+- `Google.Sheets.actions/0` returns step type IDs.
 
 Validation completed so far:
 
 ```sh
-mix test test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/operation_executor_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/client_test.exs test/fizz/integrations/google/sheets/columns_resolver_test.exs test/fizz/integrations/operation_error_test.exs test/fizz/integrations/retry_policy_test.exs
-mix test test/fizz/fields_test.exs test/fizz/fields/credential_test.exs test/fizz/fields/credential_options_test.exs test/fizz/fields/credential_secret_test.exs test/fizz/fields/credential_workos_oauth_autobind_test.exs test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/dynamic_resolver_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/columns_resolver_test.exs test/fizz/steps/credential_field_test.exs test/fizz/steps/registry_operation_definitions_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/runtime/context_builder_test.exs test/fizz/workflows/draft_validator_test.exs test/fizz/triggers/registration_manager_test.exs test/fizz/triggers/basic_triggers_integration_test.exs test/fizz_web/controllers/triggers/webhook_controller_test.exs
-mix test test/fizz/workflows/runner/worker_failure_test.exs
-mix test test/fizz/integrations/operation_executor_test.exs test/fizz/integrations/operation_error_test.exs test/fizz/integrations/retry_policy_test.exs test/fizz/workflows/runner/worker_test.exs test/fizz/workflows/timer_poller_test.exs test/fizz/workflows/rehydration_test.exs
+mix compile --warnings-as-errors
+mix test test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_guardrails_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/fields_test.exs test/fizz/workflows/step_error_test.exs test/fizz/workflows/retry_policy_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/runner/worker_failure_test.exs
+mix test
 ```
 
 ## Current Architecture Decisions
@@ -195,7 +194,7 @@ belongs to provider/auth modules.
 - Token and vault I/O still belong to `Fizz.Integrations.resolve_auth_for_execution/4`
   and provider-specific auth helpers, not to field option resolution.
 - Provider credential creation forms are declared as `provider.credential_fields`, using
-  the same `Fizz.Fields.Definition` structs as operation fields.
+  the same `Fizz.Fields.Definition` structs as step fields.
 - Credential catalog entries, credential `config_schema`, and credential `ui_schema` are
   gone.
 
@@ -232,20 +231,20 @@ callbacks are enough.
 
 ### JSON Schema Plus `ui`
 
-Keep the JSON Schema plus `ui` extension pattern, but treat it as a validated Fizz
-contract rather than free-form UI hints.
+Keep the JSON Schema plus `ui` extension pattern, but treat it as generated adapter
+output from `Fizz.Fields`, not as the declaration source.
 
 Reasons to keep it:
 
 - the editor already consumes JSON-like schemas directly
-- operation definitions can publish the same shape to Vue without translation
+- step definitions can publish the same shape to Vue without translation
 - resource mapper and locator metadata maps cleanly to n8n's field-description model
 - it keeps frontend dispatch generic while server structs own construction and validation
 
 Rules going forward:
 
 - build credential fields with `Fizz.Fields.credential/2`
-- avoid manually duplicating credential metadata in `@default_config` and `@config_schema`
+- avoid manually declaring raw step config schemas
 - put rendering metadata on `Fizz.Fields.Definition` values and let
   `Fizz.Fields.to_schema/1` write `"ui"` adapter metadata
 - validate supported components and resolver metadata at catalog/step registration time
@@ -254,18 +253,15 @@ Rules going forward:
 
 ### Phase 6 - Execution Semantics
 
-The first durable retry slice has started. Operation modules now receive typed execution
-context through `OperationExecutor`; operation failures normalize into
-`OperationError`; retry policies are declared on operation definitions; and the runner
-can persist retryable operation failures through `workflow_runs.error` plus durable
-retry timers that resume the same runnable.
+The operation execution layer has been collapsed into step execution. Step modules now
+declare fields, retry policy, and metadata through `Fizz.Steps.Definition`; the workflow
+runner owns normalized `StepError` values and durable `StepRetry` timers.
 
 Recommended order:
 
-1. Finish any remaining Google Sheets action-level error normalization gaps.
-2. Add crash/passivation recovery coverage for pending operation retry timers.
-3. Decide whether durable operation retries should remain on the existing timer/worker
-   model or move into Oban.
+1. Migrate the next integration family to typed step fields.
+2. Add a first HTTP step on the same step/retry primitives, using `Req`.
+3. Harden crash/passivation coverage for pending step retry timers.
 4. Add provider/network-domain retry policy declarations beyond Google Sheets.
 
 Likely files:
@@ -274,11 +270,11 @@ Likely files:
 - `lib/fizz/fields/definition.ex`
 - `lib/fizz/fields/credential.ex`
 - `lib/fizz/workflows/execution_context.ex`
-- `lib/fizz/integrations/operation.ex`
-- `lib/fizz/integrations/operation_executor.ex`
-- `lib/fizz/integrations/operation_error.ex`
-- `lib/fizz/integrations/retry_policy.ex`
-- `lib/fizz/integrations/operation_definition.ex`
+- `lib/fizz/workflows/step_error.ex`
+- `lib/fizz/workflows/retry_policy.ex`
+- `lib/fizz/workflows/runner/step_retry.ex`
+- `lib/fizz/steps/definition.ex`
+- `lib/fizz/steps/executor.ex`
 - `lib/fizz/integrations/definition.ex`
 - `lib/fizz/integrations/manifest.ex`
 - `lib/fizz/integrations/google/sheets/actions/append_row.ex`
@@ -291,16 +287,15 @@ Likely tests:
 - `test/fizz/fields/credential_test.exs`
 - `test/fizz/fields/credential_options_test.exs`
 - `test/fizz/workflows/execution_context_test.exs`
-- `test/fizz/integrations/operation_executor_test.exs`
-- `test/fizz/integrations/operation_error_test.exs`
-- `test/fizz/integrations/retry_policy_test.exs`
+- `test/fizz/workflows/step_error_test.exs`
+- `test/fizz/workflows/retry_policy_test.exs`
 - `test/fizz/integrations/catalog_validation_test.exs`
 - `test/fizz/integrations/google/sheets/client_test.exs`
 
 ### Phase 7 - Testing Harness And Scaffolding
 
 - Add an integration test harness with workflow fixtures, pinned outputs, credential
-  fixtures, `Req.Test` expectations, and direct operation execution.
+  fixtures, `Req.Test` expectations, and direct step execution.
 - Colocate integration fixtures beside integration modules.
 - Add `mix fizz.gen.integration <provider>.<resource>`.
 - Replace brittle tests that rely on `Process.sleep`.

@@ -11,46 +11,30 @@ defmodule Fizz.Steps.Executors.NotionCreatePage do
     icon: "/images/notion.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.NotionOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(NotionOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Notion Integration",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["database_id", "title"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Notion Integration"),
-      "database_id" => %{
-        "type" => "string",
-        "title" => "Database ID"
-      },
-      "title" => %{
-        "type" => "string",
-        "title" => "Page Title"
-      },
-      "properties" => %{
-        "type" => "object",
-        "title" => "Additional Properties",
-        "description" => "Map of Notion property name → value"
-      },
-      "content" => %{
-        "type" => "string",
-        "title" => "Page Body Content",
-        "description" => "Markdown-style text for the page body blocks"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("database_id", label: "Database ID", required?: true),
+    Fields.string("title", label: "Page Title", required?: true),
+    Fields.json("properties",
+      label: "Additional Properties",
+      description: "Map of Notion property name -> value"
+    ),
+    Fields.string("content",
+      label: "Page Body Content",
+      description: "Markdown-style text for the page body blocks"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

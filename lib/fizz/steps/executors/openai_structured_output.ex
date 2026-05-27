@@ -13,25 +13,22 @@ defmodule Fizz.Steps.Executors.OpenAIStructuredOutput do
     kind: :transform,
     role: :subnode
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["json_schema"],
-    "properties" => %{
-      "json_schema" => %{
-        "type" => "object",
-        "title" => "Output JSON Schema",
-        "description" => "JSON Schema defining the expected structured response"
-      },
-      "strict" => %{
-        "type" => "boolean",
-        "title" => "Strict Mode",
-        "default" => true,
-        "description" => "Enforce strict schema adherence"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.json("json_schema",
+      label: "Output JSON Schema",
+      required?: true,
+      description: "JSON Schema defining the expected structured response"
+    ),
+    Fields.boolean("strict",
+      label: "Strict Mode",
+      default: true,
+      description: "Enforce strict schema adherence"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",

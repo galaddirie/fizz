@@ -11,43 +11,26 @@ defmodule Fizz.Steps.Executors.GoogleSlidesCreatePresentation do
     icon: "/images/google_slides.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Google Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["title"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "Google Account"
-        ),
-      "title" => %{
-        "type" => "string",
-        "title" => "Presentation Title"
-      },
-      "template_id" => %{
-        "type" => "string",
-        "title" => "Template Presentation ID",
-        "description" => "Copy from this Google Slides file instead of creating blank"
-      },
-      "folder_id" => %{
-        "type" => "string",
-        "title" => "Destination Folder ID"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("title", label: "Presentation Title", required?: true),
+    Fields.string("template_id",
+      label: "Template Presentation ID",
+      description: "Copy from this Google Slides file instead of creating blank"
+    ),
+    Fields.string("folder_id", label: "Destination Folder ID")
+  ]
 
   @output_schema %{
     "type" => "object",

@@ -1,7 +1,7 @@
-defmodule Fizz.Integrations.RetryPolicyTest do
+defmodule Fizz.Workflows.RetryPolicyTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.{OperationError, RetryPolicy}
+  alias Fizz.Workflows.{StepError, RetryPolicy}
 
   describe "validate!/1" do
     test "accepts a complete retry policy" do
@@ -32,10 +32,10 @@ defmodule Fizz.Integrations.RetryPolicyTest do
   end
 
   describe "retryable?/3" do
-    test "matches retryable operation error categories while attempts remain" do
+    test "matches retryable step error categories while attempts remain" do
       policy = %RetryPolicy{max_attempts: 3, retry_on: [:rate_limit, :network]}
-      rate_limited = %OperationError{category: :rate_limit, retryable?: true}
-      validation = %OperationError{category: :validation, retryable?: false}
+      rate_limited = %StepError{category: :rate_limit, retryable?: true}
+      validation = %StepError{category: :validation, retryable?: false}
 
       assert RetryPolicy.retryable?(policy, rate_limited, 1)
       assert RetryPolicy.retryable?(policy, rate_limited, 2)
@@ -53,7 +53,7 @@ defmodule Fizz.Integrations.RetryPolicyTest do
         max_delay_ms: 5_000
       }
 
-      error = %OperationError{category: :rate_limit, retryable?: true, retry_after_ms: 2_000}
+      error = %StepError{category: :rate_limit, retryable?: true, retry_after_ms: 2_000}
 
       assert RetryPolicy.next_delay_ms(policy, error, 1) == 2_000
     end
@@ -73,7 +73,7 @@ defmodule Fizz.Integrations.RetryPolicyTest do
         max_delay_ms: 1_000
       }
 
-      error = %OperationError{category: :network, retryable?: true}
+      error = %StepError{category: :network, retryable?: true}
 
       assert RetryPolicy.next_delay_ms(exponential, error, 1) == 250
       assert RetryPolicy.next_delay_ms(exponential, error, 3) == 1_000

@@ -11,63 +11,42 @@ defmodule Fizz.Steps.Executors.OpenAIImageGeneration do
     icon: "/images/openai.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.OpenAIApiKey
   alias Fizz.Fields
 
   @credential_field Fields.credential(OpenAIApiKey.provider_id(), :api_key,
                       key: "credential_ref",
+                      label: "OpenAI Credential",
+                      description: "OpenAI credential. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "model" => "dall-e-3",
-    "size" => "1024x1024",
-    "quality" => "standard",
-    "n" => 1,
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["prompt"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "OpenAI Credential",
-          description: "OpenAI credential. Bound at run time per user."
-        ),
-      "prompt" => %{
-        "type" => "string",
-        "title" => "Prompt",
-        "description" => "Description of the image to generate"
-      },
-      "model" => %{
-        "type" => "string",
-        "title" => "Model",
-        "enum" => ["dall-e-3", "dall-e-2"],
-        "default" => "dall-e-3"
-      },
-      "size" => %{
-        "type" => "string",
-        "title" => "Size",
-        "enum" => ["1024x1024", "1792x1024", "1024x1792"],
-        "default" => "1024x1024"
-      },
-      "quality" => %{
-        "type" => "string",
-        "title" => "Quality",
-        "enum" => ["standard", "hd"],
-        "default" => "standard"
-      },
-      "n" => %{
-        "type" => "integer",
-        "title" => "Number of Images",
-        "default" => 1
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("prompt",
+      label: "Prompt",
+      required?: true,
+      description: "Description of the image to generate"
+    ),
+    Fields.select("model",
+      label: "Model",
+      default: "dall-e-3",
+      options: Fields.options(~w(dall-e-3 dall-e-2))
+    ),
+    Fields.select("size",
+      label: "Size",
+      default: "1024x1024",
+      options: Fields.options(~w(1024x1024 1792x1024 1024x1792))
+    ),
+    Fields.select("quality",
+      label: "Quality",
+      default: "standard",
+      options: Fields.options(~w(standard hd))
+    ),
+    Fields.number("n", label: "Number of Images", default: 1)
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -80,9 +59,6 @@ defmodule Fizz.Steps.Executors.OpenAIImageGeneration do
       "images" => %{"type" => "array", "description" => "All generated image URLs"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(_config, _input, _ctx) do

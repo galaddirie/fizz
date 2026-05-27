@@ -1,10 +1,10 @@
-defmodule Fizz.Integrations.OperationError do
+defmodule Fizz.Workflows.StepError do
   @moduledoc """
-  Normalized runtime error returned by integration operations.
+  Normalized runtime error returned by step executors.
 
-  Provider clients can still preserve the raw response or exception in `:body`
-  and `:details`, but workflow execution should make decisions from the stable
-  `:category`, `:code`, `:retryable?`, and `:retry_after_ms` fields.
+  Workflow retry decisions are made from `category`, `code`, `retryable?`, and
+  `retry_after_ms`. Step implementations may keep provider-specific details in
+  `body` or `details`, but the runner does not inspect those fields.
   """
 
   @derive {Jason.Encoder,
@@ -42,13 +42,19 @@ defmodule Fizz.Integrations.OperationError do
           | :validation
           | :unknown
 
+  @type source :: %{
+          optional(:kind) => :step | atom() | String.t(),
+          optional(:id) => String.t(),
+          optional(:version) => pos_integer() | nil
+        }
+
   @type t :: %__MODULE__{
           code: atom(),
           category: category(),
           message: String.t(),
           status: pos_integer() | nil,
           body: term(),
-          source: atom() | String.t() | nil,
+          source: source() | atom() | String.t() | nil,
           retry_after_ms: non_neg_integer() | nil,
           retryable?: boolean(),
           details: map()
@@ -132,7 +138,7 @@ defmodule Fizz.Integrations.OperationError do
     |> base_attrs(
       :credential_ref_required,
       :credential,
-      "A credential must be selected before this operation can run"
+      "A credential must be selected before this step can run"
     )
     |> new()
   end
@@ -166,7 +172,7 @@ defmodule Fizz.Integrations.OperationError do
 
   def normalize(reason, opts) do
     opts
-    |> base_attrs(:operation_failed, :unknown, inspect(reason))
+    |> base_attrs(:step_failed, :unknown, inspect(reason))
     |> Map.put(:details, %{reason: reason})
     |> new()
   end
@@ -192,7 +198,7 @@ defmodule Fizz.Integrations.OperationError do
   defp message(attrs, _code, _category) do
     case Map.get(attrs, :message) do
       value when is_binary(value) and value != "" -> value
-      _ -> "Operation failed"
+      _ -> "Step failed"
     end
   end
 
@@ -212,7 +218,7 @@ defmodule Fizz.Integrations.OperationError do
   defp code_for_category(:not_found), do: :not_found
   defp code_for_category(:validation), do: :validation_failed
   defp code_for_category(:credential), do: :credential_error
-  defp code_for_category(_category), do: :operation_failed
+  defp code_for_category(_category), do: :step_failed
 
   defp http_code(status) when status in [401], do: :unauthorized
   defp http_code(status) when status in [403], do: :forbidden
@@ -243,8 +249,7 @@ defmodule Fizz.Integrations.OperationError do
   defp response_message(_body, status), do: "HTTP #{status}"
 
   defp retry_after_ms(headers) when is_list(headers) do
-    headers
-    |> Enum.find_value(fn
+    Enum.find_value(headers, fn
       {"retry-after", value} -> parse_retry_after(value)
       {"Retry-After", value} -> parse_retry_after(value)
       _header -> nil

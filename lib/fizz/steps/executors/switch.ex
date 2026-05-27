@@ -42,41 +42,25 @@ defmodule Fizz.Steps.Executors.Switch do
     icon: "hero-list-bullet",
     kind: :control_flow
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["value", "cases"],
-    "properties" => %{
-      "value" => %{
-        "type" => "string",
-        "title" => "Value Expression",
-        "description" => "Expression to evaluate and match (e.g., {{ json.type }})"
-      },
-      "cases" => %{
-        "type" => "array",
-        "title" => "Cases",
-        "items" => %{
-          "type" => "object",
-          "properties" => %{
-            "match" => %{
-              "type" => "string",
-              "title" => "Match Value"
-            },
-            "output" => %{
-              "type" => "string",
-              "title" => "Output Name"
-            }
-          }
-        },
-        "description" => "List of cases to match against"
-      },
-      "default_output" => %{
-        "type" => "string",
-        "title" => "Default Output",
-        "default" => "default",
-        "description" => "Output when no case matches"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("value",
+      label: "Value Expression",
+      required?: true,
+      description: "Expression to evaluate and match (e.g., {{ json.type }})"
+    ),
+    Fields.json("cases",
+      label: "Cases",
+      required?: true,
+      description: "List of cases to match against"
+    ),
+    Fields.string("default_output",
+      label: "Default Output",
+      default: "default",
+      description: "Output when no case matches"
+    )
+  ]
 
   @input_schema %{"description" => "Any data"}
 
@@ -84,7 +68,7 @@ defmodule Fizz.Steps.Executors.Switch do
     "description" => "Tagged tuple {:branch, output_name, input_data}"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, input, _ctx) do

@@ -11,60 +11,31 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
     icon: "/images/github.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GitHubOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GitHubOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "GitHub Account",
+                      description: "GitHub account. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "base" => "main",
-    "draft" => false,
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["repository", "title", "head", "base"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "GitHub Account",
-          description: "GitHub account. Bound at run time per user."
-        ),
-      "repository" => %{
-        "type" => "string",
-        "title" => "Repository"
-      },
-      "title" => %{
-        "type" => "string",
-        "title" => "PR Title"
-      },
-      "body" => %{
-        "type" => "string",
-        "title" => "PR Description (Markdown)"
-      },
-      "head" => %{
-        "type" => "string",
-        "title" => "Head Branch",
-        "description" => "Branch with changes"
-      },
-      "base" => %{
-        "type" => "string",
-        "title" => "Base Branch",
-        "default" => "main"
-      },
-      "draft" => %{
-        "type" => "boolean",
-        "title" => "Open as Draft",
-        "default" => false
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("repository", label: "Repository", required?: true),
+    Fields.string("title", label: "PR Title", required?: true),
+    Fields.string("body", label: "PR Description (Markdown)"),
+    Fields.string("head",
+      label: "Head Branch",
+      required?: true,
+      description: "Branch with changes"
+    ),
+    Fields.string("base", label: "Base Branch", required?: true, default: "main"),
+    Fields.boolean("draft", label: "Open as Draft", default: false)
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -74,9 +45,6 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
       "state" => %{"type" => "string"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(_config, _input, _ctx) do

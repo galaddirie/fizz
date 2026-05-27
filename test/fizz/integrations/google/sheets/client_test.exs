@@ -2,7 +2,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.OauthConnection
-  alias Fizz.Integrations.OperationError
+  alias Fizz.Workflows.StepError
   alias Fizz.Integrations.Google.Sheets.Client
   alias Fizz.Repo
   alias Fizz.Workflows.ExecutionContext
@@ -119,7 +119,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
 
   describe "error normalization" do
     test "returns operation errors for missing required params" do
-      assert {:error, %OperationError{} = error} = Client.get_sheet_names(%{}, %{})
+      assert {:error, %StepError{} = error} = Client.get_sheet_names(%{}, %{})
 
       assert error.code == :missing_param
       assert error.category == :validation
@@ -127,7 +127,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
     end
 
     test "returns operation errors for missing credential refs" do
-      assert {:error, %OperationError{} = error} =
+      assert {:error, %StepError{} = error} =
                Client.get_sheet_names(%{"spreadsheet_id" => "sheet_123"}, %{})
 
       assert error.code == :credential_ref_required
@@ -156,7 +156,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
         |> Req.Test.json(%{"error" => %{"message" => "quota exceeded"}})
       end)
 
-      assert {:error, %OperationError{} = error} =
+      assert {:error, %StepError{} = error} =
                Client.get_sheet_names(
                  client_params(scope, connection),
                  execution_context(scope)
@@ -186,7 +186,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
         |> Req.Test.json(%{"error" => %{"message" => "temporarily unavailable"}})
       end)
 
-      assert {:error, %OperationError{} = error} =
+      assert {:error, %StepError{} = error} =
                Client.get_sheet_names(
                  client_params(scope, connection),
                  execution_context(scope)
@@ -212,7 +212,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
         Req.Test.transport_error(conn, :timeout)
       end)
 
-      assert {:error, %OperationError{} = error} =
+      assert {:error, %StepError{} = error} =
                Client.get_sheet_names(
                  client_params(scope, connection),
                  execution_context(scope)

@@ -11,36 +11,22 @@ defmodule Fizz.Steps.Executors.OutlookTrigger do
     icon: "/images/microsoft_outlook.svg",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(MicrosoftOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "Microsoft Account",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field, label: "Microsoft Account"),
-      "folder" => %{
-        "type" => "string",
-        "title" => "Folder",
-        "default" => "Inbox"
-      },
-      "from_filter" => %{
-        "type" => "string",
-        "title" => "From Filter"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("folder", label: "Folder", default: "Inbox"),
+    Fields.string("from_filter", label: "From Filter")
+  ]
 
   @output_schema %{
     "type" => "object",

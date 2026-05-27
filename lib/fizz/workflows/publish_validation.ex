@@ -3,7 +3,7 @@ defmodule Fizz.Workflows.PublishValidation do
 
   alias Fizz.Graph
   alias Fizz.Fields.Credential
-  alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
+  alias Fizz.Steps.Executor, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
   alias Fizz.Steps.Type
   alias Fizz.Workflows.Compiler.ExpressionCompiler

@@ -7,7 +7,7 @@ defmodule Fizz.Steps.Executors.DataFilter do
     icon: "hero-funnel",
     kind: :transform
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, input, _context) do

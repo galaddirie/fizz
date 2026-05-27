@@ -7,7 +7,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias Fizz.Fields.Credential
   alias Fizz.Integrations.DynamicResolver
   alias Fizz.Steps
-  alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
+  alias Fizz.Steps.Executor, as: StepExecutorBehaviour
   alias Fizz.Steps.Type
   alias Fizz.Triggers
   alias Fizz.Workflows

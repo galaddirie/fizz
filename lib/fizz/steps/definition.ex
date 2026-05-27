@@ -17,19 +17,16 @@ defmodule Fizz.Steps.Definition do
           icon: "hero-globe-alt",
           kind: :action
 
-        # Define schemas as module attributes
-        @config_schema %{
-          "type" => "object",
-          "required" => ["url"],
-          "properties" => %{
-            "url" => %{"type" => "string", "title" => "URL"}
-          }
-        }
+        alias Fizz.Fields
+
+        @fields [
+          Fields.string("url", label: "URL", required?: true)
+        ]
 
         @input_schema %{"type" => "object"}
         @output_schema %{"type" => "object"}
 
-        @behaviour Fizz.Steps.Executors.Behaviour
+        @behaviour Fizz.Steps.Executor
 
         @impl true
         def execute(config, input, context) do
@@ -46,21 +43,24 @@ defmodule Fizz.Steps.Definition do
   - `:icon` (required) - Icon identifier (Heroicon name like "hero-globe-alt" or static path like "/images/openai.svg")
   - `:kind` (required) - One of :action, :trigger, :control_flow, :transform
   - `:role` (optional) - One of :root, :subnode (default: :root)
+  - `:provider` (optional) - Provider ID for integration-owned steps
+  - `:integration` (optional) - Integration ID for integration-owned steps
+  - `:version` (optional) - Step definition version (default: 1)
 
   ## Definition Attributes
 
   After `use`, you can redefine these module attributes:
 
-  - `@config_schema` - JSON Schema for step configuration (what users fill in)
-  - `@default_config` - Default configuration map (optional)
+  - `@fields` - Typed field definitions for step configuration
+  - `@retry` - Durable retry policy for runtime errors
   - `@input_schema` - JSON Schema describing expected input
   - `@output_schema` - JSON Schema describing output
   - `@subnode_inputs` - Typed subnode input handles accepted by root nodes (optional)
 
   The macro defaults these attributes to:
 
-  - `@config_schema` - `%{"type" => "object", "properties" => %{}}`
-  - `@default_config` - `%{}`
+  - `@fields` - `[]`
+  - `@retry` - `%Fizz.Workflows.RetryPolicy{}`
   - `@input_schema` - `%{"type" => "object"}`
   - `@output_schema` - `%{"type" => "object"}`
   - `@subnode_inputs` - `[]`
@@ -80,6 +80,9 @@ defmodule Fizz.Steps.Definition do
 
     kind = Keyword.fetch!(opts, :kind)
     role = Keyword.get(opts, :role, :root)
+    provider = Keyword.get(opts, :provider)
+    integration = Keyword.get(opts, :integration)
+    version = Keyword.get(opts, :version, 1)
 
     unless kind in @valid_kinds do
       raise ArgumentError, "kind must be one of #{inspect(@valid_kinds)}, got: #{inspect(kind)}"
@@ -104,6 +107,9 @@ defmodule Fizz.Steps.Definition do
       Module.register_attribute(__MODULE__, :step_icon, persist: true)
       Module.register_attribute(__MODULE__, :step_kind, persist: true)
       Module.register_attribute(__MODULE__, :step_role, persist: true)
+      Module.register_attribute(__MODULE__, :step_provider, persist: true)
+      Module.register_attribute(__MODULE__, :step_integration, persist: true)
+      Module.register_attribute(__MODULE__, :step_version, persist: true)
 
       @step_id unquote(opts[:id])
       @step_name unquote(opts[:name])
@@ -112,17 +118,20 @@ defmodule Fizz.Steps.Definition do
       @step_icon unquote(opts[:icon])
       @step_kind unquote(opts[:kind])
       @step_role unquote(role)
+      @step_provider unquote(provider)
+      @step_integration unquote(integration)
+      @step_version unquote(version)
 
-      # Default schemas (can be overridden)
-      @config_schema %{"type" => "object", "properties" => %{}}
-      @default_config %{}
+      # Default declarations (can be overridden)
+      @fields []
+      @retry %Fizz.Workflows.RetryPolicy{}
       @input_schema %{"type" => "object"}
       @output_schema %{"type" => "object"}
       @subnode_inputs []
 
       # Allow redefinition
-      Module.register_attribute(__MODULE__, :config_schema, accumulate: false)
-      Module.register_attribute(__MODULE__, :default_config, accumulate: false)
+      Module.register_attribute(__MODULE__, :fields, accumulate: false)
+      Module.register_attribute(__MODULE__, :retry, accumulate: false)
       Module.register_attribute(__MODULE__, :input_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :output_schema, accumulate: false)
       Module.register_attribute(__MODULE__, :subnode_inputs, accumulate: false)
@@ -148,20 +157,27 @@ defmodule Fizz.Steps.Definition do
       Returns the step type definition struct for this executor.
       """
       def __step_definition__ do
+        fields = Fizz.Fields.validate!(@fields)
+
         %Fizz.Steps.Type{
           id: @step_id,
+          version: @step_version,
           name: @step_name,
           category: @step_category,
           description: @step_description,
           icon: @step_icon,
+          provider: @step_provider,
+          integration: @step_integration,
           node_role: @step_role,
           step_kind: @step_kind,
           executor: Atom.to_string(__MODULE__),
-          config_schema: @config_schema,
-          default_config: @default_config,
+          fields: fields,
+          config_schema: Fizz.Fields.to_schema(fields),
+          default_config: Fizz.Fields.defaults(fields),
           input_schema: @input_schema,
           output_schema: @output_schema,
           subnode_inputs: @subnode_inputs,
+          retry: Fizz.Workflows.RetryPolicy.validate!(@retry),
           inserted_at: nil,
           updated_at: nil
         }
@@ -176,7 +192,7 @@ defmodule Fizz.Steps.Definition do
       Returns the default configuration for this step type.
       """
       def default_config do
-        @default_config
+        Fizz.Fields.defaults(@fields)
       end
 
       defoverridable default_config: 0

@@ -61,29 +61,23 @@ defmodule Fizz.Steps.Executors.Join do
     icon: "hero-arrows-pointing-in",
     kind: :control_flow
 
-  @config_schema %{
-    "type" => "object",
-    "properties" => %{
-      "mode" => %{
-        "type" => "string",
-        "title" => "Join Mode",
-        "enum" => ["wait_all", "zip_nil", "zip_shortest", "zip_cycle", "cartesian"],
-        "default" => "zip_nil",
-        "description" => "How to combine values from multiple branches"
-      },
-      "flatten" => %{
-        "type" => "boolean",
-        "title" => "Flatten Output",
-        "default" => false,
-        "description" => "Flatten the output list one level"
-      }
-    }
-  }
+  alias Fizz.Fields
 
-  @default_config %{
-    "mode" => "zip_nil",
-    "flatten" => false
-  }
+  @supported_modes ~w(wait_all zip_nil zip_shortest zip_cycle cartesian)
+
+  @fields [
+    Fields.select("mode",
+      label: "Join Mode",
+      default: "zip_nil",
+      description: "How to combine values from multiple branches",
+      options: Fields.options(@supported_modes)
+    ),
+    Fields.boolean("flatten",
+      label: "Flatten Output",
+      default: false,
+      description: "Flatten the output list one level"
+    )
+  ]
 
   @input_schema %{
     "type" => "array",
@@ -94,9 +88,7 @@ defmodule Fizz.Steps.Executors.Join do
     "description" => "Combined values according to join mode"
   }
 
-  @behaviour Fizz.Steps.Executors.Behaviour
-
-  @supported_modes ~w(wait_all zip_nil zip_shortest zip_cycle cartesian)
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, input, _ctx) do
@@ -128,11 +120,6 @@ defmodule Fizz.Steps.Executors.Join do
     else
       {:error, [mode: "must be one of: #{Enum.join(@supported_modes, ", ")}"]}
     end
-  end
-
-  @impl true
-  def default_config do
-    @default_config
   end
 
   # Normalize input to ensure it's a list of branch values

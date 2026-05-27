@@ -11,54 +11,33 @@ defmodule Fizz.Steps.Executors.GitHubCreateIssue do
     icon: "/images/github.svg",
     kind: :action
 
-  @behaviour Fizz.Steps.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   alias Fizz.Integrations.Providers.GitHubOAuth
   alias Fizz.Fields
 
   @credential_field Fields.credential(GitHubOAuth.provider_id(), :oauth,
                       key: "credential_ref",
+                      label: "GitHub Account",
+                      description: "GitHub account. Bound at run time per user.",
                       requirement_key: "auth"
                     )
 
-  @default_config %{
-    "credential_ref" => Fields.default_value(@credential_field)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["repository", "title"],
-    "properties" => %{
-      "credential_ref" =>
-        Fields.to_schema_property(@credential_field,
-          label: "GitHub Account",
-          description: "GitHub account. Bound at run time per user."
-        ),
-      "repository" => %{
-        "type" => "string",
-        "title" => "Repository",
-        "description" => "owner/repo format"
-      },
-      "title" => %{
-        "type" => "string",
-        "title" => "Issue Title"
-      },
-      "body" => %{
-        "type" => "string",
-        "title" => "Issue Body (Markdown)"
-      },
-      "labels" => %{
-        "type" => "string",
-        "title" => "Labels",
-        "description" => "Comma-separated label names"
-      },
-      "assignees" => %{
-        "type" => "string",
-        "title" => "Assignees",
-        "description" => "Comma-separated GitHub usernames"
-      }
-    }
-  }
+  @fields [
+    @credential_field,
+    Fields.string("repository",
+      label: "Repository",
+      required?: true,
+      description: "owner/repo format"
+    ),
+    Fields.string("title", label: "Issue Title", required?: true),
+    Fields.string("body", label: "Issue Body (Markdown)"),
+    Fields.string("labels", label: "Labels", description: "Comma-separated label names"),
+    Fields.string("assignees",
+      label: "Assignees",
+      description: "Comma-separated GitHub usernames"
+    )
+  ]
 
   @output_schema %{
     "type" => "object",
@@ -68,9 +47,6 @@ defmodule Fizz.Steps.Executors.GitHubCreateIssue do
       "state" => %{"type" => "string"}
     }
   }
-
-  @impl true
-  def default_config, do: @default_config
 
   @impl true
   def execute(_config, _input, _ctx) do

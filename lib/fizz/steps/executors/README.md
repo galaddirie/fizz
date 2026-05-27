@@ -127,7 +127,7 @@ defmodule Fizz.Nodes.Executors.MyNode do
   Description of output shape.
   """
 
-  use Fizz.Nodes.Definition,
+  use Fizz.Steps.Definition,
     id: "my_node",
     name: "My Node",
     category: "Category",
@@ -135,22 +135,20 @@ defmodule Fizz.Nodes.Executors.MyNode do
     icon: "hero-icon-name",
     kind: :action | :transform | :trigger | :control_flow
 
-  @config_schema %{
-    "type" => "object",
-    "required" => ["input_field"],
-    "properties" => %{
-      "input_field" => %{
-        "title" => "Input Field",
-        "description" => "The data to process. Use {{ json }} or {{ nodes.X.json }}"
-      },
-      "option_field" => %{
-        "type" => "string",
-        "title" => "Option",
-        "default" => "default_value",
-        "description" => "Optional setting"
-      }
-    }
-  }
+  alias Fizz.Fields
+
+  @fields [
+    Fields.string("input_field",
+      label: "Input Field",
+      description: "The data to process. Use {{ json }} or {{ nodes.X.json }}",
+      required?: true
+    ),
+    Fields.string("option_field",
+      label: "Option",
+      default: "default_value",
+      description: "Optional setting"
+    )
+  ]
 
   @input_schema %{
     "description" => "Populates {{ json }} for expressions"
@@ -163,7 +161,7 @@ defmodule Fizz.Nodes.Executors.MyNode do
     }
   }
 
-  @behaviour Fizz.Nodes.Executors.Behaviour
+  @behaviour Fizz.Steps.Executor
 
   @impl true
   def execute(config, _input, _execution) do
@@ -207,12 +205,9 @@ end
 Most transform/action nodes.
 
 ```elixir
-@config_schema %{
-  "required" => ["value"],
-  "properties" => %{
-    "value" => %{"title" => "Value", "description" => "..."}
-  }
-}
+@fields [
+  Fields.string("value", label: "Value", description: "...", required?: true)
+]
 
 def execute(config, _input, _execution) do
   value = config["value"]
@@ -224,13 +219,10 @@ end
 Comparison, math, merge operations.
 
 ```elixir
-@config_schema %{
-  "required" => ["left", "right"],
-  "properties" => %{
-    "left" => %{"title" => "Left Value"},
-    "right" => %{"title" => "Right Value"}
-  }
-}
+@fields [
+  Fields.string("left", label: "Left Value", required?: true),
+  Fields.string("right", label: "Right Value", required?: true)
+]
 
 def execute(config, _input, _execution) do
   left = config["left"]
@@ -243,13 +235,10 @@ end
 Data to process plus configuration options.
 
 ```elixir
-@config_schema %{
-  "required" => ["text"],
-  "properties" => %{
-    "text" => %{"title" => "Text"},
-    "case" => %{"type" => "string", "enum" => ["upper", "lower"]}
-  }
-}
+@fields [
+  Fields.string("text", label: "Text", required?: true),
+  Fields.select("case", label: "Case", options: Fields.options(~w(upper lower)))
+]
 
 def execute(config, _input, _execution) do
   text = config["text"] |> to_string()
@@ -334,9 +323,9 @@ defp to_map(_), do: {:error, "expected object"}
 ## Checklist for New Executors
 
 - [ ] All data inputs are config fields (not read from `input` param)
-- [ ] Config schema has clear titles and descriptions
+- [ ] Field definitions have clear labels and descriptions
 - [ ] Descriptions mention expression support where applicable
-- [ ] Required fields are listed in schema's `"required"` array
+- [ ] Required fields use `required?: true`
 - [ ] `validate_config/1` checks required fields and valid values
 - [ ] Type coercion handles strings, numbers, wrapped values
 - [ ] Error messages are human-readable
@@ -360,11 +349,9 @@ Nodes whose sole purpose is to pass data through unchanged (with optional side e
 ```elixir
 defmodule Fizz.Nodes.Executors.Wait do
   # Config only has options, not data
-  @config_schema %{
-    "properties" => %{
-      "seconds" => %{"type" => "number", "default" => 5}
-    }
-  }
+  @fields [
+    Fields.number("seconds", label: "Seconds", default: 5)
+  ]
 
   def execute(config, input, _execution) do
     seconds = Map.get(config, "seconds", 5)
@@ -386,16 +373,9 @@ Nodes that reshape/filter the incoming data as their primary function.
 
 ```elixir
 defmodule Fizz.Nodes.Executors.Pick do
-  @config_schema %{
-    "required" => ["fields"],
-    "properties" => %{
-      "fields" => %{
-        "type" => "array",
-        "items" => %{"type" => "string"},
-        "description" => "Fields to keep from the input"
-      }
-    }
-  }
+  @fields [
+    Fields.json("fields", label: "Fields", description: "Fields to keep from the input")
+  ]
 
   def execute(config, input, _execution) when is_map(input) do
     fields = config["fields"] || []
@@ -415,15 +395,13 @@ Nodes that collect or aggregate from multiple runs or branches.
 ```elixir
 defmodule Fizz.Nodes.Executors.Merge do
   # No data config - merges all parent outputs automatically
-  @config_schema %{
-    "properties" => %{
-      "strategy" => %{
-        "type" => "string",
-        "enum" => ["shallow", "deep"],
-        "default" => "shallow"
-      }
-    }
-  }
+  @fields [
+    Fields.select("strategy",
+      label: "Strategy",
+      default: "shallow",
+      options: Fields.options(~w(shallow deep))
+    )
+  ]
 
   def execute(config, input, _execution) when is_map(input) do
     # input is already merged from multiple parents by runtime

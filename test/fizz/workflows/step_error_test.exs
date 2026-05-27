@@ -1,18 +1,18 @@
-defmodule Fizz.Integrations.OperationErrorTest do
+defmodule Fizz.Workflows.StepErrorTest do
   use ExUnit.Case, async: true
 
-  alias Fizz.Integrations.OperationError
+  alias Fizz.Workflows.StepError
 
   describe "http/2" do
     test "normalizes rate-limit responses with retry metadata" do
       error =
-        OperationError.http(%{
+        StepError.http(%{
           status: 429,
           headers: [{"retry-after", "7"}],
           body: %{"error" => %{"message" => "slow down"}}
         })
 
-      assert %OperationError{} = error
+      assert %StepError{} = error
       assert error.code == :rate_limited
       assert error.category == :rate_limit
       assert error.status == 429
@@ -23,7 +23,7 @@ defmodule Fizz.Integrations.OperationErrorTest do
 
     test "normalizes transient provider responses" do
       error =
-        OperationError.http(%{
+        StepError.http(%{
           status: 503,
           headers: [],
           body: %{"error" => %{"message" => "temporarily unavailable"}}
@@ -36,8 +36,8 @@ defmodule Fizz.Integrations.OperationErrorTest do
     end
 
     test "normalizes auth and permission responses as non-retryable" do
-      unauthorized = OperationError.http(%{status: 401, headers: [], body: %{}})
-      forbidden = OperationError.http(%{status: 403, headers: [], body: %{}})
+      unauthorized = StepError.http(%{status: 401, headers: [], body: %{}})
+      forbidden = StepError.http(%{status: 403, headers: [], body: %{}})
 
       assert unauthorized.code == :unauthorized
       assert unauthorized.category == :auth
@@ -50,15 +50,15 @@ defmodule Fizz.Integrations.OperationErrorTest do
   end
 
   describe "normalize/2" do
-    test "keeps existing operation errors intact" do
-      error = OperationError.new(code: :custom, category: :validation, message: "bad input")
+    test "keeps existing step errors intact" do
+      error = StepError.new(code: :custom, category: :validation, message: "bad input")
 
-      assert OperationError.normalize(error) == error
+      assert StepError.normalize(error) == error
     end
 
-    test "turns credential and validation atoms into operation errors" do
-      credential_error = OperationError.normalize(:credential_ref_required)
-      invalid_row_error = OperationError.normalize(:invalid_row_values)
+    test "turns credential and validation atoms into step errors" do
+      credential_error = StepError.normalize(:credential_ref_required)
+      invalid_row_error = StepError.normalize(:invalid_row_values)
 
       assert credential_error.code == :credential_ref_required
       assert credential_error.category == :credential
@@ -70,8 +70,8 @@ defmodule Fizz.Integrations.OperationErrorTest do
     end
 
     test "normalizes missing param and context tuples" do
-      missing_param = OperationError.normalize({:missing_param, "spreadsheet_id"})
-      missing_context = OperationError.normalize({:missing_context, :project_id})
+      missing_param = StepError.normalize({:missing_param, "spreadsheet_id"})
+      missing_context = StepError.normalize({:missing_context, :project_id})
 
       assert missing_param.code == :missing_param
       assert missing_param.category == :validation
