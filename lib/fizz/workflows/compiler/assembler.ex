@@ -507,7 +507,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   end
 
   @credential_runtime_keys [
-    :_slot_resolver,
+    :_credential_resolver,
     :current_scope,
     :user_id,
     :project_id,
@@ -532,9 +532,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end
   end
 
-  defp credential_ref_config?(%{"credential_ref" => %AccessPlan.SlotRef{}}), do: true
+  defp credential_ref_config?(%{"credential_ref" => %AccessPlan.CredentialRef{}}), do: true
 
-  defp credential_ref_config?(%{credential_ref: %AccessPlan.SlotRef{}}), do: true
+  defp credential_ref_config?(%{credential_ref: %AccessPlan.CredentialRef{}}), do: true
 
   defp credential_ref_config?(%{__struct__: _struct}), do: false
 
@@ -1632,7 +1632,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       project_id: runtime_context_value(meta_ctx, workflow, metadata, :project_id),
       workos_organization_id:
         runtime_context_value(meta_ctx, workflow, metadata, :workos_organization_id),
-      _slot_resolver: Map.get(meta_ctx, :_slot_resolver),
+      _credential_resolver: Map.get(meta_ctx, :_credential_resolver),
       execution_context: execution_context
     }
   end
@@ -1651,7 +1651,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       user_id: Map.get(resolution_context, :user_id),
       project_id: Map.get(resolution_context, :project_id),
       workos_organization_id: Map.get(resolution_context, :workos_organization_id),
-      _slot_resolver: Map.get(resolution_context, :_slot_resolver)
+      _credential_resolver: Map.get(resolution_context, :_credential_resolver)
     })
     |> ExecutionContext.put_legacy_aliases()
   end

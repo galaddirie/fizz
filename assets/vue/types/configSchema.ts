@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported UI component types for field rendering. */
-export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'slot' | 'resource_locator' | 'resource_mapper' | 'hidden';
+export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'credential' | 'resource_locator' | 'resource_mapper' | 'hidden';
 
 /** Resolver-based configuration for dynamic option loading. */
 export interface UIResolverConfig {
@@ -41,12 +41,12 @@ export interface FieldUIConfig extends Partial<UIResolverConfig> {
     options?: Array<{ label: string; value: unknown }>;
     /** Response mapping config for search result shaping. */
     responseConfig?: UIResponseConfig;
-    /** For component='slot': discriminator that selects the resolver kind. */
-    slot_kind?: string;
-    /** For component='slot': stable identifier for this slot within the step. */
-    slot_key?: string;
-    /** For component='slot': kind-specific spec (e.g. provider + auth_type). */
-    spec?: Record<string, unknown>;
+    /** For component='credential': provider identifier. */
+    provider?: string;
+    /** For component='credential': supported auth type. */
+    auth_type?: string;
+    /** For component='credential': stable identifier within the step. */
+    requirement_key?: string;
     /** Field keys that must be present before resolver-backed UI can load. */
     depends_on?: string[];
     /** Resource locator metadata for generic resource fields. */

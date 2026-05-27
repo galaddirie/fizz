@@ -141,32 +141,38 @@ defmodule Fizz.Workflows.Expressions do
   end
 
   def resolve(
-        %AccessPlan.SlotRef{kind: kind, slot_key: slot_key, step_id: step_id, spec: spec},
+        %AccessPlan.CredentialRef{
+          requirement_key: requirement_key,
+          step_id: step_id,
+          provider: provider,
+          auth_type: auth_type
+        },
         context
       ) do
     resolver =
-      Map.get(context, :_slot_resolver) ||
-        Map.get(context, "_slot_resolver") ||
-        get_in(context, [:workflow, "_slot_resolver"]) ||
-        get_in(context, [:workflow, :_slot_resolver])
+      Map.get(context, :_credential_resolver) ||
+        Map.get(context, "_credential_resolver") ||
+        get_in(context, [:workflow, "_credential_resolver"]) ||
+        get_in(context, [:workflow, :_credential_resolver])
 
     case resolver do
       resolver when is_function(resolver, 4) ->
-        case resolver.(kind, slot_key, step_id, spec) do
+        case resolver.(requirement_key, step_id, provider, auth_type) do
           {:ok, value} ->
             value
 
           {:error, reason} ->
             raise ArgumentError,
-                  "slot `#{slot_key}` on step `#{step_id}` could not be resolved: #{inspect(reason)}"
+                  "credential `#{requirement_key}` on step `#{step_id}` could not be resolved: #{inspect(reason)}"
 
           other ->
             raise ArgumentError,
-                  "slot `#{slot_key}` on step `#{step_id}` returned invalid resolver result: #{inspect(other)}"
+                  "credential `#{requirement_key}` on step `#{step_id}` returned invalid resolver result: #{inspect(other)}"
         end
 
       _ ->
-        raise ArgumentError, "slot `#{slot_key}` on step `#{step_id}` has no runtime resolver"
+        raise ArgumentError,
+              "credential `#{requirement_key}` on step `#{step_id}` has no runtime resolver"
     end
   end
 

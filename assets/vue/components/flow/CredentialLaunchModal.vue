@@ -29,9 +29,9 @@ interface Candidate {
 
 interface Descriptor {
   step_id: string;
-  slot_key: string;
-  kind: string;
-  spec: Record<string, unknown>;
+  requirement_key: string;
+  provider: string;
+  auth_type: string;
   candidates: Candidate[];
 }
 
@@ -58,8 +58,7 @@ const emit = defineEmits<{
       target_step_id: string | null;
       bindings: Array<{
         step_id: string;
-        slot_key: string;
-        kind: string;
+        requirement_key: string;
         binding_data: Record<string, unknown>;
       }>;
     }
@@ -106,7 +105,7 @@ watch(
 );
 
 function descriptorKey(d: Descriptor) {
-  return `${d.step_id}::${d.slot_key}`;
+  return `${d.step_id}::${d.requirement_key}`;
 }
 
 function descriptorDomId(d: Descriptor) {
@@ -132,7 +131,7 @@ function descriptorHasReauthCandidate(d: Descriptor) {
 }
 
 function descriptorNeedsInlineAuth(d: Descriptor) {
-  return d.kind === 'credential' && (d.candidates.length === 0 || descriptorHasReauthCandidate(d));
+  return d.candidates.length === 0 || descriptorHasReauthCandidate(d);
 }
 
 const allSelected = computed(() =>
@@ -143,13 +142,8 @@ const hasMissingCredentials = computed(() =>
   props.descriptors.some(d => d.candidates.length === 0 || descriptorHasReauthCandidate(d))
 );
 
-function specSummary(d: Descriptor) {
-  if (d.kind === 'credential') {
-    const provider = typeof d.spec['provider'] === 'string' ? d.spec['provider'] : 'unknown';
-    const authType = typeof d.spec['auth_type'] === 'string' ? d.spec['auth_type'] : '';
-    return authType ? `${provider} (${authType})` : provider;
-  }
-  return d.kind;
+function credentialSummary(d: Descriptor) {
+  return d.auth_type ? `${d.provider} (${d.auth_type})` : d.provider;
 }
 
 function candidateLabel(c: Candidate) {
@@ -157,14 +151,8 @@ function candidateLabel(c: Candidate) {
 }
 
 function providerSlugs(d: Descriptor) {
-  const provider = d.spec['provider'] ?? d.spec['providers'] ?? d.spec['integration_slug'];
-
-  if (Array.isArray(provider)) {
-    return provider.filter(value => typeof value === 'string' && value.trim() !== '');
-  }
-
-  if (typeof provider === 'string' && provider.trim() !== '') {
-    return [provider.trim()];
+  if (typeof d.provider === 'string' && d.provider.trim() !== '') {
+    return [d.provider.trim()];
   }
 
   return [];
@@ -186,7 +174,7 @@ function widgetProps(d: Descriptor) {
 function reauthMessage(d: Descriptor) {
   return descriptorHasReauthCandidate(d)
     ? 'This credential needs to be reauthorized before the workflow can run.'
-    : "You don't have a credential for this slot yet.";
+    : "You don't have a credential for this requirement yet.";
 }
 
 function handleSubmit() {
@@ -196,8 +184,7 @@ function handleSubmit() {
     const credentialId = selections.value[descriptorKey(d)];
     return {
       step_id: d.step_id,
-      slot_key: d.slot_key,
-      kind: d.kind,
+      requirement_key: d.requirement_key,
       binding_data: { credential_id: credentialId },
     };
   });
@@ -233,7 +220,7 @@ function handleSubmit() {
             <div>
               <h2 class="text-base font-semibold text-base-content">Bind your credentials</h2>
               <p class="mt-0.5 text-[12px] leading-relaxed text-base-content/60">
-                This workflow needs your credentials to run. Pick one for each slot. We'll
+                This workflow needs your credentials to run. Pick one for each requirement. We'll
                 remember your choice for next time.
               </p>
             </div>
@@ -255,7 +242,7 @@ function handleSubmit() {
           >
             <div class="flex items-center justify-between gap-2">
               <p class="text-[11px] font-medium uppercase tracking-wide text-base-content/50">
-                {{ specSummary(d) }}
+                {{ credentialSummary(d) }}
               </p>
               <p class="font-mono text-[11px] text-base-content/40">
                 step {{ d.step_id.slice(0, 8) }}

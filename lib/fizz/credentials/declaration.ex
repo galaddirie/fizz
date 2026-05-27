@@ -1,27 +1,25 @@
-defmodule Fizz.Slots.Declaration do
+defmodule Fizz.Credentials.Declaration do
   @moduledoc """
-  Helpers for slot declaration maps embedded in workflow step configs.
+  Helpers for credential declaration maps embedded in workflow step configs.
 
   Authored workflow configs store declarations such as:
 
       %{
-        "$slot" => true,
-        "kind" => "credential",
-        "slot_key" => "auth",
-        "spec" => %{"provider" => "openai_api_key", "auth_type" => "api_key"}
+        "$credential" => true,
+        "requirement_key" => "auth",
+        "provider" => "openai_api_key",
+        "auth_type" => "api_key"
       }
 
   This module is the canonical place for identifying, walking, normalizing, and
   validating those declaration maps.
   """
 
-  alias Fizz.Slots.Registry
-
   @type path :: [String.t()]
   @type normalized :: %{
-          kind: String.t(),
-          slot_key: String.t(),
-          spec: map()
+          requirement_key: String.t(),
+          provider: String.t(),
+          auth_type: String.t()
         }
 
   @type walked :: %{
@@ -30,57 +28,56 @@ defmodule Fizz.Slots.Declaration do
         }
 
   @doc """
-  Returns true when `value` is a slot declaration map.
+  Returns true when `value` is a credential declaration map.
   """
   @spec declaration?(term()) :: boolean()
   def declaration?(value) when is_map(value) do
-    Map.get(value, "$slot") == true or Map.get(value, :"$slot") == true
+    Map.get(value, "$credential") == true or Map.get(value, :"$credential") == true
   end
 
   def declaration?(_value), do: false
 
   @doc """
-  Walks a nested term and returns every slot declaration with its field path.
+  Walks a nested term and returns every credential declaration with its field path.
   """
   @spec walk(term()) :: [walked()]
   def walk(value), do: do_walk(value, [])
 
   @doc """
-  Normalizes a slot declaration to string keys needed by compiler/runtime code.
+  Normalizes a credential declaration to string keys needed by compiler/runtime code.
   """
   @spec normalize(term()) :: {:ok, normalized()} | {:error, term()}
   def normalize(value) when is_map(value) do
     with true <- declaration?(value),
-         {:ok, kind} <- required_string(value, "kind"),
-         {:ok, slot_key} <- required_string(value, "slot_key"),
-         {:ok, spec} <- fetch_spec(value) do
-      {:ok, %{kind: kind, slot_key: slot_key, spec: spec}}
+         {:ok, requirement_key} <- required_string(value, "requirement_key"),
+         {:ok, provider} <- required_string(value, "provider"),
+         {:ok, auth_type} <- required_string(value, "auth_type"),
+         :ok <- validate_auth_type(auth_type) do
+      {:ok, %{requirement_key: requirement_key, provider: provider, auth_type: auth_type}}
     else
-      false -> {:error, :not_a_slot_declaration}
+      false -> {:error, :not_a_credential_declaration}
       {:error, _reason} = error -> error
     end
   end
 
-  def normalize(_value), do: {:error, :not_a_slot_declaration}
+  def normalize(_value), do: {:error, :not_a_credential_declaration}
 
   @doc """
-  Validates a slot declaration and its registered resolver-specific spec.
+  Validates a credential declaration.
   """
   @spec validate(term()) :: :ok | {:error, String.t()}
   def validate(value) do
-    with {:ok, %{kind: kind, spec: spec}} <- normalize(value),
-         {:ok, module} <- fetch_registered_kind(kind),
-         :ok <- validate_spec(module, spec) do
+    with {:ok, _declaration} <- normalize(value) do
       :ok
     else
       {:error, {:missing_field, field}} ->
-        {:error, "slot is missing #{field}"}
+        {:error, "credential is missing #{field}"}
 
-      {:error, :not_a_slot_declaration} ->
-        {:error, "slot declaration is invalid"}
+      {:error, :not_a_credential_declaration} ->
+        {:error, "credential declaration is invalid"}
 
-      {:error, {:unregistered_kind, kind}} ->
-        {:error, "slot kind \"#{kind}\" is not registered"}
+      {:error, :invalid_auth_type} ->
+        {:error, "credential auth_type must be api_key or oauth"}
 
       {:error, reason} when is_binary(reason) ->
         {:error, reason}
@@ -117,21 +114,6 @@ defmodule Fizz.Slots.Declaration do
 
   defp do_walk(_value, _path), do: []
 
-  defp fetch_registered_kind(kind) do
-    case Registry.fetch(kind) do
-      {:ok, module} -> {:ok, module}
-      :error -> {:error, {:unregistered_kind, kind}}
-    end
-  end
-
-  defp validate_spec(module, spec) do
-    if function_exported?(module, :validate_spec, 1) do
-      module.validate_spec(spec)
-    else
-      :ok
-    end
-  end
-
   defp required_string(map, key) do
     case fetch_value(map, key) do
       value when is_binary(value) ->
@@ -145,12 +127,8 @@ defmodule Fizz.Slots.Declaration do
     end
   end
 
-  defp fetch_spec(map) do
-    case fetch_value(map, "spec") do
-      spec when is_map(spec) -> {:ok, spec}
-      _ -> {:error, {:missing_field, "spec"}}
-    end
-  end
+  defp validate_auth_type(auth_type) when auth_type in ["api_key", "oauth"], do: :ok
+  defp validate_auth_type(_auth_type), do: {:error, :invalid_auth_type}
 
   defp fetch_value(map, key) when is_map(map) and is_binary(key) do
     Map.get(map, key) || Map.get(map, String.to_existing_atom(key))

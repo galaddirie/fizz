@@ -61,7 +61,7 @@ export type WorkflowEditorCommandType =
   | 'enable_step'
   | 'run_test'
   | 'run_node'
-  | 'submit_slot_bindings'
+  | 'submit_credential_bindings'
   | 'cancel_execution'
   | 'undo'
   | 'redo'
@@ -174,13 +174,12 @@ export type WorkflowEditorEmits = {
   (e: 'run_test', payload?: { step_ids?: string[] }): void;
   (e: 'run_node', payload: { step_id: string }): void;
   (
-    e: 'submit_slot_bindings',
+    e: 'submit_credential_bindings',
     payload: {
       target_step_id: string | null;
       bindings: Array<{
         step_id: string;
-        slot_key: string;
-        kind: string;
+        requirement_key: string;
         binding_data: Record<string, unknown>;
       }>;
     }

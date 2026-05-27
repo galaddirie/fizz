@@ -6,9 +6,9 @@ defmodule Fizz.Triggers.RegistrationManager do
   import Ecto.Query
 
   alias Fizz.Accounts.Scope
+  alias Fizz.Credentials
+  alias Fizz.Credentials.Declaration, as: CredentialDeclaration
   alias Fizz.Repo
-  alias Fizz.Slots
-  alias Fizz.Slots.Declaration, as: SlotDeclaration
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Triggers
   alias Fizz.Triggers.Webhook
@@ -30,7 +30,7 @@ defmodule Fizz.Triggers.RegistrationManager do
          {:ok, context} <- load_definition_context(definition_version) do
       _ = deactivate_stale_registrations(definition_version)
 
-      errors = slot_binding_errors(definition_version, context)
+      errors = credential_binding_errors(definition_version, context)
 
       errors =
         case errors do
@@ -150,22 +150,22 @@ defmodule Fizz.Triggers.RegistrationManager do
       workos_organization_id: context.workos_organization_id
     }
 
-    with {:ok, resolver} <- Slots.runtime_resolver(scope, run_attrs),
-         {:ok, config} <- resolve_slots(trigger.config, trigger.step_id, resolver) do
+    with {:ok, resolver} <- Credentials.runtime_resolver(scope, run_attrs),
+         {:ok, config} <- resolve_credentials(trigger.config, trigger.step_id, resolver) do
       {:ok, config}
     end
   end
 
-  defp resolve_slots(value, step_id, resolver) when is_map(value) do
-    if SlotDeclaration.declaration?(value) do
-      with {:ok, %{kind: kind, slot_key: slot_key, spec: spec}} <-
-             SlotDeclaration.normalize(value),
-           {:ok, resolved} <- resolver.(kind, slot_key, step_id, spec) do
+  defp resolve_credentials(value, step_id, resolver) when is_map(value) do
+    if CredentialDeclaration.declaration?(value) do
+      with {:ok, %{requirement_key: requirement_key, provider: provider, auth_type: auth_type}} <-
+             CredentialDeclaration.normalize(value),
+           {:ok, resolved} <- resolver.(requirement_key, step_id, provider, auth_type) do
         {:ok, resolved}
       end
     else
       Enum.reduce_while(value, {:ok, %{}}, fn {key, child}, {:ok, acc} ->
-        case resolve_slots(child, step_id, resolver) do
+        case resolve_credentials(child, step_id, resolver) do
           {:ok, resolved} -> {:cont, {:ok, Map.put(acc, key, resolved)}}
           {:error, reason} -> {:halt, {:error, reason}}
         end
@@ -173,10 +173,10 @@ defmodule Fizz.Triggers.RegistrationManager do
     end
   end
 
-  defp resolve_slots(values, step_id, resolver) when is_list(values) do
+  defp resolve_credentials(values, step_id, resolver) when is_list(values) do
     values
     |> Enum.reduce_while({:ok, []}, fn value, {:ok, acc} ->
-      case resolve_slots(value, step_id, resolver) do
+      case resolve_credentials(value, step_id, resolver) do
         {:ok, resolved} -> {:cont, {:ok, [resolved | acc]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -187,7 +187,7 @@ defmodule Fizz.Triggers.RegistrationManager do
     end
   end
 
-  defp resolve_slots(value, _step_id, _resolver), do: {:ok, value}
+  defp resolve_credentials(value, _step_id, _resolver), do: {:ok, value}
 
   defp load_definition_context(%WorkflowDefinitionVersion{} = definition_version) do
     case Repo.one(
@@ -209,13 +209,13 @@ defmodule Fizz.Triggers.RegistrationManager do
     end
   end
 
-  defp slot_binding_errors(%WorkflowDefinitionVersion{} = definition_version, context) do
+  defp credential_binding_errors(%WorkflowDefinitionVersion{} = definition_version, context) do
     scope = %Scope{
       user: %{id: context.user_id},
       organization_id: context.workos_organization_id
     }
 
-    case Slots.readiness(definition_version, context.user_id, scope) do
+    case Credentials.readiness(definition_version, context.user_id, scope) do
       :ready ->
         []
 
@@ -223,22 +223,22 @@ defmodule Fizz.Triggers.RegistrationManager do
         Enum.map(descriptors, fn descriptor ->
           %{
             step_id: descriptor.step_id,
-            reason: slot_binding_error_reason(descriptor)
+            reason: credential_binding_error_reason(descriptor)
           }
         end)
     end
   end
 
-  defp slot_binding_error_reason(%{kind: kind, slot_key: slot_key, reason: :slot_unbound}) do
-    {:slot_binding_required, kind, slot_key}
+  defp credential_binding_error_reason(%{requirement_key: key, reason: :credential_unbound}) do
+    {:credential_binding_required, key}
   end
 
-  defp slot_binding_error_reason(%{kind: kind, slot_key: slot_key, reason: reason}) do
-    {:slot_binding_invalid, kind, slot_key, reason}
+  defp credential_binding_error_reason(%{requirement_key: key, reason: reason}) do
+    {:credential_binding_invalid, key, reason}
   end
 
-  defp slot_binding_error_reason(%{kind: kind, slot_key: slot_key}) do
-    {:slot_binding_required, kind, slot_key}
+  defp credential_binding_error_reason(%{requirement_key: key}) do
+    {:credential_binding_required, key}
   end
 
   defp registration_attrs(trigger, spec, context, trigger_source) do

@@ -1,10 +1,10 @@
-defmodule Fizz.Slots.Resolvers.Credential do
+defmodule Fizz.Credentials.Options do
   @moduledoc """
-  Slot resolver for the `"credential"` kind.
+  Credential option lookup, validation, and runtime reference construction.
 
-  Spec shape:
+  Requirement shape:
 
-      %{"provider" => "github_oauth", "auth_type" => "oauth"}
+      %{provider: "github_oauth", auth_type: "oauth"}
 
   Binding data shape (what a user picks):
 
@@ -17,18 +17,16 @@ defmodule Fizz.Slots.Resolvers.Credential do
   changing every executor.
   """
 
-  @behaviour Fizz.Slots.Resolver
-
   alias Fizz.Accounts.{ExternalAuth, Scope}
   alias Fizz.Integrations.ProviderCatalog
 
   @max_options 50
 
-  @impl true
-  def resolve(spec, binding_data, %Scope{user: %{id: user_id}})
-      when is_map(spec) and is_map(binding_data) and is_binary(user_id) do
-    with {:ok, provider} <- fetch_string(spec, "provider"),
-         {:ok, auth_type} <- fetch_string(spec, "auth_type"),
+  @spec resolve(map(), map(), Scope.t()) :: {:ok, map()} | {:error, term()}
+  def resolve(requirement, binding_data, %Scope{user: %{id: user_id}})
+      when is_map(requirement) and is_map(binding_data) and is_binary(user_id) do
+    with {:ok, provider} <- fetch_string(requirement, "provider"),
+         {:ok, auth_type} <- fetch_string(requirement, "auth_type"),
          {:ok, credential_id} <- fetch_string(binding_data, "credential_id") do
       {:ok,
        %{
@@ -40,11 +38,11 @@ defmodule Fizz.Slots.Resolvers.Credential do
     end
   end
 
-  def resolve(spec, binding_data, %Scope{})
-      when is_map(spec) and is_map(binding_data) do
+  def resolve(requirement, binding_data, %Scope{})
+      when is_map(requirement) and is_map(binding_data) do
     with {:ok, owner_user_id} <- fetch_string(binding_data, "owner_user_id"),
-         {:ok, provider} <- fetch_string(spec, "provider"),
-         {:ok, auth_type} <- fetch_string(spec, "auth_type"),
+         {:ok, provider} <- fetch_string(requirement, "provider"),
+         {:ok, auth_type} <- fetch_string(requirement, "auth_type"),
          {:ok, credential_id} <- fetch_string(binding_data, "credential_id") do
       {:ok,
        %{
@@ -56,12 +54,13 @@ defmodule Fizz.Slots.Resolvers.Credential do
     end
   end
 
-  def resolve(_spec, _binding_data, _scope), do: {:error, :invalid_slot_resolution_args}
+  def resolve(_requirement, _binding_data, _scope),
+    do: {:error, :invalid_credential_resolution_args}
 
-  @impl true
-  def validate_spec(spec) when is_map(spec) do
-    with {:ok, _provider} <- fetch_string(spec, "provider"),
-         {:ok, auth_type} <- fetch_string(spec, "auth_type"),
+  @spec validate_requirement(map()) :: :ok | {:error, term()}
+  def validate_requirement(requirement) when is_map(requirement) do
+    with {:ok, _provider} <- fetch_string(requirement, "provider"),
+         {:ok, auth_type} <- fetch_string(requirement, "auth_type"),
          true <- auth_type in ["api_key", "oauth"] do
       :ok
     else
@@ -70,9 +69,9 @@ defmodule Fizz.Slots.Resolvers.Credential do
     end
   end
 
-  def validate_spec(_spec), do: {:error, :invalid_spec}
+  def validate_requirement(_requirement), do: {:error, :invalid_requirement}
 
-  @impl true
+  @spec validate_binding_data(map()) :: :ok | {:error, term()}
   def validate_binding_data(%{"credential_id" => credential_id}) when is_binary(credential_id) do
     case String.trim(credential_id) do
       "" -> {:error, :credential_id_required}
@@ -82,22 +81,23 @@ defmodule Fizz.Slots.Resolvers.Credential do
 
   def validate_binding_data(_), do: {:error, :credential_id_required}
 
-  @impl true
-  def validate_binding_data(binding_data, spec) when is_map(binding_data) and is_map(spec) do
-    with :ok <- validate_spec(spec),
+  @spec validate_binding_data(map(), map()) :: :ok | {:error, term()}
+  def validate_binding_data(binding_data, requirement)
+      when is_map(binding_data) and is_map(requirement) do
+    with :ok <- validate_requirement(requirement),
          :ok <- validate_binding_data(binding_data) do
       :ok
     end
   end
 
-  def validate_binding_data(_binding_data, _spec), do: {:error, :credential_id_required}
+  def validate_binding_data(_binding_data, _requirement), do: {:error, :credential_id_required}
 
-  @impl true
-  def validate_binding_data(binding_data, spec, %Scope{} = scope)
-      when is_map(binding_data) and is_map(spec) do
-    with :ok <- validate_binding_data(binding_data, spec),
+  @spec validate_binding_data(map(), map(), Scope.t()) :: :ok | {:error, term()}
+  def validate_binding_data(binding_data, requirement, %Scope{} = scope)
+      when is_map(binding_data) and is_map(requirement) do
+    with :ok <- validate_binding_data(binding_data, requirement),
          {:ok, credential_id} <- fetch_string(binding_data, "credential_id"),
-         {:ok, options} <- options_for_spec(spec, scope, limit: :all),
+         {:ok, options} <- options_for_requirement(requirement, scope, limit: :all),
          true <- credential_option_available?(options, credential_id) do
       :ok
     else
@@ -106,28 +106,29 @@ defmodule Fizz.Slots.Resolvers.Credential do
     end
   end
 
-  def validate_binding_data(binding_data, spec, _scope),
-    do: validate_binding_data(binding_data, spec)
+  def validate_binding_data(binding_data, requirement, _scope),
+    do: validate_binding_data(binding_data, requirement)
 
-  @impl true
-  def candidate_options(spec, %Scope{} = scope) when is_map(spec) do
-    options_for_spec(spec, scope)
+  @spec candidate_options(map(), Scope.t()) :: {:ok, [map()]} | {:error, term()}
+  def candidate_options(requirement, %Scope{} = scope) when is_map(requirement) do
+    options_for_requirement(requirement, scope)
   end
 
-  def candidate_options(_spec, _scope), do: {:error, :invalid_scope}
+  def candidate_options(_requirement, _scope), do: {:error, :invalid_scope}
 
   @doc """
-  Returns credential slot options with optional query filtering and result cap.
+  Returns credential options with optional query filtering and result cap.
   """
-  @spec options_for_spec(map(), Scope.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def options_for_spec(spec, scope, opts \\ [])
+  @spec options_for_requirement(map(), Scope.t(), keyword()) :: {:ok, [map()]} | {:error, term()}
+  def options_for_requirement(requirement, scope, opts \\ [])
 
-  def options_for_spec(spec, %Scope{} = scope, opts) when is_map(spec) and is_list(opts) do
+  def options_for_requirement(requirement, %Scope{} = scope, opts)
+      when is_map(requirement) and is_list(opts) do
     with {:ok, organization_id} <- fetch_organization_id(scope) do
       external_auth_opts =
         []
-        |> maybe_put(:provider_filter, list_param(spec, "provider"))
-        |> maybe_put(:auth_types, list_param(spec, "auth_type"))
+        |> maybe_put(:provider_filter, list_param(requirement, "provider"))
+        |> maybe_put(:auth_types, list_param(requirement, "auth_type"))
 
       case ExternalAuth.list_credential_options(scope, organization_id, external_auth_opts) do
         {:ok, options} ->
@@ -136,7 +137,7 @@ defmodule Fizz.Slots.Resolvers.Credential do
           options =
             options
             |> filter_to_current_user(user_id)
-            |> maybe_sync_single_workos_oauth_option(spec, scope, organization_id)
+            |> maybe_sync_single_workos_oauth_option(requirement, scope, organization_id)
             |> filter_to_current_user(user_id)
             |> apply_search(Keyword.get(opts, :q, ""))
             |> apply_limit(Keyword.get(opts, :limit, @max_options))
@@ -149,7 +150,7 @@ defmodule Fizz.Slots.Resolvers.Credential do
     end
   end
 
-  def options_for_spec(_spec, _scope, _opts), do: {:error, :invalid_scope}
+  def options_for_requirement(_requirement, _scope, _opts), do: {:error, :invalid_scope}
 
   defp credential_option_available?(options, credential_id) when is_list(options) do
     Enum.any?(options, fn option ->

@@ -1,7 +1,7 @@
 defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   @moduledoc false
 
-  alias Fizz.Slots.Declaration
+  alias Fizz.Credentials.Declaration
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.Expressions.AccessPlan
 
@@ -71,19 +71,23 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   end
 
   defp compile_tree(
-         %{"$slot" => true} = slot_map,
+         %{"$credential" => true} = credential_map,
          _known_step_ids,
          _step_name_to_id,
          path,
          step_id
        ) do
-    case build_slot_ref(slot_map, step_id) do
+    case build_credential_ref(credential_map, step_id) do
       {:ok, ref} ->
-        dependencies = %{step_ids: MapSet.new(), runtime_keys: MapSet.new([:_slot_resolver])}
+        dependencies = %{
+          step_ids: MapSet.new(),
+          runtime_keys: MapSet.new([:_credential_resolver])
+        }
+
         {ref, dependencies, []}
 
       {:error, message} ->
-        {%AccessPlan.Literal{value: slot_map}, empty_dependencies(),
+        {%AccessPlan.Literal{value: credential_map}, empty_dependencies(),
          [format_path_error(path, message)]}
     end
   end
@@ -156,18 +160,19 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
     {%AccessPlan.Literal{value: value}, empty_dependencies(), []}
   end
 
-  defp build_slot_ref(slot_map, step_id) do
-    with {:ok, %{kind: kind, slot_key: slot_key, spec: spec}} <- Declaration.normalize(slot_map) do
+  defp build_credential_ref(credential_map, step_id) do
+    with {:ok, %{requirement_key: requirement_key, provider: provider, auth_type: auth_type}} <-
+           Declaration.normalize(credential_map) do
       {:ok,
-       %AccessPlan.SlotRef{
-         kind: kind,
-         slot_key: slot_key,
+       %AccessPlan.CredentialRef{
+         requirement_key: requirement_key,
          step_id: step_id,
-         spec: spec
+         provider: provider,
+         auth_type: auth_type
        }}
     else
-      {:error, {:missing_field, field}} -> {:error, "slot is missing #{field}"}
-      {:error, _reason} -> {:error, "slot declaration is invalid"}
+      {:error, {:missing_field, field}} -> {:error, "credential is missing #{field}"}
+      {:error, _reason} -> {:error, "credential declaration is invalid"}
     end
   end
 

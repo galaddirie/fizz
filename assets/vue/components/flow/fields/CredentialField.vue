@@ -48,15 +48,13 @@ const props = defineProps<{ field: ConfigField }>();
 
 const summary = computed(() => {
   const ui = props.field?.ui;
-  const kind = ui?.slot_kind ?? 'slot';
-  const spec = ui?.spec ?? {};
-  const provider = typeof spec['provider'] === 'string' ? spec['provider'] : null;
-  const authType = typeof spec['auth_type'] === 'string' ? spec['auth_type'] : null;
+  const provider = typeof ui?.provider === 'string' ? ui.provider : null;
+  const authType = typeof ui?.auth_type === 'string' ? ui.auth_type : null;
 
-  if (kind === 'credential' && provider) {
+  if (provider) {
     return authType ? `${provider} (${authType})` : provider;
   }
 
-  return kind;
+  return 'Credential';
 });
 </script>

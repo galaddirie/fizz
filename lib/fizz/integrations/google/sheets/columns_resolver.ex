@@ -6,7 +6,7 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
 
   Reads `spreadsheet_id`, `sheet_name`, optional `header_row`, and an optional
   `credential_ref` from the frontend payload (merged into `args.params` by the
-  resolver dispatch). When the field's `credential_ref` is still a slot
+  resolver dispatch). When the field's `credential_ref` is still a credential
   declaration (not yet bound to a real credential), falls back to the editor
   user's most recent Google OAuth connection so the preview still works.
 
@@ -18,15 +18,12 @@ defmodule Fizz.Integrations.Google.Sheets.ColumnsResolver do
 
   require Logger
 
-  @behaviour Fizz.Steps.Resolver
-
   alias Fizz.Accounts.Scope
   alias Fizz.Accounts.ExternalAuth
   alias Fizz.Integrations.CredentialRef
   alias Fizz.Integrations.Google.Sheets.Client
   alias Fizz.Integrations.Providers.GoogleOAuth
 
-  @impl true
   def resolve(%{params: params, context: context}) do
     case resolver_mode(params) do
       "sheets" -> resolve_sheets(params, context)

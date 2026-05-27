@@ -154,7 +154,7 @@ defmodule Fizz.Integrations.Manifest do
       },
       %ResolverDefinition{
         id: "credentials",
-        module: Fizz.Integrations.CredentialsResolver
+        module: Fizz.Credentials.OptionsResolver
       }
     ]
   end
@@ -251,7 +251,7 @@ defmodule Fizz.Integrations.Manifest do
     |> Map.get("properties", %{})
     |> Enum.flat_map(fn {key, schema} ->
       case get_in(schema, ["ui", "component"]) do
-        "slot" -> [credential_requirement(key, schema)]
+        "credential" -> [credential_requirement(key, schema)]
         _component -> []
       end
     end)
@@ -259,13 +259,12 @@ defmodule Fizz.Integrations.Manifest do
 
   defp credential_requirement(key, schema) do
     ui = Map.fetch!(schema, "ui")
-    spec = Map.fetch!(ui, "spec")
 
     %CredentialRequirement{
       key: key,
-      provider: Map.fetch!(spec, "provider"),
-      auth_type: auth_type!(Map.fetch!(spec, "auth_type")),
-      slot_key: Map.fetch!(ui, "slot_key"),
+      provider: Map.fetch!(ui, "provider"),
+      auth_type: auth_type!(Map.fetch!(ui, "auth_type")),
+      requirement_key: Map.fetch!(ui, "requirement_key"),
       required: true,
       label: Map.get(schema, "title")
     }

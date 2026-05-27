@@ -489,7 +489,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     GenServer.stop(view.pid, :normal)
   end
 
-  test "run_test restores missing slot declarations before readiness", %{conn: conn} do
+  test "run_test restores missing credential declarations before readiness", %{conn: conn} do
     append_step =
       WorkflowsFixtures.step(%{
         type_id: "google_sheets_append_row",
@@ -513,13 +513,13 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     |> element("#workflow-editor")
     |> render_hook("editor_command", %{"type" => "run_test", "payload" => %{}})
 
-    assert_push_event(view, "slot_bindings_needed", %{
+    assert_push_event(view, "credential_bindings_needed", %{
       descriptors: [
         %{
-          kind: "credential",
           step_id: step_id,
-          slot_key: "auth",
-          spec: %{"provider" => "google_oauth", "auth_type" => "oauth"}
+          requirement_key: "auth",
+          provider: "google_oauth",
+          auth_type: "oauth"
         }
       ]
     })

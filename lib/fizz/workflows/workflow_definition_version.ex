@@ -83,7 +83,7 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
     |> validate_step_configs()
     |> validate_has_entry_step()
     |> validate_expression_integrity()
-    |> validate_slot_declarations()
+    |> validate_credential_declarations()
   end
 
   defp maybe_validate_for_publish(changeset, _validation_mode), do: changeset
@@ -317,15 +317,15 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
     end)
   end
 
-  defp validate_slot_declarations(changeset) do
+  defp validate_credential_declarations(changeset) do
     changeset
     |> get_field(:steps, [])
-    |> PublishValidation.slot_declaration_issues()
+    |> PublishValidation.credential_declaration_issues()
     |> Enum.reduce(changeset, fn issue, acc ->
       add_error(
         acc,
         :steps,
-        "step #{issue.step_id} has invalid slot declaration: #{PublishValidation.format_expression_issue(issue)}"
+        "step #{issue.step_id} has invalid credential declaration: #{PublishValidation.format_expression_issue(issue)}"
       )
     end)
   end

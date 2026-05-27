@@ -14,19 +14,19 @@ defmodule Fizz.Steps.Executors.SlackTrigger do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.SlackOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(SlackOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(SlackOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "properties" => %{
       "credential_ref" =>
-        CredentialSlot.schema(@credential_slot,
+        CredentialRequirement.schema(@credential_requirement,
           title: "Slack Workspace",
           description: "Slack workspace. Bound at run time per user."
         ),

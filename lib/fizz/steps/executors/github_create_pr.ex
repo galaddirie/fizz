@@ -14,14 +14,14 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.GitHubOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(GitHubOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(GitHubOAuth.provider_id())
 
   @default_config %{
     "base" => "main",
     "draft" => false,
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
@@ -29,7 +29,7 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
     "required" => ["repository", "title", "head", "base"],
     "properties" => %{
       "credential_ref" =>
-        CredentialSlot.schema(@credential_slot,
+        CredentialRequirement.schema(@credential_requirement,
           title: "GitHub Account",
           description: "GitHub account. Bound at run time per user."
         ),

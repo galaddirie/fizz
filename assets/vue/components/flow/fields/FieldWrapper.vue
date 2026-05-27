@@ -1,7 +1,7 @@
 <template>
   <div class="field-wrapper">
-    <div v-if="isSlotField">
-      <SlotField :field="field" />
+    <div v-if="isCredentialField">
+      <CredentialField :field="field" />
     </div>
 
     <div v-else-if="mode === 'literal' && uiComponent !== 'default'">
@@ -53,7 +53,7 @@ import NumberField from './NumberField.vue';
 import JsonField from './JsonField.vue';
 import SelectField from './SelectField.vue';
 import SearchField from './SearchField.vue';
-import SlotField from './SlotField.vue';
+import CredentialField from './CredentialField.vue';
 import ResourceMapperField from './ResourceMapperField.vue';
 
 import type { ConfigField } from '@/types/configSchema';
@@ -85,7 +85,7 @@ const uiComponent = computed(() => {
   return componentMap[comp] ? comp : 'default';
 });
 
-const isSlotField = computed(() => props.field?.ui?.component === 'slot');
+const isCredentialField = computed(() => props.field?.ui?.component === 'credential');
 
 const handleChange = (val: unknown) => {
   emit('update:modelValue', val);

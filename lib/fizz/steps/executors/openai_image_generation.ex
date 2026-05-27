@@ -14,16 +14,16 @@ defmodule Fizz.Steps.Executors.OpenAIImageGeneration do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.OpenAIApiKey
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.api_key(OpenAIApiKey.provider_id())
+  @credential_requirement CredentialRequirement.api_key(OpenAIApiKey.provider_id())
 
   @default_config %{
     "model" => "dall-e-3",
     "size" => "1024x1024",
     "quality" => "standard",
     "n" => 1,
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
@@ -31,7 +31,7 @@ defmodule Fizz.Steps.Executors.OpenAIImageGeneration do
     "required" => ["prompt"],
     "properties" => %{
       "credential_ref" =>
-        CredentialSlot.schema(@credential_slot,
+        CredentialRequirement.schema(@credential_requirement,
           title: "OpenAI Credential",
           description: "OpenAI credential. Bound at run time per user."
         ),

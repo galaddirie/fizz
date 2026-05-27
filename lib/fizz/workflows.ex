@@ -18,8 +18,8 @@ defmodule Fizz.Workflows do
 
   alias Ecto.Multi
   alias Fizz.Accounts.{Project, Scope}
+  alias Fizz.Credentials
   alias Fizz.Repo
-  alias Fizz.Slots
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Embeds.Step
@@ -33,7 +33,7 @@ defmodule Fizz.Workflows do
   alias Fizz.Workflows.{
     DurableTimer,
     SignalInbox,
-    SlotDefaults,
+    CredentialDefaults,
     WorkflowDefinition,
     WorkflowDefinitionVersion,
     WorkflowRun
@@ -120,8 +120,8 @@ defmodule Fizz.Workflows do
     with {:ok, version_record} <- fetch_version(scope, version),
          :ok <- ensure_draft(version_record),
          {:ok, user_id} <- user_id_from_scope(scope) do
-      version_record = SlotDefaults.normalize_version(version_record)
-      _ = Slots.ensure_auto_bindings(version_record, user_id, scope)
+      version_record = CredentialDefaults.normalize_version(version_record)
+      _ = Credentials.ensure_auto_bindings(version_record, user_id, scope)
 
       published_at = DateTime.utc_now()
 
@@ -952,7 +952,7 @@ defmodule Fizz.Workflows do
   end
 
   defp do_start_run(scope, %WorkflowDefinitionVersion{} = version_record, input, opts) do
-    version_record = SlotDefaults.normalize_version(version_record)
+    version_record = CredentialDefaults.normalize_version(version_record)
 
     with :ok <- ensure_ready_to_start(scope, version_record, opts),
          {:ok, workflow, compiled_hash} <- Compiler.compile(version_record) do
@@ -967,19 +967,19 @@ defmodule Fizz.Workflows do
   end
 
   defp ensure_ready_to_start(scope, %WorkflowDefinitionVersion{} = version_record, opts) do
-    with :ok <- ensure_valid_slot_declarations(version_record),
+    with :ok <- ensure_valid_credential_declarations(version_record),
          {:ok, user_id} <- run_user_id(scope, opts) do
       case Readiness.check(version_record, user_id, scope) do
         :ready -> :ok
-        {:needs_bindings, descriptors} -> {:error, {:slot_bindings_required, descriptors}}
+        {:needs_bindings, descriptors} -> {:error, {:credential_bindings_required, descriptors}}
       end
     end
   end
 
-  defp ensure_valid_slot_declarations(%WorkflowDefinitionVersion{} = version_record) do
-    case PublishValidation.slot_declaration_issues(version_record.steps || []) do
+  defp ensure_valid_credential_declarations(%WorkflowDefinitionVersion{} = version_record) do
+    case PublishValidation.credential_declaration_issues(version_record.steps || []) do
       [] -> :ok
-      issues -> {:error, {:invalid_slot_declarations, issues}}
+      issues -> {:error, {:invalid_credential_declarations, issues}}
     end
   end
 
@@ -1847,7 +1847,7 @@ defmodule Fizz.Workflows do
     |> put_default_if_missing(:step_groups, [])
     |> put_default_if_missing(:viewport, WorkflowDefinitionVersion.default_viewport())
     |> put_default_if_missing(:settings, %{})
-    |> SlotDefaults.normalize_snapshot_attrs()
+    |> CredentialDefaults.normalize_snapshot_attrs()
   end
 
   defp put_default_if_missing(attrs, field, default) do

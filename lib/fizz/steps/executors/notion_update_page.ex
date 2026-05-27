@@ -14,19 +14,20 @@ defmodule Fizz.Steps.Executors.NotionUpdatePage do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.NotionOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(NotionOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(NotionOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "required" => ["page_id"],
     "properties" => %{
-      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Notion Integration"),
+      "credential_ref" =>
+        CredentialRequirement.schema(@credential_requirement, title: "Notion Integration"),
       "page_id" => %{
         "type" => "string",
         "title" => "Page ID"

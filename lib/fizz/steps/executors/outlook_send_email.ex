@@ -14,19 +14,20 @@ defmodule Fizz.Steps.Executors.OutlookSendEmail do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(MicrosoftOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(MicrosoftOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "required" => ["to", "subject", "body"],
     "properties" => %{
-      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Microsoft Account"),
+      "credential_ref" =>
+        CredentialRequirement.schema(@credential_requirement, title: "Microsoft Account"),
       "to" => %{"type" => "string", "title" => "To"},
       "cc" => %{"type" => "string", "title" => "CC"},
       "bcc" => %{"type" => "string", "title" => "BCC"},

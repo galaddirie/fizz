@@ -7,7 +7,7 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
   test "executor context carries runtime identity and scope values" do
     scope = %Scope{user: %{id: "user_123"}, organization_id: "org_123"}
 
-    resolver = fn _kind, _slot_key, _step_id, _spec ->
+    resolver = fn _requirement_key, _step_id, _provider, _auth_type ->
       {:ok, %{"id" => "credential_123"}}
     end
 
@@ -28,7 +28,7 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
           current_scope: scope,
           scope: scope,
           env: %{"mode" => "test"},
-          _slot_resolver: resolver
+          _credential_resolver: resolver
         },
         %{step_ids: MapSet.new()}
       )
@@ -50,5 +50,6 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
     assert %Fizz.Workflows.ExecutionContext{} = context.execution_context
     assert context.execution_context.scope == scope
     assert context.execution_context.project_id == "project_123"
+    assert context.execution_context.credential_resolver == resolver
   end
 end

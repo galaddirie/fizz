@@ -34,7 +34,7 @@ defmodule Fizz.Workflows.DraftValidatorTest do
            end)
   end
 
-  test "validate_for_publish requires credential slot declarations for slot-backed fields" do
+  test "validate_for_publish requires credential declarations for credential fields" do
     scope = WorkflowsFixtures.project_scope_fixture()
 
     append_step =
@@ -58,7 +58,7 @@ defmodule Fizz.Workflows.DraftValidatorTest do
 
     assert Enum.any?(errors, fn
              %ValidationError{
-               code: :invalid_slot_declaration,
+               code: :invalid_credential_declaration,
                step_id: step_id,
                field: "credential_ref",
                message: "is required"
@@ -99,10 +99,10 @@ defmodule Fizz.Workflows.DraftValidatorTest do
 
     assert Enum.any?(errors, fn
              %ValidationError{
-               code: :invalid_slot_declaration,
+               code: :invalid_credential_declaration,
                step_id: step_id,
                field: "credential_ref",
-               message: "must be a slot declaration"
+               message: "must be a credential declaration"
              } ->
                step_id == append_step.id
 

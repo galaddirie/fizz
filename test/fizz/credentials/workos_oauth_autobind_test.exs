@@ -1,9 +1,9 @@
-defmodule Fizz.Slots.WorkOSOAuthAutobindTest do
+defmodule Fizz.Credentials.WorkOSOAuthAutobindTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
-  alias Fizz.Slots
+  alias Fizz.Credentials
   alias Fizz.Workflows
   alias Fizz.Workflows.Readiness
   alias Fizz.WorkflowsFixtures
@@ -68,15 +68,14 @@ defmodule Fizz.Slots.WorkOSOAuthAutobindTest do
     assert connection.scopes == ["https://www.googleapis.com/auth/spreadsheets"]
 
     assert [binding] =
-             Slots.list_for_user(
+             Credentials.list_for_user(
                scope.organization_id,
                version.workflow_definition_id,
                scope.user.id
              )
 
     assert binding.step_id == hd(version.steps).id
-    assert binding.slot_key == "auth"
-    assert binding.kind == "credential"
+    assert binding.requirement_key == "auth"
     assert binding.binding_data == %{"credential_id" => connection.id}
 
     assert_receive {:workos_http_request, membership_request}
@@ -89,7 +88,7 @@ defmodule Fizz.Slots.WorkOSOAuthAutobindTest do
   defp draft_with_google_oauth_slot(scope) do
     {:ok, %{draft: draft}} =
       Workflows.create_definition(scope, %{
-        name: "Google OAuth slot #{System.unique_integer([:positive])}",
+        name: "Google OAuth credential #{System.unique_integer([:positive])}",
         description: "Auto-bind test"
       })
 
@@ -99,10 +98,10 @@ defmodule Fizz.Slots.WorkOSOAuthAutobindTest do
         name: "Needs Google",
         config: %{
           "credential_ref" => %{
-            "$slot" => true,
-            "kind" => "credential",
-            "slot_key" => "auth",
-            "spec" => %{"provider" => "google_oauth", "auth_type" => "oauth"}
+            "$credential" => true,
+            "requirement_key" => "auth",
+            "provider" => "google_oauth",
+            "auth_type" => "oauth"
           }
         }
       })

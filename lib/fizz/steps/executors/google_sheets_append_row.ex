@@ -15,12 +15,12 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRow do
 
   alias Fizz.Integrations.Google.Sheets.Actions.AppendRow
   alias Fizz.Integrations.Providers.GoogleOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(GoogleOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @spreadsheet_locator %{
@@ -94,7 +94,8 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRow do
     "type" => "object",
     "required" => ["credential_ref", "spreadsheet_id", "values"],
     "properties" => %{
-      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Google Account"),
+      "credential_ref" =>
+        CredentialRequirement.schema(@credential_requirement, title: "Google Account"),
       "spreadsheet_id" => %{
         "type" => "string",
         "title" => "Spreadsheet ID",

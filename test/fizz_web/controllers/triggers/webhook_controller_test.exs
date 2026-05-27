@@ -7,7 +7,7 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
-  alias Fizz.Slots
+  alias Fizz.Credentials
   alias Fizz.Steps.Registry, as: StepRegistry
   alias Fizz.TestSupport.Executors.FailingWebhookTrigger
   alias Fizz.Triggers.Registry
@@ -201,12 +201,11 @@ defmodule FizzWeb.Triggers.WebhookControllerTest do
     connection = insert_oauth_connection!(scope, "github_oauth")
 
     assert {:ok, _binding} =
-             Slots.upsert_binding(saved_draft, scope, %{
+             Credentials.upsert_binding(saved_draft, scope, %{
                user_id: scope.user.id,
                workflow_definition_id: definition.id,
                step_id: trigger.id,
-               slot_key: "auth",
-               kind: "credential",
+               requirement_key: "auth",
                binding_data: %{"credential_id" => connection.id},
                workos_organization_id: scope.organization_id
              })

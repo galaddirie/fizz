@@ -11,11 +11,11 @@ defmodule Fizz.Steps.ConfigSchema do
   The `"ui"` key on a property can contain:
 
     * `"component"` — which Vue component to render (`"select"`, `"search"`, etc.)
-    * `"resolver"` — module implementing `Fizz.Steps.Resolver` for dynamic options
+    * `"resolver"` — module with `resolve/1` for dynamic options
     * `"params"` — parameters forwarded to the resolver (e.g. provider_filter)
     * `"options"` — static list of `%{"label" => ..., "value" => ...}` (alternative to resolver)
     * `"responseConfig"` — mapping config for shaping search results
-    * `"slot_kind"`, `"slot_key"`, `"spec"` — slot metadata when `"component"` is `"slot"`
+    * `"provider"`, `"auth_type"`, `"requirement_key"` — credential metadata when `"component"` is `"credential"`
 
   ## Examples
 
@@ -32,7 +32,7 @@ defmodule Fizz.Steps.ConfigSchema do
         "title" => "Credential",
         "ui" => %{
           "component" => "select",
-          "resolver" => Fizz.Integrations.CredentialsResolver,
+          "resolver" => Fizz.Credentials.OptionsResolver,
           "params" => %{"provider_filter" => ["openai_api_key"]}
         }
       }
@@ -51,9 +51,9 @@ defmodule Fizz.Steps.ConfigSchema do
         }
       }
 
-      # Slot-backed credential field
+      # Credential field
       "credential_ref" =>
-        Fizz.Slots.Field.credential_schema("openai_api_key", :api_key,
+        Fizz.Credentials.Field.credential_schema("openai_api_key", :api_key,
           title: "Credential"
         )
   """

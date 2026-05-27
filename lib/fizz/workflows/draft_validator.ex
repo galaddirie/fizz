@@ -53,7 +53,10 @@ defmodule Fizz.Workflows.DraftValidator do
     |> Kernel.++(invalid_step_config_errors)
     |> Kernel.++(wrap_errors(PublishValidation.expression_issues(steps), :invalid_expression))
     |> Kernel.++(
-      wrap_errors(PublishValidation.slot_declaration_issues(steps), :invalid_slot_declaration)
+      wrap_errors(
+        PublishValidation.credential_declaration_issues(steps),
+        :invalid_credential_declaration
+      )
     )
     |> Kernel.++(
       wrap_errors(PublishValidation.trigger_root_issues(steps, connections), :trigger_not_root)

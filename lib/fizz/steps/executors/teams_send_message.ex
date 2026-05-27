@@ -14,19 +14,20 @@ defmodule Fizz.Steps.Executors.TeamsSendMessage do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(MicrosoftOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(MicrosoftOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "required" => ["team_id", "channel_id", "message"],
     "properties" => %{
-      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Microsoft Account"),
+      "credential_ref" =>
+        CredentialRequirement.schema(@credential_requirement, title: "Microsoft Account"),
       "team_id" => %{
         "type" => "string",
         "title" => "Team ID"

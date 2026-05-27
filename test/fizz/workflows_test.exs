@@ -259,7 +259,7 @@ defmodule Fizz.WorkflowsTest do
     assert_worker_shutdown(run.id)
   end
 
-  test "start_run requires bindings for declared slots" do
+  test "start_run requires bindings for declared credentials" do
     scope = WorkflowsFixtures.project_scope_fixture()
 
     entry_step = WorkflowsFixtures.step(%{type_id: "debug", name: "Entry"})
@@ -287,13 +287,13 @@ defmodule Fizz.WorkflowsTest do
 
     %{version: version} = WorkflowsFixtures.published_version_fixture(scope, snapshot_attrs)
 
-    assert {:error, {:slot_bindings_required, [descriptor]}} =
+    assert {:error, {:credential_bindings_required, [descriptor]}} =
              Workflows.start_run(scope, version, %{})
 
     assert descriptor.step_id == image_step.id
-    assert descriptor.kind == "credential"
-    assert descriptor.slot_key == "auth"
-    assert descriptor.spec == %{"provider" => "openai_api_key", "auth_type" => "api_key"}
+    assert descriptor.requirement_key == "auth"
+    assert descriptor.provider == "openai_api_key"
+    assert descriptor.auth_type == "api_key"
   end
 
   test "list_run_step_executions exposes split iterations without compiler internals" do

@@ -14,19 +14,19 @@ defmodule Fizz.Steps.Executors.GmailTrigger do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.GoogleOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(GoogleOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "properties" => %{
       "credential_ref" =>
-        CredentialSlot.schema(@credential_slot,
+        CredentialRequirement.schema(@credential_requirement,
           title: "Gmail Account",
           description: "Google account. Bound at run time per user."
         ),

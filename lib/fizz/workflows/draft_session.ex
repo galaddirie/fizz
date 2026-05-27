@@ -5,7 +5,7 @@ defmodule Fizz.Workflows.DraftSession do
 
   alias Fizz.Workflows
   alias Fizz.Workflows.DraftSession.Operation
-  alias Fizz.Workflows.SlotDefaults
+  alias Fizz.Workflows.CredentialDefaults
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
   require Logger
@@ -482,7 +482,7 @@ defmodule Fizz.Workflows.DraftSession do
   # --- Persistence ---
 
   defp persist(%__MODULE__{} = state) do
-    normalized_draft = SlotDefaults.normalize_version(state.draft)
+    normalized_draft = CredentialDefaults.normalize_version(state.draft)
     needs_persist? = state.dirty? or normalized_draft != state.draft
     state = %{state | draft: normalized_draft}
 

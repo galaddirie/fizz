@@ -14,21 +14,21 @@ defmodule Fizz.Steps.Executors.GitHubTrigger do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.GitHubOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(GitHubOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(GitHubOAuth.provider_id())
   alias Fizz.Triggers.RegistrationSpec
 
   @default_config %{
     "events" => ["push"],
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "properties" => %{
       "credential_ref" =>
-        CredentialSlot.schema(@credential_slot,
+        CredentialRequirement.schema(@credential_requirement,
           title: "GitHub Account",
           description: "GitHub account. Bound at run time per user."
         ),

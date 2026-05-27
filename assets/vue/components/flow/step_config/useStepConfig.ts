@@ -262,7 +262,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             if (uiComponent === 'hidden') return [];
 
             let inferredType: ExtendedFieldType = 'text';
-            if (uiComponent === 'slot') inferredType = 'json';
+            if (uiComponent === 'credential') inferredType = 'json';
             else if (uiComponent === 'resource_mapper') inferredType = 'resource_mapper';
             else if (uiComponent === 'resource_locator') inferredType = 'resource_locator';
             else if (uiComponent === 'search') inferredType = 'search';
@@ -287,7 +287,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
                 label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
                 description: schemaField.description,
                 type: inferredType as ExtendedFieldType,
-                expressionCapable: uiComponent !== 'slot',
+                expressionCapable: uiComponent !== 'credential',
             }];
         });
     });

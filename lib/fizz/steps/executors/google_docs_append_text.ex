@@ -14,19 +14,20 @@ defmodule Fizz.Steps.Executors.GoogleDocsAppendText do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.GoogleOAuth
-  alias Fizz.Slots.CredentialSlot
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.oauth(GoogleOAuth.provider_id())
+  @credential_requirement CredentialRequirement.oauth(GoogleOAuth.provider_id())
 
   @default_config %{
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
     "type" => "object",
     "required" => ["document_id", "text"],
     "properties" => %{
-      "credential_ref" => CredentialSlot.schema(@credential_slot, title: "Google Account"),
+      "credential_ref" =>
+        CredentialRequirement.schema(@credential_requirement, title: "Google Account"),
       "document_id" => %{
         "type" => "string",
         "title" => "Document ID"

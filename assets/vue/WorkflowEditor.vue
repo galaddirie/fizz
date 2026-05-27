@@ -6,7 +6,7 @@ import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import AddStepPicker from '@/components/flow/AddStepPicker.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
 import PublishModal from '@/components/flow/PublishModal.vue';
-import RunLaunchModal from '@/components/flow/RunLaunchModal.vue';
+import CredentialLaunchModal from '@/components/flow/CredentialLaunchModal.vue';
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import Avatar from '@/components/ui/Avatar.vue';
@@ -268,8 +268,8 @@ const publishValidationErrors = ref<WorkflowValidationError[]>([]);
 const publishTriggerImpact = ref<TriggerImpact | null>(null);
 const publishExecutionHashChanged = ref<boolean | null>(null);
 
-// Run launch (slot binding) modal state
-interface SlotCandidate {
+// Run launch credential modal state
+interface CredentialCandidate {
   id: string;
   provider?: string;
   provider_label?: string;
@@ -281,19 +281,19 @@ interface SlotCandidate {
   requires_reauthorization?: boolean;
   status?: string;
 }
-interface SlotBindingDescriptor {
+interface CredentialBindingDescriptor {
   step_id: string;
-  slot_key: string;
-  kind: string;
-  spec: Record<string, unknown>;
-  candidates: SlotCandidate[];
+  requirement_key: string;
+  provider: string;
+  auth_type: string;
+  candidates: CredentialCandidate[];
 }
 const isRunLaunchModalOpen = ref(false);
 const runLaunchTargetStepId = ref<string | null>(null);
-const runLaunchDescriptors = ref<SlotBindingDescriptor[]>([]);
+const runLaunchDescriptors = ref<CredentialBindingDescriptor[]>([]);
 
-useLiveEvent<{ target_step_id: string | null; descriptors: SlotBindingDescriptor[] }>(
-  'slot_bindings_needed',
+useLiveEvent<{ target_step_id: string | null; descriptors: CredentialBindingDescriptor[] }>(
+  'credential_bindings_needed',
   payload => {
     runLaunchTargetStepId.value = payload.target_step_id ?? null;
     runLaunchDescriptors.value = payload.descriptors ?? [];
@@ -301,7 +301,7 @@ useLiveEvent<{ target_step_id: string | null; descriptors: SlotBindingDescriptor
   }
 );
 
-useLiveEvent<{ target_step_id: string | null }>('slot_bindings_resolved', payload => {
+useLiveEvent<{ target_step_id: string | null }>('credential_bindings_resolved', payload => {
   if (payload.target_step_id === runLaunchTargetStepId.value) {
     runLaunchDescriptors.value = [];
     isRunLaunchModalOpen.value = false;
@@ -316,16 +316,15 @@ function handleReauthConnected(payload: { target_step_id: string | null }) {
   emit('reauth_connected', payload);
 }
 
-function handleSubmitSlotBindings(payload: {
+function handleSubmitCredentialBindings(payload: {
   target_step_id: string | null;
   bindings: Array<{
     step_id: string;
-    slot_key: string;
-    kind: string;
+    requirement_key: string;
     binding_data: Record<string, unknown>;
   }>;
 }) {
-  emit('submit_slot_bindings', payload);
+  emit('submit_credential_bindings', payload);
   isRunLaunchModalOpen.value = false;
 }
 
@@ -867,14 +866,14 @@ useLiveEvent<{
         @publish="handlePublish"
       />
 
-      <RunLaunchModal
+      <CredentialLaunchModal
         :is-open="isRunLaunchModalOpen"
         :target-step-id="runLaunchTargetStepId"
         :descriptors="runLaunchDescriptors"
         :widget-token="widgetToken"
         @close="closeRunLaunchModal"
         @reauth-connected="handleReauthConnected"
-        @submit="handleSubmitSlotBindings"
+        @submit="handleSubmitCredentialBindings"
       />
     </div>
   </div>

@@ -21,16 +21,15 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
 
   alias Fizz.Integrations.CredentialRef
   alias Fizz.Integrations.Providers.OpenAIApiKey
-  alias Fizz.Slots.CredentialSlot
-  alias Fizz.Slots.Field, as: SlotField
+  alias Fizz.Credentials.Requirement, as: CredentialRequirement
 
-  @credential_slot CredentialSlot.api_key(OpenAIApiKey.provider_id())
+  @credential_requirement CredentialRequirement.api_key(OpenAIApiKey.provider_id())
 
   @default_config %{
     "model" => "gpt-5.5",
     "temperature" => 0.2,
     "max_tokens" => 800,
-    "credential_ref" => CredentialSlot.declaration(@credential_slot)
+    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
   }
 
   @config_schema %{
@@ -38,7 +37,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
     "required" => ["model", "credential_ref"],
     "properties" => %{
       "credential_ref" =>
-        CredentialSlot.schema(@credential_slot,
+        CredentialRequirement.schema(@credential_requirement,
           title: "Credential",
           description: "OpenAI credential. Bound at run time per user."
         ),
@@ -138,7 +137,7 @@ defmodule Fizz.Steps.Executors.OpenAIModel do
         Map.get(config, :credential_ref)
 
     cond do
-      SlotField.slot_declaration?(credential_ref) ->
+      CredentialRequirement.declaration?(credential_ref) ->
         errors
 
       true ->

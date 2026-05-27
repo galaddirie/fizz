@@ -4,8 +4,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   use FizzWeb, :verified_routes
 
   alias Fizz.Accounts
-  alias Fizz.Integrations.{CredentialsResolver, DynamicResolver}
-  alias Fizz.Slots
+  alias Fizz.Credentials
+  alias Fizz.Credentials.OptionsResolver
+  alias Fizz.Integrations.DynamicResolver
   alias Fizz.Steps
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Type
@@ -136,11 +137,11 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       "run_node" ->
         {:noreply, run_node(socket, payload)}
 
-      "submit_slot_bindings" ->
-        {:noreply, submit_slot_bindings(socket, payload)}
+      "submit_credential_bindings" ->
+        {:noreply, submit_credential_bindings(socket, payload)}
 
       "reauth_connected" ->
-        {:noreply, refresh_slot_bindings(socket, payload)}
+        {:noreply, refresh_credential_bindings(socket, payload)}
 
       "cancel_execution" ->
         {:noreply, cancel_execution(socket)}
@@ -605,7 +606,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp run_test(socket), do: run_editor_execution(socket, nil)
 
-  defp submit_slot_bindings(socket, payload) do
+  defp submit_credential_bindings(socket, payload) do
     bindings = Map.get(payload, "bindings") || []
     target_step_id = Map.get(payload, "target_step_id")
     user_id = socket.assigns.current_user_id
@@ -617,15 +618,14 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
     results =
       Enum.map(bindings, fn binding ->
-        Slots.upsert_binding(
+        Credentials.upsert_binding(
           socket.assigns.draft,
           socket.assigns.current_scope,
           %{
             user_id: user_id,
             workflow_definition_id: workflow_definition_id,
             step_id: Map.get(binding, "step_id"),
-            slot_key: Map.get(binding, "slot_key"),
-            kind: Map.get(binding, "kind"),
+            requirement_key: Map.get(binding, "requirement_key"),
             binding_data: Map.get(binding, "binding_data") || %{},
             workos_organization_id: workos_organization_id
           }
@@ -641,7 +641,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     end
   end
 
-  defp refresh_slot_bindings(socket, payload) do
+  defp refresh_credential_bindings(socket, payload) do
     target_step_id = Map.get(payload, "target_step_id")
 
     with {:ok, execution_draft} <- editor_execution_draft(socket.assigns.draft, target_step_id) do
@@ -651,10 +651,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
              socket.assigns.current_scope
            ) do
         :ready ->
-          push_event(socket, "slot_bindings_resolved", %{target_step_id: target_step_id})
+          push_event(socket, "credential_bindings_resolved", %{target_step_id: target_step_id})
 
         {:needs_bindings, descriptors} ->
-          push_event(socket, "slot_bindings_needed", %{
+          push_event(socket, "credential_bindings_needed", %{
             target_step_id: target_step_id,
             descriptors: descriptors
           })
@@ -729,7 +729,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
             proceed_editor_execution(socket, execution_draft, target_step_id)
 
           {:needs_bindings, descriptors} ->
-            push_event(socket, "slot_bindings_needed", %{
+            push_event(socket, "credential_bindings_needed", %{
               target_step_id: target_step_id,
               descriptors: descriptors
             })
@@ -762,15 +762,15 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         |> refresh_execution_state(run.id)
         |> maybe_assign_started_execution(run)
 
-      {:error, {:slot_bindings_required, descriptors}} ->
-        push_event(socket, "slot_bindings_needed", %{
+      {:error, {:credential_bindings_required, descriptors}} ->
+        push_event(socket, "credential_bindings_needed", %{
           target_step_id: nil,
           descriptors: descriptors
         })
 
-      {:error, {:invalid_slot_declarations, issues}} ->
+      {:error, {:invalid_credential_declarations, issues}} ->
         issues
-        |> slot_declaration_validation_errors()
+        |> credential_declaration_validation_errors()
         |> then(&handle_run_validation_errors(socket, &1))
 
       {:error, reason} ->
@@ -1008,13 +1008,13 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp search_credentials(socket, payload) do
-    case CredentialsResolver.resolve(%{
+    case OptionsResolver.resolve(%{
            q: resolver_query(payload),
            params: search_credentials_params(payload),
            context: resolver_context(socket)
          }) do
       {:ok, options} ->
-        maybe_push_credential_results(socket, CredentialsResolver, payload, options)
+        maybe_push_credential_results(socket, OptionsResolver, payload, options)
 
       {:error, reason} ->
         socket
@@ -2242,7 +2242,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     }
   end
 
-  defp maybe_push_credential_results(socket, CredentialsResolver, payload, options) do
+  defp maybe_push_credential_results(socket, OptionsResolver, payload, options) do
     socket
     |> assign(:credential_options, options)
     |> push_event(
@@ -2346,14 +2346,14 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     Enum.group_by(errors, fn error -> error.step_id || @global_validation_key end, & &1)
   end
 
-  defp slot_declaration_validation_errors(issues) do
+  defp credential_declaration_validation_errors(issues) do
     Enum.map(issues, fn issue ->
       %DraftValidator.ValidationError{
         step_id: Map.get(issue, :step_id) || Map.get(issue, "step_id"),
         field: Map.get(issue, :field) || Map.get(issue, "field"),
         message: Map.get(issue, :message) || Map.get(issue, "message") || inspect(issue),
         severity: :error,
-        code: :invalid_slot_declaration
+        code: :invalid_credential_declaration
       }
     end)
   end

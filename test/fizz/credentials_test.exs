@@ -1,19 +1,18 @@
-defmodule Fizz.SlotsTest do
+defmodule Fizz.CredentialsTest do
   use Fizz.DataCase, async: true
 
   alias Fizz.Accounts.{ApiCredential, OauthConnection}
-  alias Fizz.Accounts.Scope
-  alias Fizz.Slots
-  alias Fizz.Slots.Declaration
+  alias Fizz.Credentials
+  alias Fizz.Credentials.Declaration
   alias Fizz.Workflows
-  alias Fizz.Workflows.SlotDefaults
+  alias Fizz.Workflows.CredentialDefaults
   alias Fizz.WorkflowsFixtures
 
-  describe "slot declarations" do
-    test "walks nested config and normalizes slot declarations" do
+  describe "credential declarations" do
+    test "walks nested config and normalizes credential declarations" do
       config = %{
-        "credential_ref" => credential_slot("openai_api_key"),
-        "nested" => [%{"value" => credential_slot("github_oauth", "oauth")}]
+        "credential_ref" => credential_declaration("openai_api_key"),
+        "nested" => [%{"value" => credential_declaration("github_oauth", "oauth")}]
       }
 
       declarations = config |> Declaration.walk() |> Enum.sort_by(& &1.path)
@@ -25,32 +24,36 @@ defmodule Fizz.SlotsTest do
 
       assert {:ok,
               %{
-                kind: "credential",
-                slot_key: "auth",
-                spec: %{"provider" => "openai_api_key", "auth_type" => "api_key"}
+                requirement_key: "auth",
+                provider: "openai_api_key",
+                auth_type: "api_key"
               }} = Declaration.normalize(openai)
 
       assert :ok = Declaration.validate(github)
     end
 
-    test "reports missing and unregistered slot declaration fields" do
-      assert {:error, "slot is missing kind"} =
-               Declaration.validate(%{"$slot" => true, "slot_key" => "auth", "spec" => %{}})
-
-      assert {:error, "slot kind \"missing\" is not registered"} =
+    test "reports missing and invalid credential declaration fields" do
+      assert {:error, "credential is missing provider"} =
                Declaration.validate(%{
-                 "$slot" => true,
-                 "kind" => "missing",
-                 "slot_key" => "auth",
-                 "spec" => %{}
+                 "$credential" => true,
+                 "requirement_key" => "auth",
+                 "auth_type" => "api_key"
+               })
+
+      assert {:error, "credential auth_type must be api_key or oauth"} =
+               Declaration.validate(%{
+                 "$credential" => true,
+                 "requirement_key" => "auth",
+                 "provider" => "openai_api_key",
+                 "auth_type" => "password"
                })
     end
   end
 
-  describe "required_slots/1" do
-    test "returns normalized slot descriptors for workflow step maps" do
+  describe "required_credentials/1" do
+    test "returns normalized credential descriptors for workflow step maps" do
       steps = [
-        %{id: "step_a", config: %{"credential_ref" => credential_slot("openai_api_key")}},
+        %{id: "step_a", config: %{"credential_ref" => credential_declaration("openai_api_key")}},
         %{id: "step_b", config: %{}}
       ]
 
@@ -58,16 +61,16 @@ defmodule Fizz.SlotsTest do
                %{
                  step_id: "step_a",
                  field: "credential_ref",
-                 kind: "credential",
-                 slot_key: "auth",
-                 spec: %{"provider" => "openai_api_key", "auth_type" => "api_key"}
+                 requirement_key: "auth",
+                 provider: "openai_api_key",
+                 auth_type: "api_key"
                }
-             ] = Slots.required_slots(steps)
+             ] = Credentials.required_credentials(steps)
     end
   end
 
-  describe "slot defaults" do
-    test "restores missing slot declarations from step default config" do
+  describe "credential defaults" do
+    test "restores missing credential declarations from step default config" do
       step =
         WorkflowsFixtures.step(%{
           type_id: "google_sheets_append_row",
@@ -78,14 +81,14 @@ defmodule Fizz.SlotsTest do
                %{
                  config: %{
                    "credential_ref" => %{
-                     "$slot" => true,
-                     "kind" => "credential",
-                     "slot_key" => "auth",
-                     "spec" => %{"provider" => "google_oauth", "auth_type" => "oauth"}
+                     "$credential" => true,
+                     "requirement_key" => "auth",
+                     "provider" => "google_oauth",
+                     "auth_type" => "oauth"
                    }
                  }
                }
-             ] = SlotDefaults.normalize_steps([step])
+             ] = CredentialDefaults.normalize_steps([step])
     end
 
     test "does not overwrite concrete legacy credential refs" do
@@ -102,12 +105,12 @@ defmodule Fizz.SlotsTest do
         })
 
       assert [%{config: %{"credential_ref" => ^legacy_ref}}] =
-               SlotDefaults.normalize_steps([step])
+               CredentialDefaults.normalize_steps([step])
     end
   end
 
   describe "ensure_auto_bindings/3" do
-    test "auto-binds one available WorkOS OAuth connection for restored credential slots" do
+    test "auto-binds one available WorkOS OAuth connection for restored credentials" do
       scope = WorkflowsFixtures.project_scope_fixture()
 
       append_step =
@@ -122,8 +125,8 @@ defmodule Fizz.SlotsTest do
 
       {:ok, %{draft: draft}} =
         Workflows.create_definition(scope, %{
-          name: "OAuth slot workflow #{System.unique_integer([:positive])}",
-          description: "Slot auto-bind test"
+          name: "OAuth credential workflow #{System.unique_integer([:positive])}",
+          description: "Credential auto-bind test"
         })
 
       {:ok, version} =
@@ -135,33 +138,33 @@ defmodule Fizz.SlotsTest do
 
       connection = insert_oauth_connection!(scope.user.id, scope.organization_id, "google_oauth")
 
-      assert {:ok, [binding]} = Slots.ensure_auto_bindings(version, scope.user.id, scope)
+      assert {:ok, [binding]} = Credentials.ensure_auto_bindings(version, scope.user.id, scope)
       assert binding.step_id == append_step.id
-      assert binding.slot_key == "auth"
+      assert binding.requirement_key == "auth"
       assert binding.binding_data == %{"credential_id" => connection.id}
-      assert Slots.readiness(version, scope.user.id, scope) == :ready
+      assert Credentials.readiness(version, scope.user.id, scope) == :ready
     end
   end
 
-  describe "candidate_options/3" do
-    test "returns a tagged error for unknown slot kinds" do
-      assert {:error, :unknown_slot_kind} = Slots.candidate_options("missing", %{}, %Scope{})
+  describe "candidate_options/2" do
+    test "returns a tagged error for invalid scope" do
+      assert {:error, :invalid_scope} =
+               Credentials.candidate_options(credential_declaration("openai_api_key"), nil)
     end
   end
 
   describe "upsert_binding/3" do
-    test "persists a binding when it matches the slot declaration spec" do
+    test "persists a binding when it matches the credential requirement" do
       scope = WorkflowsFixtures.project_scope_fixture()
-      version = draft_with_credential_slot(scope, "openai_api_key")
+      version = draft_with_credential_requirement(scope, "openai_api_key")
       credential = insert_api_credential!(scope.user.id, scope.organization_id, "openai_api_key")
 
       assert {:ok, binding} =
-               Slots.upsert_binding(version, scope, %{
+               Credentials.upsert_binding(version, scope, %{
                  user_id: scope.user.id,
                  workflow_definition_id: version.workflow_definition_id,
                  step_id: hd(version.steps).id,
-                 slot_key: "auth",
-                 kind: "credential",
+                 requirement_key: "auth",
                  binding_data: %{"credential_id" => credential.id},
                  workos_organization_id: scope.organization_id
                })
@@ -169,20 +172,19 @@ defmodule Fizz.SlotsTest do
       assert binding.binding_data == %{"credential_id" => credential.id}
     end
 
-    test "rejects a credential binding that does not satisfy the declaration spec" do
+    test "rejects a credential binding that does not satisfy the requirement" do
       scope = WorkflowsFixtures.project_scope_fixture()
-      version = draft_with_credential_slot(scope, "openai_api_key")
+      version = draft_with_credential_requirement(scope, "openai_api_key")
 
       credential =
         insert_api_credential!(scope.user.id, scope.organization_id, "anthropic_api_key")
 
       assert {:error, changeset} =
-               Slots.upsert_binding(version, scope, %{
+               Credentials.upsert_binding(version, scope, %{
                  user_id: scope.user.id,
                  workflow_definition_id: version.workflow_definition_id,
                  step_id: hd(version.steps).id,
-                 slot_key: "auth",
-                 kind: "credential",
+                 requirement_key: "auth",
                  binding_data: %{"credential_id" => credential.id},
                  workos_organization_id: scope.organization_id
                })
@@ -191,27 +193,27 @@ defmodule Fizz.SlotsTest do
     end
   end
 
-  defp credential_slot(provider, auth_type \\ "api_key") do
+  defp credential_declaration(provider, auth_type \\ "api_key") do
     %{
-      "$slot" => true,
-      "kind" => "credential",
-      "slot_key" => "auth",
-      "spec" => %{"provider" => provider, "auth_type" => auth_type}
+      "$credential" => true,
+      "requirement_key" => "auth",
+      "provider" => provider,
+      "auth_type" => auth_type
     }
   end
 
-  defp draft_with_credential_slot(scope, provider) do
+  defp draft_with_credential_requirement(scope, provider) do
     {:ok, %{draft: draft}} =
       Workflows.create_definition(scope, %{
-        name: "Slot workflow #{System.unique_integer([:positive])}",
-        description: "Slot test"
+        name: "Credential workflow #{System.unique_integer([:positive])}",
+        description: "Credential test"
       })
 
     step =
       WorkflowsFixtures.step(%{
         type_id: "openai_image_generation",
         name: "Image",
-        config: %{"credential_ref" => credential_slot(provider)}
+        config: %{"credential_ref" => credential_declaration(provider)}
       })
 
     attrs = WorkflowsFixtures.snapshot_attrs(%{steps: [step]})
@@ -238,8 +240,8 @@ defmodule Fizz.SlotsTest do
   defp insert_oauth_connection!(user_id, organization_id, provider) do
     %OauthConnection{}
     |> OauthConnection.changeset(%{
-      user_id: user_id,
       workos_organization_id: organization_id,
+      user_id: user_id,
       provider: provider,
       status: :active
     })

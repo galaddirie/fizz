@@ -99,7 +99,7 @@ defmodule Fizz.Workflows.CompilerTest do
     assert match?(%AccessPlan.ValueExpression{}, compiled_config["label"])
   end
 
-  test "credential slot steps request runtime auth context" do
+  test "credential steps request runtime auth context" do
     append_id = Ecto.UUID.generate()
 
     version = %WorkflowDefinitionVersion{
@@ -138,6 +138,7 @@ defmodule Fizz.Workflows.CompilerTest do
       |> Enum.map(& &1.context_key)
 
     assert :current_scope in context_keys
+    assert :_credential_resolver in context_keys
     assert :user_id in context_keys
     assert :project_id in context_keys
     assert :workos_organization_id in context_keys
@@ -893,10 +894,10 @@ defmodule Fizz.Workflows.CompilerTest do
 
   defp credential_slot(provider, auth_type) do
     %{
-      "$slot" => true,
-      "kind" => "credential",
-      "slot_key" => "auth",
-      "spec" => %{"provider" => provider, "auth_type" => auth_type}
+      "$credential" => true,
+      "requirement_key" => "auth",
+      "provider" => provider,
+      "auth_type" => auth_type
     }
   end
 

@@ -3,7 +3,7 @@ defmodule Fizz.Integrations.Providers.AnthropicApiKey do
   Anthropic API-key provider definition.
 
   Token resolution is not implemented yet; the catalog still exposes the
-  provider so credential slots and account configuration can target it.
+  provider so credential requirements and account configuration can target it.
   """
 
   alias Fizz.Integrations.ProviderDefinition

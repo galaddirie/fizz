@@ -78,7 +78,7 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     "wait"
   ]
 
-  @expected_credential_slots [
+  @expected_credential_requirements [
     {"anthropic_model", "credential_ref", "anthropic_api_key", "api_key", "auth"},
     {"anthropic_vision_analysis", "credential_ref", "anthropic_api_key", "api_key", "auth"},
     {"box_upload_file", "credential_ref", "box_oauth", "oauth", "auth"},
@@ -148,17 +148,17 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     end
   end
 
-  describe "credential slot shapes" do
-    test "slot-backed credential fields keep their provider/auth contracts" do
-      assert credential_slots() == @expected_credential_slots
+  describe "credential field shapes" do
+    test "credential fields keep their provider/auth contracts" do
+      assert credential_requirements() == @expected_credential_requirements
     end
 
-    test "non-slot UI components stay explicit" do
+    test "non-credential UI components stay explicit" do
       assert ui_components() == @expected_ui_components
     end
 
-    test "slot-backed credential fields have matching default declarations" do
-      for {step_id, field, provider, auth_type, slot_key} <- credential_slots() do
+    test "credential fields have matching default declarations" do
+      for {step_id, field, provider, auth_type, requirement_key} <- credential_requirements() do
         {:ok, step_type} = Registry.get(step_id)
         default_config = Registry.get_default_config(step_id)
         schema = get_in(step_type.config_schema, ["properties", field])
@@ -166,24 +166,18 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
         assert %{
                  "type" => "object",
                  "ui" => %{
-                   "component" => "slot",
-                   "slot_kind" => "credential",
-                   "slot_key" => ^slot_key,
-                   "spec" => %{
-                     "provider" => ^provider,
-                     "auth_type" => ^auth_type
-                   }
+                   "component" => "credential",
+                   "requirement_key" => ^requirement_key,
+                   "provider" => ^provider,
+                   "auth_type" => ^auth_type
                  }
                } = schema
 
         assert %{
-                 "$slot" => true,
-                 "kind" => "credential",
-                 "slot_key" => ^slot_key,
-                 "spec" => %{
-                   "provider" => ^provider,
-                   "auth_type" => ^auth_type
-                 }
+                 "$credential" => true,
+                 "requirement_key" => ^requirement_key,
+                 "provider" => ^provider,
+                 "auth_type" => ^auth_type
                } = Map.fetch!(default_config, field)
 
         assert {:ok, %{id: ^provider, type: provider_auth_type}} =
@@ -206,9 +200,9 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     |> Enum.sort()
   end
 
-  defp credential_slots do
+  defp credential_requirements do
     Registry.all()
-    |> Enum.flat_map(&credential_slots_for_step/1)
+    |> Enum.flat_map(&credential_requirements_for_step/1)
     |> Enum.sort()
   end
 
@@ -218,27 +212,26 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     |> Enum.sort()
   end
 
-  defp credential_slots_for_step(%Type{} = step_type) do
+  defp credential_requirements_for_step(%Type{} = step_type) do
     step_type.config_schema
     |> Map.get("properties", %{})
     |> Enum.flat_map(fn {field, schema} ->
       case get_in(schema, ["ui", "component"]) do
-        "slot" -> [credential_slot_tuple(step_type.id, field, schema)]
+        "credential" -> [credential_requirement_tuple(step_type.id, field, schema)]
         _component -> []
       end
     end)
   end
 
-  defp credential_slot_tuple(step_id, field, schema) do
+  defp credential_requirement_tuple(step_id, field, schema) do
     ui = Map.fetch!(schema, "ui")
-    spec = Map.fetch!(ui, "spec")
 
     {
       step_id,
       field,
-      Map.fetch!(spec, "provider"),
-      Map.fetch!(spec, "auth_type"),
-      Map.fetch!(ui, "slot_key")
+      Map.fetch!(ui, "provider"),
+      Map.fetch!(ui, "auth_type"),
+      Map.fetch!(ui, "requirement_key")
     }
   end
 
@@ -247,7 +240,7 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     |> Map.get("properties", %{})
     |> Enum.flat_map(fn {field, schema} ->
       case get_in(schema, ["ui", "component"]) do
-        "slot" -> []
+        "credential" -> []
         component when is_binary(component) -> [{step_type.id, field, component}]
         _component -> []
       end

@@ -5,14 +5,14 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
   The compiler produces a reusable `Runic.Workflow` graph. This module provides
   the run-specific context that should not be baked into that compiled artifact,
   such as the run identity, project and organization metadata, current scope,
-  and the slot resolver used for per-user value bindings (credentials, etc.).
+  and the credential resolver used for per-user credential bindings.
 
   The result is attached to the workflow at worker start and can be rebuilt on
   resume from durable metadata.
   """
 
   alias Fizz.Accounts.Scope
-  alias Fizz.Slots
+  alias Fizz.Credentials
   alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.WorkflowRun
 
@@ -23,7 +23,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
     run
     |> base_context()
     |> maybe_put_scope(scope)
-    |> maybe_put_slot_resolver(scope, run)
+    |> maybe_put_credential_resolver(scope, run)
     |> put_global_context()
   end
 
@@ -31,7 +31,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
     attrs
     |> base_context()
     |> maybe_put_scope(scope)
-    |> maybe_put_slot_resolver(scope, attrs)
+    |> maybe_put_credential_resolver(scope, attrs)
     |> put_global_context()
   end
 
@@ -78,14 +78,14 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
 
   defp maybe_put_scope(context, _scope), do: context
 
-  defp maybe_put_slot_resolver(context, %Scope{} = scope, run_or_attrs) do
-    case Slots.runtime_resolver(scope, run_or_attrs) do
-      {:ok, resolver} -> Map.put(context, :_slot_resolver, resolver)
+  defp maybe_put_credential_resolver(context, %Scope{} = scope, run_or_attrs) do
+    case Credentials.runtime_resolver(scope, run_or_attrs) do
+      {:ok, resolver} -> Map.put(context, :_credential_resolver, resolver)
       {:error, _reason} -> context
     end
   end
 
-  defp maybe_put_slot_resolver(context, _scope, _run_or_attrs), do: context
+  defp maybe_put_credential_resolver(context, _scope, _run_or_attrs), do: context
 
   defp put_global_context(context) do
     context

@@ -3,7 +3,7 @@ defmodule Fizz.TestSupport.CatalogValidation.MissingCredentialDefaultStep do
     id: "missing_credential_default_step",
     name: "Missing Credential Default Step",
     category: "Test",
-    description: "Invalid step missing the default slot declaration.",
+    description: "Invalid step missing the default credential declaration.",
     icon: "hero-key",
     kind: :action
 
@@ -13,7 +13,7 @@ defmodule Fizz.TestSupport.CatalogValidation.MissingCredentialDefaultStep do
     "type" => "object",
     "properties" => %{
       "credential_ref" =>
-        Fizz.Slots.Field.credential_schema("google_oauth", :oauth, title: "Google Account")
+        Fizz.Credentials.Field.credential_schema("google_oauth", :oauth, title: "Google Account")
     }
   }
 

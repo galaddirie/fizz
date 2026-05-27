@@ -23,7 +23,7 @@ defmodule Fizz.Workflows.Runtime.ConfigResolver do
   def resolve_value(%AccessPlan.PredicateExpression{} = plan, context),
     do: Expressions.resolve(plan, context)
 
-  def resolve_value(%AccessPlan.SlotRef{} = plan, context),
+  def resolve_value(%AccessPlan.CredentialRef{} = plan, context),
     do: Expressions.resolve(plan, context)
 
   def resolve_value(map, context) when is_map(map) do

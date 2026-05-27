@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.PublishValidation do
   @moduledoc false
 
   alias Fizz.Graph
-  alias Fizz.Slots.Declaration
+  alias Fizz.Credentials.Declaration
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
   alias Fizz.Steps.Type
@@ -58,20 +58,20 @@ defmodule Fizz.Workflows.PublishValidation do
   end
 
   @doc """
-  Validates that slot declarations in step configs are well-formed.
+  Validates that credential declarations in step configs are well-formed.
 
   This replaces the prior credential-accessibility check. Per-user credential
   selection now happens at run time via `Fizz.Workflows.Readiness`, so publish
-  validation only needs to confirm the workflow declares its slot
+  validation only needs to confirm the workflow declares its credential
   requirements correctly.
   """
-  @spec slot_declaration_issues([map()]) :: [issue()]
-  def slot_declaration_issues(steps) when is_list(steps) do
+  @spec credential_declaration_issues([map()]) :: [issue()]
+  def credential_declaration_issues(steps) when is_list(steps) do
     Enum.flat_map(steps, fn step ->
       config = step.config || %{}
 
-      required_slot_declaration_issues(step, config) ++
-        configured_slot_declaration_issues(step, config)
+      required_credential_declaration_issues(step, config) ++
+        configured_credential_declaration_issues(step, config)
     end)
   end
 
@@ -187,21 +187,21 @@ defmodule Fizz.Workflows.PublishValidation do
 
         config_schema
         |> schema_required_fields()
-        |> Enum.reject(fn field -> slot_schema_property?(Map.get(properties, field)) end)
+        |> Enum.reject(fn field -> credential_schema_property?(Map.get(properties, field)) end)
 
       :error ->
         []
     end
   end
 
-  defp required_slot_fields_for_step(type_id) do
+  defp required_credential_fields_for_step(type_id) do
     case step_type(type_id) do
       {:ok, %Type{} = type} ->
         type.config_schema
         |> schema_properties()
         |> Enum.flat_map(fn
           {field, property} when is_binary(field) ->
-            case slot_schema_property?(property) do
+            case credential_schema_property?(property) do
               true -> [field]
               false -> []
             end
@@ -215,7 +215,7 @@ defmodule Fizz.Workflows.PublishValidation do
     end
   end
 
-  defp configured_slot_declaration_issues(step, config) do
+  defp configured_credential_declaration_issues(step, config) do
     config
     |> Declaration.walk()
     |> Enum.flat_map(fn %{path: path, declaration: declaration} ->
@@ -229,31 +229,31 @@ defmodule Fizz.Workflows.PublishValidation do
     end)
   end
 
-  defp required_slot_declaration_issues(step, config) do
+  defp required_credential_declaration_issues(step, config) do
     step.type_id
-    |> required_slot_fields_for_step()
+    |> required_credential_fields_for_step()
     |> Enum.flat_map(fn field ->
       case Map.fetch(config, field) do
-        {:ok, value} -> required_slot_value_issues(step, field, value)
+        {:ok, value} -> required_credential_value_issues(step, field, value)
         :error -> [%{step_id: step.id, field: field, message: "is required"}]
       end
     end)
   end
 
-  defp required_slot_value_issues(step, field, value) do
+  defp required_credential_value_issues(step, field, value) do
     case Declaration.declaration?(value) do
       true ->
         []
 
       false ->
-        [%{step_id: step.id, field: field, message: required_slot_message(value)}]
+        [%{step_id: step.id, field: field, message: required_credential_message(value)}]
     end
   end
 
-  defp required_slot_message(value) do
+  defp required_credential_message(value) do
     case missing_required_value?(value) do
       true -> "is required"
-      false -> "must be a slot declaration"
+      false -> "must be a credential declaration"
     end
   end
 
@@ -275,14 +275,14 @@ defmodule Fizz.Workflows.PublishValidation do
   defp schema_properties(%{properties: properties}) when is_map(properties), do: properties
   defp schema_properties(_schema), do: %{}
 
-  defp slot_schema_property?(property) when is_map(property) do
+  defp credential_schema_property?(property) when is_map(property) do
     property
     |> property_ui()
     |> ui_component()
-    |> Kernel.==("slot")
+    |> Kernel.==("credential")
   end
 
-  defp slot_schema_property?(_property), do: false
+  defp credential_schema_property?(_property), do: false
 
   defp property_ui(%{"ui" => ui}) when is_map(ui), do: ui
   defp property_ui(%{ui: ui}) when is_map(ui), do: ui

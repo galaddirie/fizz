@@ -7,7 +7,7 @@ defmodule Fizz.Integrations.DynamicResolver do
   merging, and metadata returned to generic Vue field components.
   """
 
-  alias Fizz.Integrations.CredentialsResolver
+  alias Fizz.Credentials.OptionsResolver
   alias Fizz.Steps
   alias Fizz.Steps.Type
   alias Fizz.Workflows.Embeds.Step
@@ -85,7 +85,7 @@ defmodule Fizz.Integrations.DynamicResolver do
         ensure_resolver_loaded(resolver)
 
       _ ->
-        fetch_slot_field_resolver(field_schema)
+        fetch_credential_field_resolver(field_schema)
     end
   end
 
@@ -102,9 +102,9 @@ defmodule Fizz.Integrations.DynamicResolver do
     end
   end
 
-  defp fetch_slot_field_resolver(field_schema) do
-    case field_ui_value(field_schema, :slot_kind) do
-      "credential" -> {:ok, CredentialsResolver}
+  defp fetch_credential_field_resolver(field_schema) do
+    case field_ui_value(field_schema, :component) do
+      "credential" -> {:ok, OptionsResolver}
       _ -> {:error, :resolver_not_found}
     end
   end
@@ -117,18 +117,16 @@ defmodule Fizz.Integrations.DynamicResolver do
 
   defp schema_resolver_params(field_schema) do
     field_schema
-    |> slot_field_resolver_params()
+    |> credential_field_resolver_params()
     |> Map.merge(resolver_ui_params(field_schema))
   end
 
-  defp slot_field_resolver_params(field_schema) do
-    case field_ui_value(field_schema, :slot_kind) do
+  defp credential_field_resolver_params(field_schema) do
+    case field_ui_value(field_schema, :component) do
       "credential" ->
-        spec = field_ui_value(field_schema, :spec) || %{}
-
         %{}
-        |> maybe_put("provider_filter", Map.get(spec, "provider") || Map.get(spec, :provider))
-        |> maybe_put("auth_types", Map.get(spec, "auth_type") || Map.get(spec, :auth_type))
+        |> maybe_put("provider_filter", field_ui_value(field_schema, :provider))
+        |> maybe_put("auth_types", field_ui_value(field_schema, :auth_type))
 
       _ ->
         %{}

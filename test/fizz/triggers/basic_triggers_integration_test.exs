@@ -7,7 +7,7 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
-  alias Fizz.Slots
+  alias Fizz.Credentials
   alias Fizz.Triggers.Registry
   alias Fizz.Triggers.TriggerRegistration
   alias Fizz.Triggers.Workers.TriggerFireWorker
@@ -251,12 +251,11 @@ defmodule Fizz.Triggers.BasicTriggersIntegrationTest do
     connection = insert_oauth_connection!(scope, "github_oauth")
 
     assert {:ok, _binding} =
-             Slots.upsert_binding(version, scope, %{
+             Credentials.upsert_binding(version, scope, %{
                user_id: scope.user.id,
                workflow_definition_id: workflow_definition_id,
                step_id: trigger_step_id,
-               slot_key: "auth",
-               kind: "credential",
+               requirement_key: "auth",
                binding_data: %{"credential_id" => connection.id},
                workos_organization_id: scope.organization_id
              })

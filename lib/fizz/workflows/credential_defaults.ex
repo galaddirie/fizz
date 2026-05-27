@@ -1,7 +1,7 @@
-defmodule Fizz.Workflows.SlotDefaults do
+defmodule Fizz.Workflows.CredentialDefaults do
   @moduledoc false
 
-  alias Fizz.Slots.Declaration
+  alias Fizz.Credentials.Declaration
   alias Fizz.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.Embeds.Step
   alias Fizz.Workflows.WorkflowDefinitionVersion
@@ -45,9 +45,9 @@ defmodule Fizz.Workflows.SlotDefaults do
 
   defp normalize_step_config(type_id, config) when is_binary(type_id) and is_map(config) do
     type_id
-    |> slot_default_config()
+    |> credential_default_config()
     |> Enum.reduce(config, fn {field, declaration}, acc ->
-      if missing_slot_value?(Map.get(acc, field)) do
+      if missing_credential_value?(Map.get(acc, field)) do
         Map.put(acc, field, declaration)
       else
         acc
@@ -57,7 +57,7 @@ defmodule Fizz.Workflows.SlotDefaults do
 
   defp normalize_step_config(_type_id, config), do: config
 
-  defp slot_default_config(type_id) do
+  defp credential_default_config(type_id) do
     type_id
     |> StepRegistry.get_default_config()
     |> Enum.filter(fn {_field, value} -> Declaration.declaration?(value) end)
@@ -68,6 +68,6 @@ defmodule Fizz.Workflows.SlotDefaults do
   defp step_config(%{"config" => config}) when is_map(config), do: config
   defp step_config(_step), do: %{}
 
-  defp missing_slot_value?(nil), do: true
-  defp missing_slot_value?(_value), do: false
+  defp missing_credential_value?(nil), do: true
+  defp missing_credential_value?(_value), do: false
 end

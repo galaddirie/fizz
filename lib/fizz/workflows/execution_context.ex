@@ -23,7 +23,7 @@ defmodule Fizz.Workflows.ExecutionContext do
           user_id: String.t() | nil,
           project_id: String.t() | nil,
           workos_organization_id: String.t() | nil,
-          slot_resolver: function() | nil,
+          credential_resolver: function() | nil,
           trace: map(),
           opts: map()
         }
@@ -38,7 +38,7 @@ defmodule Fizz.Workflows.ExecutionContext do
     :user_id,
     :project_id,
     :workos_organization_id,
-    :slot_resolver,
+    :credential_resolver,
     steps: %{},
     workflow: %{},
     env: %{},
@@ -70,7 +70,7 @@ defmodule Fizz.Workflows.ExecutionContext do
       project_id: first_value(map, existing, workflow, metadata, :project_id),
       workos_organization_id:
         first_value(map, existing, workflow, metadata, :workos_organization_id),
-      slot_resolver: map_value_or(map, :_slot_resolver, existing.slot_resolver),
+      credential_resolver: map_value_or(map, :_credential_resolver, existing.credential_resolver),
       trace: map_value_or(map, :trace, existing.trace) |> map_or_empty(),
       opts: map_value_or(map, :opts, existing.opts) |> map_or_empty()
     }
@@ -93,7 +93,7 @@ defmodule Fizz.Workflows.ExecutionContext do
       user_id: context.user_id,
       project_id: context.project_id,
       workos_organization_id: context.workos_organization_id,
-      _slot_resolver: context.slot_resolver,
+      _credential_resolver: context.credential_resolver,
       execution_context: context
     }
   end

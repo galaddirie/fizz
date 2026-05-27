@@ -49,7 +49,7 @@ defmodule Fizz.Steps.Registry do
   require Logger
 
   @ets_table :fizz_step_types
-  @supported_ui_components ~w(hidden json number resource_locator resource_mapper search select slot string)
+  @supported_ui_components ~w(credential hidden json number resource_locator resource_mapper search select string)
 
   # ============================================================================
   # Client API
@@ -372,7 +372,7 @@ defmodule Fizz.Steps.Registry do
   defp validate_schema_property!(type, path, schema, default_config) when is_map(schema) do
     validate_ui_component!(type, path, schema)
     validate_schema_property_extensions!(type, path, schema)
-    validate_credential_slot!(type, path, schema, default_config)
+    validate_credential_field!(type, path, schema, default_config)
 
     schema
     |> Map.get("properties", %{})
@@ -660,29 +660,27 @@ defmodule Fizz.Steps.Registry do
 
   defp schema_extension(_property, _key), do: nil
 
-  defp validate_credential_slot!(type, path, schema, default_config) do
+  defp validate_credential_field!(type, path, schema, default_config) do
     case get_in(schema, ["ui", "component"]) do
-      "slot" -> validate_credential_slot_shape!(type, path, schema, default_config)
+      "credential" -> validate_credential_field_shape!(type, path, schema, default_config)
       _component -> :ok
     end
   end
 
-  defp validate_credential_slot_shape!(type, path, schema, default_config) do
+  defp validate_credential_field_shape!(type, path, schema, default_config) do
     ui = Map.get(schema, "ui", %{})
-    spec = Map.get(ui, "spec", %{})
-    provider = Map.get(spec, "provider")
-    auth_type = Map.get(spec, "auth_type")
-    slot_key = Map.get(ui, "slot_key")
+    provider = Map.get(ui, "provider")
+    auth_type = Map.get(ui, "auth_type")
+    requirement_key = Map.get(ui, "requirement_key")
     field = Enum.join(path, ".")
 
-    with "credential" <- Map.get(ui, "slot_kind"),
-         true <- is_binary(slot_key) and slot_key != "",
+    with true <- is_binary(requirement_key) and requirement_key != "",
          true <- is_binary(provider) and provider != "",
          {:ok, auth_atom} <- credential_auth_type(auth_type),
          {:ok, _provider} <-
            Fizz.Integrations.ProviderCatalog.provider_for_type(provider, auth_atom),
          {:ok, default_value} <- fetch_nested(default_config, path),
-         :ok <- validate_credential_default(default_value, provider, auth_type, slot_key) do
+         :ok <- validate_credential_default(default_value, provider, auth_type, requirement_key) do
       :ok
     else
       {:error, reason} ->
@@ -691,7 +689,7 @@ defmodule Fizz.Steps.Registry do
 
       false ->
         raise ArgumentError,
-              "step type #{type.id} credential field #{field} is missing slot metadata"
+              "step type #{type.id} credential field #{field} is missing credential metadata"
 
       other ->
         raise ArgumentError,
@@ -705,18 +703,18 @@ defmodule Fizz.Steps.Registry do
 
   defp validate_credential_default(
          %{
-           "$slot" => true,
-           "kind" => "credential",
-           "slot_key" => slot_key,
-           "spec" => %{"provider" => provider, "auth_type" => auth_type}
+           "$credential" => true,
+           "requirement_key" => requirement_key,
+           "provider" => provider,
+           "auth_type" => auth_type
          },
          provider,
          auth_type,
-         slot_key
+         requirement_key
        ),
        do: :ok
 
-  defp validate_credential_default(default_value, _provider, _auth_type, _slot_key) do
+  defp validate_credential_default(default_value, _provider, _auth_type, _requirement_key) do
     {:error, {:missing_credential_default, default_value}}
   end
 

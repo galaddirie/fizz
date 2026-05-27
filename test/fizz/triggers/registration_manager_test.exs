@@ -6,7 +6,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
-  alias Fizz.Slots
+  alias Fizz.Credentials
   alias Fizz.Triggers
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Triggers.{TriggerRegistration, TriggerSource}
@@ -29,7 +29,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     assert Enum.any?(registrations, &(&1.kind == "schedule" and not is_nil(&1.next_fire_at)))
   end
 
-  test "sync_on_publish requires bindings for trigger slots" do
+  test "sync_on_publish requires bindings for trigger credentials" do
     scope = project_scope_fixture()
 
     trigger =
@@ -45,7 +45,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
     %{version: version} = published_version_fixture(scope, snapshot_attrs(%{steps: [trigger]}))
 
-    assert {:error, [%{step_id: step_id, reason: {:slot_binding_required, "credential", "auth"}}]} =
+    assert {:error, [%{step_id: step_id, reason: {:credential_binding_required, "auth"}}]} =
              RegistrationManager.sync_on_publish(version)
 
     assert step_id == trigger.id
@@ -124,12 +124,11 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     connection = insert_oauth_connection!(scope, "google_oauth")
 
     assert {:ok, _binding} =
-             Slots.upsert_binding(saved_draft, scope, %{
+             Credentials.upsert_binding(saved_draft, scope, %{
                user_id: scope.user.id,
                workflow_definition_id: definition.id,
                step_id: trigger.id,
-               slot_key: "auth",
-               kind: "credential",
+               requirement_key: "auth",
                binding_data: %{"credential_id" => connection.id},
                workos_organization_id: scope.organization_id
              })
@@ -192,12 +191,11 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     connection = insert_oauth_connection!(scope, "github_oauth")
 
     assert {:ok, _binding} =
-             Slots.upsert_binding(saved_v1, scope, %{
+             Credentials.upsert_binding(saved_v1, scope, %{
                user_id: scope.user.id,
                workflow_definition_id: definition.id,
                step_id: trigger_step_id,
-               slot_key: "auth",
-               kind: "credential",
+               requirement_key: "auth",
                binding_data: %{"credential_id" => connection.id},
                workos_organization_id: scope.organization_id
              })
@@ -285,10 +283,10 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
   defp credential_slot(provider, auth_type) do
     %{
-      "$slot" => true,
-      "kind" => "credential",
-      "slot_key" => "auth",
-      "spec" => %{"provider" => provider, "auth_type" => auth_type}
+      "$credential" => true,
+      "requirement_key" => "auth",
+      "provider" => provider,
+      "auth_type" => auth_type
     }
   end
 

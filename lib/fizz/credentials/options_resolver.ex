@@ -1,24 +1,19 @@
-defmodule Fizz.Integrations.CredentialsResolver do
+defmodule Fizz.Credentials.OptionsResolver do
   @moduledoc """
   Resolves credential options for workflow step config fields.
-
-  Implements `Fizz.Steps.Resolver` so step executors can reference this module
-  directly in their config schema.
   """
 
-  @behaviour Fizz.Steps.Resolver
-
   alias Fizz.Accounts.Scope
-  alias Fizz.Slots.Resolvers.Credential, as: CredentialSlotResolver
+  alias Fizz.Credentials.Options
 
   @max_options 50
 
-  @impl true
+  @spec resolve(map()) :: {:ok, [map()]} | {:error, term()}
   def resolve(%{q: query, params: params, context: context}) do
     with {:ok, scope} <- fetch_scope(context),
          {:ok, options} <-
-           CredentialSlotResolver.options_for_spec(
-             spec_from_params(params),
+           Options.options_for_requirement(
+             requirement_from_params(params),
              scope,
              q: query,
              limit: @max_options
@@ -36,7 +31,7 @@ defmodule Fizz.Integrations.CredentialsResolver do
 
   defp fetch_scope(_context), do: {:error, :scope_not_available}
 
-  defp spec_from_params(params) do
+  defp requirement_from_params(params) do
     params = normalize_params(params)
 
     %{}

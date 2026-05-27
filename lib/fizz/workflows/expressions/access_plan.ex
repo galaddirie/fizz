@@ -41,22 +41,22 @@ defmodule Fizz.Workflows.Expressions.AccessPlan do
     @type t :: %__MODULE__{parsed: Solid.Template.t()}
   end
 
-  defmodule SlotRef do
+  defmodule CredentialRef do
     @moduledoc """
-    Compiled reference to a per-user slot binding declared in step config.
+    Compiled reference to a per-user credential binding declared in step config.
 
-    Slots are typed declarations like `credential_ref` that resolve to
-    a concrete value at runtime via the registered resolver for `kind`.
+    Credential declarations resolve to a credential_ref-shaped value at runtime
+    through the run's credential resolver.
     """
 
-    @enforce_keys [:kind, :slot_key, :step_id, :spec]
-    defstruct [:kind, :slot_key, :step_id, :spec]
+    @enforce_keys [:requirement_key, :step_id, :provider, :auth_type]
+    defstruct [:requirement_key, :step_id, :provider, :auth_type]
 
     @type t :: %__MODULE__{
-            kind: String.t(),
-            slot_key: String.t(),
+            requirement_key: String.t(),
             step_id: String.t() | nil,
-            spec: map()
+            provider: String.t(),
+            auth_type: String.t()
           }
   end
 end

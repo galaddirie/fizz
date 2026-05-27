@@ -9,7 +9,7 @@ defmodule Fizz.Integrations.Definition do
     RetryPolicy
   }
 
-  @supported_field_components ~w(hidden json number password resource_locator resource_mapper search select slot string)
+  @supported_field_components ~w(credential hidden json number password resource_locator resource_mapper search select string)
 
   @spec validate_operation!(OperationDefinition.t()) :: OperationDefinition.t()
   def validate_operation!(%OperationDefinition{} = operation) do
@@ -82,7 +82,11 @@ defmodule Fizz.Integrations.Definition do
   defp validate_credential_requirement!(%CredentialRequirement{} = requirement) do
     validate_required_string!(requirement.key, "credential requirement key")
     validate_required_string!(requirement.provider, "credential requirement provider")
-    validate_required_string!(requirement.slot_key, "credential requirement slot_key")
+
+    validate_required_string!(
+      requirement.requirement_key,
+      "credential requirement requirement_key"
+    )
 
     unless requirement.auth_type in [:oauth, :api_key] do
       raise ArgumentError,
