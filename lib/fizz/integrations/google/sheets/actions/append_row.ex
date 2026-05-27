@@ -9,7 +9,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
   Positional list rows pass through without requiring headers.
   """
 
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "google_sheets_append_row",
     version: 1,
     name: "Google Sheets — Append Row",
@@ -25,7 +25,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
   alias Fizz.Integrations.{Google.Sheets.Client, Providers.GoogleOAuth}
   alias Fizz.Workflows.RetryPolicy
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   @spreadsheet_locator %{
     "kind" => "google_sheets.spreadsheet",

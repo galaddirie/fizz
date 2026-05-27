@@ -9,17 +9,17 @@ kind: service
 status: active
 summary: Step types are compile-time code artifacts registered in ETS, while integration auth flows through typed provider ids and metadata-only credential references.
 surface:
-  - lib/fizz/steps/definition.ex
-  - lib/fizz/steps/type.ex
-  - lib/fizz/steps/registry.ex
-  - lib/fizz/steps/resolver.ex
-  - lib/fizz/steps/executors/behaviour.ex
+  - lib/fizz/integrations/step_definition.ex
+  - lib/fizz/integrations/step_type.ex
+  - lib/fizz/integrations/step_registry.ex
+  - lib/fizz/integrations/dynamic_resolver.ex
+  - lib/fizz/workflows/step_executor.ex
   - lib/fizz/integrations/provider.ex
   - lib/fizz/integrations/provider_catalog.ex
   - lib/fizz/integrations/credential_ref.ex
   - lib/fizz/integrations/credentials_resolver.ex
-  - test/fizz/steps/resolver_test.exs
-  - test/fizz/steps/type_subnodes_test.exs
+  - test/fizz/integrations/dynamic_resolver_test.exs
+  - test/fizz/integrations/step_type_subnodes_test.exs
   - test/fizz/integrations/credentials_resolver_test.exs
   - test/fizz/integrations_test.exs
 ```
@@ -111,22 +111,22 @@ surface:
 
 ```spec-verification
 - kind: source_file
-  target: lib/fizz/steps/definition.ex
+  target: lib/fizz/integrations/step_definition.ex
   covers:
     - steps.integration_auth.definition_macro
 
 - kind: source_file
-  target: lib/fizz/steps/type.ex
+  target: lib/fizz/integrations/step_type.ex
   covers:
     - steps.integration_auth.subnode_metadata
 
 - kind: source_file
-  target: lib/fizz/steps/registry.ex
+  target: lib/fizz/integrations/step_registry.ex
   covers:
     - steps.integration_auth.registry
 
 - kind: source_file
-  target: lib/fizz/steps/executors/behaviour.ex
+  target: lib/fizz/workflows/step_executor.ex
   covers:
     - steps.integration_auth.executor_contract
 
@@ -147,13 +147,13 @@ surface:
     - steps.integration_auth.credentials_resolver
 
 - kind: test_file
-  target: test/fizz/steps/type_subnodes_test.exs
+  target: test/fizz/integrations/step_type_subnodes_test.exs
   covers:
     - steps.integration_auth.subnode_metadata
     - steps.integration_auth.ai_subnodes
 
 - kind: test_file
-  target: test/fizz/steps/resolver_test.exs
+  target: test/fizz/integrations/dynamic_resolver_test.exs
   covers:
     - steps.integration_auth.executor_contract
     - steps.integration_auth.credentials_resolver

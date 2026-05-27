@@ -39,7 +39,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
         name: "GitHub Trigger",
         config:
           "github_trigger"
-          |> Fizz.Steps.Registry.get_default_config()
+          |> Fizz.Integrations.StepRegistry.get_default_config()
           |> Map.put("repository", "acme/site")
       })
 
@@ -274,7 +274,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
           name: "GitHub Trigger",
           config:
             "github_trigger"
-            |> Fizz.Steps.Registry.get_default_config()
+            |> Fizz.Integrations.StepRegistry.get_default_config()
             |> Map.merge(%{"events" => ["push"], "repository" => repository})
         })
       ]

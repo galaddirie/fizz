@@ -55,8 +55,8 @@ defmodule Fizz.Application do
         Fizz.Integrations.Registry,
         Fizz.Integrations.Catalog,
 
-        # Step type registry - must start before endpoint so types are available
-        Fizz.Steps.Registry
+        # Integration-owned step type index - must start before endpoint so types are available.
+        Fizz.Integrations.StepRegistry
       ])
       |> maybe_add_child(
         Fizz.Triggers.Supervisor,

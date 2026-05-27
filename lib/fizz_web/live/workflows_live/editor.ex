@@ -6,11 +6,11 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias Fizz.Accounts
   alias Fizz.Fields.Credential
   alias Fizz.Integrations.DynamicResolver
-  alias Fizz.Steps
-  alias Fizz.Steps.Executor, as: StepExecutorBehaviour
-  alias Fizz.Steps.Type
+  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.StepType
   alias Fizz.Triggers
   alias Fizz.Workflows
+  alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.DraftValidator
   alias Fizz.Workflows.DraftSession
@@ -345,7 +345,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
            load_execution(scope, run_id, socket.assigns.live_action),
          {:ok, socket, draft, seq, undo_state, editor_state, presences, persistence} <-
            maybe_connect_draft_session(socket, scope, draft, run_id) do
-      step_types = Steps.list_types()
+      step_types = StepRegistry.all()
 
       socket
       |> assign(:current_scope, scope)
@@ -866,8 +866,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp editor_trigger_root?(%WorkflowDefinitionVersion{} = draft, %Step{} = step) do
-    with {:ok, %Type{} = type} <- Steps.get_type(step.type_id) do
-      Type.trigger?(type) and Enum.empty?(incoming_connections(draft, step.id))
+    with {:ok, %StepType{} = type} <- StepRegistry.get(step.type_id) do
+      StepType.trigger?(type) and Enum.empty?(incoming_connections(draft, step.id))
     else
       _error ->
         false
@@ -1732,7 +1732,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     }
   end
 
-  defp encode_step_type(%Type{} = type) do
+  defp encode_step_type(%StepType{} = type) do
     %{
       id: type.id,
       name: type.name,
@@ -1748,7 +1748,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     }
   end
 
-  defp encode_node_library_item(%Type{} = type) do
+  defp encode_node_library_item(%StepType{} = type) do
     %{
       type_id: type.id,
       name: type.name,

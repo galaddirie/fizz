@@ -17,5 +17,8 @@ defmodule Fizz.TestSupport.CatalogValidation.AcmeDocs do
   def triggers, do: [Fizz.TestSupport.CatalogValidation.AcmeDocsTrigger]
 
   @impl true
+  def step_modules, do: []
+
+  @impl true
   def required_scopes(_operation), do: []
 end

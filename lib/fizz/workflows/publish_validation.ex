@@ -3,9 +3,9 @@ defmodule Fizz.Workflows.PublishValidation do
 
   alias Fizz.Graph
   alias Fizz.Fields.Credential
-  alias Fizz.Steps.Executor, as: StepExecutorBehaviour
-  alias Fizz.Steps.Registry
-  alias Fizz.Steps.Type
+  alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour
+  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.StepType
   alias Fizz.Workflows.Compiler.ExpressionCompiler
 
   @type issue :: %{
@@ -85,8 +85,8 @@ defmodule Fizz.Workflows.PublishValidation do
     steps
     |> Enum.flat_map(fn step ->
       case step_type(step.type_id) do
-        {:ok, %Type{} = type} ->
-          if Type.trigger?(type) and MapSet.member?(incoming_step_ids, step.id) do
+        {:ok, %StepType{} = type} ->
+          if StepType.trigger?(type) and MapSet.member?(incoming_step_ids, step.id) do
             [%{step_id: step.id, field: nil, message: trigger_root_message()}]
           else
             []
@@ -171,7 +171,7 @@ defmodule Fizz.Workflows.PublishValidation do
   defp field_to_string(_field), do: nil
 
   defp step_type(type_id) when is_binary(type_id) do
-    case Registry.get(type_id) do
+    case StepRegistry.get(type_id) do
       {:ok, type} -> {:ok, type}
       {:error, :not_found} -> :error
     end
@@ -181,7 +181,7 @@ defmodule Fizz.Workflows.PublishValidation do
 
   defp required_fields_for_step(type_id) do
     case step_type(type_id) do
-      {:ok, %Type{} = type} ->
+      {:ok, %StepType{} = type} ->
         config_schema = type.config_schema
         properties = schema_properties(config_schema)
 
@@ -196,7 +196,7 @@ defmodule Fizz.Workflows.PublishValidation do
 
   defp required_credential_fields_for_step(type_id) do
     case step_type(type_id) do
-      {:ok, %Type{} = type} ->
+      {:ok, %StepType{} = type} ->
         type.config_schema
         |> schema_properties()
         |> Enum.flat_map(fn

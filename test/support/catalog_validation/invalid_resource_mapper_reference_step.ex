@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMapperReferenceStep do
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "invalid_resource_mapper_reference_step",
     name: "Invalid Resource Mapper Reference Step",
     category: "Test",
@@ -7,7 +7,7 @@ defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMapperReferenceStep 
     icon: "hero-table-cells",
     kind: :action
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   @fields [
     %Fizz.Fields.Definition{

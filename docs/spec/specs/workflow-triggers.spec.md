@@ -20,7 +20,7 @@ surface:
 
 ```spec-requirements
 - id: workflows.triggers.behaviour_composition
-  statement: Trigger executor modules implement both `Fizz.Steps.Executor` (for `execute/3`, `validate_config/1`, `effective_output_schema/1`) and `Fizz.Triggers.Behaviour` (for `registration_spec/2`, `match?/2`, `normalize_event/2`). The `use Fizz.Steps.Definition, kind: :trigger` macro wires both behaviours automatically. `match?/2` is optional and defaults to returning true.
+  statement: Trigger executor modules implement both `Fizz.Workflows.StepExecutor` (for `execute/3`, `validate_config/1`, `effective_output_schema/1`) and `Fizz.Triggers.Behaviour` (for `registration_spec/2`, `match?/2`, `normalize_event/2`). The `use Fizz.Integrations.StepDefinition, kind: :trigger` macro wires both behaviours automatically. `match?/2` is optional and defaults to returning true.
   priority: must
   stability: stable
 

@@ -2,7 +2,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRowTest do
   use ExUnit.Case, async: true
 
   alias Fizz.Integrations.Google.Sheets.Actions.AppendRow
-  alias Fizz.Steps.Executor
+  alias Fizz.Workflows.StepExecutor, as: Executor
   alias Fizz.Workflows.StepError
 
   describe "execute/3" do

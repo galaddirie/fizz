@@ -35,7 +35,7 @@ live "/projects/:project_id/workflows/:definition_id/edit/runs/:run_id", Workflo
 
 **Responsibilities:**
 - Load definition + draft (via `Workflows.edit_definition/2` which returns existing draft or clones published)
-- Load step types from `Fizz.Steps.list_types()`
+- Load step types from `Fizz.Integrations.StepRegistry.all()`
 - Join `DraftSession` GenServer (starts one if none running)
 - Track Phoenix Presence on `"draft:#{version_id}"`
 - Subscribe to PubSub topics: `"draft:#{version_id}"`, `"workflow_run:#{run_id}"` (when debugging)

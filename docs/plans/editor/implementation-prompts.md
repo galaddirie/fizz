@@ -120,7 +120,7 @@ Phase 1 delivered the DraftSession GenServer with operation application, undo/re
 
 - `DraftSession` GenServer from Phase 1
 - `FizzWeb.Presence` module (already in supervision tree)
-- `Fizz.Steps.Registry` with `list_types/0` for step type catalog
+- `Fizz.Integrations.StepRegistry` with `list_types/0` for step type catalog
 - `Fizz.Workflows.edit_definition/2` to load/create draft
 - `Fizz.Workflows.Expressions` module with `parse/1`, `validate/1`
 - Vue `WorkflowEditor.vue` emitting `editor_command` with types defined in `WorkflowEditorCommandType`
@@ -144,7 +144,7 @@ Phase 1 delivered the DraftSession GenServer with operation application, undo/re
    - Build scope from `socket.assigns.current_scope` with project
    - Call `Workflows.get_definition(scope, definition_id)` to load definition
    - Call `Workflows.edit_definition(scope, definition_id)` to get/create draft
-   - Call `Steps.list_types()` and build `node_library_items` (summary list for sidebar: `%{type_id, name, description, icon, category, step_kind, node_role}`)
+   - Call `Fizz.Integrations.StepRegistry.all()` and build `node_library_items` (summary list for sidebar: `%{type_id, name, description, icon, category, step_kind, node_role}`)
    - Call `DraftSession.join(draft.id, scope, current_user_id)` to get `{draft, seq, undo_state}`
    - Track presence on `"draft:#{draft.id}"` via `Presence.track/4`
    - Subscribe to PubSub topic `"draft:#{draft.id}"`

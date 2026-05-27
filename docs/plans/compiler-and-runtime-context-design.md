@@ -88,7 +88,7 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
   defp normalize_steps(steps) do
     steps
     |> Enum.map(fn step ->
-      type = Fizz.Steps.Registry.get(step.type_id)
+      type = Fizz.Integrations.StepRegistry.get(step.type_id)
 
       %IR.Step{
         id: step.id,
@@ -686,7 +686,7 @@ Lightweight — accept incomplete work for autosave:
 - Ecto embed casting succeeds for `steps`, `connections`, `step_groups`
 - Step IDs are unique and key-safe
 - Connection IDs are unique
-- Every `type_id` exists in `Fizz.Steps.Registry`
+- Every `type_id` exists in `Fizz.Integrations.StepRegistry`
 - Every connection references existing step IDs
 - Every `step_group.step_ids` entry references an existing step
 - A step belongs to at most one group

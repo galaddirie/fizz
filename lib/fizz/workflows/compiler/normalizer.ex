@@ -2,8 +2,8 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
   @moduledoc false
 
   alias Fizz.Graph
-  alias Fizz.Steps.Registry
-  alias Fizz.Steps.Type
+  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.StepType
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
   @spec normalize(WorkflowDefinitionVersion.t()) :: {:ok, map()} | {:error, [map()]}
@@ -26,8 +26,8 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
   defp normalize_steps(steps) do
     steps
     |> Enum.reduce_while({:ok, %{}}, fn step, {:ok, acc} ->
-      with {:ok, type} <- Registry.get(step.type_id),
-           {:ok, executor} <- Type.executor_module(type) do
+      with {:ok, type} <- StepRegistry.get(step.type_id),
+           {:ok, executor} <- StepType.executor_module(type) do
         normalized_step = %{
           id: step.id,
           type_id: step.type_id,

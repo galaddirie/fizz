@@ -167,7 +167,7 @@ Category: `"App State"`
 | `table_get_row` | `:action` | Get single row by ID |
 | `table_upsert` | `:action` | Insert or update based on unique column |
 
-All executors follow existing patterns: `use Fizz.Steps.Definition`, `@behaviour Fizz.Steps.Executor`, typed `@fields`, and `execute/3`. They call `Fizz.AppState` context functions, receiving `org_id` and `project_id` from `context[:metadata]`.
+All executors follow existing patterns: `use Fizz.Integrations.StepDefinition`, `@behaviour Fizz.Workflows.StepExecutor`, typed `@fields`, and `execute/3`. They call `Fizz.AppState` context functions, receiving `org_id` and `project_id` from `context[:metadata]`.
 
 `kv_increment` uses atomic SQL: `UPDATE ... SET value = value + $amount, version = version + 1 ... RETURNING *` with upsert for non-existent keys.
 
@@ -490,7 +490,7 @@ Layout components use `children: [descriptor, ...]` for composition, forming a r
 
 ### Step Kind
 
-Add `:render` to valid kinds in `Fizz.Steps.Definition` and `Fizz.Steps.Type`. All UI steps use `kind: :render`.
+Add `:render` to valid kinds in `Fizz.Integrations.StepDefinition` and `Fizz.Integrations.StepType`. All UI steps use `kind: :render`.
 
 ### Step Types
 
@@ -712,43 +712,43 @@ lib/fizz/apps/app_session.ex
 
 ### Step Executors
 ```
-lib/fizz/steps/executors/kv_get.ex
-lib/fizz/steps/executors/kv_set.ex
-lib/fizz/steps/executors/kv_delete.ex
-lib/fizz/steps/executors/kv_list.ex
-lib/fizz/steps/executors/kv_increment.ex
-lib/fizz/steps/executors/kv_compare_and_swap.ex
-lib/fizz/steps/executors/table_query.ex
-lib/fizz/steps/executors/table_insert.ex
-lib/fizz/steps/executors/table_update.ex
-lib/fizz/steps/executors/table_delete.ex
-lib/fizz/steps/executors/table_get_row.ex
-lib/fizz/steps/executors/table_upsert.ex
-lib/fizz/steps/executors/wait_for_input.ex
-lib/fizz/steps/executors/wait_for_approval.ex
-lib/fizz/steps/executors/send_to_client.ex
-lib/fizz/steps/executors/request_input.ex
-lib/fizz/steps/executors/ui/table.ex
-lib/fizz/steps/executors/ui/chart.ex
-lib/fizz/steps/executors/ui/markdown.ex
-lib/fizz/steps/executors/ui/text.ex
-lib/fizz/steps/executors/ui/json_viewer.ex
-lib/fizz/steps/executors/ui/image.ex
-lib/fizz/steps/executors/ui/metric.ex
-lib/fizz/steps/executors/ui/status_badge.ex
-lib/fizz/steps/executors/ui/form.ex
-lib/fizz/steps/executors/ui/button_group.ex
-lib/fizz/steps/executors/ui/slider.ex
-lib/fizz/steps/executors/ui/file_upload.ex
-lib/fizz/steps/executors/ui/chat_input.ex
-lib/fizz/steps/executors/ui/date_picker.ex
-lib/fizz/steps/executors/ui/page.ex
-lib/fizz/steps/executors/ui/grid.ex
-lib/fizz/steps/executors/ui/tabs.ex
-lib/fizz/steps/executors/ui/sidebar.ex
-lib/fizz/steps/executors/ui/stack.ex
-lib/fizz/steps/executors/ui/columns.ex
-lib/fizz/steps/executors/ui/divider.ex
+lib/fizz/integrations/fizz/builtins/kv_get.ex
+lib/fizz/integrations/fizz/builtins/kv_set.ex
+lib/fizz/integrations/fizz/builtins/kv_delete.ex
+lib/fizz/integrations/fizz/builtins/kv_list.ex
+lib/fizz/integrations/fizz/builtins/kv_increment.ex
+lib/fizz/integrations/fizz/builtins/kv_compare_and_swap.ex
+lib/fizz/integrations/fizz/builtins/table_query.ex
+lib/fizz/integrations/fizz/builtins/table_insert.ex
+lib/fizz/integrations/fizz/builtins/table_update.ex
+lib/fizz/integrations/fizz/builtins/table_delete.ex
+lib/fizz/integrations/fizz/builtins/table_get_row.ex
+lib/fizz/integrations/fizz/builtins/table_upsert.ex
+lib/fizz/integrations/fizz/builtins/wait_for_input.ex
+lib/fizz/integrations/fizz/builtins/wait_for_approval.ex
+lib/fizz/integrations/fizz/builtins/send_to_client.ex
+lib/fizz/integrations/fizz/builtins/request_input.ex
+lib/fizz/integrations/fizz/builtins/ui/table.ex
+lib/fizz/integrations/fizz/builtins/ui/chart.ex
+lib/fizz/integrations/fizz/builtins/ui/markdown.ex
+lib/fizz/integrations/fizz/builtins/ui/text.ex
+lib/fizz/integrations/fizz/builtins/ui/json_viewer.ex
+lib/fizz/integrations/fizz/builtins/ui/image.ex
+lib/fizz/integrations/fizz/builtins/ui/metric.ex
+lib/fizz/integrations/fizz/builtins/ui/status_badge.ex
+lib/fizz/integrations/fizz/builtins/ui/form.ex
+lib/fizz/integrations/fizz/builtins/ui/button_group.ex
+lib/fizz/integrations/fizz/builtins/ui/slider.ex
+lib/fizz/integrations/fizz/builtins/ui/file_upload.ex
+lib/fizz/integrations/fizz/builtins/ui/chat_input.ex
+lib/fizz/integrations/fizz/builtins/ui/date_picker.ex
+lib/fizz/integrations/fizz/builtins/ui/page.ex
+lib/fizz/integrations/fizz/builtins/ui/grid.ex
+lib/fizz/integrations/fizz/builtins/ui/tabs.ex
+lib/fizz/integrations/fizz/builtins/ui/sidebar.ex
+lib/fizz/integrations/fizz/builtins/ui/stack.ex
+lib/fizz/integrations/fizz/builtins/ui/columns.ex
+lib/fizz/integrations/fizz/builtins/ui/divider.ex
 ```
 
 ### Channels & Web
@@ -803,10 +803,10 @@ priv/repo/migrations/YYYYMMDDHHMMSS_create_apps_tables.exs
 
 ### Files to Modify
 ```
-lib/fizz/steps/definition.ex          -- add :render to valid kinds
-lib/fizz/steps/type.ex                -- add :render to step_kind type
-lib/fizz/steps/registry.ex            -- register all new executor modules
-lib/fizz/steps/executors/behaviour.ex -- add execute_streaming/4 optional callback
+lib/fizz/integrations/step_definition.ex          -- add :render to valid kinds
+lib/fizz/integrations/step_type.ex                -- add :render to step_kind type
+lib/fizz/integrations/step_registry.ex            -- register all new executor modules
+lib/fizz/workflows/step_executor.ex -- add execute_streaming/4 optional callback
 lib/fizz/workflows/runner/worker.ex   -- signal_intent, handle_signal_intent, streaming dispatch
 lib/fizz/workflows/runtime/context_builder.ex -- add store to base_context
 lib/fizz/workflows/expressions.ex     -- add "store" binding

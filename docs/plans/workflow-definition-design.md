@@ -287,7 +287,7 @@ end
 | Field | Required | Description |
 |-------|----------|-------------|
 | `id` | yes | Key-safe identifier derived from the current step `name`, used by connections, execution records, and output references. It must be unique within the definition version and is regenerated when the step is renamed. |
-| `type_id` | yes | Must match an entry in `Fizz.Steps.Registry`. |
+| `type_id` | yes | Must match an entry in `Fizz.Integrations.StepRegistry`. |
 | `name` | yes | User-facing label. |
 | `config` | yes | Step-type-specific authored configuration. Compound types can keep nested config here if the nested parts are not graph-connected steps. |
 | `position` | no | Canvas coordinates and editor placement metadata. |
@@ -320,7 +320,7 @@ end
 - Step `id` values are generated from the current display `name`, not assigned independently.
 - When duplicate names exist, increment the generated id: `"Fetch Order"` -> `fetch_order`, `"Fetch Order 2"` -> `fetch_order_2`.
 - Renaming a step regenerates its `id`: `"Fetch Order 2"` -> `fetch_order_2`, then renaming to `"Fetch Order Canada"` updates the `id` to `fetch_order_canada`.
-- This is distinct from `type_id`, which identifies the step type from `Fizz.Steps.Registry`. Two renamed HTTP request steps can have different step `id` values while sharing the same `type_id` such as `http_request`.
+- This is distinct from `type_id`, which identifies the step type from `Fizz.Integrations.StepRegistry`. Two renamed HTTP request steps can have different step `id` values while sharing the same `type_id` such as `http_request`.
 - A step `id` can match its `type_id`, especially when a step is first created, but they are not the same concept.
 
 Deliberately omitted from `step_groups` in v1:
@@ -342,7 +342,7 @@ Validation should happen in two layers: embed casting in the schema changeset, t
 - `cast_embed` succeeds for `steps`, `connections`, and `step_groups`.
 - Step ids are unique and key-safe.
 - Connection ids are unique.
-- Every `type_id` exists in `Fizz.Steps.Registry`.
+- Every `type_id` exists in `Fizz.Integrations.StepRegistry`.
 - Every connection references existing step ids.
 - Every `step_group.step_ids` entry references an existing step.
 - A step may belong to at most one group in v1.
@@ -363,7 +363,7 @@ Representative validator shape:
 
 ```elixir
 defmodule Fizz.Workflows.DefinitionValidator do
-  alias Fizz.Steps.Registry
+  alias Fizz.Integrations.StepRegistry
   alias Fizz.Workflows.DefinitionVersion
 
   def validate_for_save(%DefinitionVersion{} = version) do
@@ -389,7 +389,7 @@ defmodule Fizz.Workflows.DefinitionValidator do
 
   defp validate_step_types(steps) do
     Enum.reduce_while(steps, :ok, fn step, :ok ->
-      if Registry.exists?(step.type_id),
+      if StepRegistry.exists?(step.type_id),
         do: {:cont, :ok},
         else: {:halt, {:error, {:unknown_type, step.id, step.type_id}}}
     end)

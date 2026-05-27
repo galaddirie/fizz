@@ -10,7 +10,7 @@ When running a test execution for a workflow with a manual trigger, there is no 
 
 ## Current Behavior
 
-The manual trigger executor (`lib/fizz/steps/executors/manual_input.ex`) supports:
+The manual trigger executor (`lib/fizz/integrations/fizz/builtins/manual_input.ex`) supports:
 
 - `input_schema` config field — a JSON Schema defining the expected input shape
 - `execute/2` — simply returns the input event data as output (pass-through)
@@ -83,7 +83,7 @@ Instead of a pre-run modal that interrupts the execute flow, repurpose the **lef
 
 ## Relevant Files
 
-- `lib/fizz/steps/executors/manual_input.ex` — Manual trigger executor with `input_schema` and `test_data` config
+- `lib/fizz/integrations/fizz/builtins/manual_input.ex` — Manual trigger executor with `input_schema` and `test_data` config
 - `lib/fizz_web/live/workflows_live/editor.ex` — `start_editor_test_run/2` — needs to read `test_data` from the trigger step instead of hardcoding `%{}`
 - `assets/vue/components/flow/step_config/StepConfigContextPane.vue` — Left panel, needs trigger-specific test data editor mode
 - `assets/vue/components/flow/step_config/useInputData.ts` — Input state logic, knows whether current step is a trigger

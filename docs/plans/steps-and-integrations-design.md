@@ -41,17 +41,18 @@ Steps also carry an optional **role** for hierarchical composition:
 
 ### Step Definition
 
-Every step type is an Elixir module that calls `use Fizz.Steps.Definition` with its metadata:
+Every step type is an Elixir module that calls `use Fizz.Integrations.StepDefinition` with its metadata:
 
 ```elixir
-defmodule Fizz.Steps.Executors.Format do
-  use Fizz.Steps.Definition,
+defmodule Fizz.Integrations.Fizz.Builtins.Format do
+  use Fizz.Integrations.StepDefinition,
     id: "format",
     name: "Format Text",
     category: "Transform",
     description: "Interpolates a template string using step input fields.",
     icon: "hero-document-text",
-    kind: :transform
+    kind: :transform,
+    integration: "fizz"
 
   alias Fizz.Fields
 
@@ -105,10 +106,10 @@ At execution time the root executor receives subnode configs pre-resolved and ke
 
 ### Step Type Struct
 
-`Fizz.Steps.Type` is the read-only struct exposed to callers outside the executor layer:
+`Fizz.Integrations.StepType` is the read-only struct exposed to callers outside the executor layer:
 
 ```
-%Fizz.Steps.Type{
+%Fizz.Integrations.StepType{
   id:             "openai_model",        # unique string identifier
   name:           "OpenAI Model",        # display name
   category:       "AI",                  # grouping label
@@ -120,7 +121,7 @@ At execution time the root executor receives subnode configs pre-resolved and ke
   input_schema:   %{...},               # expected input shape
   output_schema:  %{...},               # produced output shape
   subnode_inputs:  [...],                 # input declarations (root nodes only)
-  executor:       Fizz.Steps.Executors.OpenaiModel
+  executor:       Fizz.Integrations.OpenAI.Nodes.Model
 }
 ```
 
@@ -130,7 +131,7 @@ Helper predicates: `Type.trigger?/1`, `Type.action?/1`, `Type.transform?/1`, `Ty
 
 ### Registry
 
-`Fizz.Steps.Registry` owns an ETS table (`fizz_step_types`) created at application start. It auto-discovers all executor modules via `@executor_modules` — a hardcoded list of 55 modules that is the single place to add new step types.
+`Fizz.Integrations.StepRegistry` owns an ETS table (`fizz_step_types`) created at application start. It loads executor modules from `Fizz.Integrations.Manifest.step_executor_modules/0`, which is derived from integration-owned `step_modules/0` lists.
 
 Key functions:
 
@@ -143,13 +144,13 @@ Key functions:
 | `grouped_by_category/0` | Returns `%{category => [Type]}` map for sidebar rendering. |
 | `library_items/0` | Returns lightweight maps for the node editor drag palette. |
 
-The module name convention is `Fizz.Steps.Executors.<PascalCase>` where `PascalCase` is derived from the step id string (e.g. `"ai_agent"` → `AiAgent`). `Type.executor_module/1` performs this conversion.
+Providerless Fizz nodes live under `Fizz.Integrations.Fizz.Builtins.*`. Provider-owned nodes live under their product integration namespace, such as `Fizz.Integrations.Google.Sheets.Actions.AppendRow` or `Fizz.Integrations.OpenAI.Nodes.Model`. `Type.executor_module/1` resolves the persisted executor module string back to a module atom.
 
 ---
 
 ### Executor Behaviour
 
-`Fizz.Steps.Executor` defines the contract every executor implements:
+`Fizz.Workflows.StepExecutor` defines the contract every executor implements:
 
 ```elixir
 @callback execute(config :: map(), input :: map(), context :: map()) ::
@@ -261,7 +262,7 @@ A credential ref is a **metadata-only** map that travels with a workflow config.
 
 #### Credentials Resolver
 
-`Fizz.Integrations.CredentialsResolver` implements `Fizz.Steps.Resolver` and is used as the `"resolver"` in config schema `"ui"` extensions. It:
+`Fizz.Integrations.CredentialsResolver` implemented the old step resolver behavior and was used as the `"resolver"` in config schema `"ui"` extensions. It:
 
 1. Fetches all `ExternalAuth` records for the current user.
 2. Filters by `provider_filter` and `auth_types` params from the schema.
@@ -299,16 +300,16 @@ Gmail (`gmail_trigger`, `gmail_send_email`, `gmail_reply_email`), Slack (`slack_
 
 | Path | Purpose |
 |---|---|
-| `lib/fizz/steps/definition.ex` | `use Fizz.Steps.Definition` macro |
-| `lib/fizz/steps/type.ex` | `Fizz.Steps.Type` struct + helpers |
-| `lib/fizz/steps/registry.ex` | ETS-backed step type registry |
-| `lib/fizz/steps/config_schema.ex` | Config schema typespecs |
-| `lib/fizz/steps/resolver.ex` | Resolver behaviour |
-| `lib/fizz/steps/executors/behaviour.ex` | Executor behaviour |
-| `lib/fizz/steps/executors/` | All 55+ executor modules |
+| `lib/fizz/integrations/step_definition.ex` | `use Fizz.Integrations.StepDefinition` macro |
+| `lib/fizz/integrations/step_type.ex` | `Fizz.Integrations.StepType` struct + helpers |
+| `lib/fizz/integrations/step_registry.ex` | ETS-backed step type registry |
+| `lib/fizz/workflows/step_executor.ex` | Executor behaviour |
+| `lib/fizz/integrations/fizz/builtins/` | Providerless Fizz built-in nodes |
+| `lib/fizz/integrations/<product>/` | Provider-owned product step modules, clients, resolvers, and triggers |
+| `lib/fizz/fields.ex` | Typed field definitions and JSON Schema adapter output |
 | `lib/fizz/integrations/provider.ex` | Provider behaviour |
 | `lib/fizz/integrations/provider_catalog.ex` | Provider registry |
 | `lib/fizz/integrations/credential_ref.ex` | Credential ref helpers |
-| `lib/fizz/integrations/credentials_resolver.ex` | Credential search resolver |
+| `lib/fizz/fields/credential.ex` | Credential field handler and option resolver |
 | `lib/fizz/integrations/providers/github_oauth.ex` | GitHub OAuth provider |
 | `lib/fizz/integrations/providers/openai_api_key.ex` | OpenAI API key provider |

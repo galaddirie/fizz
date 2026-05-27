@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMetadataStep do
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "invalid_resource_metadata_step",
     name: "Invalid Resource Metadata Step",
     category: "Test",
@@ -7,7 +7,7 @@ defmodule Fizz.TestSupport.CatalogValidation.InvalidResourceMetadataStep do
     icon: "hero-table-cells",
     kind: :action
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   @fields [
     %Fizz.Fields.Definition{

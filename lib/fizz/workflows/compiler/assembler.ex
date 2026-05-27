@@ -3,8 +3,8 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   require Runic
 
-  alias Fizz.Steps.Executors.Aggregator, as: AggregatorExecutor
-  alias Fizz.Steps.Executors.Join, as: JoinExecutor
+  alias Fizz.Integrations.Fizz.Builtins.Aggregator, as: AggregatorExecutor
+  alias Fizz.Integrations.Fizz.Builtins.Join, as: JoinExecutor
   alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.Expressions.AccessPlan
   alias Fizz.Workflows.Runtime.ConfigResolver

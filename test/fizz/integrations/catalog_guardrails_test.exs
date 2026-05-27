@@ -2,8 +2,8 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
   use ExUnit.Case, async: true
 
   alias Fizz.Integrations.ProviderCatalog
-  alias Fizz.Steps.Registry
-  alias Fizz.Steps.Type
+  alias Fizz.Integrations.StepRegistry, as: Registry
+  alias Fizz.Integrations.StepType
 
   @expected_provider_ids [
     "anthropic_api_key",
@@ -19,7 +19,23 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
   ]
 
   @expected_integration_ids [
-    "google_sheets"
+    "anthropic",
+    "box",
+    "fizz",
+    "github",
+    "gmail",
+    "google_docs",
+    "google_drive",
+    "google_sheets",
+    "google_slides",
+    "notion",
+    "onedrive",
+    "openai",
+    "outlook",
+    "powerpoint",
+    "sharepoint",
+    "slack",
+    "teams"
   ]
 
   @expected_step_type_ids [
@@ -138,8 +154,8 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
 
       assert step_types |> Enum.map(& &1.id) |> Enum.sort() == @expected_step_type_ids
 
-      for %Type{} = step_type <- step_types do
-        assert {:ok, module} = Type.executor_module(step_type)
+      for %StepType{} = step_type <- step_types do
+        assert {:ok, module} = StepType.executor_module(step_type)
         assert {:module, ^module} = Code.ensure_loaded(module)
       end
 
@@ -147,10 +163,10 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
       assert {:ok, read_rows} = Registry.get("google_sheets_read_rows")
 
       assert {:ok, Fizz.Integrations.Google.Sheets.Actions.AppendRow} =
-               Type.executor_module(append_row)
+               StepType.executor_module(append_row)
 
       assert {:ok, Fizz.Integrations.Google.Sheets.Actions.ReadRows} =
-               Type.executor_module(read_rows)
+               StepType.executor_module(read_rows)
     end
   end
 
@@ -224,7 +240,7 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     |> Enum.sort()
   end
 
-  defp credential_requirements_for_step(%Type{} = step_type) do
+  defp credential_requirements_for_step(%StepType{} = step_type) do
     step_type.config_schema
     |> Map.get("properties", %{})
     |> Enum.flat_map(fn {field, schema} ->
@@ -247,7 +263,7 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     }
   end
 
-  defp ui_components_for_step(%Type{} = step_type) do
+  defp ui_components_for_step(%StepType{} = step_type) do
     step_type.config_schema
     |> Map.get("properties", %{})
     |> Enum.flat_map(fn {field, schema} ->

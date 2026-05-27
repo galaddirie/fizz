@@ -7,7 +7,7 @@ defmodule Fizz.Integrations.CatalogTest do
   }
 
   alias Fizz.Fields
-  alias Fizz.Steps.Registry, as: StepRegistry
+  alias Fizz.Integrations.StepRegistry, as: StepRegistry
   alias Fizz.Workflows.RetryPolicy
 
   describe "catalog lookups" do
@@ -47,8 +47,9 @@ defmodule Fizz.Integrations.CatalogTest do
   describe "manifest definitions" do
     test "manifest exposes current built-in module lists" do
       assert Fizz.Integrations.Providers.GoogleOAuth in Manifest.provider_modules()
+      assert Fizz.Integrations.Fizz in Manifest.integration_modules()
       assert Fizz.Integrations.Google.Sheets in Manifest.integration_modules()
-      assert Fizz.Steps.Executors.ManualInput in Manifest.step_executor_modules()
+      assert Fizz.Integrations.Fizz.Builtins.ManualInput in Manifest.step_executor_modules()
       assert Fizz.Integrations.Google.Sheets.Actions.AppendRow in Manifest.step_executor_modules()
       assert Fizz.Integrations.Google.Sheets.Actions.ReadRows in Manifest.step_executor_modules()
     end

@@ -7,7 +7,7 @@ defmodule Fizz.Triggers do
 
   alias Fizz.Accounts.Scope
   alias Fizz.Repo
-  alias Fizz.Steps.Executor, as: StepExecutorBehaviour
+  alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour
   alias Fizz.Triggers.{TriggerEvent, TriggerRegistration, TriggerSource, TriggerSourceRow}
   alias Fizz.Workflows.WorkflowDefinitionVersion
 

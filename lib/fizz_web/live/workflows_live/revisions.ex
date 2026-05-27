@@ -3,7 +3,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
   use LiveVue, :live_view
 
   alias Fizz.Accounts
-  alias Fizz.Steps
+  alias Fizz.Integrations.StepRegistry
   alias Fizz.Workflows
   alias Fizz.Workflows.DraftSession
   alias Fizz.Workflows.WorkflowDefinitionVersion
@@ -112,7 +112,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
          {:ok, draft} <- Workflows.edit_definition(scope, definition_id),
          {:ok, joined_draft, undo_state, editor_state, joined?} <-
            maybe_connect_draft_session(socket, scope, draft) do
-      step_types = Steps.list_types()
+      step_types = StepRegistry.all()
 
       socket
       |> assign(:current_scope, scope)

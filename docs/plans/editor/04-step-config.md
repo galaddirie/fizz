@@ -13,7 +13,7 @@ Step configuration is the core authoring experience. Each step type declares typ
 Each executor module defines typed fields:
 
 ```elixir
-# Example: lib/fizz/steps/executors/slack_send_message.ex
+# Example: lib/fizz/integrations/slack/actions/send_message.ex
 alias Fizz.Fields
 
 @fields [

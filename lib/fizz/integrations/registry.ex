@@ -108,7 +108,8 @@ defmodule Fizz.Integrations.Registry do
         provider_id: module.provider_id(),
         module: module,
         actions: module.actions(),
-        triggers: module.triggers()
+        triggers: module.triggers(),
+        step_modules: module.step_modules()
       }
     else
       _ -> raise ArgumentError, "#{inspect(module)} must implement Fizz.Integrations.Integration"
@@ -117,7 +118,7 @@ defmodule Fizz.Integrations.Registry do
 
   defp implements_integration?(module) do
     Enum.all?(
-      [:id, :display_name, :provider_id, :actions, :triggers, :required_scopes],
+      [:id, :display_name, :provider_id, :actions, :triggers, :step_modules, :required_scopes],
       &function_exported?(module, &1, callback_arity(&1))
     )
   end
@@ -154,6 +155,7 @@ defmodule Fizz.Integrations.Registry do
     validate_provider!(entry)
     validate_action_step_ids!(entry.actions, entry.id)
     validate_trigger_modules!(entry.triggers, Fizz.Triggers.Source, :trigger, entry.id)
+    validate_step_modules!(entry.step_modules, entry)
   end
 
   defp validate_required_fields!(%{
@@ -162,16 +164,20 @@ defmodule Fizz.Integrations.Registry do
          provider_id: provider_id,
          module: module,
          actions: actions,
-         triggers: triggers
+         triggers: triggers,
+         step_modules: step_modules
        })
        when is_binary(id) and id != "" and is_binary(display_name) and display_name != "" and
-              is_binary(provider_id) and provider_id != "" and is_atom(module) and
-              is_list(actions) and is_list(triggers),
+              (is_nil(provider_id) or (is_binary(provider_id) and provider_id != "")) and
+              is_atom(module) and is_list(actions) and is_list(triggers) and
+              is_list(step_modules),
        do: :ok
 
   defp validate_required_fields!(entry) do
     raise ArgumentError, "invalid integration entry: #{inspect(entry)}"
   end
+
+  defp validate_provider!(%{provider_id: nil}), do: :ok
 
   defp validate_provider!(%{id: id, provider_id: provider_id}) do
     case Fizz.Integrations.ProviderCatalog.provider(provider_id) do
@@ -180,6 +186,53 @@ defmodule Fizz.Integrations.Registry do
 
       {:error, :unknown_provider} ->
         raise ArgumentError, "integration #{id} uses unknown provider #{provider_id}"
+    end
+  end
+
+  defp validate_step_modules!(modules, entry) do
+    Enum.each(modules, fn module ->
+      validate_step_module!(module, entry)
+    end)
+  end
+
+  defp validate_step_module!(module, entry) when is_atom(module) do
+    case Code.ensure_loaded(module) do
+      {:module, ^module} ->
+        validate_step_definition!(module, entry)
+
+      _ ->
+        raise ArgumentError,
+              "integration #{entry.id} step module #{inspect(module)} is not loaded"
+    end
+  end
+
+  defp validate_step_module!(module, entry) do
+    raise ArgumentError, "integration #{entry.id} step module is invalid: #{inspect(module)}"
+  end
+
+  defp validate_step_definition!(module, entry) do
+    if function_exported?(module, :__step_definition__, 0) do
+      module
+      |> apply(:__step_definition__, [])
+      |> validate_step_ownership!(module, entry)
+    else
+      raise ArgumentError,
+            "integration #{entry.id} step module #{inspect(module)} must use Fizz.Integrations.StepDefinition"
+    end
+  end
+
+  defp validate_step_ownership!(step_type, module, entry) do
+    cond do
+      step_type.integration != entry.id ->
+        raise ArgumentError,
+              "integration #{entry.id} step module #{inspect(module)} declares integration #{inspect(step_type.integration)}"
+
+      step_type.provider != entry.provider_id ->
+        raise ArgumentError,
+              "integration #{entry.id} step module #{inspect(module)} declares provider #{inspect(step_type.provider)}"
+
+      true ->
+        :ok
     end
   end
 

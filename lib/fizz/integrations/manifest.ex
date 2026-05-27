@@ -30,67 +30,30 @@ defmodule Fizz.Integrations.Manifest do
   @spec integration_modules() :: [module()]
   def integration_modules do
     [
-      Fizz.Integrations.Google.Sheets
+      Fizz.Integrations.Fizz,
+      Fizz.Integrations.Anthropic,
+      Fizz.Integrations.Box,
+      Fizz.Integrations.GitHub,
+      Fizz.Integrations.Google.Docs,
+      Fizz.Integrations.Google.Drive,
+      Fizz.Integrations.Google.Gmail,
+      Fizz.Integrations.Google.Sheets,
+      Fizz.Integrations.Google.Slides,
+      Fizz.Integrations.Microsoft.OneDrive,
+      Fizz.Integrations.Microsoft.Outlook,
+      Fizz.Integrations.Microsoft.PowerPoint,
+      Fizz.Integrations.Microsoft.SharePoint,
+      Fizz.Integrations.Microsoft.Teams,
+      Fizz.Integrations.Notion,
+      Fizz.Integrations.OpenAI,
+      Fizz.Integrations.Slack
     ]
   end
 
   @spec step_executor_modules() :: [module()]
   def step_executor_modules do
-    [
-      Fizz.Steps.Executors.ManualInput,
-      Fizz.Steps.Executors.OnChatTrigger,
-      Fizz.Steps.Executors.HttpRequest,
-      Fizz.Steps.Executors.JsonParser,
-      Fizz.Steps.Executors.DataFilter,
-      Fizz.Steps.Executors.DataTransform,
-      Fizz.Steps.Executors.DataOutput,
-      Fizz.Steps.Executors.Condition,
-      Fizz.Steps.Executors.Switch,
-      Fizz.Steps.Executors.Format,
-      Fizz.Steps.Executors.Debug,
-      Fizz.Steps.Executors.Math,
-      Fizz.Steps.Executors.Aggregator,
-      Fizz.Steps.Executors.Splitter,
-      Fizz.Steps.Executors.Join,
-      Fizz.Steps.Executors.ScheduleTrigger,
-      Fizz.Steps.Executors.Wait,
-      Fizz.Steps.Executors.AIAgent,
-      Fizz.Steps.Executors.OpenAIModel,
-      Fizz.Steps.Executors.AnthropicModel,
-      Fizz.Steps.Executors.AIStructureSchema,
-      Fizz.Steps.Executors.AIToolHttp,
-      Fizz.Steps.Executors.OpenAIImageGeneration,
-      Fizz.Steps.Executors.AnthropicVisionAnalysis,
-      Fizz.Steps.Executors.GmailTrigger,
-      Fizz.Steps.Executors.GmailSendEmail,
-      Fizz.Steps.Executors.GmailReplyEmail,
-      Fizz.Steps.Executors.SlackTrigger,
-      Fizz.Steps.Executors.SlackSendMessage,
-      Fizz.Steps.Executors.SlackCreateChannel,
-      Fizz.Steps.Executors.GoogleDocsTrigger,
-      Fizz.Steps.Executors.GoogleDocsCreateDoc,
-      Fizz.Steps.Executors.GoogleDocsAppendText,
-      Fizz.Steps.Executors.GoogleSheetsTrigger,
-      Fizz.Integrations.Google.Sheets.Actions.ReadRows,
-      Fizz.Integrations.Google.Sheets.Actions.AppendRow,
-      Fizz.Steps.Executors.GoogleSlidesCreatePresentation,
-      Fizz.Steps.Executors.GoogleSlidesAddSlide,
-      Fizz.Steps.Executors.GoogleDriveUploadFile,
-      Fizz.Steps.Executors.NotionTrigger,
-      Fizz.Steps.Executors.NotionCreatePage,
-      Fizz.Steps.Executors.NotionUpdatePage,
-      Fizz.Steps.Executors.GitHubTrigger,
-      Fizz.Steps.Executors.GitHubCreateIssue,
-      Fizz.Steps.Executors.GitHubCreatePR,
-      Fizz.Steps.Executors.OutlookTrigger,
-      Fizz.Steps.Executors.OutlookSendEmail,
-      Fizz.Steps.Executors.TeamsTrigger,
-      Fizz.Steps.Executors.TeamsSendMessage,
-      Fizz.Steps.Executors.SharePointUploadFile,
-      Fizz.Steps.Executors.OneDriveUploadFile,
-      Fizz.Steps.Executors.PowerPointCreatePresentation,
-      Fizz.Steps.Executors.BoxUploadFile
-    ]
+    integration_modules()
+    |> Enum.flat_map(& &1.step_modules())
   end
 
   @spec definitions() :: map()
@@ -157,7 +120,8 @@ defmodule Fizz.Integrations.Manifest do
         provider_id: module.provider_id(),
         module: module,
         actions: module.actions(),
-        triggers: module.triggers()
+        triggers: module.triggers(),
+        step_modules: module.step_modules()
       }
     end)
   end

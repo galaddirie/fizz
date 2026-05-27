@@ -1,7 +1,7 @@
 defmodule FizzWeb.WorkflowsLive.Payload do
   @moduledoc false
 
-  alias Fizz.Steps.Type
+  alias Fizz.Integrations.StepType
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion}
 
@@ -47,8 +47,8 @@ defmodule FizzWeb.WorkflowsLive.Payload do
     }
   end
 
-  @spec step_type(Type.t()) :: map()
-  def step_type(%Type{} = type) do
+  @spec step_type(StepType.t()) :: map()
+  def step_type(%StepType{} = type) do
     %{
       id: type.id,
       name: type.name,

@@ -270,7 +270,7 @@ defmodule Fizz.WorkflowsTest do
         name: "Image",
         config:
           "openai_image_generation"
-          |> Fizz.Steps.Registry.get_default_config()
+          |> Fizz.Integrations.StepRegistry.get_default_config()
           |> Map.put("prompt", "a generated product mockup")
       })
 

@@ -11,7 +11,7 @@ summary: Workflow definitions persist typed authored documents and advance throu
 surface:
   - docs/plans/workflow-definition-design.md
   - docs/plans/compiler-and-runtime-context-design.md
-  - lib/fizz/steps/registry.ex
+  - lib/fizz/integrations/step_registry.ex
 ```
 
 ## Requirements
@@ -171,7 +171,7 @@ surface:
     - workflows.definitions.publish_validation
 
 - kind: source_file
-  target: lib/fizz/steps/registry.ex
+  target: lib/fizz/integrations/step_registry.ex
   covers:
     - workflows.definitions.save_validation
 ```

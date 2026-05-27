@@ -13,8 +13,8 @@ dynamic field resolver work and the credential/slot cleanup are now committed.
 - Credential field checkpoint: `d824f3d Replace slot bindings with credential bindings`
 - Operation metadata checkpoint: `4944cce Refactor Google Sheets operations & credential UI`
 - Current committed scope: Phases 0 through 5 plus the credential field ownership cleanup and Google Sheets operation metadata ownership
-- Current uncommitted scope: collapse executable operations into step types, move retry/error handling into `Fizz.Workflows`, and make `Fizz.Fields` the source of truth for step fields
-- Recommended next slice after this diff: migrate the next integration family to typed step fields and add any missing Vue typed-field affordances
+- Current uncommitted scope: collapse executable operations into step types, move retry/error handling into `Fizz.Workflows`, make `Fizz.Fields` the source of truth for step fields, and start Phase 7 integration step organization/testing/scaffolding
+- Recommended next slice after this diff: add pinned workflow fixtures and `Req.Test` transport harnesses, then implement the first non-Google API family behind the same step/retry primitives
 
 ## What Changed Since The Previous Handoff
 
@@ -46,7 +46,7 @@ The credential/slot cleanup is committed in `d824f3d`.
 
 - Deleted the generic `Fizz.Slots` context, registry, resolver behavior, credential slot
   wrapper, and slot binding schema.
-- Deleted `Fizz.Steps.Resolver`; edit-time dynamic values now go through
+- Deleted the old step resolver behavior; edit-time dynamic values now go through
   `Fizz.Integrations.DynamicResolver`.
 - Added first-class credential declaration, field, requirement, binding, defaults, option
   lookup, and option resolver modules under `Fizz.Credentials`.
@@ -62,7 +62,7 @@ Validation completed for the credential cleanup:
 
 ```sh
 mix compile
-mix test test/fizz/credentials_test.exs test/fizz/credentials/workos_oauth_autobind_test.exs test/fizz/credentials/options_resolver_test.exs test/fizz/steps/credential_field_test.exs test/fizz/integrations/catalog_guardrails_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/draft_validator_test.exs test/fizz/workflows/runtime/context_builder_test.exs test/fizz/workflows/compiler/assembler_context_test.exs test/fizz/workflows_test.exs test/fizz_web/live/workflow_editor_live_test.exs test/fizz/triggers/registration_manager_test.exs test/fizz/triggers/basic_triggers_integration_test.exs test/fizz_web/controllers/triggers/webhook_controller_test.exs
+mix test test/fizz/credentials_test.exs test/fizz/credentials/workos_oauth_autobind_test.exs test/fizz/credentials/options_resolver_test.exs test/fizz/integrations/credential_field_test.exs test/fizz/integrations/catalog_guardrails_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/draft_validator_test.exs test/fizz/workflows/runtime/context_builder_test.exs test/fizz/workflows/compiler/assembler_context_test.exs test/fizz/workflows_test.exs test/fizz_web/live/workflow_editor_live_test.exs test/fizz/triggers/registration_manager_test.exs test/fizz/triggers/basic_triggers_integration_test.exs test/fizz_web/controllers/triggers/webhook_controller_test.exs
 mix precommit
 mix assets.deploy
 ```
@@ -87,7 +87,7 @@ Validation completed so far:
 
 ```sh
 mix compile
-mix test test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/catalog_test.exs test/fizz/integrations/manifest_task_test.exs test/fizz/steps/registry_operation_definitions_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/client_test.exs test/fizz/integrations/operation_executor_test.exs
+mix test test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/catalog_test.exs test/fizz/integrations/manifest_task_test.exs test/fizz/integrations/catalog_guardrails_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/client_test.exs
 mix assets.build
 mix precommit
 ```
@@ -98,7 +98,7 @@ same existing third-party Vite/Tailwind warnings.
 ### Current Uncommitted Slice - Shared Fields, Step Errors, And Step Retry
 
 This slice continues Phase 6 and removes the operation execution layer. There is now one
-executable primitive: `Fizz.Steps.Type`, declared by step modules and run by the
+executable primitive: `Fizz.Integrations.StepType`, declared by step modules and run by the
 workflow runner. Integrations remain provider/product/resolver/trigger/client/auth
 metadata.
 
@@ -128,7 +128,7 @@ Execution ownership changes:
 - Deleted `Fizz.Integrations.Operation`, `OperationDefinition`, `OperationExecutor`,
   `StepTypeAdapter`, `OperationError`, and integration-owned retry policy modules.
 - Deleted operation catalog APIs and manifest operation/version generation.
-- Added `Fizz.Steps.Executor` as the runtime executor behavior/helper.
+- Added `Fizz.Workflows.StepExecutor` as the runtime executor behavior/helper.
 - Added `Fizz.Workflows.StepError` and `Fizz.Workflows.RetryPolicy` as generic workflow
   runtime primitives.
 - `Fizz.Workflows.StepExecutionError` now preserves the original reason plus step ID,
@@ -137,7 +137,7 @@ Execution ownership changes:
   retries only normalized `%Fizz.Workflows.StepError{}` failures with a compiled retry
   policy.
 - Google Sheets append/read modules are normal step executor modules using
-  `Fizz.Steps.Definition`; their client/resolver/domain code remains under
+  `Fizz.Integrations.StepDefinition`; their client/resolver/domain code remains under
   integrations.
 - `Google.Sheets.actions/0` returns step type IDs.
 
@@ -147,6 +147,49 @@ Validation completed so far:
 mix compile --warnings-as-errors
 mix test test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_guardrails_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/fields_test.exs test/fizz/workflows/step_error_test.exs test/fizz/workflows/retry_policy_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/runner/worker_failure_test.exs
 mix test
+```
+
+### Current Uncommitted Slice - Phase 7 Integration Metadata And Harness
+
+This slice starts Phase 7 without adding another executable abstraction. Step modules
+remain executable; integration modules now own the step module lists for their domain.
+Provider-owned executable step modules live beside the integration domain code that owns
+their fields, clients, resolvers, and triggers. Providerless built-in workflow nodes are
+owned by the Fizz product-domain integration.
+
+- Added `Fizz.Integrations.StaticIntegration` for product integrations with static
+  action and step module lists.
+- Added `Fizz.Integrations.Fizz` and moved providerless built-in nodes under
+  `Fizz.Integrations.Fizz.Builtins`.
+- Added product integration modules for Anthropic, Box, GitHub, Gmail, Google Docs,
+  Google Drive, Google Slides, Notion, OpenAI, Slack, and Microsoft OneDrive, Outlook,
+  PowerPoint, SharePoint, and Teams.
+- Moved product integration declaration files into each product directory as
+  `integration.ex`, keeping `lib/fizz/integrations/` reserved for framework/catalog
+  primitives.
+- Moved provider-owned executable steps from the old flat executor namespace
+  into `Fizz.Integrations.<Product>.Actions`, `.Triggers`, or `.Nodes` modules.
+- Step declaration/type metadata now lives under `Fizz.Integrations`, the step executor
+  behavior lives under `Fizz.Workflows`, and the old `Fizz.Steps` namespace was removed
+  along with the stale executor namespace and unused `ConfigSchema` module.
+- Added explicit `provider` and `integration` metadata to the remaining external
+  provider-owned step definitions, including trigger steps and AI model subnodes.
+- Added `Fizz.Integrations.PlaceholderStep` so skeleton external executors return a
+  typed `not_implemented` payload instead of empty `%{}` results.
+- Added `Fizz.IntegrationStepCase` for direct step definition lookup, schema lookup, and
+  step execution in integration tests.
+- Added catalog/harness coverage in `test/fizz/integrations/external_steps_test.exs`,
+  including checks that every registered step declares an integration owner.
+- Renamed built-in executor files so `aggregator.ex` and `splitter.ex` match their
+  module names, and deleted the stale unmanifested `openai_structured_output` executor.
+- `Fizz.Integrations.Manifest.step_executor_modules/0` now derives executable modules
+  from `integration_modules/0 |> Enum.flat_map(& &1.step_modules())`, removing the
+  second hand-maintained executor list.
+
+Validation completed so far:
+
+```sh
+mix test test/fizz/integrations/external_steps_test.exs test/fizz/integrations/catalog_guardrails_test.exs
 ```
 
 ## Current Architecture Decisions
@@ -212,7 +255,7 @@ Keep these concepts separate:
 - `Fizz.Integrations.resolve_auth_for_execution/4`: run-time auth material resolution
   for API key, OAuth, and provider-specific credential backends.
 
-Do not reintroduce a second generic resolver behavior named close to `Steps.Resolver` or
+Do not reintroduce a second generic resolver behavior named close to the old step resolver or
 `Slots.Resolver`.
 
 ### Field State
@@ -254,7 +297,7 @@ Rules going forward:
 ### Phase 6 - Execution Semantics
 
 The operation execution layer has been collapsed into step execution. Step modules now
-declare fields, retry policy, and metadata through `Fizz.Steps.Definition`; the workflow
+declare fields, retry policy, and metadata through `Fizz.Integrations.StepDefinition`; the workflow
 runner owns normalized `StepError` values and durable `StepRetry` timers.
 
 Recommended order:
@@ -273,8 +316,8 @@ Likely files:
 - `lib/fizz/workflows/step_error.ex`
 - `lib/fizz/workflows/retry_policy.ex`
 - `lib/fizz/workflows/runner/step_retry.ex`
-- `lib/fizz/steps/definition.ex`
-- `lib/fizz/steps/executor.ex`
+- `lib/fizz/integrations/step_definition.ex`
+- `lib/fizz/workflows/step_executor.ex`
 - `lib/fizz/integrations/definition.ex`
 - `lib/fizz/integrations/manifest.ex`
 - `lib/fizz/integrations/google/sheets/actions/append_row.ex`
@@ -294,8 +337,9 @@ Likely tests:
 
 ### Phase 7 - Testing Harness And Scaffolding
 
-- Add an integration test harness with workflow fixtures, pinned outputs, credential
-  fixtures, `Req.Test` expectations, and direct step execution.
+- Direct step execution harness: started with `Fizz.IntegrationStepCase`.
+- Workflow fixtures, pinned outputs, credential fixtures, and `Req.Test` expectations:
+  still open.
 - Colocate integration fixtures beside integration modules.
 - Add `mix fizz.gen.integration <provider>.<resource>`.
 - Replace brittle tests that rely on `Process.sleep`.

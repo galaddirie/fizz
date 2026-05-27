@@ -3,7 +3,7 @@ defmodule Fizz.Integrations.CatalogValidationTest do
 
   alias Fizz.Integrations.ProviderCatalog
   alias Fizz.Integrations.Registry, as: IntegrationRegistry
-  alias Fizz.Steps.Registry, as: StepRegistry
+  alias Fizz.Integrations.StepRegistry, as: StepRegistry
 
   setup do
     previous_providers = Application.get_env(:fizz, :integration_providers)
@@ -119,8 +119,8 @@ defmodule Fizz.Integrations.CatalogValidationTest do
     test "duplicate step type IDs raise during catalog load" do
       assert_raise RuntimeError, ~r/Duplicate step type IDs/, fn ->
         StepRegistry.types_for_modules!([
-          Fizz.Steps.Executors.ManualInput,
-          Fizz.Steps.Executors.ManualInput
+          Fizz.Integrations.Fizz.Builtins.ManualInput,
+          Fizz.Integrations.Fizz.Builtins.ManualInput
         ])
       end
     end

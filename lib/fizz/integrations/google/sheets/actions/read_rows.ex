@@ -3,7 +3,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
   Reads rows from a Google Sheet range.
   """
 
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "google_sheets_read_rows",
     version: 1,
     name: "Google Sheets — Read Rows",
@@ -22,7 +22,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
   alias Fizz.Integrations.Google.Sheets.Rows
   alias Fizz.Workflows.RetryPolicy
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   @fields [
     Fields.credential(GoogleOAuth.provider_id(), :oauth,

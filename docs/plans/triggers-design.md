@@ -12,7 +12,7 @@ This design covers the full trigger surface: basics (manual, webhook, schedule, 
 
 ### Fizz Repo Mapping
 
-Triggers are part of the step type system (`lib/fizz/steps/`) and the workflow execution infrastructure (`lib/fizz/workflows/`). The trigger registry and fire routing are new control-plane concerns alongside the existing planned `signal_inbox`, `durable_timers`, and `shard_leases`. Trigger operations are scoped through `%Fizz.Accounts.Scope{}` and `project_id`, matching the rest of the platform.
+Triggers are integration-owned step types declared under `lib/fizz/integrations/` and executed by the workflow infrastructure in `lib/fizz/workflows/`. The trigger registry and fire routing are new control-plane concerns alongside the existing planned `signal_inbox`, `durable_timers`, and `shard_leases`. Trigger operations are scoped through `%Fizz.Accounts.Scope{}` and `project_id`, matching the rest of the platform.
 
 ---
 
@@ -33,16 +33,16 @@ All trigger fires route through Oban (`TriggerFireWorker`) for consistent retry,
 
 ## 3. Trigger Behaviour
 
-The existing `Fizz.Steps.Executor` defines `execute/3` for all step types. Triggers need three additional callbacks that describe their relationship to the outside world.
+The existing `Fizz.Workflows.StepExecutor` defines `execute/3` for all step types. Triggers need three additional callbacks that describe their relationship to the outside world.
 
-**Behaviour composition**: Trigger executor modules declare both `@behaviour Fizz.Steps.Executor` (for `execute/3`, `validate_config/1`, `effective_output_schema/1`) and `@behaviour Fizz.Triggers.Behaviour` (for the trigger-specific callbacks below). The `use Fizz.Steps.Definition, kind: :trigger` macro should wire both behaviours automatically. `Fizz.Triggers.Behaviour` does NOT inherit from or replace the executor behaviour — they are composed via dual `@behaviour` declarations.
+**Behaviour composition**: Trigger executor modules declare both `@behaviour Fizz.Workflows.StepExecutor` (for `execute/3`, `validate_config/1`, `effective_output_schema/1`) and `@behaviour Fizz.Triggers.Behaviour` (for the trigger-specific callbacks below). The `use Fizz.Integrations.StepDefinition, kind: :trigger` macro should wire both behaviours automatically. `Fizz.Triggers.Behaviour` does NOT inherit from or replace the executor behaviour — they are composed via dual `@behaviour` declarations.
 
 ```elixir
 defmodule Fizz.Triggers.Behaviour do
   @moduledoc """
   Additional behaviour for trigger step executors.
 
-  Trigger steps implement BOTH Fizz.Steps.Executor (execute/3, etc.)
+  Trigger steps implement BOTH Fizz.Workflows.StepExecutor (execute/3, etc.)
   AND this behaviour. The Step Definition macro wires both when kind: :trigger.
   """
 
@@ -754,7 +754,7 @@ defmodule Fizz.Triggers.RegistrationManager do
     manifest = definition_version.compiled_workflow.fizz_metadata.trigger_manifest
 
     for trigger <- manifest do
-      executor = Fizz.Steps.Registry.get_executor(trigger.type_id)
+      executor = Fizz.Integrations.StepRegistry.get_executor(trigger.type_id)
       {:ok, spec} = executor.registration_spec(trigger.config, build_context(definition_version))
 
       upsert_registration(%{

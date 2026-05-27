@@ -17,5 +17,8 @@ defmodule Fizz.TestSupport.CatalogValidation.UnknownProviderIntegration do
   def triggers, do: []
 
   @impl true
+  def step_modules, do: []
+
+  @impl true
   def required_scopes(_operation), do: []
 end

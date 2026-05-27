@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.Executors.FailingWebhookTrigger do
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "failing_webhook_trigger",
     name: "Failing Webhook Trigger",
     category: "Test",
@@ -7,7 +7,7 @@ defmodule Fizz.TestSupport.Executors.FailingWebhookTrigger do
     icon: "hero-bolt",
     kind: :trigger
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   alias Fizz.Triggers.RegistrationSpec
 

@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.CredentialDefaults do
   @moduledoc false
 
   alias Fizz.Fields.Credential
-  alias Fizz.Steps.Registry, as: StepRegistry
+  alias Fizz.Integrations.StepRegistry, as: StepRegistry
   alias Fizz.Workflows.Embeds.Step
   alias Fizz.Workflows.WorkflowDefinitionVersion
 

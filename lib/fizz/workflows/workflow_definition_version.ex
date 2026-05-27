@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
   use Fizz.Schema
 
   alias Fizz.Graph
-  alias Fizz.Steps.Registry
+  alias Fizz.Integrations.StepRegistry
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.PublishValidation
   alias Fizz.Workflows.WorkflowDefinition
@@ -124,7 +124,7 @@ defmodule Fizz.Workflows.WorkflowDefinitionVersion do
       changeset
       |> get_field(:steps, [])
       |> Enum.reduce([], fn step, errors ->
-        case Registry.get(step.type_id) do
+        case StepRegistry.get(step.type_id) do
           {:ok, _type} -> errors
           {:error, :not_found} -> ["#{step.id} (#{step.type_id})" | errors]
         end

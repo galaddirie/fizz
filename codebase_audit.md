@@ -6,12 +6,13 @@ This audit started as a read-only baseline for integration scalability. Since th
 refactor has shipped metadata-first catalog foundations, resource locator/mapper support,
 a credential ownership cleanup, and a shared typed field contract.
 
-Current useful primitives include `Fizz.Steps.Definition`, `Fizz.Steps.Type`,
-`Fizz.Steps.Executor`, `Fizz.Steps.Registry`,
+Current useful primitives include `Fizz.Integrations.StepDefinition`, `Fizz.Integrations.StepType`,
+`Fizz.Workflows.StepExecutor`, `Fizz.Integrations.StepRegistry`,
 `Fizz.Integrations.ProviderDefinition`, `Fizz.Integrations.DynamicResolver`,
-`Fizz.Fields`, `Fizz.Fields.Credential`, and schema-driven Vue field rendering.
-The main remaining issue is migrating every older executor family to typed field
-definitions and normalized step errors.
+`Fizz.Integrations.StaticIntegration`, `Fizz.Integrations.PlaceholderStep`,
+`Fizz.Integrations.Fizz`, `Fizz.Fields`, `Fizz.Fields.Credential`, and schema-driven Vue field rendering.
+The main remaining issue is turning the registered skeleton integration steps into real
+Req-backed API clients with pinned step/workflow tests.
 
 ## 0. Refactor Updates
 
@@ -26,7 +27,7 @@ Resolved since the original audit:
 - Provider credential creation inputs and step inputs now use the same
   `Fizz.Fields.Definition` contract, with JSON Schema plus `"ui"` generated as adapter
   output.
-- `Fizz.Steps.Resolver` was deleted; edit-time dynamic values now route through
+- The old step resolver behavior was deleted; edit-time dynamic values now route through
   `Fizz.Integrations.DynamicResolver`.
 - `MapEditor.vue` was replaced by `ResourceMapperField.vue`.
 - `RunLaunchModal.vue` and `SlotField.vue` were replaced by credential-named components.
@@ -43,15 +44,32 @@ Still open:
   metadata, and step metadata directly
 - Google Sheets now publishes retry metadata on step definitions and the client returns
   `Fizz.Workflows.StepError` instead of raw `{:backoff, ...}` or HTTP maps
+- Remaining external skeleton products now have product integration modules, executable
+  step modules colocated under integration namespaces, explicit step
+  `provider`/`integration` metadata, and a shared `not_implemented` execution payload
+  instead of ad hoc empty `%{}` returns.
+- Product integration declaration files now live inside their product directories as
+  `integration.ex`, keeping the integration root for shared catalog/framework modules.
+- Providerless built-in/internal workflow nodes now belong to the `fizz` integration
+  under `Fizz.Integrations.Fizz.Builtins`; step declaration/type metadata now lives in
+  `Fizz.Integrations`, and the execution behavior lives in `Fizz.Workflows`.
+- `Fizz.IntegrationStepCase` provides the first direct step harness for integration
+  catalog tests.
 
 ## 1. Current Declarations and Boilerplate
 
-Integration declarations are split across registries. Auth providers are listed in `Fizz.Integrations.ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`). Product integrations are listed separately in `Fizz.Integrations.Registry` (`lib/fizz/integrations/registry.ex:55`). Workflow step types are loaded from the manifest into `Fizz.Steps.Registry`. Adding a real integration can still require a provider module, provider catalog edit, product integration module, step module, manifest edit, image assets, UI field support, and tests.
+Integration declarations are still manifest-driven, but executable ownership is now
+attached to integration modules. Auth providers are listed in `Fizz.Integrations.ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`). Product integrations are listed in the manifest and each integration exposes its own `step_modules/0`. `Fizz.Integrations.StepRegistry` loads step types by flattening those integration-owned module lists. Adding a real integration can still require a provider module, provider catalog edit, product integration module, step module, manifest edit, image assets, UI field support, and tests.
 
-The product-level integration abstraction is product metadata, not executable ownership.
-Google Sheets advertises action step type IDs, and append/read are ordinary step
-executors. Other providers such as Gmail, Slack, Notion, GitHub, and Microsoft are still
-mostly older step executor modules that need typed field cleanup.
+The product-level integration abstraction is now executable ownership plus product
+metadata. Google Sheets advertises action step type IDs and owns append/read/trigger step
+modules. Gmail, Slack, Notion, GitHub, Microsoft, Box, OpenAI, and Anthropic also have
+product integration modules that group action IDs and step modules. Provider-owned
+executable modules live under `Fizz.Integrations.<Product>.Actions`, `.Triggers`, or
+`.Nodes`; providerless Fizz nodes live under `Fizz.Integrations.Fizz.Builtins`. Most
+external product steps are still skeleton executors, but they now declare
+provider/integration ownership explicitly and return a shared placeholder payload until
+their API clients are implemented.
 
 OAuth provider modules repeat the same shape. Slack, Google, Microsoft, Notion, and Box define `provider_id/0`, `display_name/0`, `definition/0`, `check_connection/2`, `fetch_token/2`, and `network_domains/0`, differing mainly by slug/logo/domains (`lib/fizz/integrations/providers/google_oauth.ex:14`, `lib/fizz/integrations/providers/slack_oauth.ex:14`, `lib/fizz/integrations/providers/box_oauth.ex:14`). `PipesOAuth` centralizes WorkOS token/status calls (`lib/fizz/integrations/providers/pipes_oauth.ex:6`), but not provider declaration boilerplate.
 
@@ -59,7 +77,7 @@ API-key providers have inconsistent implementation status. OpenAI implements `Fi
 
 Credential declarations are now explicit field definitions. Legacy executor modules
 still repeat the same pattern: build a `Fizz.Fields.credential/2` and let
-`Fizz.Steps.Definition` generate defaults and schema. That is much thinner than the old
+`Fizz.Integrations.StepDefinition` generate defaults and schema. That is much thinner than the old
 credential module stack, but it is still boilerplate that should disappear as common
 provider step helpers emerge.
 
@@ -76,7 +94,7 @@ The code has several good abstractions that are not consistently used as the sou
 
 There are also context-level duplications. `GitHubOAuth` reimplements token-fetch flow directly through `Accounts.get_pipes_access_token/3` (`lib/fizz/integrations/providers/github_oauth.ex:29`, `lib/fizz/integrations/providers/github_oauth.ex:57`) rather than layering GitHub-specific metadata on top of the generic `PipesOAuth` path. Workspace console setup reaches directly into `Integrations` and provider registries (`lib/fizz_web/channels/workspace_console_channel.ex:4`, `lib/fizz_web/channels/workspace_console_channel.ex:149`), while similar provider setup exists in the workspace job worker (`lib/fizz/workspaces/workers/exec_job_worker.ex:252`).
 
-The AI subnode path is a separate copy-paste hotspot. `OpenAIModel` and `AnthropicModel` duplicate credential schema, output shape, validation, and error mapping (`lib/fizz/steps/executors/openai_model.ex:29`, `lib/fizz/steps/executors/anthropic_model.ex:26`). `AIAgent` hardcodes accepted model subnodes and provider dispatch (`lib/fizz/steps/executors/ai_agent.ex:43`, `lib/fizz/steps/executors/ai_agent.ex:195`). Adding another LLM provider currently means adding a subnode and editing the agent.
+The AI subnode path is a separate copy-paste hotspot. `OpenAIModel` and `AnthropicModel` duplicate credential schema, output shape, validation, and error mapping under their provider integration namespaces. `AIAgent` hardcodes accepted model subnodes and provider dispatch in `lib/fizz/integrations/fizz/builtins/ai_agent.ex`. Adding another LLM provider currently means adding a subnode and editing the agent.
 
 ## 3. UI to Backend Coupling
 
@@ -113,15 +131,25 @@ workflow-specific schema. The generic slot context was removed instead of moved.
 
 Project-scope resolution is repeated in LiveViews. Project routes are inside the authenticated LiveView session (`lib/fizz_web/router.ex:69`), while `UserAuth` mounts only the base current scope (`lib/fizz_web/user_auth.ex:329`). Several LiveViews rebuild project scope themselves (`lib/fizz_web/live/workflows_live/index.ex:48`, `workflows_live/editor.ex:340`, `workflows_live/revisions.ex:109`, `workspaces_live/index.ex:86`). `FizzWeb.Plugs.RequireProjectScope` exists (`lib/fizz_web/plugs/require_project_scope.ex:1`) but is not wired for LiveView. A shared authenticated project live_session/on_mount would reduce repeated scope code.
 
-Runtime context naming is inconsistent. `ContextBuilder` stores both `:scope` and `:current_scope` (`lib/fizz/workflows/runtime/context_builder.ex:65`), and the assembler forwards both (`lib/fizz/workflows/compiler/assembler.ex:1625`). Google Sheets consumes `current_scope` (`lib/fizz/integrations/google/sheets/client.ex:223`), while AI Agent tries `scope`, `current_scope`, and metadata (`lib/fizz/steps/executors/ai_agent.ex:461`). A runtime struct such as `Fizz.Workflows.ExecutionContext` should use one canonical field.
+Runtime context naming is inconsistent. `ContextBuilder` stores both `:scope` and `:current_scope` (`lib/fizz/workflows/runtime/context_builder.ex:65`), and the assembler forwards both (`lib/fizz/workflows/compiler/assembler.ex:1625`). Google Sheets consumes `current_scope` (`lib/fizz/integrations/google/sheets/client.ex:223`), while AI Agent tries `scope`, `current_scope`, and metadata (`lib/fizz/integrations/fizz/builtins/ai_agent.ex`). A runtime struct such as `Fizz.Workflows.ExecutionContext` should use one canonical field.
 
-There are also low-level navigation inconsistencies: `aggregate_items.ex` defines `Fizz.Steps.Executors.Aggregator` with ID `"aggregator"` (`lib/fizz/steps/executors/aggregate_items.ex:1`, `aggregate_items.ex:35`), and `split_items.ex` defines `Fizz.Steps.Executors.Splitter` with ID `"splitter"` (`lib/fizz/steps/executors/split_items.ex:1`, `split_items.ex:30`). File/module/id names should align for a catalog expected to scale.
+Built-in executor file/module/id naming is now aligned for the previously inconsistent
+aggregator and splitter steps. Keep that convention as new internal primitives are added.
 
 ## 5. Tests and Testability
 
 Current coverage is strongest around auth, WorkOS, triggers, workflow execution, and editor server behavior. WorkOS HTTP/retry/vault behavior is covered (`test/fizz/accounts/workos_test.exs:56`), auth callback/session creation is covered (`test/fizz_web/controllers/workos_auth_controller_test.exs:130`), WorkOS webhooks are covered (`test/fizz_web/controllers/workos_webhook_controller_test.exs:23`), and credential/provider flows are covered in `test/fizz/integrations_test.exs:40`. Google Sheets has table discovery and resolver coverage (`test/fizz/integrations/google/sheets/client_test.exs:43`, `test/fizz/integrations/google/sheets/columns_resolver_test.exs:38`). Trigger and workflow runtime coverage is broad (`test/fizz/triggers/basic_triggers_integration_test.exs:18`, `test/fizz/workflows/runner/worker_test.exs:267`, `test/fizz/workflows/runner/worker_failure_test.exs:50`).
 
-Coverage gaps line up with abstraction gaps. GitHub provider HTTP behavior is hard to isolate because `GitHubOAuth` calls `Req.get/2` and `Req.post/2` directly (`lib/fizz/integrations/providers/github_oauth.ex:161`). Workspace provider HTTP has a similar direct-Req gap (`lib/fizz/workspaces/providers/sprites/http.ex:80`). Google Sheets append/error/backoff paths are under-covered even though the client has append and HTTP error branches (`lib/fizz/integrations/google/sheets/client.ex:120`, `client.ex:184`). LiveVue behavior is mostly tested through server hooks and props while SSR is disabled in tests (`config/test.exs:3`), leaving client event payload construction and field interactions thinly covered.
+Coverage gaps line up with abstraction gaps. Phase 7 now has `Fizz.IntegrationStepCase`
+for direct step definition lookup and execution, plus coverage that product integrations
+point at concrete step type IDs. GitHub provider HTTP behavior is still hard to isolate
+because `GitHubOAuth` calls `Req.get/2` and `Req.post/2` directly
+(`lib/fizz/integrations/providers/github_oauth.ex:161`). Workspace provider HTTP has a
+similar direct-Req gap (`lib/fizz/workspaces/providers/sprites/http.ex:80`). The next
+testability gap is `Req.Test` transport seams plus pinned workflow fixtures for real
+provider steps. LiveVue behavior is mostly tested through server hooks and props while
+SSR is disabled in tests (`config/test.exs:3`), leaving client event payload construction
+and field interactions thinly covered.
 
 Some tests are brittle. Several mutate global application config, forcing `async: false` and increasing leakage risk (`test/fizz/accounts/workos_test.exs:22`, `test/fizz/integrations_test.exs:14`, `test/fizz_web/live/workflow_editor_live_test.exs:47`). Sleep/poll synchronization appears despite the project testing guidance (`test/fizz/workflows/runner/worker_failure_test.exs:467`, `test/fizz_web/live/workflow_editor_live_test.exs:1591`, `test/fizz/triggers/basic_triggers_integration_test.exs:276`). Some LiveView tests modify process internals with `:sys.replace_state/2` (`test/fizz_web/live/workflow_editor_live_test.exs:1577`), and raw SQL lease setup is duplicated in workflow tests (`test/fizz/workflows_test.exs:768`, `test/fizz/workflows/runner/worker_test.exs:605`).
 

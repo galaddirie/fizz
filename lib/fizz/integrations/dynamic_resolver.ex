@@ -8,8 +8,8 @@ defmodule Fizz.Integrations.DynamicResolver do
   """
 
   alias Fizz.Fields.Credential
-  alias Fizz.Steps
-  alias Fizz.Steps.Type
+  alias Fizz.Integrations.StepRegistry
+  alias Fizz.Integrations.StepType
   alias Fizz.Workflows.Embeds.Step
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
@@ -26,7 +26,7 @@ defmodule Fizz.Integrations.DynamicResolver do
     with {:ok, step_id} <- resolver_step_id(payload),
          {:ok, field_key} <- resolver_field_key(payload),
          {:ok, step} <- fetch_step(draft, step_id),
-         {:ok, type} <- Steps.get_type(step.type_id),
+         {:ok, type} <- StepRegistry.get(step.type_id),
          {:ok, field_schema} <- fetch_config_field_schema(type, field_key),
          {:ok, resolver} <- fetch_field_resolver(field_schema),
          params <- merge_resolver_params(field_schema, payload),
@@ -72,7 +72,7 @@ defmodule Fizz.Integrations.DynamicResolver do
     end
   end
 
-  defp fetch_config_field_schema(%Type{} = type, field_key) do
+  defp fetch_config_field_schema(%StepType{} = type, field_key) do
     case get_in(type.config_schema, ["properties", field_key]) do
       field_schema when is_map(field_schema) -> {:ok, field_schema}
       _ -> {:error, :field_not_found}

@@ -8,7 +8,7 @@ defmodule Fizz.Triggers.RegistrationManager do
   alias Fizz.Accounts.Scope
   alias Fizz.Fields.Credential
   alias Fizz.Repo
-  alias Fizz.Steps.Executor, as: StepExecutorBehaviour
+  alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour
   alias Fizz.Triggers
   alias Fizz.Triggers.Webhook
   alias Fizz.Triggers.TriggerRegistration

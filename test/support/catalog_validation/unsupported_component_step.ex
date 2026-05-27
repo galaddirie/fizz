@@ -1,5 +1,5 @@
 defmodule Fizz.TestSupport.CatalogValidation.UnsupportedComponentStep do
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "unsupported_component_step",
     name: "Unsupported Component Step",
     category: "Test",
@@ -7,7 +7,7 @@ defmodule Fizz.TestSupport.CatalogValidation.UnsupportedComponentStep do
     icon: "hero-bolt",
     kind: :action
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   @fields [
     %Fizz.Fields.Definition{key: "value", type: :string, component: "bespoke"}

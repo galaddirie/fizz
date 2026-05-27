@@ -9,13 +9,14 @@ This plan is informed by n8n, but translated into idiomatic Elixir/Phoenix/OTP. 
 - `d824f3d` deleted the generic slots system and replaced it with first-class credential declarations, credential bindings, and runtime credential resolution.
 - `4944cce` moved Google Sheets operation metadata into operation modules, deleted the old Google Sheets step wrappers, and dispatches operations with typed execution context.
 - Current uncommitted work collapses operations into step types, makes `Fizz.Fields` the source of truth for step fields, moves normalized errors/retry policy into `Fizz.Workflows`, and gives the runner a generic durable step retry path.
-- The next implementation slice should continue Phase 6 by migrating the next integration family to typed step fields and hardening retry resume around worker crashes/passivation.
+- Current Phase 7 work makes integrations first-class step owners. The new `fizz` integration owns providerless built-in nodes under `Fizz.Integrations.Fizz.Builtins`, external products own their provider-backed steps under integration namespaces, step declaration/type metadata lives under `Fizz.Integrations`, and the step execution behavior lives under `Fizz.Workflows`.
+- The next implementation slice should deepen Phase 7 with pinned workflow fixtures and `Req.Test` HTTP harnesses, then implement the first non-Google API family behind the same step/retry primitives.
 
 ## Diagnosis
 
-1. **Declaration scatter is the main scalability blocker.** Providers, product integrations, and workflow steps are declared in separate lists: `ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`), `Integrations.Registry` (`lib/fizz/integrations/registry.ex:55`), and `Steps.Registry` (`lib/fizz/steps/registry.ex:263`). Adding a real integration means keeping multiple registries and wrappers manually aligned.
+1. **Declaration scatter is now mostly reduced to provider/catalog registration.** Providers are still listed through `ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`), but product integrations own their executable step modules via `step_modules/0`, and `Fizz.Integrations.StepRegistry` indexes those step definitions from the manifest. Adding a real integration still requires provider/catalog edits, assets, tests, and docs, but there is no separate step executor list to maintain.
 
-2. **There is now one executable primitive.** `Fizz.Steps.Type` is the node definition consumed by the editor and runtime. Integrations should own provider/product/resolver/trigger/client/auth metadata, but not a parallel executable "operation" layer.
+2. **There is now one executable primitive.** `Fizz.Integrations.StepType` is the node definition consumed by the editor and runtime. Integrations should own provider/product/resolver/trigger/client/auth metadata, but not a parallel executable "operation" layer.
 
 3. **Credentials are runtime auth primitives, not a parallel field system.** WorkOS-backed OAuth and Vault-backed API keys are mostly generic, and provider definitions now expose credential creation fields through `Fizz.Fields`. Workflow credential binding storage remains, but declaration maps, schema generation, defaults, option lookup, readiness, auto-binding, runtime binding lookup, and secret extraction now live under the credential field handler instead of dedicated credential schema/catalog modules.
 
@@ -23,19 +24,27 @@ This plan is informed by n8n, but translated into idiomatic Elixir/Phoenix/OTP. 
 
 5. **The UI is schema-driven, but field-state ownership is still young.** Vue renders backend schema fields through `FieldWrapper` (`assets/vue/components/flow/fields/FieldWrapper.vue:70`), and `ResourceMapperField.vue` now uses schema/resolver metadata instead of Google Sheets-specific branches. `Fizz.Integrations.DynamicResolver` owns edit-time field dispatch, and Google Sheets async failures now normalize through `Fizz.Workflows.StepError`, but there is not yet a durable server-side field-state model for cross-client async loading/error state.
 
-6. **Tests cover workflows broadly but not integration-backed steps as isolated units.** There is no ExUnit equivalent of n8n's workflow JSON plus pinned-output harness. Direct `Req` usage in provider/client modules makes some HTTP tests hard (`lib/fizz/integrations/providers/github_oauth.ex:161`).
+6. **Tests cover workflows broadly, and Phase 7 now has a first direct step harness.** `Fizz.IntegrationStepCase` gives tests a small API for loading step definitions and executing integration-backed steps directly. The remaining n8n-style gap is workflow JSON fixtures with pinned outputs, credential fixtures, and `Req.Test` HTTP expectations. Direct `Req` usage in provider/client modules still makes some HTTP tests hard (`lib/fizz/integrations/providers/github_oauth.ex:161`).
 
 ## Target Architecture
 
 ### Core Modules
 
 - `Fizz.Integrations.Catalog`: supervised GenServer/ETS registry for providers, integrations, triggers, and resolvers. It should load from a generated manifest and expose read-only lookup APIs.
-- `Fizz.Integrations.Manifest`: generated module produced by a Mix task from declared integration modules. This replaces hand-maintained lists in `ProviderCatalog`, `Integrations.Registry`, and `Steps.Registry`.
+- `Fizz.Integrations.Manifest`: generated module produced by a Mix task from declared integration modules. This replaces hand-maintained lists in `ProviderCatalog`, `Integrations.Registry`, and `Integrations.StepRegistry`.
+- `Fizz.Integrations.StepRegistry`: ETS-backed index of `Fizz.Integrations.StepType` definitions loaded from integration-owned `step_modules/0` declarations.
+- `Fizz.Integrations.StaticIntegration`: boilerplate-free integration module macro for products whose catalog surface and executable step module list are static.
+- `Fizz.Integrations.<Product>.integration.ex`: colocated product integration
+  declaration file. Root `lib/fizz/integrations/` stays limited to shared
+  catalog/framework primitives.
+- `Fizz.Integrations.PlaceholderStep`: shared explicit execution payload for registered external steps whose API clients are not implemented yet.
 - `Fizz.Integrations.Definition`: structs and validators for integration/provider metadata, delegating field validation to `Fizz.Fields`.
 - `Fizz.Fields`: canonical typed field contract plus JSON Schema adapter output. It owns field definitions, validation, defaults, and schema generation for step fields and provider credential-creation fields.
 - `Fizz.Fields.Credential`: credential field handler. It owns credential declaration maps, option lookup, readiness descriptors, auto-binding, runtime binding lookup, and secret extraction for API-key credential creation.
-- `Fizz.Steps.Type`: canonical executable node definition with typed fields, generated config schema/defaults, retry policy, input/output schema, provider/integration metadata, and version.
-- `Fizz.Steps.Executor`: runtime behavior/helper for all executable steps.
+- `Fizz.Integrations.StepType`: canonical executable node definition with typed fields, generated config schema/defaults, retry policy, input/output schema, provider/integration metadata, and version.
+- `Fizz.Workflows.StepExecutor`: runtime behavior/helper for all executable steps.
+- `Fizz.Integrations.Fizz.Builtins.*`: providerless Fizz product-domain nodes such as
+  triggers, transforms, control flow, HTTP, and AI orchestration helpers.
 - `Fizz.Integrations.Provider`: provider metadata and auth-provider behavior. Keep WorkOS Pipes helpers behind `Fizz.Integrations.Auth.PipesOAuth`.
 - `Fizz.Integrations.Auth`: execution-time auth resolver returning typed auth material. It should support project-scoped and organization-scoped callers without duplicating `CredentialRef` logic.
 - `Fizz.Integrations.DynamicResolver`: generic edit-time dispatcher for select/search/resource mapper fields. Credential options dispatch through `Fizz.Fields.Credential` as a field handler, not as a separate resolver subsystem.
@@ -51,12 +60,13 @@ metadata kept beside integration domain code. Example target shape:
 defmodule Fizz.Integrations.Integration do
   @callback id() :: String.t()
   @callback display_name() :: String.t()
-  @callback provider_id() :: String.t()
+  @callback provider_id() :: String.t() | nil
   @callback actions() :: [String.t()]
   @callback triggers() :: [module()]
+  @callback step_modules() :: [module()]
 end
 
-defmodule Fizz.Steps.Executor do
+defmodule Fizz.Workflows.StepExecutor do
   @callback execute(config :: map(), input :: term(), context :: map()) ::
               {:ok, term()}
               | {:error, term()}
@@ -68,7 +78,7 @@ Example integration-backed step definition:
 
 ```elixir
 defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
-  use Fizz.Steps.Definition,
+  use Fizz.Integrations.StepDefinition,
     id: "google_sheets_append_row",
     version: 1,
     name: "Google Sheets - Append Row",
@@ -100,7 +110,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
 
   @retry %RetryPolicy{max_attempts: 3, backoff: :exponential}
 
-  @behaviour Fizz.Steps.Executor
+  @behaviour Fizz.Workflows.StepExecutor
 
   def execute(config, input, context) do
     # call Google Sheets client/resolver/auth helpers here
@@ -152,7 +162,7 @@ Status: shipped in `8931099`.
 
 ### Phase 3 - Metadata-Driven Step Registry
 
-Make `Fizz.Steps.Registry` load all executable step modules from the manifest, while integration metadata advertises action step type IDs. Google Sheets append/read are now normal step executor modules with their client/resolver/domain code under integrations.
+Make `Fizz.Integrations.StepRegistry` load all executable step modules from the manifest, while integration metadata advertises action step type IDs. Google Sheets append/read are now normal step executor modules with their client/resolver/domain code under integrations.
 
 Status: shipped in `8931099`.
 
@@ -182,7 +192,9 @@ Shippable result: `execute(config, input, context)` remains the step runtime con
 
 Add an ExUnit integration harness inspired by n8n's `NodeTestHarness`: workflow fixture input, pinned outputs, credential fixtures, `Req.Test` HTTP expectations, and direct step execution. Add a Mix task such as `mix fizz.gen.integration google.sheets` to scaffold provider, credential fields, step, resolver, tests, docs, and assets.
 
-Shippable result: new integrations have a paved path; old tests remain valid while new step tests grow.
+Current result: `Fizz.IntegrationStepCase` exists for direct step definition lookup and execution. Static integration modules now group executable step modules by product, provider-owned steps live under `Fizz.Integrations.<Product>.Actions`, `.Triggers`, or `.Nodes`, and providerless built-ins live under `Fizz.Integrations.Fizz.Builtins`. Empty TODO executors return a typed `not_implemented` payload through `Fizz.Integrations.PlaceholderStep`. Guardrail tests enforce that every registered step declares an integration owner and that providerless built-ins belong to the `fizz` integration.
+
+Remaining shippable result: add workflow JSON/pinned-output fixtures, credential fixtures, `Req.Test` transport harnesses, and a Mix scaffold task so new integrations have a paved path while step tests grow.
 
 ## What We Are Not Borrowing From n8n
 
