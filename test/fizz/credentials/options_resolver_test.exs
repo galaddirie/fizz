@@ -35,7 +35,7 @@ defmodule Fizz.Credentials.OptionsResolverTest do
       assert option["owner_user_id"] == user.id
     end
 
-    test "applies search query with current slot params" do
+    test "applies search query with current credential params" do
       user = user_fixture()
       organization_id = "org_credentials_resolver_search"
       scope = Scope.for_user(user) |> Scope.with_organization_id(organization_id)

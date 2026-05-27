@@ -2,6 +2,14 @@
 
 This plan is informed by n8n, but translated into idiomatic Elixir/Phoenix/OTP. The goal is not to port n8n's TypeScript architecture; the goal is to preserve its durable ideas: metadata-first integration definitions, generated catalogs, generic UI rendering, versioned operations, isolated credential/auth contracts, and test harnesses that make new integrations cheap.
 
+## Current Checkpoints
+
+- `8931099` completed Phases 0-4: catalog guardrails, unified definitions, operation-backed Google Sheets registry support, and schema-driven credential forms.
+- `9ef8cfd` completed Phase 5: dynamic field resolver dispatch plus generic resource locator/mapper UI support.
+- `d824f3d` deleted the generic slots system and replaced it with first-class credential declarations, credential bindings, and runtime credential resolution.
+- Current uncommitted work moves Google Sheets operation metadata into the operation modules, deletes the old Google Sheets step wrappers, and dispatches operations with typed execution context.
+- The next implementation slice should continue Phase 6 by normalizing operation errors and retry metadata before attempting durable retries.
+
 ## Diagnosis
 
 1. **Declaration scatter is the main scalability blocker.** Providers, product integrations, and workflow steps are declared in separate lists: `ProviderCatalog` (`lib/fizz/integrations/provider_catalog.ex:9`), `Integrations.Registry` (`lib/fizz/integrations/registry.ex:55`), and `Steps.Registry` (`lib/fizz/steps/registry.ex:263`). Adding a real integration means keeping multiple registries and wrappers manually aligned.
@@ -10,9 +18,9 @@ This plan is informed by n8n, but translated into idiomatic Elixir/Phoenix/OTP. 
 
 3. **Credentials are generic in storage but not in declaration/UI.** WorkOS-backed OAuth and Vault-backed API keys are mostly generic, but provider modules and credential forms repeat boilerplate. API credential UI assumes one `secret` field (`lib/fizz_web/live/user_management_live.ex:481`, `user_management_live.html.heex:511`), so provider-specific credential schemas are missing.
 
-4. **Context boundaries are blurred.** `Accounts` and `Integrations` depend on each other (`lib/fizz/integrations.ex:9`, `lib/fizz/accounts/external_auth.ex:12`). Slot API ownership is split between `Fizz.Slots` and `Fizz.Workflows.SlotBinding` (`lib/fizz/slots.ex:1`, `lib/fizz/workflows/slot_binding.ex:1`). Runtime context uses both `scope` and `current_scope` (`lib/fizz/workflows/runtime/context_builder.ex:65`), which leaks Phoenix naming into execution code.
+4. **Context boundaries are still blurred, but credential ownership is cleaner.** `Accounts` and `Integrations` still depend on each other (`lib/fizz/integrations.ex:9`, `lib/fizz/accounts/external_auth.ex:12`). The generic slot API has been deleted and credential binding ownership now lives in `Fizz.Credentials` plus `Fizz.Workflows.CredentialBinding`. Runtime context still carries compatibility fields such as `scope` and `current_scope` (`lib/fizz/workflows/runtime/context_builder.ex:65`), which leaks Phoenix naming into execution code.
 
-5. **The UI is partly schema-driven, but provider-specific assumptions are creeping in.** Vue can render backend schema fields through `FieldWrapper` (`assets/vue/components/flow/fields/FieldWrapper.vue:70`), but `MapEditor.vue` is effectively Google Sheets-specific (`assets/vue/components/flow/fields/MapEditor.vue:276`). Dynamic resolvers are routed through the editor LiveView (`lib/fizz_web/live/workflows_live/editor.ex:999`) instead of a generic integration schema service.
+5. **The UI is schema-driven, but field-state ownership is still young.** Vue renders backend schema fields through `FieldWrapper` (`assets/vue/components/flow/fields/FieldWrapper.vue:70`), and `ResourceMapperField.vue` now uses schema/resolver metadata instead of Google Sheets-specific branches. `Fizz.Integrations.DynamicResolver` owns edit-time field dispatch, but there is not yet a durable server-side field-state model for cross-client async loading/error state.
 
 6. **Tests cover workflows broadly but not integration operations as isolated units.** There is no ExUnit equivalent of n8n's workflow JSON plus pinned-output harness. Direct `Req` usage in provider/client modules makes some HTTP tests hard (`lib/fizz/integrations/providers/github_oauth.ex:161`).
 
@@ -29,8 +37,8 @@ This plan is informed by n8n, but translated into idiomatic Elixir/Phoenix/OTP. 
 - `Fizz.Integrations.Operation`: operation behavior. Operation modules own metadata, config schema, dynamic resolvers, and execution.
 - `Fizz.Integrations.OperationExecutor`: one generic step executor that dispatches operation IDs to operation modules. This replaces per-operation wrapper executors over time.
 - `Fizz.Integrations.DynamicResolver`: generic dispatcher for select/search/resource mapper fields. LiveView calls this instead of inspecting field internals directly.
+- `Fizz.Credentials`: first-class context for credential declarations, field option lookup, per-user workflow bindings, readiness, auto-binding, and runtime credential refs.
 - `Fizz.Workflows.ExecutionContext`: typed runtime context struct with one canonical scope field, project ID, user ID, organization ID, run ID, trace context, and execution options.
-- `Fizz.Slots.SlotBinding`: move or alias `Fizz.Workflows.SlotBinding` so the schema and API ownership match.
 
 ### Integration Contract
 
@@ -119,7 +127,11 @@ Keep the existing JSON Schema plus `ui` extension, but make it a validated Fizz 
 - Dynamic data: `resolver: :spreadsheets`, `resolver: :columns`, `depends_on: [...]`, `params: %{...}`.
 - Auth fields: declared through credential requirements, not hand-assembled per executor.
 
-The Vue layer should continue to use a small component registry, but `MapEditor.vue` should become a generic `ResourceMapperField.vue`; Google Sheets should supply resolver metadata and labels, not custom component assumptions.
+The Vue layer should continue to use a small component registry. `ResourceMapperField.vue`
+is the generic mapper component; Google Sheets should supply resolver metadata and labels,
+not custom component assumptions.
+
+Current state: `ResourceMapperField.vue` and `DynamicResolver` now exist. Continue tightening this contract by keeping error copy, lookup labels, dependencies, and mapper defaults in schemas/resolver replies instead of Vue provider branches.
 
 ### OTP and Context Boundaries
 
@@ -132,45 +144,49 @@ The Vue layer should continue to use a small component registry, but `MapEditor.
 
 ### Phase 0 - Baseline and Guardrails
 
-Create catalog validation tests around current providers, step IDs, credential slots, and schema field support. Add a short guide for adding an integration today so the baseline friction is explicit. No runtime behavior changes.
+Create catalog validation tests around current providers, step IDs, credential fields, and schema field support. Add a short guide for adding an integration today so the baseline friction is explicit. No runtime behavior changes.
 
-Shippable result: documentation and tests only.
+Status: shipped in `8931099`.
 
 ### Phase 1 - Append-Only Catalogs and Validation
 
 Change provider/integration config extension from replacement semantics to append semantics. `:integration_providers` and `:integrations` should add to built-ins unless an explicit test-only replacement option is used. Add validation for duplicate IDs, invalid auth suffixes, missing icons, missing credential requirements, and unsupported UI components.
 
-Shippable result: existing modules still work; extension points become safer.
+Status: shipped in `8931099`.
 
 ### Phase 2 - Introduce Unified Definitions
 
-Add `OperationDefinition`, `CredentialRequirement`, `ProviderDefinition` improvements, and `Fizz.Integrations.Catalog`. Build adapters so current `Fizz.Steps.Type` entries can be produced from current executor modules and from operation definitions. Do not remove existing step wrappers yet.
+Add `OperationDefinition`, `CredentialRequirement`, `ProviderDefinition` improvements, and `Fizz.Integrations.Catalog`. Build adapters so current `Fizz.Steps.Type` entries can be produced from current executor modules and from operation definitions.
 
-Shippable result: no UI/runtime behavior change; new catalog APIs can be tested side-by-side.
+Status: shipped in `8931099`.
 
 ### Phase 3 - Operation-Driven Step Registry
 
 Make `Fizz.Steps.Registry` consume operation definitions through `Fizz.Integrations.Catalog`. Add `Fizz.Integrations.OperationExecutor` as the generic executor for operation-backed step types. Migrate Google Sheets first because it already has product modules and operations. Keep old wrappers as compatibility adapters.
 
-Shippable result: Google Sheets uses the new path; other steps still use old executors.
+Status: shipped in `8931099`.
 
 ### Phase 4 - Credential Contract and Forms
 
 Introduce credential definitions with provider-specific UI schema and credential-test metadata. Refactor API-key creation/rotation UI to render from credential schema instead of fixed `secret` params. Move or decouple `Accounts.ExternalAuth` so it no longer depends on `ProviderCatalog`. Add organization-scoped auth resolver so OpenAI helpers stop reimplementing credential ref logic.
 
-Shippable result: current single-secret API-key providers still work; richer providers can be added without HEEx changes.
+Status: shipped in `8931099`, then tightened in `d824f3d`.
+
+Follow-up result from `d824f3d`: generic slots were deleted. Credentials now have explicit declarations, option resolution, per-user bindings, and runtime credential refs. There are no backwards-compat shims.
 
 ### Phase 5 - Dynamic UI Resolver Layer
 
-Replace editor-specific resolver inspection with `Fizz.Integrations.DynamicResolver.resolve/4`. Add schema-level `depends_on`, `display`, `resource_locator`, and `resource_mapper`. Rename/refactor `MapEditor.vue` into a generic mapper component and move Google Sheets specifics into resolver outputs.
+Replace editor-specific resolver inspection with `Fizz.Integrations.DynamicResolver.resolve/4`. Add schema-level `depends_on`, `display`, `resource_locator`, and `resource_mapper`. Keep `ResourceMapperField.vue` generic and move Google Sheets specifics into resolver outputs.
 
-Shippable result: existing Google Sheets mapping still works, but future resource mappers do not require bespoke Vue code.
+Status: shipped in `9ef8cfd`.
 
 ### Phase 6 - Execution Semantics
 
 Introduce `Fizz.Workflows.ExecutionContext` and migrate executors/operations to it. Add normalized error structs, retry metadata, rate-limit/backoff handling, and per-operation network domain declarations. Use Oban for durable operation retries and polling/backoff, and supervised processes only for active subscriptions.
 
-Shippable result: old executor `execute(config, input, context)` can be adapted while operation modules move to the typed context.
+Current recommendation: split this phase. Typed operation context dispatch has started for Google Sheets operations. Continue with normalized operation errors and retry policy metadata. Add durable Oban retries only after the runner has a clear persistence and resume contract.
+
+Shippable result: old executor `execute(config, input, context)` remains available while operation modules move to the typed context.
 
 ### Phase 7 - Testing Harness and Scaffolding
 

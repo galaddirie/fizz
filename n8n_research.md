@@ -2,6 +2,23 @@
 
 Scratch checkout: `/tmp/fizz-n8n-research`.
 
+## 0. Fizz Decisions Applied So Far
+
+The following n8n-inspired ideas have now been applied in Fizz:
+
+- integration metadata is moving toward generated manifests and validated definitions
+- dynamic field values are routed through a backend dispatcher instead of component-specific
+  LiveView branches
+- resource locators and resource mappers are generic field types
+- credential requirements are explicit first-class declarations rather than generic runtime
+  slots
+- credential option loading is edit-time field resolution, while runtime auth resolution
+  remains a separate concern
+
+One n8n idea deliberately not copied: n8n has broad node parameter state in the frontend
+store. Fizz should keep LiveView as the source of truth and use Vue only for transient
+request/loading state unless we need cross-client field-state replay.
+
 ## 1. Node and Integration Architecture
 
 n8n defines integrations as node types with a small runtime contract and a large metadata contract. The core `INodeType` contract requires `description` and optionally provides runtime entry points such as `execute`, `poll`, `trigger`, `webhook`, `supplyData`, `methods`, `webhookMethods`, and `customOperations` (`packages/workflow/src/interfaces.ts:2057`). The metadata contract, `INodeTypeDescription`, carries version, display metadata, inputs, outputs, parameters, credentials, request defaults, declarative request operations, and webhooks (`packages/workflow/src/interfaces.ts:2584`). The key design choice is that UI shape, credential needs, routing hints, and execution hooks are all visible from one node description.

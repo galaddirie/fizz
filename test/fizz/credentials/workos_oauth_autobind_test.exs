@@ -37,7 +37,7 @@ defmodule Fizz.Credentials.WorkOSOAuthAutobindTest do
 
   test "readiness auto-binds the single active WorkOS Pipes OAuth account" do
     scope = WorkflowsFixtures.project_scope_fixture()
-    version = draft_with_google_oauth_slot(scope)
+    version = draft_with_google_oauth_credential(scope)
 
     other_user = Fizz.AccountsFixtures.user_fixture()
 
@@ -85,7 +85,7 @@ defmodule Fizz.Credentials.WorkOSOAuthAutobindTest do
     assert token_request[:url] == "/data-integrations/google/token"
   end
 
-  defp draft_with_google_oauth_slot(scope) do
+  defp draft_with_google_oauth_credential(scope) do
     {:ok, %{draft: draft}} =
       Workflows.create_definition(scope, %{
         name: "Google OAuth credential #{System.unique_integer([:positive])}",

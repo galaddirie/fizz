@@ -13,8 +13,8 @@ defmodule Fizz.Credentials.Options do
   At runtime, `resolve/3` returns a credential_ref-shaped map keyed to the
   actor user. Executors continue calling
   `Fizz.Integrations.resolve_auth_for_execution/4` with that map to fetch
-  the actual token. This keeps token I/O out of slot resolution and avoids
-  changing every executor.
+  the actual token. This keeps token I/O out of credential option resolution
+  and avoids changing every executor.
   """
 
   alias Fizz.Accounts.{ExternalAuth, Scope}

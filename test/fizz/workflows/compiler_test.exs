@@ -110,7 +110,7 @@ defmodule Fizz.Workflows.CompilerTest do
           type_id: "google_sheets_append_row",
           name: "Append Row",
           config: %{
-            "credential_ref" => credential_slot("google_oauth", "oauth"),
+            "credential_ref" => credential_declaration("google_oauth", "oauth"),
             "spreadsheet_id" => "sheet_123",
             "values" => %{"A" => "1"}
           },
@@ -892,7 +892,7 @@ defmodule Fizz.Workflows.CompilerTest do
     }
   end
 
-  defp credential_slot(provider, auth_type) do
+  defp credential_declaration(provider, auth_type) do
     %{
       "$credential" => true,
       "requirement_key" => "auth",

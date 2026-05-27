@@ -8,10 +8,13 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   alias Fizz.Integrations
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Repo
+  alias Fizz.Workflows.ExecutionContext
 
   @sheets_base_url "https://sheets.googleapis.com/v4"
 
-  @spec get_values(map(), map(), String.t(), keyword()) ::
+  @type execution_context :: ExecutionContext.t() | map()
+
+  @spec get_values(map(), execution_context(), String.t(), keyword()) ::
           {:ok, [list()]} | {:backoff, term()} | {:error, term()}
   def get_values(params, context, range, opts \\ []) do
     query =
@@ -33,7 +36,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     end
   end
 
-  @spec get_headers(map(), map(), keyword()) ::
+  @spec get_headers(map(), execution_context(), keyword()) ::
           {:ok, [String.t()]} | {:backoff, term()} | {:error, term()}
   def get_headers(params, context, opts \\ []) do
     sheet_name = Keyword.get(opts, :sheet_name, "Sheet1")
@@ -47,7 +50,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     end
   end
 
-  @spec get_sheet_names(map(), map(), keyword()) ::
+  @spec get_sheet_names(map(), execution_context(), keyword()) ::
           {:ok, [String.t()]} | {:backoff, term()} | {:error, term()}
   def get_sheet_names(params, context, opts \\ []) do
     query = %{fields: Keyword.get(opts, :fields, "sheets.properties.title")}
@@ -65,7 +68,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     end
   end
 
-  @spec get_tables(map(), map(), keyword()) ::
+  @spec get_tables(map(), execution_context(), keyword()) ::
           {:ok, [map()]} | {:backoff, term()} | {:error, term()}
   def get_tables(params, context, opts \\ []) do
     query = %{
@@ -95,7 +98,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     end
   end
 
-  @spec get_table_headers(map(), map(), String.t(), keyword()) ::
+  @spec get_table_headers(map(), execution_context(), String.t(), keyword()) ::
           {:ok, [String.t()]} | {:backoff, term()} | {:error, term()}
   def get_table_headers(params, context, table_id, opts \\ []) when is_binary(table_id) do
     with {:ok, tables} <- get_tables(params, context, opts) do
@@ -117,7 +120,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     end
   end
 
-  @spec append_values(map(), map(), String.t(), [list()], keyword()) ::
+  @spec append_values(map(), execution_context(), String.t(), [list()], keyword()) ::
           {:ok, map()} | {:backoff, term()} | {:error, term()}
   def append_values(params, context, range, rows, opts \\ [])
       when is_list(rows) do
@@ -141,7 +144,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
     end
   end
 
-  @spec append_table_values(map(), map(), String.t(), [list()], keyword()) ::
+  @spec append_table_values(map(), execution_context(), String.t(), [list()], keyword()) ::
           {:ok, map()} | {:backoff, term()} | {:error, term()}
   def append_table_values(params, context, table_id, rows, _opts \\ [])
       when is_binary(table_id) and is_list(rows) do
@@ -220,8 +223,11 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
 
   defp credential_ref(_params), do: {:error, :credential_ref_required}
 
+  defp scope_from_context(%ExecutionContext{scope: %Scope{} = scope}), do: {:ok, scope}
+
   defp scope_from_context(context) do
-    case Map.get(context, :current_scope) || Map.get(context, "current_scope") do
+    case Map.get(context, :scope) || Map.get(context, "scope") ||
+           Map.get(context, :current_scope) || Map.get(context, "current_scope") do
       %Scope{} = scope ->
         {:ok, scope}
 
@@ -269,6 +275,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   defp context_value(context, :user_id) do
     Map.get(context, :user_id) ||
       Map.get(context, "user_id") ||
+      scope_user_id(Map.get(context, :scope) || Map.get(context, "scope")) ||
       scope_user_id(Map.get(context, :current_scope) || Map.get(context, "current_scope"))
   end
 

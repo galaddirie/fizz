@@ -61,8 +61,8 @@ defmodule Fizz.Integrations.CatalogTest do
       assert Fizz.Integrations.Providers.GoogleOAuth in Manifest.provider_modules()
       assert Fizz.Integrations.Google.Sheets in Manifest.integration_modules()
       assert Fizz.Steps.Executors.ManualInput in Manifest.step_executor_modules()
-      refute Fizz.Steps.Executors.GoogleSheetsAppendRow in Manifest.step_executor_modules()
-      refute Fizz.Steps.Executors.GoogleSheetsReadRows in Manifest.step_executor_modules()
+      refute Fizz.Integrations.Google.Sheets.Actions.AppendRow in Manifest.step_executor_modules()
+      refute Fizz.Integrations.Google.Sheets.Actions.ReadRows in Manifest.step_executor_modules()
     end
 
     test "manifest operation definitions validate and include credential requirements" do
@@ -100,8 +100,8 @@ defmodule Fizz.Integrations.CatalogTest do
 
   describe "step type adapters" do
     test "adapter produces step types from existing executor modules" do
-      assert %Fizz.Steps.Type{id: "google_sheets_append_row"} =
-               StepTypeAdapter.from_executor_module!(Fizz.Steps.Executors.GoogleSheetsAppendRow)
+      assert %Fizz.Steps.Type{id: "manual_input"} =
+               StepTypeAdapter.from_executor_module!(Fizz.Steps.Executors.ManualInput)
     end
 
     test "adapter produces step types from operation definitions" do

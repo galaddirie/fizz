@@ -4,6 +4,7 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Integrations.Google.Sheets.Client
   alias Fizz.Repo
+  alias Fizz.Workflows.ExecutionContext
   alias Fizz.WorkOSHTTPMock
 
   setup context do
@@ -107,8 +108,9 @@ defmodule Fizz.Integrations.Google.Sheets.ClientTest do
         }
       }
 
-      assert {:ok, [%{"columns" => columns}]} =
-               Client.get_tables(params, %{current_scope: scope, project_id: scope.project.id})
+      context = %ExecutionContext{scope: scope, project_id: scope.project.id}
+
+      assert {:ok, [%{"columns" => columns}]} = Client.get_tables(params, context)
 
       assert Enum.map(columns, &Map.get(&1, "label")) == ["num1", "res", "test"]
     end

@@ -1,17 +1,18 @@
-defmodule Fizz.Steps.Executors.GoogleSheetsAppendRowTest do
+defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRowTest do
   use ExUnit.Case, async: true
 
   alias Fizz.Integrations.Google.Sheets.Actions.AppendRow
-  alias Fizz.Steps.Executors.GoogleSheetsAppendRow
+  alias Fizz.Integrations.OperationExecutor
 
   describe "execute/3" do
-    test "requires a resolved credential ref" do
+    test "requires a resolved credential ref through the operation executor" do
       config = %{
         "spreadsheet_id" => "sheet_123",
         "values" => %{"A" => "1"}
       }
 
-      assert {:error, :credential_ref_required} = GoogleSheetsAppendRow.execute(config, %{}, %{})
+      assert {:error, :credential_ref_required} =
+               OperationExecutor.execute(config, %{}, %{type_id: "google_sheets_append_row"})
     end
   end
 
@@ -79,9 +80,9 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRowTest do
     end
   end
 
-  describe "config schema" do
+  describe "definition/0" do
     test "exposes the resource mapper UI hint on the values field" do
-      schema = GoogleSheetsAppendRow.__step_definition__().config_schema
+      schema = AppendRow.definition().config_schema
       values_field = get_in(schema, ["properties", "values"])
 
       assert get_in(values_field, ["ui", "component"]) == "resource_mapper"
@@ -100,7 +101,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsAppendRowTest do
     end
 
     test "keeps sheet and table selection state hidden because the mapper owns it" do
-      schema = GoogleSheetsAppendRow.__step_definition__().config_schema
+      schema = AppendRow.definition().config_schema
       sheet_name_field = get_in(schema, ["properties", "sheet_name"])
       table_id_field = get_in(schema, ["properties", "table_id"])
 

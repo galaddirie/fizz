@@ -26,14 +26,15 @@ defmodule Fizz.Steps.ConfigSchema do
         "default" => "info"
       }
 
-      # Resolver-backed select dropdown
+      # Credential field
       "credential_ref" => %{
         "type" => "object",
         "title" => "Credential",
         "ui" => %{
-          "component" => "select",
-          "resolver" => Fizz.Credentials.OptionsResolver,
-          "params" => %{"provider_filter" => ["openai_api_key"]}
+          "component" => "credential",
+          "provider" => "openai_api_key",
+          "auth_type" => "api_key",
+          "requirement_key" => "auth"
         }
       }
 
@@ -51,7 +52,7 @@ defmodule Fizz.Steps.ConfigSchema do
         }
       }
 
-      # Credential field
+      # Credential field helper
       "credential_ref" =>
         Fizz.Credentials.Field.credential_schema("openai_api_key", :api_key,
           title: "Credential"

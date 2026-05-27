@@ -268,7 +268,7 @@ const publishValidationErrors = ref<WorkflowValidationError[]>([]);
 const publishTriggerImpact = ref<TriggerImpact | null>(null);
 const publishExecutionHashChanged = ref<boolean | null>(null);
 
-// Run launch credential modal state
+// Credential launch modal state
 interface CredentialCandidate {
   id: string;
   provider?: string;
@@ -288,28 +288,28 @@ interface CredentialBindingDescriptor {
   auth_type: string;
   candidates: CredentialCandidate[];
 }
-const isRunLaunchModalOpen = ref(false);
-const runLaunchTargetStepId = ref<string | null>(null);
-const runLaunchDescriptors = ref<CredentialBindingDescriptor[]>([]);
+const isCredentialLaunchModalOpen = ref(false);
+const credentialLaunchTargetStepId = ref<string | null>(null);
+const credentialLaunchDescriptors = ref<CredentialBindingDescriptor[]>([]);
 
 useLiveEvent<{ target_step_id: string | null; descriptors: CredentialBindingDescriptor[] }>(
   'credential_bindings_needed',
   payload => {
-    runLaunchTargetStepId.value = payload.target_step_id ?? null;
-    runLaunchDescriptors.value = payload.descriptors ?? [];
-    isRunLaunchModalOpen.value = true;
+    credentialLaunchTargetStepId.value = payload.target_step_id ?? null;
+    credentialLaunchDescriptors.value = payload.descriptors ?? [];
+    isCredentialLaunchModalOpen.value = true;
   }
 );
 
 useLiveEvent<{ target_step_id: string | null }>('credential_bindings_resolved', payload => {
-  if (payload.target_step_id === runLaunchTargetStepId.value) {
-    runLaunchDescriptors.value = [];
-    isRunLaunchModalOpen.value = false;
+  if (payload.target_step_id === credentialLaunchTargetStepId.value) {
+    credentialLaunchDescriptors.value = [];
+    isCredentialLaunchModalOpen.value = false;
   }
 });
 
-function closeRunLaunchModal() {
-  isRunLaunchModalOpen.value = false;
+function closeCredentialLaunchModal() {
+  isCredentialLaunchModalOpen.value = false;
 }
 
 function handleReauthConnected(payload: { target_step_id: string | null }) {
@@ -325,7 +325,7 @@ function handleSubmitCredentialBindings(payload: {
   }>;
 }) {
   emit('submit_credential_bindings', payload);
-  isRunLaunchModalOpen.value = false;
+  isCredentialLaunchModalOpen.value = false;
 }
 
 function openPublishModal() {
@@ -867,11 +867,11 @@ useLiveEvent<{
       />
 
       <CredentialLaunchModal
-        :is-open="isRunLaunchModalOpen"
-        :target-step-id="runLaunchTargetStepId"
-        :descriptors="runLaunchDescriptors"
+        :is-open="isCredentialLaunchModalOpen"
+        :target-step-id="credentialLaunchTargetStepId"
+        :descriptors="credentialLaunchDescriptors"
         :widget-token="widgetToken"
-        @close="closeRunLaunchModal"
+        @close="closeCredentialLaunchModal"
         @reauth-connected="handleReauthConnected"
         @submit="handleSubmitCredentialBindings"
       />

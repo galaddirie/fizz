@@ -3,9 +3,7 @@ defmodule Fizz.Integrations.OperationExecutor do
   Generic workflow step executor for operation-backed integration steps.
 
   It resolves the operation definition from the step context and dispatches to
-  the operation module. Current operation modules still use the legacy
-  `execute(config, input, context)` contract, so the typed execution context is
-  carried alongside the compatibility map until Phase 6.
+  the operation module with a typed `Fizz.Workflows.ExecutionContext`.
   """
 
   @behaviour Fizz.Steps.Executors.Behaviour
@@ -21,7 +19,7 @@ defmodule Fizz.Integrations.OperationExecutor do
       |> ExecutionContext.put_legacy_aliases()
 
     with {:ok, operation} <- operation_for(context) do
-      operation.module.execute(config, input, context)
+      operation.module.execute(config, input, context.execution_context)
     end
   end
 

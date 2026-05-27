@@ -6,11 +6,9 @@ defmodule Fizz.Integrations.Manifest do
   """
 
   alias Fizz.Integrations.{
-    CredentialRequirement,
     Definition,
     OperationDefinition,
     ResolverDefinition,
-    RetryPolicy,
     TriggerDefinition
   }
 
@@ -113,18 +111,8 @@ defmodule Fizz.Integrations.Manifest do
   @spec operation_definitions() :: [OperationDefinition.t()]
   def operation_definitions do
     [
-      operation_definition(
-        Fizz.Steps.Executors.GoogleSheetsAppendRow,
-        Fizz.Integrations.Google.Sheets.Actions.AppendRow,
-        "google_sheets.append_row",
-        "google_sheets_append_row"
-      ),
-      operation_definition(
-        Fizz.Steps.Executors.GoogleSheetsReadRows,
-        Fizz.Integrations.Google.Sheets.Actions.ReadRows,
-        "google_sheets.read_rows",
-        "google_sheets_read_rows"
-      )
+      Fizz.Integrations.Google.Sheets.Actions.AppendRow.definition(),
+      Fizz.Integrations.Google.Sheets.Actions.ReadRows.definition()
     ]
     |> Definition.validate_operations!()
   end
@@ -197,81 +185,6 @@ defmodule Fizz.Integrations.Manifest do
       }
     end)
   end
-
-  defp operation_definition(step_module, operation_module, operation_id, step_type_id) do
-    step_type = step_module.__step_definition__()
-
-    %OperationDefinition{
-      id: operation_id,
-      step_type_id: step_type_id,
-      version: 1,
-      provider: "google_oauth",
-      integration: "google_sheets",
-      kind: :action,
-      module: operation_module,
-      auth: credential_requirements(step_type.config_schema),
-      default_config: step_module.default_config(),
-      depends_on: schema_extension_index(step_type.config_schema, "depends_on"),
-      field_display: schema_extension_index(step_type.config_schema, "display"),
-      input_schema: step_type.input_schema,
-      display: %{
-        name: step_type.name,
-        category: step_type.category,
-        icon: step_type.icon,
-        description: step_type.description
-      },
-      config_schema: step_type.config_schema,
-      output_schema: step_type.output_schema,
-      resource_locators: schema_extension_index(step_type.config_schema, "resource_locator"),
-      resource_mappers: schema_extension_index(step_type.config_schema, "resource_mapper"),
-      retry: %RetryPolicy{max_attempts: 1, backoff: :none}
-    }
-  end
-
-  defp schema_extension_index(config_schema, key) do
-    config_schema
-    |> Map.get("properties", %{})
-    |> Enum.flat_map(fn {field, property} ->
-      case schema_extension(property, key) do
-        nil -> []
-        value -> [{field, value}]
-      end
-    end)
-    |> Map.new()
-  end
-
-  defp schema_extension(property, key) when is_map(property) do
-    Map.get(property, key) || get_in(property, ["ui", key])
-  end
-
-  defp schema_extension(_property, _key), do: nil
-
-  defp credential_requirements(config_schema) do
-    config_schema
-    |> Map.get("properties", %{})
-    |> Enum.flat_map(fn {key, schema} ->
-      case get_in(schema, ["ui", "component"]) do
-        "credential" -> [credential_requirement(key, schema)]
-        _component -> []
-      end
-    end)
-  end
-
-  defp credential_requirement(key, schema) do
-    ui = Map.fetch!(schema, "ui")
-
-    %CredentialRequirement{
-      key: key,
-      provider: Map.fetch!(ui, "provider"),
-      auth_type: auth_type!(Map.fetch!(ui, "auth_type")),
-      requirement_key: Map.fetch!(ui, "requirement_key"),
-      required: true,
-      label: Map.get(schema, "title")
-    }
-  end
-
-  defp auth_type!("oauth"), do: :oauth
-  defp auth_type!("api_key"), do: :api_key
 
   defp credential_ui_schema(%Definition.Provider{type: :api_key} = provider) do
     %{

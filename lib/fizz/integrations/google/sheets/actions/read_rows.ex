@@ -5,14 +5,95 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
 
   @behaviour Fizz.Integrations.Operation
 
+  alias Fizz.Credentials.Requirement, as: CredentialFieldRequirement
+
+  alias Fizz.Integrations.{
+    CredentialRequirement,
+    OperationDefinition,
+    Providers.GoogleOAuth,
+    RetryPolicy
+  }
+
   alias Fizz.Integrations.Google.Sheets.Client
   alias Fizz.Integrations.Google.Sheets.Rows
+
+  @credential_requirement CredentialFieldRequirement.oauth(GoogleOAuth.provider_id())
+
+  @default_config %{
+    "credential_ref" => CredentialFieldRequirement.declaration(@credential_requirement)
+  }
+
+  @config_schema %{
+    "type" => "object",
+    "required" => ["credential_ref", "spreadsheet_id"],
+    "properties" => %{
+      "credential_ref" =>
+        CredentialFieldRequirement.schema(@credential_requirement, title: "Google Account"),
+      "spreadsheet_id" => %{
+        "type" => "string",
+        "title" => "Spreadsheet ID"
+      },
+      "range" => %{
+        "type" => "string",
+        "title" => "Range",
+        "description" => "A1 notation range, e.g. Sheet1!A1:Z100",
+        "default" => "Sheet1!A:Z"
+      }
+    }
+  }
+
+  @output_schema %{
+    "type" => "object",
+    "properties" => %{
+      "rows" => %{"type" => "array", "description" => "List of row objects with header keys"},
+      "total_rows" => %{"type" => "integer"}
+    }
+  }
 
   @impl true
   def id, do: "google_sheets.read_rows"
 
   @impl true
-  def schema, do: %{"type" => "object"}
+  def definition do
+    %OperationDefinition{
+      id: id(),
+      step_type_id: "google_sheets_read_rows",
+      version: 1,
+      provider: GoogleOAuth.provider_id(),
+      integration: "google_sheets",
+      kind: :action,
+      module: __MODULE__,
+      auth: [
+        %CredentialRequirement{
+          key: "credential_ref",
+          provider: GoogleOAuth.provider_id(),
+          auth_type: :oauth,
+          requirement_key: "auth",
+          required: true,
+          label: "Google Account"
+        }
+      ],
+      default_config: default_config(),
+      display: %{
+        name: "Google Sheets — Read Rows",
+        category: "Documents",
+        icon: "/images/google_sheets.svg",
+        description: "Read one or more rows from a Google Sheet range"
+      },
+      config_schema: config_schema(),
+      output_schema: output_schema(),
+      retry: %RetryPolicy{max_attempts: 1, backoff: :none}
+    }
+  end
+
+  @doc false
+  def default_config, do: @default_config
+
+  @doc false
+  def config_schema, do: @config_schema
+
+  @doc false
+  def output_schema, do: @output_schema
 
   @impl true
   def execute(config, _input, context) do

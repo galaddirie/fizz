@@ -110,7 +110,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
         type_id: "google_sheets_trigger",
         name: "Google Sheets Trigger",
         config: %{
-          "credential_ref" => credential_slot("google_oauth", "oauth"),
+          "credential_ref" => credential_declaration("google_oauth", "oauth"),
           "spreadsheet_id" => "spreadsheet_1",
           "sheet_name" => "Sheet1",
           "event_mode" => "row_added_or_updated",
@@ -281,7 +281,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     })
   end
 
-  defp credential_slot(provider, auth_type) do
+  defp credential_declaration(provider, auth_type) do
     %{
       "$credential" => true,
       "requirement_key" => "auth",

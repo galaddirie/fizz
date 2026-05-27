@@ -4,7 +4,7 @@ defmodule Fizz.Credentials.Field do
 
   A credential field has two parts:
 
-    * The **config schema entry** — declares the field's UI rendering and slot
+    * The **config schema entry** — declares the field's UI rendering and
       provider/auth contract (consumed by the editor).
     * The **default config value** — the credential declaration map that lives in
     step config and, at compile time, becomes a `CredentialRef` access plan.

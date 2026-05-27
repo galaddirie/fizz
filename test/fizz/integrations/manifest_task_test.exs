@@ -19,7 +19,7 @@ defmodule Fizz.Integrations.ManifestTaskTest do
     assert {:ok, content} = File.read(output_path)
     assert content =~ "defmodule Fizz.Integrations.Manifest"
     assert content =~ "Fizz.Integrations.Providers.GoogleOAuth"
-    assert content =~ "Fizz.Steps.Executors.GoogleSheetsAppendRow"
+    assert content =~ "Fizz.Integrations.Google.Sheets.Actions.AppendRow"
   end
 
   test "mix task check mode verifies the generated manifest is current" do

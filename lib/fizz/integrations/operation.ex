@@ -8,7 +8,11 @@ defmodule Fizz.Integrations.Operation do
   """
 
   @callback id() :: String.t()
-  @callback schema() :: map()
-  @callback execute(config :: map(), input :: term(), context :: map()) ::
+  @callback definition() :: Fizz.Integrations.OperationDefinition.t()
+  @callback execute(
+              config :: map(),
+              input :: term(),
+              context :: Fizz.Workflows.ExecutionContext.t()
+            ) ::
               {:ok, term()} | {:error, term()}
 end

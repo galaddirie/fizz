@@ -14,10 +14,10 @@ defmodule Fizz.Steps.RegistryOperationDefinitionsTest do
 
     test "operation-backed steps keep their existing default configuration" do
       assert Registry.get_default_config("google_sheets_append_row") ==
-               Fizz.Steps.Executors.GoogleSheetsAppendRow.default_config()
+               Fizz.Integrations.Google.Sheets.Actions.AppendRow.default_config()
 
       assert Registry.get_default_config("google_sheets_read_rows") ==
-               Fizz.Steps.Executors.GoogleSheetsReadRows.default_config()
+               Fizz.Integrations.Google.Sheets.Actions.ReadRows.default_config()
     end
   end
 end
