@@ -14,5 +14,5 @@ defmodule Fizz.Integrations.Operation do
               input :: term(),
               context :: Fizz.Workflows.ExecutionContext.t()
             ) ::
-              {:ok, term()} | {:error, term()}
+              {:ok, term()} | {:error, Fizz.Integrations.OperationError.t() | term()}
 end

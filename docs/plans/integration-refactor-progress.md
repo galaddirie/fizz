@@ -11,9 +11,10 @@ dynamic field resolver work and the credential/slot cleanup are now committed.
 - Phase 0-4 checkpoint: `8931099 feat(integrations): add metadata-first catalog foundation`
 - Phase 5 checkpoint: `9ef8cfd refactor: add resource locator/mapper field support`
 - Credential field checkpoint: `d824f3d Replace slot bindings with credential bindings`
-- Current committed scope: Phases 0 through 5 plus the credential field ownership cleanup
-- Current uncommitted scope: Google Sheets operation metadata ownership and typed operation dispatch
-- Recommended next slice after this diff: normalized operation error structs and retry metadata
+- Operation metadata checkpoint: `4944cce Refactor Google Sheets operations & credential UI`
+- Current committed scope: Phases 0 through 5 plus the credential field ownership cleanup and Google Sheets operation metadata ownership
+- Current uncommitted scope: normalized operation errors, Google Sheets client error normalization, retry policy metadata, and shared `Fizz.Fields` ownership for operation/credential fields
+- Recommended next slice after this diff: runner persistence/resume design for durable operation retries
 
 ## What Changed Since The Previous Handoff
 
@@ -69,9 +70,9 @@ mix assets.deploy
 `mix precommit` passed with `503 tests, 0 failures`. `mix assets.deploy` passed with the
 same existing third-party Vite/Tailwind warnings seen before.
 
-### Current Uncommitted Slice - Operation Metadata Ownership
+### Operation Metadata Ownership
 
-This slice continues the no-shim cleanup:
+This slice is committed in `4944cce`.
 
 - Google Sheets append-row/read-rows operation modules now own their
   `OperationDefinition` metadata directly.
@@ -94,6 +95,53 @@ mix precommit
 `mix precommit` passed with `503 tests, 0 failures`. `mix assets.build` passed with the
 same existing third-party Vite/Tailwind warnings.
 
+### Current Uncommitted Slice - Shared Fields, Operation Errors, And Retry Metadata
+
+This slice continues Phase 6 and removes the remaining credential-specific field/schema
+path:
+
+- Added `Fizz.Fields` as the public field API and `Fizz.Fields.Definition` as the
+  canonical typed field struct.
+- JSON Schema plus per-field `"ui"` metadata is now adapter output from `Fizz.Fields`,
+  not the source of truth for migrated definitions.
+- Added `Fizz.Fields.Credential` as the credential field handler. It owns credential
+  declaration maps, option lookup, readiness descriptors, auto-binding, runtime binding
+  lookup, and API-key secret extraction.
+- Deleted the dedicated credential declaration/schema modules:
+  `Fizz.Credentials`, `Fizz.Credentials.Field`, `Fizz.Credentials.Requirement`,
+  `Fizz.Credentials.OptionsResolver`, `Fizz.Integrations.CredentialSchema`,
+  `Fizz.Integrations.CredentialRequirement`, and
+  `Fizz.Integrations.Definition.Credential`.
+- Removed the credential catalog kind. Provider definitions now expose
+  `credential_fields`, and operation definitions expose typed `fields`.
+- Google Sheets append/read operation definitions now use `fields` as the source of
+  truth for credential, resource locator, and resource mapper schema metadata.
+- Legacy executor modules still emit JSON Schema, but credential field construction now
+  goes through `Fizz.Fields.credential/2`, `Fizz.Fields.default_value/1`, and
+  `Fizz.Fields.to_schema_property/1`.
+
+The same uncommitted slice also continues operation-error work:
+
+- Added `Fizz.Integrations.OperationError` as the normalized runtime operation error
+  shape.
+- Added richer `Fizz.Integrations.RetryPolicy` metadata: max attempts, backoff kind,
+  initial/max delay, and retryable categories/codes.
+- `OperationExecutor` normalizes raw operation module failures before returning them to
+  the workflow runner.
+- Google Sheets client failures now return `OperationError` for validation, credential,
+  HTTP rate-limit, transient provider, and transport/network failures.
+- Google Sheets operation definitions publish retry metadata for rate-limit, network,
+  and transient provider failures.
+- Google Sheets field resolvers still return UI-friendly field error codes while reading
+  the normalized operation error shape.
+
+Validation completed so far:
+
+```sh
+mix test test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/operation_executor_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/client_test.exs test/fizz/integrations/google/sheets/columns_resolver_test.exs test/fizz/integrations/operation_error_test.exs test/fizz/integrations/retry_policy_test.exs
+mix test test/fizz/fields_test.exs test/fizz/fields/credential_test.exs test/fizz/fields/credential_options_test.exs test/fizz/fields/credential_secret_test.exs test/fizz/fields/credential_workos_oauth_autobind_test.exs test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/dynamic_resolver_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/columns_resolver_test.exs test/fizz/steps/credential_field_test.exs test/fizz/steps/registry_operation_definitions_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/runtime/context_builder_test.exs test/fizz/workflows/draft_validator_test.exs test/fizz/triggers/registration_manager_test.exs test/fizz/triggers/basic_triggers_integration_test.exs test/fizz_web/controllers/triggers/webhook_controller_test.exs
+```
+
 ## Current Architecture Decisions
 
 ### Slots
@@ -106,9 +154,11 @@ The remaining word "slot" should only mean normal workflow graph input/output po
 or Phoenix/Vue template slots. It should not describe credential fields, credential
 bindings, or runtime secret resolution.
 
-### Credentials
+### Credentials And Fields
 
-Credentials are first-class integration primitives.
+Credentials are runtime auth primitives and a field type, not a parallel schema system.
+Field declaration/rendering belongs to `Fizz.Fields`; provider/auth runtime behavior
+belongs to provider/auth modules.
 
 - Step config stores a credential declaration map:
 
@@ -136,6 +186,10 @@ Credentials are first-class integration primitives.
 - Runtime resolution produces the existing `credential_ref` map expected by auth helpers.
 - Token and vault I/O still belong to `Fizz.Integrations.resolve_auth_for_execution/4`
   and provider-specific auth helpers, not to field option resolution.
+- Provider credential creation forms are declared as `provider.credential_fields`, using
+  the same `Fizz.Fields.Definition` structs as operation fields.
+- Credential catalog entries, credential `config_schema`, and credential `ui_schema` are
+  gone.
 
 ### Resolver Concepts
 
@@ -145,9 +199,9 @@ Keep these concepts separate:
   field values, including selects, search fields, credential options, resource locators,
   and resource mappers.
 - Resolver modules with `resolve/1`: concrete edit-time field resolvers, such as
-  `Fizz.Credentials.OptionsResolver` and Google Sheets resource resolvers.
-- `Fizz.Credentials.runtime_resolver/2`: run-time credential binding lookup that returns
-  a function used by compiled access plans.
+  `Fizz.Fields.Credential` and Google Sheets resource resolvers.
+- `Fizz.Fields.Credential.runtime_resolver/2`: run-time credential binding lookup that
+  returns a function used by compiled access plans.
 - `Fizz.Integrations.resolve_auth_for_execution/4`: run-time auth material resolution
   for API key, OAuth, and provider-specific credential backends.
 
@@ -182,29 +236,32 @@ Reasons to keep it:
 
 Rules going forward:
 
-- build credential fields with `Fizz.Credentials.Requirement` or `Fizz.Credentials.Field`
+- build credential fields with `Fizz.Fields.credential/2`
 - avoid manually duplicating credential metadata in `@default_config` and `@config_schema`
-- put rendering metadata under `"ui"` and persisted declaration values under config
+- put rendering metadata on `Fizz.Fields.Definition` values and let
+  `Fizz.Fields.to_schema/1` write `"ui"` adapter metadata
 - validate supported components and resolver metadata at catalog/step registration time
 
 ## Remaining Work
 
 ### Phase 6 - Execution Semantics
 
-The first non-durable slice has started: operation modules now receive typed execution
-context through `OperationExecutor`. Continue with error and retry normalization before
-designing durable retries.
+The first two non-durable slices have started: operation modules now receive typed
+execution context through `OperationExecutor`, and operation failures are being
+normalized before durable retry handling exists.
 
 Recommended order:
 
-1. Add normalized operation error structs.
-2. Expand retry policy metadata and validation.
-3. Normalize Google Sheets rate-limit, transient HTTP, network, credential, and validation
-   errors.
-4. Only after that, design durable retry persistence and runner resume.
+1. Finish any remaining Google Sheets action-level error normalization gaps.
+2. Decide how retryable `OperationError` values are persisted on workflow runs.
+3. Add runner resume/backoff handling.
+4. Only after that, move durable retries into Oban or the existing runnable worker model.
 
 Likely files:
 
+- `lib/fizz/fields.ex`
+- `lib/fizz/fields/definition.ex`
+- `lib/fizz/fields/credential.ex`
 - `lib/fizz/workflows/execution_context.ex`
 - `lib/fizz/integrations/operation.ex`
 - `lib/fizz/integrations/operation_executor.ex`
@@ -219,6 +276,9 @@ Likely files:
 
 Likely tests:
 
+- `test/fizz/fields_test.exs`
+- `test/fizz/fields/credential_test.exs`
+- `test/fizz/fields/credential_options_test.exs`
 - `test/fizz/workflows/execution_context_test.exs`
 - `test/fizz/integrations/operation_executor_test.exs`
 - `test/fizz/integrations/operation_error_test.exs`

@@ -6,6 +6,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
   cleanly separated (for example `github_oauth` vs `github_api_key`).
   """
 
+  alias Fizz.Fields
+
   @replacement_config_key :replace_integration_providers_for_test
 
   @spec providers() :: [map()]
@@ -157,6 +159,8 @@ defmodule Fizz.Integrations.ProviderCatalog do
     api_key_module =
       normalize_api_key_module(entry[:api_key_module] || entry["api_key_module"])
 
+    module = if(type == :oauth, do: oauth_module, else: api_key_module)
+
     %{
       id: id,
       label: label,
@@ -164,7 +168,21 @@ defmodule Fizz.Integrations.ProviderCatalog do
       custom: custom in [true, "true", 1],
       type: type,
       oauth_module: if(type == :oauth, do: oauth_module, else: nil),
-      api_key_module: if(type == :api_key, do: api_key_module, else: nil)
+      api_key_module: if(type == :api_key, do: api_key_module, else: nil),
+      credential_fields:
+        normalize_credential_fields(
+          entry[:credential_fields] || entry["credential_fields"],
+          type,
+          id,
+          label
+        ),
+      credential_test:
+        normalize_credential_test(
+          entry[:credential_test] || entry["credential_test"],
+          type,
+          id,
+          module
+        )
     }
   end
 
@@ -316,4 +334,49 @@ defmodule Fizz.Integrations.ProviderCatalog do
       _ -> raise ArgumentError, "provider #{id} module #{inspect(module)} is not loaded"
     end
   end
+
+  defp normalize_credential_fields(fields, _type, _id, _label) when is_list(fields) do
+    fields
+    |> Enum.map(&Fields.field/1)
+    |> Fields.validate!()
+  end
+
+  defp normalize_credential_fields(_fields, :api_key, id, label) do
+    [
+      Fields.password("secret",
+        label: "#{label} API key",
+        required?: true,
+        default: "",
+        autocomplete: "new-password",
+        placeholder: api_key_placeholder(id),
+        order: 10
+      )
+    ]
+  end
+
+  defp normalize_credential_fields(_fields, :oauth, _id, _label), do: []
+  defp normalize_credential_fields(_fields, _type, _id, _label), do: []
+
+  defp normalize_credential_test(test, _type, _id, _module) when is_map(test), do: test
+
+  defp normalize_credential_test(_test, :api_key, _id, module) when is_atom(module) do
+    %{"type" => "api_key", "module" => Atom.to_string(module), "operation" => "check_connection"}
+  end
+
+  defp normalize_credential_test(_test, :api_key, id, _module) do
+    %{"type" => "api_key", "provider" => id, "operation" => "vault_lookup"}
+  end
+
+  defp normalize_credential_test(_test, :oauth, id, _module) do
+    %{"type" => "oauth", "provider" => id, "operation" => "connection_status"}
+  end
+
+  defp normalize_credential_test(_test, _type, id, _module) do
+    %{"provider" => id}
+  end
+
+  defp api_key_placeholder("openai_api_key"), do: "sk-..."
+  defp api_key_placeholder("anthropic_api_key"), do: "sk-ant-..."
+  defp api_key_placeholder("github_api_key"), do: "ghp_..."
+  defp api_key_placeholder(_provider_id), do: "Enter API key"
 end

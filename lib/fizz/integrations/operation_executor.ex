@@ -9,6 +9,7 @@ defmodule Fizz.Integrations.OperationExecutor do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Catalog
+  alias Fizz.Integrations.OperationError
   alias Fizz.Workflows.ExecutionContext
 
   @impl true
@@ -19,7 +20,9 @@ defmodule Fizz.Integrations.OperationExecutor do
       |> ExecutionContext.put_legacy_aliases()
 
     with {:ok, operation} <- operation_for(context) do
-      operation.module.execute(config, input, context.execution_context)
+      operation
+      |> execute_operation(config, input, context.execution_context)
+      |> normalize_result(operation)
     end
   end
 
@@ -44,6 +47,18 @@ defmodule Fizz.Integrations.OperationExecutor do
         operation_for_step_type(context)
     end
   end
+
+  defp execute_operation(operation, config, input, execution_context) do
+    operation.module.execute(config, input, execution_context)
+  end
+
+  defp normalize_result({:error, %OperationError{}} = error, _operation), do: error
+
+  defp normalize_result({:error, reason}, operation) do
+    {:error, OperationError.normalize(reason, source: operation.id)}
+  end
+
+  defp normalize_result(result, _operation), do: result
 
   defp verify_step_type(_operation, nil), do: :ok
 

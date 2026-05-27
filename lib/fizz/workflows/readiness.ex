@@ -17,7 +17,7 @@ defmodule Fizz.Workflows.Readiness do
       `candidates` populated for the run-launch UI.
   """
 
-  alias Fizz.Credentials
+  alias Fizz.Fields.Credential
   alias Fizz.Accounts.Scope
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
@@ -33,8 +33,8 @@ defmodule Fizz.Workflows.Readiness do
           :ready | {:needs_bindings, [descriptor()]}
   def check(%WorkflowDefinitionVersion{} = version, user_id, %Scope{} = scope)
       when is_binary(user_id) do
-    _ = Credentials.ensure_auto_bindings(version, user_id, scope)
+    _ = Credential.ensure_auto_bindings(version, user_id, scope)
 
-    Credentials.readiness(version, user_id, scope)
+    Credential.readiness(version, user_id, scope)
   end
 end

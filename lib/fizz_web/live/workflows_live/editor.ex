@@ -4,8 +4,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   use FizzWeb, :verified_routes
 
   alias Fizz.Accounts
-  alias Fizz.Credentials
-  alias Fizz.Credentials.OptionsResolver
+  alias Fizz.Fields.Credential
   alias Fizz.Integrations.DynamicResolver
   alias Fizz.Steps
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
@@ -618,7 +617,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
     results =
       Enum.map(bindings, fn binding ->
-        Credentials.upsert_binding(
+        Credential.upsert_binding(
           socket.assigns.draft,
           socket.assigns.current_scope,
           %{
@@ -1008,13 +1007,13 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp search_credentials(socket, payload) do
-    case OptionsResolver.resolve(%{
+    case Credential.resolve(%{
            q: resolver_query(payload),
            params: search_credentials_params(payload),
            context: resolver_context(socket)
          }) do
       {:ok, options} ->
-        maybe_push_credential_results(socket, OptionsResolver, payload, options)
+        maybe_push_credential_results(socket, Credential, payload, options)
 
       {:error, reason} ->
         socket
@@ -2242,7 +2241,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     }
   end
 
-  defp maybe_push_credential_results(socket, OptionsResolver, payload, options) do
+  defp maybe_push_credential_results(socket, Credential, payload, options) do
     socket
     |> assign(:credential_options, options)
     |> push_event(

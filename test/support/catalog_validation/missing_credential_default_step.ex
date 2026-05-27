@@ -8,12 +8,15 @@ defmodule Fizz.TestSupport.CatalogValidation.MissingCredentialDefaultStep do
     kind: :action
 
   @behaviour Fizz.Steps.Executors.Behaviour
+  @credential_field Fizz.Fields.credential("google_oauth", :oauth,
+                      key: "credential_ref",
+                      label: "Google Account"
+                    )
 
   @config_schema %{
     "type" => "object",
     "properties" => %{
-      "credential_ref" =>
-        Fizz.Credentials.Field.credential_schema("google_oauth", :oauth, title: "Google Account")
+      "credential_ref" => Fizz.Fields.to_schema_property(@credential_field)
     }
   }
 

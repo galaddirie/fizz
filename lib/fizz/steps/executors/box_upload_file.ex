@@ -14,20 +14,22 @@ defmodule Fizz.Steps.Executors.BoxUploadFile do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.BoxOAuth
-  alias Fizz.Credentials.Requirement, as: CredentialRequirement
+  alias Fizz.Fields
 
-  @credential_requirement CredentialRequirement.oauth(BoxOAuth.provider_id())
+  @credential_field Fields.credential(BoxOAuth.provider_id(), :oauth,
+                      key: "credential_ref",
+                      requirement_key: "auth"
+                    )
 
   @default_config %{
-    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
+    "credential_ref" => Fields.default_value(@credential_field)
   }
 
   @config_schema %{
     "type" => "object",
     "required" => ["file_name", "file_content"],
     "properties" => %{
-      "credential_ref" =>
-        CredentialRequirement.schema(@credential_requirement, title: "Box Account"),
+      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Box Account"),
       "parent_folder_id" => %{
         "type" => "string",
         "title" => "Parent Folder ID",

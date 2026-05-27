@@ -18,7 +18,7 @@ defmodule Fizz.Workflows do
 
   alias Ecto.Multi
   alias Fizz.Accounts.{Project, Scope}
-  alias Fizz.Credentials
+  alias Fizz.Fields.Credential
   alias Fizz.Repo
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Workflows.Compiler
@@ -121,7 +121,7 @@ defmodule Fizz.Workflows do
          :ok <- ensure_draft(version_record),
          {:ok, user_id} <- user_id_from_scope(scope) do
       version_record = CredentialDefaults.normalize_version(version_record)
-      _ = Credentials.ensure_auto_bindings(version_record, user_id, scope)
+      _ = Credential.ensure_auto_bindings(version_record, user_id, scope)
 
       published_at = DateTime.utc_now()
 

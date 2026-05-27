@@ -53,10 +53,13 @@ defmodule Fizz.Steps.ConfigSchema do
       }
 
       # Credential field helper
-      "credential_ref" =>
-        Fizz.Credentials.Field.credential_schema("openai_api_key", :api_key,
-          title: "Credential"
+      credential_field =
+        Fizz.Fields.credential("openai_api_key", :api_key,
+          key: "credential_ref",
+          label: "Credential"
         )
+
+      "credential_ref" => Fizz.Fields.to_schema_property(credential_field)
   """
 
   @type ui_config :: %{optional(String.t()) => term()}

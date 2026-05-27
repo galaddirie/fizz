@@ -14,12 +14,15 @@ defmodule Fizz.Steps.Executors.TeamsSendMessage do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.MicrosoftOAuth
-  alias Fizz.Credentials.Requirement, as: CredentialRequirement
+  alias Fizz.Fields
 
-  @credential_requirement CredentialRequirement.oauth(MicrosoftOAuth.provider_id())
+  @credential_field Fields.credential(MicrosoftOAuth.provider_id(), :oauth,
+                      key: "credential_ref",
+                      requirement_key: "auth"
+                    )
 
   @default_config %{
-    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
+    "credential_ref" => Fields.default_value(@credential_field)
   }
 
   @config_schema %{
@@ -27,7 +30,7 @@ defmodule Fizz.Steps.Executors.TeamsSendMessage do
     "required" => ["team_id", "channel_id", "message"],
     "properties" => %{
       "credential_ref" =>
-        CredentialRequirement.schema(@credential_requirement, title: "Microsoft Account"),
+        Fields.to_schema_property(@credential_field, label: "Microsoft Account"),
       "team_id" => %{
         "type" => "string",
         "title" => "Team ID"

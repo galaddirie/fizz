@@ -1,7 +1,7 @@
 defmodule Fizz.Integrations.CatalogValidationTest do
   use ExUnit.Case, async: false
 
-  alias Fizz.Integrations.OperationDefinition
+  alias Fizz.Integrations.{OperationDefinition, RetryPolicy}
   alias Fizz.Integrations.ProviderCatalog
   alias Fizz.Integrations.Registry, as: IntegrationRegistry
   alias Fizz.Steps.Registry, as: StepRegistry
@@ -58,6 +58,19 @@ defmodule Fizz.Integrations.CatalogValidationTest do
       Application.put_env(:fizz, :integration_providers, [provider])
 
       assert_raise ArgumentError, ~r/missing logo_path/, fn ->
+        ProviderCatalog.providers()
+      end
+    end
+
+    test "malformed provider credential fields raise during catalog load" do
+      provider =
+        Map.put(acme_provider(), :credential_fields, [
+          %{key: "secret", type: :password, component: "bespoke"}
+        ])
+
+      Application.put_env(:fizz, :integration_providers, [provider])
+
+      assert_raise ArgumentError, ~r/unsupported component/, fn ->
         ProviderCatalog.providers()
       end
     end
@@ -225,6 +238,26 @@ defmodule Fizz.Integrations.CatalogValidationTest do
                    fn ->
                      Fizz.Integrations.Definition.validate_operation!(operation)
                    end
+    end
+
+    test "malformed retry policy raises during operation validation" do
+      operation = %OperationDefinition{
+        id: "acme_docs.action",
+        step_type_id: "acme_docs_action",
+        version: 1,
+        provider: "acme_api_key",
+        integration: "acme_docs",
+        kind: :action,
+        module: Fizz.TestSupport.CatalogValidation.AcmeDocsAction,
+        display: %{"name" => "Acme Docs Action", "icon" => "hero-bolt"},
+        config_schema: %{"type" => "object"},
+        output_schema: %{"type" => "object"},
+        retry: %RetryPolicy{max_attempts: 0}
+      }
+
+      assert_raise ArgumentError, ~r/invalid retry policy/, fn ->
+        Fizz.Integrations.Definition.validate_operation!(operation)
+      end
     end
   end
 

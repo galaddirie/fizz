@@ -3,13 +3,8 @@ defmodule Fizz.Integrations.Definition do
   Validators and normalization helpers for unified integration definitions.
   """
 
-  alias Fizz.Integrations.{
-    CredentialRequirement,
-    OperationDefinition,
-    RetryPolicy
-  }
-
-  @supported_field_components ~w(credential hidden json number password resource_locator resource_mapper search select string)
+  alias Fizz.Fields
+  alias Fizz.Integrations.{OperationDefinition, RetryPolicy}
 
   @spec validate_operation!(OperationDefinition.t()) :: OperationDefinition.t()
   def validate_operation!(%OperationDefinition{} = operation) do
@@ -21,10 +16,10 @@ defmodule Fizz.Integrations.Definition do
     validate_module!(operation.module, "operation #{operation.id} module")
     validate_operation_module!(operation)
     validate_display!(operation.id, operation.display)
+    Fields.validate!(operation.fields)
     validate_schema!("operation #{operation.id} config_schema", operation.config_schema)
     validate_schema!("operation #{operation.id} input_schema", operation.input_schema)
     validate_schema!("operation #{operation.id} output_schema", operation.output_schema)
-    Enum.each(operation.auth, &validate_credential_requirement!/1)
     validate_retry_policy!(operation.retry)
 
     operation
@@ -46,68 +41,34 @@ defmodule Fizz.Integrations.Definition do
     raise ArgumentError, "operation definitions must be a list, got: #{inspect(operations)}"
   end
 
-  @spec validate_credential!(struct()) :: struct()
-  def validate_credential!(%Fizz.Integrations.Definition.Credential{} = credential) do
-    validate_required_string!(credential.id, "credential id")
-    validate_required_string!(credential.provider, "credential provider")
-    validate_display_map!(credential.id, credential.display)
-    validate_schema!("credential #{credential.id} ui_schema", credential.ui_schema)
-
-    unless credential.auth_type in [:oauth, :api_key] do
-      raise ArgumentError,
-            "credential #{credential.id} has unsupported auth_type #{inspect(credential.auth_type)}"
-    end
-
-    credential
+  @spec validate_provider!(struct()) :: struct()
+  def validate_provider!(%Fizz.Integrations.Definition.Provider{} = provider) do
+    validate_required_string!(provider.id, "provider id")
+    validate_required_string!(provider.label, "provider label")
+    Fields.validate!(provider.credential_fields)
+    provider
   end
 
-  def validate_credential!(credential) do
-    raise ArgumentError, "invalid credential definition: #{inspect(credential)}"
+  def validate_provider!(provider) do
+    raise ArgumentError, "invalid provider definition: #{inspect(provider)}"
   end
 
-  @spec validate_credentials!([struct()]) :: [struct()]
-  def validate_credentials!(credentials) when is_list(credentials) do
-    credentials
-    |> validate_unique_by!(& &1.id, "credential IDs")
-    |> Enum.map(&validate_credential!/1)
+  @spec validate_providers!([struct()]) :: [struct()]
+  def validate_providers!(providers) when is_list(providers) do
+    providers
+    |> validate_unique_by!(& &1.id, "provider IDs")
+    |> Enum.map(&validate_provider!/1)
   end
 
-  def validate_credentials!(credentials) do
-    raise ArgumentError, "credential definitions must be a list, got: #{inspect(credentials)}"
+  def validate_providers!(providers) do
+    raise ArgumentError, "provider definitions must be a list, got: #{inspect(providers)}"
   end
 
   @spec supported_field_components() :: [String.t()]
-  def supported_field_components, do: @supported_field_components
+  def supported_field_components, do: Fields.supported_components()
 
-  defp validate_credential_requirement!(%CredentialRequirement{} = requirement) do
-    validate_required_string!(requirement.key, "credential requirement key")
-    validate_required_string!(requirement.provider, "credential requirement provider")
-
-    validate_required_string!(
-      requirement.requirement_key,
-      "credential requirement requirement_key"
-    )
-
-    unless requirement.auth_type in [:oauth, :api_key] do
-      raise ArgumentError,
-            "credential requirement #{requirement.key} has unsupported auth_type #{inspect(requirement.auth_type)}"
-    end
-
-    requirement
-  end
-
-  defp validate_credential_requirement!(requirement) do
-    raise ArgumentError, "invalid credential requirement: #{inspect(requirement)}"
-  end
-
-  defp validate_retry_policy!(%RetryPolicy{max_attempts: max_attempts, backoff: backoff})
-       when is_integer(max_attempts) and max_attempts > 0 and
-              backoff in [:none, :linear, :exponential],
-       do: :ok
-
-  defp validate_retry_policy!(retry) do
-    raise ArgumentError, "invalid retry policy: #{inspect(retry)}"
-  end
+  defp validate_retry_policy!(%RetryPolicy{} = retry), do: RetryPolicy.validate!(retry)
+  defp validate_retry_policy!(retry), do: RetryPolicy.validate!(retry)
 
   defp validate_operation_module!(%OperationDefinition{} = operation) do
     behaviours =
@@ -142,20 +103,6 @@ defmodule Fizz.Integrations.Definition do
 
   defp validate_display!(operation_id, display) do
     raise ArgumentError, "operation #{operation_id} display requires a name: #{inspect(display)}"
-  end
-
-  defp validate_display_map!(credential_id, %{} = display) do
-    case display[:label] || display["label"] do
-      label when is_binary(label) and label != "" ->
-        :ok
-
-      _label ->
-        raise ArgumentError, "credential #{credential_id} display requires a label"
-    end
-  end
-
-  defp validate_display_map!(credential_id, display) do
-    raise ArgumentError, "credential #{credential_id} display must be a map: #{inspect(display)}"
   end
 
   defp validate_display_icon!(operation_id, display) do
@@ -197,11 +144,12 @@ defmodule Fizz.Integrations.Definition do
       nil ->
         :ok
 
-      component when component in @supported_field_components ->
-        :ok
-
       component ->
-        raise ArgumentError, "#{label} uses unsupported ui.component #{inspect(component)}"
+        if component in Fields.supported_components() do
+          :ok
+        else
+          raise ArgumentError, "#{label} uses unsupported ui.component #{inspect(component)}"
+        end
     end
   end
 

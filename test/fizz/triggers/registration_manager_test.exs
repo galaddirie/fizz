@@ -6,7 +6,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
-  alias Fizz.Credentials
+  alias Fizz.Fields.Credential
   alias Fizz.Triggers
   alias Fizz.Triggers.RegistrationManager
   alias Fizz.Triggers.{TriggerRegistration, TriggerSource}
@@ -124,7 +124,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     connection = insert_oauth_connection!(scope, "google_oauth")
 
     assert {:ok, _binding} =
-             Credentials.upsert_binding(saved_draft, scope, %{
+             Credential.upsert_binding(saved_draft, scope, %{
                user_id: scope.user.id,
                workflow_definition_id: definition.id,
                step_id: trigger.id,
@@ -191,7 +191,7 @@ defmodule Fizz.Triggers.RegistrationManagerTest do
     connection = insert_oauth_connection!(scope, "github_oauth")
 
     assert {:ok, _binding} =
-             Credentials.upsert_binding(saved_v1, scope, %{
+             Credential.upsert_binding(saved_v1, scope, %{
                user_id: scope.user.id,
                workflow_definition_id: definition.id,
                step_id: trigger_step_id,

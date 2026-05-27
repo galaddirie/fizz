@@ -4,23 +4,27 @@ Repository: `/Users/galdirie/code/fizz`.
 
 This audit started as a read-only baseline for integration scalability. Since then, the
 refactor has shipped metadata-first catalog foundations, resource locator/mapper support,
-and a credential ownership cleanup.
+a credential ownership cleanup, and a shared typed field contract.
 
 Current useful primitives include `Fizz.Steps.Definition`, `Fizz.Steps.Registry`,
 `Fizz.Integrations.ProviderDefinition`, `Fizz.Integrations.Operation`,
-`Fizz.Integrations.DynamicResolver`, `Fizz.Credentials`, and schema-driven Vue field
-rendering. The main remaining issue is that operation definitions are not yet the single
-source of truth for every step family.
+`Fizz.Integrations.DynamicResolver`, `Fizz.Fields`, `Fizz.Fields.Credential`, and
+schema-driven Vue field rendering. The main remaining issue is that operation definitions
+are not yet the single source of truth for every step family.
 
 ## 0. Refactor Updates
 
 Resolved since the original audit:
 
 - Generic `Fizz.Slots` modules and `Fizz.Workflows.SlotBinding` were deleted.
-- Credential declaration, option lookup, readiness, auto-binding, and runtime binding
-  resolution now live under `Fizz.Credentials`.
+- Dedicated credential declaration/schema modules were deleted.
+- Credential field declaration, option lookup, readiness, auto-binding, runtime binding
+  resolution, and API-key secret extraction now live under `Fizz.Fields.Credential`.
 - Credential fields use explicit `"$credential"` declarations plus `"ui"."component" ==
   "credential"` schema metadata.
+- Provider credential creation inputs and operation inputs now use the same
+  `Fizz.Fields.Definition` contract, with JSON Schema plus `"ui"` generated as adapter
+  output.
 - `Fizz.Steps.Resolver` was deleted; edit-time dynamic values now route through
   `Fizz.Integrations.DynamicResolver`.
 - `MapEditor.vue` was replaced by `ResourceMapperField.vue`.
@@ -30,10 +34,13 @@ Still open:
 
 - provider modules still duplicate OAuth/API-key declaration boilerplate
 - many non-Google integrations are still executor-first rather than operation-first
-- operation errors, retry policy, and execution context are not yet normalized
+- execution context and Google Sheets operation errors are now normalized; durable retry
+  persistence is still open
 - dynamic field state is reply-based, not durable server-side state
 - Google Sheets append/read operation definitions now own their step metadata directly;
   the old Google Sheets step wrapper executors were deleted
+- Google Sheets operations now publish retry metadata and the client returns
+  `Fizz.Integrations.OperationError` instead of raw `{:backoff, ...}` or HTTP maps
 
 ## 1. Current Declarations and Boilerplate
 
@@ -49,19 +56,21 @@ OAuth provider modules repeat the same shape. Slack, Google, Microsoft, Notion, 
 
 API-key providers have inconsistent implementation status. OpenAI implements `Fizz.Integrations.Provider` (`lib/fizz/integrations/providers/openai_api_key.ex:8`), while Anthropic, GitHub API key, and custom API key are catalog-only definitions with no provider behavior (`lib/fizz/integrations/providers/anthropic_api_key.ex:1`, `lib/fizz/integrations/providers/github_api_key.ex:1`). `ProviderDefinition.api_key/1` supports nil-module providers (`lib/fizz/integrations/provider_definition.ex:31`), and runtime auth falls back to generic vault resolution (`lib/fizz/integrations.ex:305`). This works, but it leaks "implemented vs definition-only" into execution branching.
 
-Credential declarations are now explicit, but executor modules still repeat the same
-pattern: declare a `Fizz.Credentials.Requirement`, add a default credential declaration,
-and add a credential field schema. That is clearer than the old slot wrappers, but it is
-still boilerplate that should move into operation definitions as those become the source
-of truth.
+Credential declarations are now explicit field definitions. Legacy executor modules still
+repeat the same pattern: build a `Fizz.Fields.credential/2`, add its default declaration,
+and add its generated schema property. That is much thinner than the old credential
+module stack, but it is still boilerplate that should disappear as those executors move
+to operation definitions.
 
 ## 2. Shared Abstractions vs. Copy-Paste
 
 The code has several good abstractions that are not consistently used as the source of truth:
 
 - `Fizz.Integrations.Operation` says step executors should delegate API work to operation modules (`lib/fizz/integrations/operation.ex:5`), but only Google Sheets substantially follows this pattern.
-- `Fizz.Steps.ConfigSchema` documents a JSON Schema plus `ui` extension model (`lib/fizz/steps/config_schema.ex:5`), but richer concerns such as visibility rules, credential requirements, dynamic resource lookup, and operation routing are not first-class yet.
-- `Fizz.Credentials.Requirement` wraps credential declaration/schema generation, but each
+- `Fizz.Fields` now owns typed field definitions and adapts them to the JSON Schema plus
+  `ui` extension model used by Vue, but most non-Google operation fields are still
+  generated from legacy executor modules.
+- `Fizz.Fields.Credential` wraps credential declaration/schema generation, but each
   legacy executor still wires it manually.
 - `Fizz.Integrations.resolve_auth_for_execution/4` validates credential refs and resolves API-key/OAuth credentials (`lib/fizz/integrations.ex:155`, `lib/fizz/integrations.ex:313`), while `OpenAIApiKey` repeats credential-ref normalization, owner checks, and vault resolution for organization-scoped helpers (`lib/fizz/integrations/providers/openai_api_key.ex:162`, `lib/fizz/integrations/providers/openai_api_key.ex:175`).
 
@@ -75,15 +84,22 @@ Workflow editor configuration is partially schema-driven. `WorkflowsLive.Editor`
 
 Dynamic options are still event-routed through the editor LiveView, but the resolver
 lookup is now centralized in `Fizz.Integrations.DynamicResolver`. Credential fields are
-handled as a field component type and dispatch to `Fizz.Credentials.OptionsResolver`.
+handled as a field component type and dispatch to `Fizz.Fields.Credential`.
 The remaining improvement is field-state ownership: loading and error state are still
-transient Vue request state rather than durable LiveView/server state.
+transient Vue request state rather than durable LiveView/server state. Google Sheets
+resolver failures now read normalized operation errors, but no server process owns field
+state across clients or reconnects.
 
 The resource mapper is now generic enough for the next integration family:
 `ResourceMapperField.vue` receives lookup fields, labels, and async error copy through
 schema/resolver metadata. Continue keeping provider vocabulary out of Vue components.
 
-The credentials settings UI handles only a narrow API-key shape. `UserManagementLive` builds forms with `provider`, `provider_label`, `provider_custom_name`, and `secret` (`lib/fizz_web/live/user_management_live.ex:481`, `lib/fizz_web/live/user_management_live.ex:521`). The HEEx form labels the secret as an API key with an `sk-...` placeholder (`lib/fizz_web/live/user_management_live.html.heex:511`), and rotation uses the same fixed shape (`lib/fizz_web/live/user_management_live.ex:497`, `user_management_live.html.heex:608`). Providers that need multiple secret fields, region/domain fields, token type labels, or credential tests require UI changes.
+The credentials settings UI now reads provider `credential_fields` through the same
+field contract as operation inputs. API-key providers get a generated password/secret
+field by default, and providers can declare multiple secret or non-secret creation
+fields without adding a credential-specific schema module. The next UI improvement is to
+render those fields through the same component registry used by workflow operation fields
+instead of keeping credential-form-specific markup.
 
 OAuth connection UI is delegated to WorkOS widget strings instead of internal provider definitions. Settings hardcode the `pipes` tab (`lib/fizz_web/live/user_management_live.ex:29`, `lib/fizz_web/live/user_management_live.html.heex:289`), and the JS hook maps widget names to React widgets (`assets/js/hooks/workos_react_widgets.js:30`). Workspace repository cloning is also GitHub-specific: the LiveView calls `Integrations.list_repos(..., "github_oauth", ...)` (`lib/fizz_web/live/workspaces_live/show.ex:432`) and renders GitHub-specific errors (`show.ex:461`, `show.html.heex:146`).
 
@@ -91,9 +107,9 @@ OAuth connection UI is delegated to WorkOS widget strings instead of internal pr
 
 The highest-risk boundary issue is a context cycle. `Fizz.Integrations` delegates persistence to `Fizz.Accounts.ExternalAuth` (`lib/fizz/integrations.ex:5`, `lib/fizz/integrations.ex:9`), while `Accounts.ExternalAuth` and `Accounts.ApiCredential` depend back on `Fizz.Integrations.ProviderCatalog` (`lib/fizz/accounts/external_auth.ex:12`, `lib/fizz/accounts/api_credential.ex:12`). Provider definition ownership should be one-way: either integration validation wraps credential persistence, or credential persistence owns provider-agnostic storage only.
 
-Credential binding ownership is now explicit: `Fizz.Credentials` owns the context API,
-and `Fizz.Workflows.CredentialBinding` owns the workflow-specific schema. The generic
-slot context was removed instead of moved.
+Credential binding ownership is now explicit: `Fizz.Fields.Credential` owns field-facing
+declaration and lookup behavior, and `Fizz.Workflows.CredentialBinding` owns the
+workflow-specific schema. The generic slot context was removed instead of moved.
 
 Project-scope resolution is repeated in LiveViews. Project routes are inside the authenticated LiveView session (`lib/fizz_web/router.ex:69`), while `UserAuth` mounts only the base current scope (`lib/fizz_web/user_auth.ex:329`). Several LiveViews rebuild project scope themselves (`lib/fizz_web/live/workflows_live/index.ex:48`, `workflows_live/editor.ex:340`, `workflows_live/revisions.ex:109`, `workspaces_live/index.ex:86`). `FizzWeb.Plugs.RequireProjectScope` exists (`lib/fizz_web/plugs/require_project_scope.ex:1`) but is not wired for LiveView. A shared authenticated project live_session/on_mount would reduce repeated scope code.
 

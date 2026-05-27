@@ -98,8 +98,9 @@ defmodule Fizz.Integrations.Manifest do
 
     %{
       providers:
-        Fizz.Integrations.ProviderCatalog.providers() |> Enum.map(&provider_definition/1),
-      credentials: credential_definitions() |> Definition.validate_credentials!(),
+        Fizz.Integrations.ProviderCatalog.providers()
+        |> Enum.map(&provider_definition/1)
+        |> Definition.validate_providers!(),
       integrations: integration_definitions(),
       operations: operations,
       triggers: trigger_definitions(),
@@ -142,7 +143,7 @@ defmodule Fizz.Integrations.Manifest do
       },
       %ResolverDefinition{
         id: "credentials",
-        module: Fizz.Credentials.OptionsResolver
+        module: Fizz.Fields.Credential
       }
     ]
   end
@@ -154,23 +155,10 @@ defmodule Fizz.Integrations.Manifest do
       type: provider.type,
       logo_path: provider.logo_path,
       custom: provider.custom,
-      module: provider.oauth_module || provider.api_key_module
+      module: provider.oauth_module || provider.api_key_module,
+      credential_fields: provider.credential_fields,
+      credential_test: provider.credential_test
     }
-  end
-
-  defp credential_definitions do
-    Fizz.Integrations.ProviderCatalog.providers()
-    |> Enum.map(&provider_definition/1)
-    |> Enum.map(fn provider ->
-      %Definition.Credential{
-        id: provider.id,
-        provider: provider.id,
-        auth_type: provider.type,
-        display: %{label: provider.label, icon: provider.logo_path},
-        ui_schema: credential_ui_schema(provider),
-        test: credential_test(provider)
-      }
-    end)
   end
 
   defp integration_definitions do
@@ -185,48 +173,6 @@ defmodule Fizz.Integrations.Manifest do
       }
     end)
   end
-
-  defp credential_ui_schema(%Definition.Provider{type: :api_key} = provider) do
-    %{
-      "type" => "object",
-      "required" => ["secret"],
-      "properties" => %{
-        "secret" => %{
-          "type" => "string",
-          "title" => "#{provider.label} API key",
-          "writeOnly" => true,
-          "ui" => %{
-            "component" => "password",
-            "autocomplete" => "new-password",
-            "placeholder" => api_key_placeholder(provider.id),
-            "order" => 10
-          }
-        }
-      }
-    }
-  end
-
-  defp credential_ui_schema(%Definition.Provider{type: :oauth}) do
-    %{"type" => "object", "properties" => %{}}
-  end
-
-  defp credential_test(%Definition.Provider{type: :api_key, module: module})
-       when is_atom(module) do
-    %{"type" => "api_key", "module" => Atom.to_string(module), "operation" => "check_connection"}
-  end
-
-  defp credential_test(%Definition.Provider{type: :api_key} = provider) do
-    %{"type" => "api_key", "provider" => provider.id, "operation" => "vault_lookup"}
-  end
-
-  defp credential_test(%Definition.Provider{type: :oauth} = provider) do
-    %{"type" => "oauth", "provider" => provider.id, "operation" => "connection_status"}
-  end
-
-  defp api_key_placeholder("openai_api_key"), do: "sk-..."
-  defp api_key_placeholder("anthropic_api_key"), do: "sk-ant-..."
-  defp api_key_placeholder("github_api_key"), do: "ghp_..."
-  defp api_key_placeholder(_provider_id), do: "Enter API key"
 
   defp operation_versions(operations) do
     operations

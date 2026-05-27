@@ -7,7 +7,7 @@ defmodule Fizz.Integrations.DynamicResolver do
   merging, and metadata returned to generic Vue field components.
   """
 
-  alias Fizz.Credentials.OptionsResolver
+  alias Fizz.Fields.Credential
   alias Fizz.Steps
   alias Fizz.Steps.Type
   alias Fizz.Workflows.Embeds.Step
@@ -104,7 +104,7 @@ defmodule Fizz.Integrations.DynamicResolver do
 
   defp fetch_credential_field_resolver(field_schema) do
     case field_ui_value(field_schema, :component) do
-      "credential" -> {:ok, OptionsResolver}
+      "credential" -> {:ok, Credential}
       _ -> {:error, :resolver_not_found}
     end
   end

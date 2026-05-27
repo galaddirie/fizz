@@ -1,9 +1,8 @@
-defmodule Fizz.CredentialsTest do
+defmodule Fizz.Fields.CredentialTest do
   use Fizz.DataCase, async: true
 
   alias Fizz.Accounts.{ApiCredential, OauthConnection}
-  alias Fizz.Credentials
-  alias Fizz.Credentials.Declaration
+  alias Fizz.Fields.Credential
   alias Fizz.Workflows
   alias Fizz.Workflows.CredentialDefaults
   alias Fizz.WorkflowsFixtures
@@ -15,7 +14,7 @@ defmodule Fizz.CredentialsTest do
         "nested" => [%{"value" => credential_declaration("github_oauth", "oauth")}]
       }
 
-      declarations = config |> Declaration.walk() |> Enum.sort_by(& &1.path)
+      declarations = config |> Credential.walk() |> Enum.sort_by(& &1.path)
 
       assert [
                %{path: ["credential_ref"], declaration: openai},
@@ -27,21 +26,21 @@ defmodule Fizz.CredentialsTest do
                 requirement_key: "auth",
                 provider: "openai_api_key",
                 auth_type: "api_key"
-              }} = Declaration.normalize(openai)
+              }} = Credential.normalize(openai)
 
-      assert :ok = Declaration.validate(github)
+      assert :ok = Credential.validate(github)
     end
 
     test "reports missing and invalid credential declaration fields" do
       assert {:error, "credential is missing provider"} =
-               Declaration.validate(%{
+               Credential.validate(%{
                  "$credential" => true,
                  "requirement_key" => "auth",
                  "auth_type" => "api_key"
                })
 
       assert {:error, "credential auth_type must be api_key or oauth"} =
-               Declaration.validate(%{
+               Credential.validate(%{
                  "$credential" => true,
                  "requirement_key" => "auth",
                  "provider" => "openai_api_key",
@@ -65,7 +64,7 @@ defmodule Fizz.CredentialsTest do
                  provider: "openai_api_key",
                  auth_type: "api_key"
                }
-             ] = Credentials.required_credentials(steps)
+             ] = Credential.required_credentials(steps)
     end
   end
 
@@ -138,18 +137,18 @@ defmodule Fizz.CredentialsTest do
 
       connection = insert_oauth_connection!(scope.user.id, scope.organization_id, "google_oauth")
 
-      assert {:ok, [binding]} = Credentials.ensure_auto_bindings(version, scope.user.id, scope)
+      assert {:ok, [binding]} = Credential.ensure_auto_bindings(version, scope.user.id, scope)
       assert binding.step_id == append_step.id
       assert binding.requirement_key == "auth"
       assert binding.binding_data == %{"credential_id" => connection.id}
-      assert Credentials.readiness(version, scope.user.id, scope) == :ready
+      assert Credential.readiness(version, scope.user.id, scope) == :ready
     end
   end
 
   describe "candidate_options/2" do
     test "returns a tagged error for invalid scope" do
       assert {:error, :invalid_scope} =
-               Credentials.candidate_options(credential_declaration("openai_api_key"), nil)
+               Credential.candidate_options(credential_declaration("openai_api_key"), nil)
     end
   end
 
@@ -160,7 +159,7 @@ defmodule Fizz.CredentialsTest do
       credential = insert_api_credential!(scope.user.id, scope.organization_id, "openai_api_key")
 
       assert {:ok, binding} =
-               Credentials.upsert_binding(version, scope, %{
+               Credential.upsert_binding(version, scope, %{
                  user_id: scope.user.id,
                  workflow_definition_id: version.workflow_definition_id,
                  step_id: hd(version.steps).id,
@@ -180,7 +179,7 @@ defmodule Fizz.CredentialsTest do
         insert_api_credential!(scope.user.id, scope.organization_id, "anthropic_api_key")
 
       assert {:error, changeset} =
-               Credentials.upsert_binding(version, scope, %{
+               Credential.upsert_binding(version, scope, %{
                  user_id: scope.user.id,
                  workflow_definition_id: version.workflow_definition_id,
                  step_id: hd(version.steps).id,

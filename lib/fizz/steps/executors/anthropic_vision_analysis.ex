@@ -14,13 +14,16 @@ defmodule Fizz.Steps.Executors.AnthropicVisionAnalysis do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.AnthropicApiKey
-  alias Fizz.Credentials.Requirement, as: CredentialRequirement
+  alias Fizz.Fields
 
-  @credential_requirement CredentialRequirement.api_key(AnthropicApiKey.provider_id())
+  @credential_field Fields.credential(AnthropicApiKey.provider_id(), :api_key,
+                      key: "credential_ref",
+                      requirement_key: "auth"
+                    )
 
   @default_config %{
     "model" => "claude-3-5-sonnet-latest",
-    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
+    "credential_ref" => Fields.default_value(@credential_field)
   }
 
   @config_schema %{
@@ -28,8 +31,8 @@ defmodule Fizz.Steps.Executors.AnthropicVisionAnalysis do
     "required" => ["image_url", "prompt"],
     "properties" => %{
       "credential_ref" =>
-        CredentialRequirement.schema(@credential_requirement,
-          title: "Anthropic Credential",
+        Fields.to_schema_property(@credential_field,
+          label: "Anthropic Credential",
           description: "Anthropic credential. Bound at run time per user."
         ),
       "model" => %{

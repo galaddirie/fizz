@@ -11,20 +11,13 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
 
   @behaviour Fizz.Integrations.Operation
 
-  alias Fizz.Credentials.Requirement, as: CredentialFieldRequirement
+  alias Fizz.Fields
 
   alias Fizz.Integrations.{
-    CredentialRequirement,
     Google.Sheets.Client,
     OperationDefinition,
     Providers.GoogleOAuth,
     RetryPolicy
-  }
-
-  @credential_requirement CredentialFieldRequirement.oauth(GoogleOAuth.provider_id())
-
-  @default_config %{
-    "credential_ref" => CredentialFieldRequirement.declaration(@credential_requirement)
   }
 
   @spreadsheet_locator %{
@@ -100,50 +93,49 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
       "schema_state" => "Schema locked"
     }
   }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["credential_ref", "spreadsheet_id", "values"],
-    "properties" => %{
-      "credential_ref" =>
-        CredentialFieldRequirement.schema(@credential_requirement, title: "Google Account"),
-      "spreadsheet_id" => %{
-        "type" => "string",
-        "title" => "Spreadsheet ID",
-        "resource_locator" => @spreadsheet_locator,
-        "ui" => %{
-          "component" => "resource_locator",
-          "resource_locator" => @spreadsheet_locator
-        }
-      },
-      "sheet_name" => %{
-        "type" => "string",
-        "title" => "Sheet Name",
-        "default" => "",
-        "ui" => %{"component" => "hidden"}
-      },
-      "table_id" => %{
-        "type" => "string",
-        "title" => "Table ID",
-        "default" => "",
-        "ui" => %{"component" => "hidden"}
-      },
-      "values" => %{
-        "type" => "object",
-        "title" => "Row Values",
-        "description" => "Map a value to each column in your sheet.",
-        "depends_on" => @values_depends_on,
-        "display" => @field_display["values"],
-        "resource_mapper" => @row_values_mapper,
-        "ui" => %{
-          "component" => "resource_mapper",
-          "resolver" => Fizz.Integrations.Google.Sheets.ColumnsResolver,
-          "depends_on" => @values_depends_on,
-          "resource_mapper" => @row_values_mapper
-        }
-      }
-    }
+  @fields [
+    Fields.credential(GoogleOAuth.provider_id(), :oauth,
+      key: "credential_ref",
+      label: "Google Account",
+      requirement_key: "auth",
+      required?: true,
+      order: 10
+    ),
+    Fields.resource_locator("spreadsheet_id", @spreadsheet_locator,
+      label: "Spreadsheet ID",
+      required?: true,
+      order: 20
+    ),
+    Fields.hidden("sheet_name",
+      label: "Sheet Name",
+      default: "",
+      order: 30
+    ),
+    Fields.hidden("table_id",
+      label: "Table ID",
+      default: "",
+      order: 40
+    ),
+    Fields.resource_mapper("values", @row_values_mapper,
+      label: "Row Values",
+      description: "Map a value to each column in your sheet.",
+      required?: true,
+      resolver: Fizz.Integrations.Google.Sheets.ColumnsResolver,
+      depends_on: @values_depends_on,
+      display: @field_display["values"],
+      order: 50
+    )
+  ]
+  @default_config Fields.defaults(@fields)
+  @retry_policy %RetryPolicy{
+    max_attempts: 3,
+    backoff: :exponential,
+    initial_delay_ms: 1_000,
+    max_delay_ms: 60_000,
+    retry_on: [:rate_limit, :network, :transient]
   }
+
+  @config_schema Fields.to_schema(@fields)
 
   @output_schema %{
     "type" => "object",
@@ -166,19 +158,8 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
       integration: "google_sheets",
       kind: :action,
       module: __MODULE__,
-      auth: [
-        %CredentialRequirement{
-          key: "credential_ref",
-          provider: GoogleOAuth.provider_id(),
-          auth_type: :oauth,
-          requirement_key: "auth",
-          required: true,
-          label: "Google Account"
-        }
-      ],
       default_config: default_config(),
-      depends_on: %{"values" => @values_depends_on},
-      field_display: @field_display,
+      fields: fields(),
       display: %{
         name: "Google Sheets — Append Row",
         category: "Documents",
@@ -187,14 +168,15 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRow do
       },
       config_schema: config_schema(),
       output_schema: output_schema(),
-      resource_locators: %{"spreadsheet_id" => @spreadsheet_locator},
-      resource_mappers: %{"values" => @row_values_mapper},
-      retry: %RetryPolicy{max_attempts: 1, backoff: :none}
+      retry: @retry_policy
     }
   end
 
   @doc false
   def default_config, do: @default_config
+
+  @doc false
+  def fields, do: @fields
 
   @doc false
   def config_schema, do: @config_schema

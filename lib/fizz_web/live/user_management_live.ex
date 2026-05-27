@@ -3,7 +3,7 @@ defmodule FizzWeb.UserManagementLive do
 
   alias Fizz.Accounts
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
-  alias Fizz.Integrations.CredentialSchema
+  alias Fizz.Fields.Credential
   alias Fizz.Integrations.ProviderCatalog
 
   @user_tabs [
@@ -163,7 +163,7 @@ defmodule FizzWeb.UserManagementLive do
         "provider" => provider.id,
         "provider_label" => provider.label,
         "provider_custom_name" => "",
-        "credentials" => CredentialSchema.defaults(provider.id)
+        "credentials" => Credential.defaults(provider.id)
       }
 
       {:noreply,
@@ -489,7 +489,7 @@ defmodule FizzWeb.UserManagementLive do
       "provider" => provider,
       "provider_label" => provider_label,
       "provider_custom_name" => Map.get(params, "provider_custom_name", ""),
-      "credentials" => CredentialSchema.defaults(provider)
+      "credentials" => Credential.defaults(provider)
     }
 
     to_form(merge_credential_form_params(defaults, params), as: :credential)
@@ -515,7 +515,7 @@ defmodule FizzWeb.UserManagementLive do
         "provider_label" => credential.provider_label || "",
         "provider_custom_name" => credential.provider_custom_name || "",
         "provider" => credential.provider || "",
-        "credentials" => CredentialSchema.defaults(credential.provider)
+        "credentials" => Credential.defaults(credential.provider)
       },
       as: :rotate_credential
     )
@@ -599,7 +599,7 @@ defmodule FizzWeb.UserManagementLive do
   end
 
   defp credential_fields(provider_id) when is_binary(provider_id),
-    do: CredentialSchema.fields(provider_id)
+    do: Credential.fields(provider_id)
 
   defp credential_fields(_provider_id), do: []
 

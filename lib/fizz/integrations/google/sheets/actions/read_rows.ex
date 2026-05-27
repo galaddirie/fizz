@@ -5,10 +5,9 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
 
   @behaviour Fizz.Integrations.Operation
 
-  alias Fizz.Credentials.Requirement, as: CredentialFieldRequirement
+  alias Fizz.Fields
 
   alias Fizz.Integrations.{
-    CredentialRequirement,
     OperationDefinition,
     Providers.GoogleOAuth,
     RetryPolicy
@@ -17,30 +16,29 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
   alias Fizz.Integrations.Google.Sheets.Client
   alias Fizz.Integrations.Google.Sheets.Rows
 
-  @credential_requirement CredentialFieldRequirement.oauth(GoogleOAuth.provider_id())
+  @fields [
+    Fields.credential(GoogleOAuth.provider_id(), :oauth,
+      key: "credential_ref",
+      label: "Google Account",
+      requirement_key: "auth",
+      required?: true,
+      order: 10
+    ),
+    Fields.string("spreadsheet_id",
+      label: "Spreadsheet ID",
+      required?: true,
+      order: 20
+    ),
+    Fields.string("range",
+      label: "Range",
+      description: "A1 notation range, e.g. Sheet1!A1:Z100",
+      default: "Sheet1!A:Z",
+      order: 30
+    )
+  ]
 
-  @default_config %{
-    "credential_ref" => CredentialFieldRequirement.declaration(@credential_requirement)
-  }
-
-  @config_schema %{
-    "type" => "object",
-    "required" => ["credential_ref", "spreadsheet_id"],
-    "properties" => %{
-      "credential_ref" =>
-        CredentialFieldRequirement.schema(@credential_requirement, title: "Google Account"),
-      "spreadsheet_id" => %{
-        "type" => "string",
-        "title" => "Spreadsheet ID"
-      },
-      "range" => %{
-        "type" => "string",
-        "title" => "Range",
-        "description" => "A1 notation range, e.g. Sheet1!A1:Z100",
-        "default" => "Sheet1!A:Z"
-      }
-    }
-  }
+  @default_config Fields.defaults(@fields)
+  @config_schema Fields.to_schema(@fields)
 
   @output_schema %{
     "type" => "object",
@@ -48,6 +46,13 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
       "rows" => %{"type" => "array", "description" => "List of row objects with header keys"},
       "total_rows" => %{"type" => "integer"}
     }
+  }
+  @retry_policy %RetryPolicy{
+    max_attempts: 3,
+    backoff: :exponential,
+    initial_delay_ms: 1_000,
+    max_delay_ms: 60_000,
+    retry_on: [:rate_limit, :network, :transient]
   }
 
   @impl true
@@ -63,17 +68,8 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
       integration: "google_sheets",
       kind: :action,
       module: __MODULE__,
-      auth: [
-        %CredentialRequirement{
-          key: "credential_ref",
-          provider: GoogleOAuth.provider_id(),
-          auth_type: :oauth,
-          requirement_key: "auth",
-          required: true,
-          label: "Google Account"
-        }
-      ],
       default_config: default_config(),
+      fields: fields(),
       display: %{
         name: "Google Sheets — Read Rows",
         category: "Documents",
@@ -82,12 +78,15 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.ReadRows do
       },
       config_schema: config_schema(),
       output_schema: output_schema(),
-      retry: %RetryPolicy{max_attempts: 1, backoff: :none}
+      retry: @retry_policy
     }
   end
 
   @doc false
   def default_config, do: @default_config
+
+  @doc false
+  def fields, do: @fields
 
   @doc false
   def config_schema, do: @config_schema

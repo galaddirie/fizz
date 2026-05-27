@@ -1,6 +1,7 @@
 defmodule Fizz.Integrations.OperationExecutorTest do
   use ExUnit.Case, async: true
 
+  alias Fizz.Integrations.OperationError
   alias Fizz.Integrations.OperationExecutor
   alias Fizz.Steps.Executors.Behaviour
   alias Fizz.Workflows.ExecutionContext
@@ -12,7 +13,7 @@ defmodule Fizz.Integrations.OperationExecutorTest do
         "values" => ["Ada", "Lovelace"]
       }
 
-      assert {:error, :credential_ref_required} =
+      assert {:error, %OperationError{code: :credential_ref_required, category: :credential}} =
                Behaviour.execute("google_sheets_append_row", config, %{}, %{})
     end
 
@@ -29,7 +30,7 @@ defmodule Fizz.Integrations.OperationExecutorTest do
         workos_organization_id: "org_123"
       }
 
-      assert {:error, :credential_ref_required} =
+      assert {:error, %OperationError{code: :credential_ref_required, category: :credential}} =
                OperationExecutor.execute(config, %{}, context)
     end
 
@@ -38,7 +39,7 @@ defmodule Fizz.Integrations.OperationExecutorTest do
         "spreadsheet_id" => "sheet_123"
       }
 
-      assert {:error, :credential_ref_required} =
+      assert {:error, %OperationError{code: :credential_ref_required, category: :credential}} =
                OperationExecutor.execute(config, %{}, %{
                  operation_id: "google_sheets.read_rows",
                  type_id: "google_sheets_read_rows"
@@ -74,8 +75,20 @@ defmodule Fizz.Integrations.OperationExecutorTest do
         workos_organization_id: "org_123"
       }
 
-      assert {:error, :credential_ref_required} =
+      assert {:error, %OperationError{code: :credential_ref_required, category: :credential}} =
                OperationExecutor.execute(config, %{}, execution_context)
+    end
+
+    test "normalizes raw operation failures" do
+      assert {:error, %OperationError{} = error} =
+               OperationExecutor.execute(
+                 %{"spreadsheet_id" => "sheet_123", "values" => "not-a-row"},
+                 %{},
+                 %{type_id: "google_sheets_append_row"}
+               )
+
+      assert error.code == :invalid_row_values
+      assert error.category == :validation
     end
 
     test "returns an error when no operation can be resolved" do

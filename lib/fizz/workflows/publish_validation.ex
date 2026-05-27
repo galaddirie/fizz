@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.PublishValidation do
   @moduledoc false
 
   alias Fizz.Graph
-  alias Fizz.Credentials.Declaration
+  alias Fizz.Fields.Credential
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Steps.Registry
   alias Fizz.Steps.Type
@@ -217,14 +217,14 @@ defmodule Fizz.Workflows.PublishValidation do
 
   defp configured_credential_declaration_issues(step, config) do
     config
-    |> Declaration.walk()
+    |> Credential.walk()
     |> Enum.flat_map(fn %{path: path, declaration: declaration} ->
-      case Declaration.validate(declaration) do
+      case Credential.validate(declaration) do
         :ok ->
           []
 
         {:error, message} ->
-          [%{step_id: step.id, field: Declaration.format_path(path), message: message}]
+          [%{step_id: step.id, field: Credential.format_path(path), message: message}]
       end
     end)
   end
@@ -241,7 +241,7 @@ defmodule Fizz.Workflows.PublishValidation do
   end
 
   defp required_credential_value_issues(step, field, value) do
-    case Declaration.declaration?(value) do
+    case Credential.declaration?(value) do
       true ->
         []
 

@@ -1,7 +1,7 @@
 defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   @moduledoc false
 
-  alias Fizz.Credentials.Declaration
+  alias Fizz.Fields.Credential
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.Expressions.AccessPlan
 
@@ -162,7 +162,7 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
 
   defp build_credential_ref(credential_map, step_id) do
     with {:ok, %{requirement_key: requirement_key, provider: provider, auth_type: auth_type}} <-
-           Declaration.normalize(credential_map) do
+           Credential.normalize(credential_map) do
       {:ok,
        %AccessPlan.CredentialRef{
          requirement_key: requirement_key,

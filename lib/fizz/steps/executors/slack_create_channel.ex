@@ -14,12 +14,15 @@ defmodule Fizz.Steps.Executors.SlackCreateChannel do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.SlackOAuth
-  alias Fizz.Credentials.Requirement, as: CredentialRequirement
+  alias Fizz.Fields
 
-  @credential_requirement CredentialRequirement.oauth(SlackOAuth.provider_id())
+  @credential_field Fields.credential(SlackOAuth.provider_id(), :oauth,
+                      key: "credential_ref",
+                      requirement_key: "auth"
+                    )
 
   @default_config %{
-    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
+    "credential_ref" => Fields.default_value(@credential_field)
   }
 
   @config_schema %{
@@ -27,8 +30,8 @@ defmodule Fizz.Steps.Executors.SlackCreateChannel do
     "required" => ["channel_name"],
     "properties" => %{
       "credential_ref" =>
-        CredentialRequirement.schema(@credential_requirement,
-          title: "Slack Workspace",
+        Fields.to_schema_property(@credential_field,
+          label: "Slack Workspace",
           description: "Slack workspace. Bound at run time per user."
         ),
       "channel_name" => %{

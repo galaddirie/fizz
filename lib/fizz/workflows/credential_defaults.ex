@@ -1,7 +1,7 @@
 defmodule Fizz.Workflows.CredentialDefaults do
   @moduledoc false
 
-  alias Fizz.Credentials.Declaration
+  alias Fizz.Fields.Credential
   alias Fizz.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.Embeds.Step
   alias Fizz.Workflows.WorkflowDefinitionVersion
@@ -60,7 +60,7 @@ defmodule Fizz.Workflows.CredentialDefaults do
   defp credential_default_config(type_id) do
     type_id
     |> StepRegistry.get_default_config()
-    |> Enum.filter(fn {_field, value} -> Declaration.declaration?(value) end)
+    |> Enum.filter(fn {_field, value} -> Credential.declaration?(value) end)
   end
 
   defp step_config(%Step{config: config}) when is_map(config), do: config

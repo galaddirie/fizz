@@ -12,7 +12,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
   """
 
   alias Fizz.Accounts.Scope
-  alias Fizz.Credentials
+  alias Fizz.Fields.Credential
   alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.WorkflowRun
 
@@ -79,7 +79,7 @@ defmodule Fizz.Workflows.Runtime.ContextBuilder do
   defp maybe_put_scope(context, _scope), do: context
 
   defp maybe_put_credential_resolver(context, %Scope{} = scope, run_or_attrs) do
-    case Credentials.runtime_resolver(scope, run_or_attrs) do
+    case Credential.runtime_resolver(scope, run_or_attrs) do
       {:ok, resolver} -> Map.put(context, :_credential_resolver, resolver)
       {:error, _reason} -> context
     end

@@ -15,14 +15,17 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
 
   alias Fizz.Integrations.Google.Sheets.Triggers.RowChange
   alias Fizz.Integrations.Providers.GoogleOAuth
-  alias Fizz.Credentials.Requirement, as: CredentialRequirement
-  alias Fizz.Credentials.Declaration
+  alias Fizz.Fields
+  alias Fizz.Fields.Credential
   alias Fizz.Triggers.RegistrationSpec
 
-  @credential_requirement CredentialRequirement.oauth(GoogleOAuth.provider_id())
+  @credential_field Fields.credential(GoogleOAuth.provider_id(), :oauth,
+                      key: "credential_ref",
+                      requirement_key: "auth"
+                    )
 
   @default_config %{
-    "credential_ref" => CredentialRequirement.declaration(@credential_requirement),
+    "credential_ref" => Fields.default_value(@credential_field),
     "event_mode" => "row_added_or_updated",
     "sheet_name" => "Sheet1",
     "range" => "A:ZZZ",
@@ -35,8 +38,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
     "type" => "object",
     "required" => ["credential_ref", "spreadsheet_id", "sheet_name"],
     "properties" => %{
-      "credential_ref" =>
-        CredentialRequirement.schema(@credential_requirement, title: "Google Account"),
+      "credential_ref" => Fields.to_schema_property(@credential_field, label: "Google Account"),
       "spreadsheet_id" => %{
         "type" => "string",
         "title" => "Spreadsheet ID"
@@ -130,7 +132,7 @@ defmodule Fizz.Steps.Executors.GoogleSheetsTrigger do
   @impl true
   def validate_config(config) do
     cond do
-      not Declaration.declaration?(Map.get(config, "credential_ref")) ->
+      not Credential.declaration?(Map.get(config, "credential_ref")) ->
         {:error, [credential_ref: "must be a credential declaration"]}
 
       not present?(Map.get(config, "spreadsheet_id")) ->

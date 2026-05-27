@@ -8,6 +8,8 @@ defmodule Fizz.Integrations.CatalogTest do
     StepTypeAdapter
   }
 
+  alias Fizz.Fields
+
   describe "catalog lookups" do
     test "catalog starts under supervision and exposes provider definitions" do
       assert {:ok, provider} = Catalog.provider("google_oauth")
@@ -15,16 +17,20 @@ defmodule Fizz.Integrations.CatalogTest do
       assert provider.type == :oauth
     end
 
-    test "catalog exposes credential, integration, operation, trigger, resolver, and version metadata" do
-      assert {:ok, credential} = Catalog.credential("openai_api_key")
-      assert credential.auth_type == :api_key
-      assert credential.ui_schema["required"] == ["secret"]
-      assert get_in(credential.ui_schema, ["properties", "secret", "writeOnly"]) == true
+    test "catalog exposes provider field, integration, operation, trigger, resolver, and version metadata" do
+      refute function_exported?(Catalog, :credential, 1)
+      refute function_exported?(Catalog, :credentials, 0)
 
-      assert get_in(credential.ui_schema, ["properties", "secret", "ui", "component"]) ==
+      assert {:ok, openai_provider} = Catalog.provider("openai_api_key")
+      credential_schema = Fields.to_schema(openai_provider.credential_fields)
+
+      assert credential_schema["required"] == ["secret"]
+      assert get_in(credential_schema, ["properties", "secret", "writeOnly"]) == true
+
+      assert get_in(credential_schema, ["properties", "secret", "ui", "component"]) ==
                "password"
 
-      assert credential.test["operation"] == "check_connection"
+      assert openai_provider.credential_test["operation"] == "check_connection"
 
       assert {:ok, integration} = Catalog.integration("google_sheets")
       assert integration.module == Fizz.Integrations.Google.Sheets
@@ -65,36 +71,42 @@ defmodule Fizz.Integrations.CatalogTest do
       refute Fizz.Integrations.Google.Sheets.Actions.ReadRows in Manifest.step_executor_modules()
     end
 
-    test "manifest operation definitions validate and include credential requirements" do
+    test "manifest operation definitions validate and include typed fields" do
       assert %OperationDefinition{} =
                operation =
                Enum.find(Manifest.operation_definitions(), &(&1.id == "google_sheets.append_row"))
 
-      assert [
-               %Fizz.Integrations.CredentialRequirement{
-                 key: "credential_ref",
-                 provider: "google_oauth",
-                 auth_type: :oauth
-               }
-             ] = operation.auth
+      credential_field = Enum.find(operation.fields, &(&1.key == "credential_ref"))
 
-      assert operation.depends_on["values"] == [
+      assert credential_field.type == :credential
+      assert credential_field.credential.provider == "google_oauth"
+      assert credential_field.credential.auth_type == :oauth
+
+      values_field = Enum.find(operation.fields, &(&1.key == "values"))
+
+      assert values_field.depends_on == [
                "credential_ref",
                "spreadsheet_id",
                "sheet_name",
                "table_id"
              ]
 
-      assert operation.resource_locators["spreadsheet_id"]["kind"] ==
+      spreadsheet_field = Enum.find(operation.fields, &(&1.key == "spreadsheet_id"))
+
+      assert spreadsheet_field.resource_locator["kind"] ==
                "google_sheets.spreadsheet"
 
-      assert operation.resource_mappers["values"]["kind"] == "google_sheets.row_values"
+      assert values_field.resource_mapper["kind"] == "google_sheets.row_values"
 
-      assert operation.resource_mappers["values"]["lookups"]["primary_resource"]["mode"] ==
+      assert values_field.resource_mapper["lookups"]["primary_resource"]["mode"] ==
                "sheets"
 
-      assert operation.resource_mappers["values"]["lookups"]["schema_resource"]["mode"] ==
+      assert values_field.resource_mapper["lookups"]["schema_resource"]["mode"] ==
                "tables"
+
+      assert operation.retry.max_attempts == 3
+      assert operation.retry.backoff == :exponential
+      assert operation.retry.retry_on == [:rate_limit, :network, :transient]
     end
   end
 

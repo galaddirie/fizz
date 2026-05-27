@@ -6,8 +6,7 @@ defmodule Fizz.Triggers.RegistrationManager do
   import Ecto.Query
 
   alias Fizz.Accounts.Scope
-  alias Fizz.Credentials
-  alias Fizz.Credentials.Declaration, as: CredentialDeclaration
+  alias Fizz.Fields.Credential
   alias Fizz.Repo
   alias Fizz.Steps.Executors.Behaviour, as: StepExecutorBehaviour
   alias Fizz.Triggers
@@ -150,16 +149,16 @@ defmodule Fizz.Triggers.RegistrationManager do
       workos_organization_id: context.workos_organization_id
     }
 
-    with {:ok, resolver} <- Credentials.runtime_resolver(scope, run_attrs),
+    with {:ok, resolver} <- Credential.runtime_resolver(scope, run_attrs),
          {:ok, config} <- resolve_credentials(trigger.config, trigger.step_id, resolver) do
       {:ok, config}
     end
   end
 
   defp resolve_credentials(value, step_id, resolver) when is_map(value) do
-    if CredentialDeclaration.declaration?(value) do
+    if Credential.declaration?(value) do
       with {:ok, %{requirement_key: requirement_key, provider: provider, auth_type: auth_type}} <-
-             CredentialDeclaration.normalize(value),
+             Credential.normalize(value),
            {:ok, resolved} <- resolver.(requirement_key, step_id, provider, auth_type) do
         {:ok, resolved}
       end
@@ -215,7 +214,7 @@ defmodule Fizz.Triggers.RegistrationManager do
       organization_id: context.workos_organization_id
     }
 
-    case Credentials.readiness(definition_version, context.user_id, scope) do
+    case Credential.readiness(definition_version, context.user_id, scope) do
       :ready ->
         []
 

@@ -119,6 +119,8 @@ defmodule Fizz.Integrations.CatalogGuardrailsTest do
     {"google_sheets_append_row", "spreadsheet_id", "resource_locator"},
     {"google_sheets_append_row", "table_id", "hidden"},
     {"google_sheets_append_row", "values", "resource_mapper"},
+    {"google_sheets_read_rows", "range", "string"},
+    {"google_sheets_read_rows", "spreadsheet_id", "string"},
     {"manual_input", "test_data", "json"}
   ]
 

@@ -1,8 +1,8 @@
-defmodule Fizz.Credentials.OptionsResolverTest do
+defmodule Fizz.Fields.CredentialOptionsTest do
   use Fizz.DataCase, async: true
 
   alias Fizz.Accounts.{ApiCredential, Scope}
-  alias Fizz.Credentials.OptionsResolver
+  alias Fizz.Fields.Credential
 
   import Fizz.AccountsFixtures
 
@@ -19,7 +19,7 @@ defmodule Fizz.Credentials.OptionsResolverTest do
         insert_api_credential!(user.id, organization_id, "anthropic_api_key", "Anthropic Primary")
 
       assert {:ok, options} =
-               OptionsResolver.resolve(%{
+               Credential.resolve(%{
                  q: "",
                  params: %{
                    "provider_filter" => ["openai_api_key"],
@@ -47,7 +47,7 @@ defmodule Fizz.Credentials.OptionsResolverTest do
         insert_api_credential!(user.id, organization_id, "openai_api_key", "OpenAI Staging")
 
       assert {:ok, options} =
-               OptionsResolver.resolve(%{
+               Credential.resolve(%{
                  q: "production",
                  params: %{
                    "provider_filter" => ["openai_api_key"],

@@ -1,9 +1,9 @@
-defmodule Fizz.Credentials.WorkOSOAuthAutobindTest do
+defmodule Fizz.Fields.CredentialWorkOSOAuthAutobindTest do
   use Fizz.DataCase, async: false
 
   alias Fizz.Accounts.OauthConnection
   alias Fizz.Repo
-  alias Fizz.Credentials
+  alias Fizz.Fields.Credential
   alias Fizz.Workflows
   alias Fizz.Workflows.Readiness
   alias Fizz.WorkflowsFixtures
@@ -68,7 +68,7 @@ defmodule Fizz.Credentials.WorkOSOAuthAutobindTest do
     assert connection.scopes == ["https://www.googleapis.com/auth/spreadsheets"]
 
     assert [binding] =
-             Credentials.list_for_user(
+             Credential.list_for_user(
                scope.organization_id,
                version.workflow_definition_id,
                scope.user.id

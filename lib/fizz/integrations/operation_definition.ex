@@ -3,7 +3,8 @@ defmodule Fizz.Integrations.OperationDefinition do
   Metadata-first definition for one executable integration operation.
   """
 
-  alias Fizz.Integrations.{CredentialRequirement, RetryPolicy}
+  alias Fizz.Fields.Definition, as: FieldDefinition
+  alias Fizz.Integrations.RetryPolicy
 
   @enforce_keys [
     :id,
@@ -24,16 +25,12 @@ defmodule Fizz.Integrations.OperationDefinition do
     :integration,
     :kind,
     :module,
-    auth: [],
     default_config: %{},
-    depends_on: %{},
-    field_display: %{},
+    fields: [],
     input_schema: %{"type" => "object"},
     display: %{},
     config_schema: %{},
     output_schema: %{},
-    resource_locators: %{},
-    resource_mappers: %{},
     retry: %RetryPolicy{}
   ]
 
@@ -45,16 +42,12 @@ defmodule Fizz.Integrations.OperationDefinition do
           integration: String.t(),
           kind: :action | :trigger,
           module: module(),
-          auth: [CredentialRequirement.t()],
           default_config: map(),
-          depends_on: map(),
-          field_display: map(),
+          fields: [FieldDefinition.t()],
           input_schema: map(),
           display: map(),
           config_schema: map(),
           output_schema: map(),
-          resource_locators: map(),
-          resource_mappers: map(),
           retry: RetryPolicy.t()
         }
 end

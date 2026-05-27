@@ -14,14 +14,17 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
   @behaviour Fizz.Steps.Executors.Behaviour
 
   alias Fizz.Integrations.Providers.GitHubOAuth
-  alias Fizz.Credentials.Requirement, as: CredentialRequirement
+  alias Fizz.Fields
 
-  @credential_requirement CredentialRequirement.oauth(GitHubOAuth.provider_id())
+  @credential_field Fields.credential(GitHubOAuth.provider_id(), :oauth,
+                      key: "credential_ref",
+                      requirement_key: "auth"
+                    )
 
   @default_config %{
     "base" => "main",
     "draft" => false,
-    "credential_ref" => CredentialRequirement.declaration(@credential_requirement)
+    "credential_ref" => Fields.default_value(@credential_field)
   }
 
   @config_schema %{
@@ -29,8 +32,8 @@ defmodule Fizz.Steps.Executors.GitHubCreatePR do
     "required" => ["repository", "title", "head", "base"],
     "properties" => %{
       "credential_ref" =>
-        CredentialRequirement.schema(@credential_requirement,
-          title: "GitHub Account",
+        Fields.to_schema_property(@credential_field,
+          label: "GitHub Account",
           description: "GitHub account. Bound at run time per user."
         ),
       "repository" => %{

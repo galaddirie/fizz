@@ -24,6 +24,6 @@ defmodule Fizz.Integrations.AuthProviderCatalog do
 
   @impl true
   def credential_secret_value(provider_id, attrs) do
-    Fizz.Integrations.CredentialSchema.secret_value(provider_id, attrs)
+    Fizz.Fields.Credential.secret_value(provider_id, attrs)
   end
 end

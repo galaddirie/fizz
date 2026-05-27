@@ -6,6 +6,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   alias Fizz.Accounts.Scope
   alias Fizz.Accounts.User
   alias Fizz.Integrations
+  alias Fizz.Integrations.OperationError
   alias Fizz.Integrations.Providers.GoogleOAuth
   alias Fizz.Repo
   alias Fizz.Workflows.ExecutionContext
@@ -13,9 +14,10 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   @sheets_base_url "https://sheets.googleapis.com/v4"
 
   @type execution_context :: ExecutionContext.t() | map()
+  @type error_result :: {:error, OperationError.t()}
 
   @spec get_values(map(), execution_context(), String.t(), keyword()) ::
-          {:ok, [list()]} | {:backoff, term()} | {:error, term()}
+          {:ok, [list()]} | error_result()
   def get_values(params, context, range, opts \\ []) do
     query =
       %{
@@ -37,7 +39,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   end
 
   @spec get_headers(map(), execution_context(), keyword()) ::
-          {:ok, [String.t()]} | {:backoff, term()} | {:error, term()}
+          {:ok, [String.t()]} | error_result()
   def get_headers(params, context, opts \\ []) do
     sheet_name = Keyword.get(opts, :sheet_name, "Sheet1")
     header_row = Keyword.get(opts, :header_row, 1)
@@ -51,7 +53,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   end
 
   @spec get_sheet_names(map(), execution_context(), keyword()) ::
-          {:ok, [String.t()]} | {:backoff, term()} | {:error, term()}
+          {:ok, [String.t()]} | error_result()
   def get_sheet_names(params, context, opts \\ []) do
     query = %{fields: Keyword.get(opts, :fields, "sheets.properties.title")}
 
@@ -69,7 +71,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   end
 
   @spec get_tables(map(), execution_context(), keyword()) ::
-          {:ok, [map()]} | {:backoff, term()} | {:error, term()}
+          {:ok, [map()]} | error_result()
   def get_tables(params, context, opts \\ []) do
     query = %{
       fields:
@@ -99,12 +101,12 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   end
 
   @spec get_table_headers(map(), execution_context(), String.t(), keyword()) ::
-          {:ok, [String.t()]} | {:backoff, term()} | {:error, term()}
+          {:ok, [String.t()]} | error_result()
   def get_table_headers(params, context, table_id, opts \\ []) when is_binary(table_id) do
     with {:ok, tables} <- get_tables(params, context, opts) do
       case Enum.find(tables, &(Map.get(&1, "id") == table_id)) do
         nil ->
-          {:error, :table_not_found}
+          {:error, OperationError.normalize(:table_not_found, source: :google_sheets)}
 
         table ->
           {:ok, Enum.map(Map.get(table, "columns", []), &Map.get(&1, "label"))}
@@ -121,7 +123,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   end
 
   @spec append_values(map(), execution_context(), String.t(), [list()], keyword()) ::
-          {:ok, map()} | {:backoff, term()} | {:error, term()}
+          {:ok, map()} | error_result()
   def append_values(params, context, range, rows, opts \\ [])
       when is_list(rows) do
     query =
@@ -145,7 +147,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   end
 
   @spec append_table_values(map(), execution_context(), String.t(), [list()], keyword()) ::
-          {:ok, map()} | {:backoff, term()} | {:error, term()}
+          {:ok, map()} | error_result()
   def append_table_values(params, context, table_id, rows, _opts \\ [])
       when is_binary(table_id) and is_list(rows) do
     body = %{
@@ -179,7 +181,8 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
         method: method,
         url: url,
         headers: [{"authorization", "Bearer #{Keyword.fetch!(opts, :token)}"}],
-        params: Keyword.get(opts, :params, %{})
+        params: Keyword.get(opts, :params, %{}),
+        retry: false
       ]
       |> maybe_put_json(Keyword.get(opts, :json))
       |> Keyword.merge(Application.get_env(:fizz, :google_sheets_req_options, []))
@@ -188,14 +191,11 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
-      {:ok, %{status: 429, headers: headers, body: body}} ->
-        {:backoff, %{status: 429, retry_after_ms: retry_after_ms(headers), body: body}}
-
-      {:ok, %{status: status, body: body}} ->
-        {:error, %{status: status, body: body}}
+      {:ok, response} ->
+        {:error, OperationError.http(response, source: :google_sheets)}
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, OperationError.network(reason, source: :google_sheets)}
     end
   end
 
@@ -211,6 +211,12 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
                credential_ref
              ) do
         {:ok, auth.token_result.access_token}
+      else
+        {:error, %OperationError{}} = error ->
+          error
+
+        {:error, reason} ->
+          {:error, OperationError.normalize(reason, source: :google_sheets)}
       end
     end
   end
@@ -221,7 +227,8 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   defp credential_ref(%{credential_ref: credential_ref}) when is_map(credential_ref),
     do: {:ok, credential_ref}
 
-  defp credential_ref(_params), do: {:error, :credential_ref_required}
+  defp credential_ref(_params),
+    do: {:error, OperationError.normalize(:credential_ref_required, source: :google_sheets)}
 
   defp scope_from_context(%ExecutionContext{scope: %Scope{} = scope}), do: {:ok, scope}
 
@@ -242,7 +249,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
          %User{} = user <- Repo.get(User, user_id) do
       {:ok, %Scope{user: user, actor: :user, organization_id: organization_id}}
     else
-      nil -> {:error, :user_not_found}
+      nil -> {:error, OperationError.normalize(:user_not_found, source: :google_sheets)}
       {:error, _reason} = error -> error
     end
   end
@@ -250,7 +257,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   defp context_string(context, key) when is_map(context) and is_atom(key) do
     case context_value(context, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, {:missing_context, key}}
+      _ -> {:error, OperationError.normalize({:missing_context, key}, source: :google_sheets)}
     end
   end
 
@@ -288,7 +295,7 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
   defp fetch_string(map, key) when is_map(map) and is_binary(key) do
     case Map.get(map, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, {:missing_param, key}}
+      _ -> {:error, OperationError.normalize({:missing_param, key}, source: :google_sheets)}
     end
   end
 
@@ -563,24 +570,4 @@ defmodule Fizz.Integrations.Google.Sheets.Client do
 
   defp maybe_put_json(opts, nil), do: opts
   defp maybe_put_json(opts, json), do: Keyword.put(opts, :json, json)
-
-  defp retry_after_ms(headers) do
-    headers
-    |> Enum.find_value(fn
-      {"retry-after", value} -> parse_retry_after(value)
-      {"Retry-After", value} -> parse_retry_after(value)
-      _header -> nil
-    end)
-    |> case do
-      nil -> :timer.minutes(1)
-      ms -> ms
-    end
-  end
-
-  defp parse_retry_after(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {seconds, ""} when seconds >= 0 -> :timer.seconds(seconds)
-      _ -> nil
-    end
-  end
 end

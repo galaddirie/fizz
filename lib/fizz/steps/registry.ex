@@ -43,13 +43,14 @@ defmodule Fizz.Steps.Registry do
 
   use GenServer
 
+  alias Fizz.Fields
   alias Fizz.Integrations.StepTypeAdapter
   alias Fizz.Steps.Type
 
   require Logger
 
   @ets_table :fizz_step_types
-  @supported_ui_components ~w(credential hidden json number resource_locator resource_mapper search select string)
+  @supported_ui_components Fields.supported_components()
 
   # ============================================================================
   # Client API

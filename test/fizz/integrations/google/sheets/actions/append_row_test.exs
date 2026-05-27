@@ -2,6 +2,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRowTest do
   use ExUnit.Case, async: true
 
   alias Fizz.Integrations.Google.Sheets.Actions.AppendRow
+  alias Fizz.Integrations.OperationError
   alias Fizz.Integrations.OperationExecutor
 
   describe "execute/3" do
@@ -11,7 +12,7 @@ defmodule Fizz.Integrations.Google.Sheets.Actions.AppendRowTest do
         "values" => %{"A" => "1"}
       }
 
-      assert {:error, :credential_ref_required} =
+      assert {:error, %OperationError{code: :credential_ref_required, category: :credential}} =
                OperationExecutor.execute(config, %{}, %{type_id: "google_sheets_append_row"})
     end
   end

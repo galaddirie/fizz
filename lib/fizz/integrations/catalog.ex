@@ -6,7 +6,7 @@ defmodule Fizz.Integrations.Catalog do
   use GenServer
 
   @table :fizz_integration_catalog
-  @kinds [:provider, :credential, :integration, :operation, :trigger, :resolver, :version]
+  @kinds [:provider, :integration, :operation, :trigger, :resolver, :version]
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -17,12 +17,6 @@ defmodule Fizz.Integrations.Catalog do
 
   @spec provider(String.t()) :: {:ok, map() | struct()} | {:error, :not_found}
   def provider(id), do: get(:provider, id)
-
-  @spec credentials() :: [map() | struct()]
-  def credentials, do: list(:credential)
-
-  @spec credential(String.t()) :: {:ok, map() | struct()} | {:error, :not_found}
-  def credential(id), do: get(:credential, id)
 
   @spec integrations() :: [map() | struct()]
   def integrations, do: list(:integration)
@@ -119,7 +113,6 @@ defmodule Fizz.Integrations.Catalog do
     definitions = manifest.definitions()
 
     insert_all(:provider, definitions.providers, & &1.id)
-    insert_all(:credential, definitions.credentials, & &1.id)
     insert_all(:integration, definitions.integrations, & &1.id)
     insert_all(:operation, definitions.operations, & &1.id)
     insert_all(:trigger, definitions.triggers, & &1.id)
