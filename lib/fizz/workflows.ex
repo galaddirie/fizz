@@ -558,16 +558,32 @@ defmodule Fizz.Workflows do
     with {:ok, run} <- fetch_run(run_id) do
       case run.status do
         :running ->
-          {:ok, run}
+          do_clear_run_error(run)
 
         status when status in [:sleeping, :passivated] ->
           run
           |> WorkflowRun.transition_status(:running)
+          |> Ecto.Changeset.change(error: nil)
           |> Repo.update()
 
         _ ->
           {:error, :invalid_transition}
       end
+    end
+  end
+
+  @doc false
+  def record_run_retry(run_id, error_payload, opts \\ []) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id),
+         {:ok, changeset} <- retry_changeset(run, error_payload, Keyword.get(opts, :sleep?)) do
+      Repo.update(changeset)
+    end
+  end
+
+  @doc false
+  def clear_run_error(run_id) when is_binary(run_id) do
+    with {:ok, run} <- fetch_run(run_id) do
+      do_clear_run_error(run)
     end
   end
 
@@ -1064,6 +1080,38 @@ defmodule Fizz.Workflows do
       |> Ecto.Changeset.change(attrs)
       |> Repo.update()
     end
+  end
+
+  defp retry_changeset(%WorkflowRun{status: :running} = run, error_payload, true) do
+    changeset =
+      run
+      |> WorkflowRun.transition_status(:sleeping)
+      |> Ecto.Changeset.change(
+        error: normalize_payload(error_payload),
+        last_active_at: DateTime.utc_now()
+      )
+
+    {:ok, changeset}
+  end
+
+  defp retry_changeset(%WorkflowRun{} = run, error_payload, _sleep?) do
+    if WorkflowRun.terminal?(run) do
+      {:error, :invalid_transition}
+    else
+      {:ok,
+       Ecto.Changeset.change(run,
+         error: normalize_payload(error_payload),
+         last_active_at: DateTime.utc_now()
+       )}
+    end
+  end
+
+  defp do_clear_run_error(%WorkflowRun{error: nil} = run), do: {:ok, run}
+
+  defp do_clear_run_error(%WorkflowRun{} = run) do
+    run
+    |> Ecto.Changeset.change(error: nil)
+    |> Repo.update()
   end
 
   defp fetch_run(run_id) when is_binary(run_id) do

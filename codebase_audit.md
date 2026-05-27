@@ -34,8 +34,9 @@ Still open:
 
 - provider modules still duplicate OAuth/API-key declaration boilerplate
 - many non-Google integrations are still executor-first rather than operation-first
-- execution context and Google Sheets operation errors are now normalized; durable retry
-  persistence is still open
+- execution context and Google Sheets operation errors are now normalized; retryable
+  operation failures now persist through `workflow_runs.error` plus durable retry timers,
+  but crash/passivation recovery coverage still needs hardening
 - dynamic field state is reply-based, not durable server-side state
 - Google Sheets append/read operation definitions now own their step metadata directly;
   the old Google Sheets step wrapper executors were deleted

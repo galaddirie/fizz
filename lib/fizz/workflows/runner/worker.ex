@@ -18,6 +18,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   alias Fizz.Workflows
   alias Fizz.Workflows.{DurableTimer, SignalInbox}
   alias Fizz.Workflows.LeaseManager
+  alias Fizz.Workflows.Runner.OperationRetry
   alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.StepExecutionTrace
   alias Fizz.Workflows.Store.{CheckpointStrategy, SqliteStore}
@@ -56,7 +57,8 @@ defmodule Fizz.Workflows.Runner.Worker do
     :status,
     cycle_count: 0,
     active_tasks: %{},
-    local_timers: %{}
+    local_timers: %{},
+    retrying_runnables: %{}
   ]
 
   def child_spec(opts) do
@@ -231,7 +233,7 @@ defmodule Fizz.Workflows.Runner.Worker do
           |> put_in([Access.key!(:active_tasks), ref], task_state)
           |> append_runnable_dispatched_event(task_state)
 
-        maybe_broadcast_step_started(state, task_state.runnable)
+        maybe_broadcast_step_started(state, task_state)
         {:noreply, state}
 
       :error ->
@@ -262,16 +264,20 @@ defmodule Fizz.Workflows.Runner.Worker do
       {task_state, active_tasks} ->
         failed_runnable = Runnable.fail(task_state.runnable, reason)
 
-        state =
-          state
-          |> Map.put(:active_tasks, active_tasks)
-          |> append_runnable_result_event(failed_runnable, task_state)
-          |> apply_runnable(failed_runnable)
-          |> bump_cycle_count()
+        case handle_failed_task(
+               %{state | active_tasks: active_tasks},
+               failed_runnable,
+               task_state
+             ) do
+          {:continue, next_state} ->
+            {:noreply, next_state}
 
-        _ = Workflows.touch_run_activity(state.run_id)
+          {:stop, next_state} ->
+            {:stop, :normal, next_state}
 
-        {:stop, :normal, fail_and_stop(state, reason)}
+          {:error, retry_reason, next_state} ->
+            {:stop, :normal, fail_and_stop(next_state, retry_reason)}
+        end
     end
   end
 
@@ -384,17 +390,26 @@ defmodule Fizz.Workflows.Runner.Worker do
     active_runnable_ids =
       Map.values(state.active_tasks) |> Enum.map(& &1.runnable.id) |> MapSet.new()
 
-    pending_runnables = Enum.reject(runnables, &MapSet.member?(active_runnable_ids, &1.id))
+    retrying_runnable_ids =
+      state.retrying_runnables
+      |> Map.keys()
+      |> MapSet.new()
+
+    unavailable_runnable_ids = MapSet.union(active_runnable_ids, retrying_runnable_ids)
+
+    pending_runnables = Enum.reject(runnables, &MapSet.member?(unavailable_runnable_ids, &1.id))
 
     pending_runnables
     |> Enum.take(local_slots)
     |> Enum.reduce(state, fn runnable, acc -> dispatch_runnable(acc, runnable) end)
   end
 
-  defp dispatch_runnable(state, %Runnable{} = runnable) do
+  defp dispatch_runnable(state, %Runnable{} = runnable, attempt \\ 0)
+       when is_integer(attempt) and attempt >= 0 do
     case RunnableDispatcher.enqueue(state.runnable_dispatcher, state.run_id, self(), runnable) do
       {:ok, ref} ->
         task_state = %{
+          attempt: attempt,
           consumer_pid: nil,
           dispatched_at_us: nil,
           runnable: runnable,
@@ -422,6 +437,16 @@ defmodule Fizz.Workflows.Runner.Worker do
   end
 
   defp process_event(state, {:timer_fired, %DurableTimer{} = timer}) do
+    if OperationRetry.timer?(timer) do
+      process_operation_retry_timer(state, timer)
+    else
+      process_delayed_timer(state, timer)
+    end
+  end
+
+  defp process_event(state, _event), do: {:error, :unsupported_event, state}
+
+  defp process_delayed_timer(state, %DurableTimer{} = timer) do
     with {:ok, runnable} <- delayed_timer_runnable(state.workflow, timer) do
       state =
         state
@@ -444,18 +469,30 @@ defmodule Fizz.Workflows.Runner.Worker do
     end
   end
 
-  defp process_event(state, _event), do: {:error, :unsupported_event, state}
+  defp process_operation_retry_timer(state, %DurableTimer{} = timer) do
+    with {:ok, %{runnable: runnable, attempt: attempt}} <-
+           OperationRetry.decode_timer(timer, state.workflow) do
+      state =
+        state
+        |> cancel_idle_timeout()
+        |> ensure_running_state()
+        |> drop_local_timer(timer.id)
+        |> drop_retrying_runnable(runnable.id)
+        |> dispatch_runnable(runnable, attempt)
+
+      _ = Workflows.touch_run_activity(state.run_id)
+      _ = Workflows.clear_run_error(state.run_id)
+      :ok = Workflows.mark_timer_fired(timer.id)
+
+      {:continue, state}
+    else
+      {:error, reason} ->
+        {:error, reason, state}
+    end
+  end
 
   defp handle_completed_task(state, %Runnable{status: :failed} = executed, task_state) do
-    state =
-      state
-      |> append_runnable_result_event(executed, task_state)
-      |> apply_runnable(executed)
-      |> bump_cycle_count()
-
-    _ = Workflows.touch_run_activity(state.run_id)
-
-    {:stop, fail_and_stop(state, executed.error)}
+    handle_failed_task(state, executed, task_state)
   end
 
   defp handle_completed_task(state, %Runnable{status: :completed} = executed, task_state) do
@@ -492,6 +529,27 @@ defmodule Fizz.Workflows.Runner.Worker do
     dispatch_cycle(state)
   end
 
+  defp handle_failed_task(state, %Runnable{status: :failed} = executed, task_state) do
+    state =
+      state
+      |> append_runnable_result_event(executed, task_state)
+      |> bump_cycle_count()
+
+    _ = Workflows.touch_run_activity(state.run_id)
+
+    case schedule_operation_retry(state, executed, task_state) do
+      {:ok, retry_state} ->
+        {:continue, retry_state}
+
+      :halt ->
+        state = apply_runnable(state, executed)
+        {:stop, fail_and_stop(state, executed.error)}
+
+      {:error, reason, retry_state} ->
+        {:error, reason, apply_runnable(retry_state, executed)}
+    end
+  end
+
   defp handle_timer_intent(state, executed, timer_spec) do
     payload = delayed_timer_payload(executed, timer_spec.output)
 
@@ -517,6 +575,46 @@ defmodule Fizz.Workflows.Runner.Worker do
     else
       {:error, reason} ->
         {:error, reason, state}
+    end
+  end
+
+  defp schedule_operation_retry(state, %Runnable{} = failed_runnable, task_state) do
+    case OperationRetry.next_retry(failed_runnable, failed_runnable.error, task_state.attempt) do
+      {:ok, retry} ->
+        create_operation_retry_timer(state, failed_runnable, retry)
+
+      :halt ->
+        :halt
+    end
+  end
+
+  defp create_operation_retry_timer(state, %Runnable{} = failed_runnable, retry) do
+    fire_at = DateTime.add(DateTime.utc_now(), retry.delay_ms, :millisecond)
+
+    with {:ok, timer} <-
+           Workflows.create_timer(
+             state.run_id,
+             OperationRetry.retry_step_id(failed_runnable),
+             fire_at,
+             timer_name: OperationRetry.timer_name(failed_runnable),
+             payload: retry.timer_payload
+           ),
+         {:ok, _run} <-
+           Workflows.record_run_retry(
+             state.run_id,
+             OperationRetry.run_error_payload(retry, fire_at),
+             sleep?: map_size(state.active_tasks) == 0
+           ) do
+      state =
+        state
+        |> put_retrying_runnable(failed_runnable.id, timer.id)
+        |> maybe_schedule_local_timer(timer)
+        |> maybe_mark_retry_sleeping()
+        |> maybe_checkpoint(%{cycle_count: state.cycle_count, status: :running})
+
+      {:ok, state}
+    else
+      {:error, reason} -> {:error, reason, state}
     end
   end
 
@@ -688,7 +786,7 @@ defmodule Fizz.Workflows.Runner.Worker do
       dispatched_at:
         System.convert_time_unit(task_state.dispatched_at_us, :microsecond, :millisecond),
       policy: SchedulerPolicy.default_policy(),
-      attempt: 0
+      attempt: task_state.attempt
     }
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
@@ -702,12 +800,12 @@ defmodule Fizz.Workflows.Runner.Worker do
       node_hash: Map.get(runnable.node, :hash),
       result_fact: runnable.result,
       completed_at: System.monotonic_time(:millisecond),
-      attempt: 0,
+      attempt: task_state.attempt,
       duration_ms: duration_ms(duration_us),
       duration_us: duration_us
     }
 
-    maybe_broadcast_step_completed(state, runnable, duration_us)
+    maybe_broadcast_step_completed(state, runnable, duration_us, task_state.attempt)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end
@@ -725,11 +823,11 @@ defmodule Fizz.Workflows.Runner.Worker do
       error: error,
       failed_at: System.monotonic_time(:millisecond),
       duration_us: duration_us,
-      attempts: 1,
+      attempts: task_state.attempt + 1,
       failure_action: :halt
     }
 
-    maybe_broadcast_step_failed(state, runnable, duration_us)
+    maybe_broadcast_step_failed(state, runnable, duration_us, task_state.attempt)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end
@@ -754,7 +852,7 @@ defmodule Fizz.Workflows.Runner.Worker do
       duration_us: duration_us
     }
 
-    maybe_broadcast_step_completed(state, runnable, duration_us)
+    maybe_broadcast_step_completed(state, runnable, duration_us, 0)
 
     %{state | workflow: Workflow.append_runnable_events(state.workflow, [event])}
   end
@@ -866,6 +964,30 @@ defmodule Fizz.Workflows.Runner.Worker do
     %{state | local_timers: Map.put(local_timers, timer_id, ref)}
   end
 
+  defp put_retrying_runnable(
+         %__MODULE__{retrying_runnables: retrying_runnables} = state,
+         runnable_id,
+         timer_id
+       ) do
+    %{state | retrying_runnables: Map.put(retrying_runnables, runnable_id, timer_id)}
+  end
+
+  defp drop_retrying_runnable(
+         %__MODULE__{retrying_runnables: retrying_runnables} = state,
+         runnable_id
+       ) do
+    %{state | retrying_runnables: Map.delete(retrying_runnables, runnable_id)}
+  end
+
+  defp maybe_mark_retry_sleeping(%__MODULE__{active_tasks: active_tasks} = state)
+       when map_size(active_tasks) == 0 do
+    state
+    |> maybe_broadcast_status_change(:sleeping)
+    |> Map.put(:status, :sleeping)
+  end
+
+  defp maybe_mark_retry_sleeping(%__MODULE__{} = state), do: state
+
   defp drop_local_timer(%__MODULE__{local_timers: local_timers} = state, timer_id) do
     case Map.pop(local_timers, timer_id) do
       {nil, timers} ->
@@ -903,14 +1025,14 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp normalize_max_concurrency(value) when is_integer(value) and value > 0, do: value
   defp normalize_max_concurrency(_value), do: max(System.schedulers_online(), 1)
 
-  defp maybe_broadcast_step_started(state, %Runnable{} = runnable) do
+  defp maybe_broadcast_step_started(state, %{runnable: %Runnable{} = runnable} = task_state) do
     with {:ok, step_id} <- runnable_step_id(runnable) do
       payload =
         %{
           run_id: state.run_id,
           runnable_id: runnable.id,
           step_id: step_id,
-          attempt: 0,
+          attempt: task_state.attempt,
           input_summary: summarize_value(runnable.input_fact.value),
           input_fact_hash: runnable.input_fact.hash,
           started_at: DateTime.utc_now()
@@ -927,8 +1049,8 @@ defmodule Fizz.Workflows.Runner.Worker do
     end
   end
 
-  defp maybe_broadcast_step_completed(state, %Runnable{} = runnable, duration_us) do
-    case splitter_iteration_payloads(state.run_id, runnable, duration_us) do
+  defp maybe_broadcast_step_completed(state, %Runnable{} = runnable, duration_us, attempt) do
+    case splitter_iteration_payloads(state.run_id, runnable, duration_us, attempt) do
       {:ok, payloads} ->
         Enum.each(payloads, fn payload ->
           _ = broadcast(state.run_id, {:step_completed, payload})
@@ -945,7 +1067,7 @@ defmodule Fizz.Workflows.Runner.Worker do
               run_id: state.run_id,
               runnable_id: runnable.id,
               step_id: step_id,
-              attempt: 0,
+              attempt: attempt,
               input_summary: summarize_value(runnable.input_fact.value),
               input_fact_hash: runnable.input_fact.hash,
               output_item_count: output_item_count(output),
@@ -963,14 +1085,14 @@ defmodule Fizz.Workflows.Runner.Worker do
     end
   end
 
-  defp maybe_broadcast_step_failed(state, %Runnable{} = runnable, duration_us) do
+  defp maybe_broadcast_step_failed(state, %Runnable{} = runnable, duration_us, attempt) do
     with {:ok, step_id} <- runnable_step_id(runnable) do
       payload =
         %{
           run_id: state.run_id,
           runnable_id: runnable.id,
           step_id: step_id,
-          attempt: 0,
+          attempt: attempt,
           input_summary: summarize_value(runnable.input_fact.value),
           input_fact_hash: runnable.input_fact.hash,
           error: encode_error(runnable.error),
@@ -1060,7 +1182,8 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp splitter_iteration_payloads(
          run_id,
          %Runnable{node: %FanOut{name: name}} = runnable,
-         duration_us
+         duration_us,
+         attempt
        ) do
     with {:ok, step_id} <- StepExecutionTrace.splitter_fan_out_step_id(name),
          emitted_facts when emitted_facts != [] <- splitter_emitted_facts(runnable.result) do
@@ -1078,7 +1201,7 @@ defmodule Fizz.Workflows.Runner.Worker do
             runnable_id: runnable.id,
             execution_key: "#{runnable.id}:#{item_index}",
             step_id: step_id,
-            attempt: 0,
+            attempt: attempt,
             input_summary: summarize_value(runnable.input_fact.value),
             input_fact_hash: runnable.input_fact.hash,
             output_item_count: 1,
@@ -1098,7 +1221,7 @@ defmodule Fizz.Workflows.Runner.Worker do
     end
   end
 
-  defp splitter_iteration_payloads(_run_id, _runnable, _duration_us), do: :error
+  defp splitter_iteration_payloads(_run_id, _runnable, _duration_us, _attempt), do: :error
 
   defp splitter_emitted_facts(result) when is_list(result) do
     Enum.filter(result, &match?(%Fact{}, &1))

@@ -8,8 +8,8 @@ This plan is informed by n8n, but translated into idiomatic Elixir/Phoenix/OTP. 
 - `9ef8cfd` completed Phase 5: dynamic field resolver dispatch plus generic resource locator/mapper UI support.
 - `d824f3d` deleted the generic slots system and replaced it with first-class credential declarations, credential bindings, and runtime credential resolution.
 - `4944cce` moved Google Sheets operation metadata into operation modules, deleted the old Google Sheets step wrappers, and dispatches operations with typed execution context.
-- Current uncommitted work adds normalized operation errors, normalizes Google Sheets client failures, publishes declarative retry metadata for Google Sheets operations, and consolidates credential declarations/schema/defaults into the shared `Fizz.Fields` contract.
-- The next implementation slice should continue Phase 6 by deciding how the runner persists retryable operation failures before adding durable Oban retries.
+- Current uncommitted work consolidates credential declarations/schema/defaults into the shared `Fizz.Fields` contract, adds normalized operation errors, normalizes Google Sheets client failures, publishes declarative retry metadata for Google Sheets operations, and gives the runner a durable retry timer path for retryable operation failures.
+- The next implementation slice should continue Phase 6 by hardening retry resume around worker crashes/passivation and then deciding whether operation retries should stay on the existing durable timer/worker model or move into Oban.
 
 ## Diagnosis
 
@@ -190,7 +190,7 @@ Status: shipped in `9ef8cfd`.
 
 Introduce `Fizz.Workflows.ExecutionContext` and migrate executors/operations to it. Add normalized error structs, retry metadata, rate-limit/backoff handling, and per-operation network domain declarations. Use Oban for durable operation retries and polling/backoff, and supervised processes only for active subscriptions.
 
-Current recommendation: split this phase. Typed operation context dispatch has shipped for Google Sheets operations, and normalized operation errors plus retry policy metadata are now in progress. Add durable Oban retries only after the runner has a clear persistence and resume contract.
+Current recommendation: keep this phase split. Typed operation context dispatch has shipped for Google Sheets operations. Normalized operation errors, retry policy metadata, and the first runner persistence/resume contract now exist: executor failures are wrapped in `Fizz.Workflows.StepExecutionError`, retryable `OperationError` values are persisted on `workflow_runs.error`, and the worker schedules durable `operation_retry_v1` timers that resume the same runnable with incremented attempt metadata.
 
 Shippable result: old executor `execute(config, input, context)` remains available while operation modules move to the typed context and return normalized errors.
 

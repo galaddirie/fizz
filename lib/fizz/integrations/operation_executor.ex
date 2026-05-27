@@ -52,13 +52,24 @@ defmodule Fizz.Integrations.OperationExecutor do
     operation.module.execute(config, input, execution_context)
   end
 
-  defp normalize_result({:error, %OperationError{}} = error, _operation), do: error
+  defp normalize_result({:error, %OperationError{} = error}, operation) do
+    {:error, attach_operation_details(error, operation)}
+  end
 
   defp normalize_result({:error, reason}, operation) do
     {:error, OperationError.normalize(reason, source: operation.id)}
   end
 
   defp normalize_result(result, _operation), do: result
+
+  defp attach_operation_details(%OperationError{} = error, operation) do
+    details =
+      error.details
+      |> Map.put_new(:operation_id, operation.id)
+      |> Map.put_new(:operation_version, operation.version)
+
+    %{error | details: details}
+  end
 
   defp verify_step_type(_operation, nil), do: :ok
 

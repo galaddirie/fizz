@@ -3,12 +3,14 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   import Fizz.WorkflowsFixtures
 
+  alias Fizz.Integrations.OperationError
   alias Fizz.Workflows
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.Runner.RunnableConsumerSupervisor
   alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Runtime.ContextBuilder
+  alias Fizz.Workflows.StepExecutionError
   alias Fizz.Workflows.Store.SqliteStore
   alias Fizz.Workflows.WorkflowRun
 
@@ -152,6 +154,124 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
       assert_receive {:run_status_changed, %{run_id: ^run_id, status: :failed}}, 5_000
       assert {:ok, %{status: :failed}} = Workflows.get_run(scope, run.id)
+    end
+  end
+
+  describe "operation retries" do
+    test "retryable operation errors sleep the run and resume the runnable",
+         %{
+           scope: scope,
+           registry: registry,
+           task_supervisor: task_supervisor,
+           runnable_dispatcher: runnable_dispatcher,
+           tmp_dir: tmp_dir
+         } do
+      attempts = start_supervised!({Agent, fn -> 0 end})
+
+      workflow =
+        Runic.Workflow.new()
+        |> Runic.Workflow.add(
+          Runic.step(
+            fn input ->
+              attempt = Agent.get_and_update(attempts, &{&1, &1 + 1})
+
+              case attempt do
+                0 ->
+                  raise StepExecutionError.exception(
+                          reason:
+                            OperationError.new(
+                              code: :network_error,
+                              category: :network,
+                              message: "Network request failed",
+                              source: :google_sheets,
+                              retry_after_ms: 0,
+                              retryable?: true,
+                              details: %{
+                                reason: :timeout,
+                                operation_id: "google_sheets.append_row"
+                              }
+                            ),
+                          step_id: "retry_step",
+                          step_type_id: "google_sheets_append_row",
+                          operation_id: "google_sheets.append_row",
+                          operation_version: 1
+                        )
+
+                _ ->
+                  Map.put(input, "attempt", attempt)
+              end
+            end,
+            name: :retry_step
+          )
+        )
+
+      %{version: version} = published_version_fixture(scope)
+      run = insert_running_run(scope, version, %{compiled_hash: nil})
+      run_id = run.id
+
+      Phoenix.PubSub.subscribe(Fizz.PubSub, "workflow_run:#{run_id}")
+
+      pid =
+        start_worker!(workflow, run, scope,
+          registry: registry,
+          task_supervisor: task_supervisor,
+          runnable_dispatcher: runnable_dispatcher,
+          tmp_dir: tmp_dir,
+          idle_timeout_ms: 0
+        )
+
+      Worker.run(pid, %{"value" => "ok"})
+
+      assert_receive {:step_started, %{run_id: ^run_id, step_id: "retry_step", attempt: 0}},
+                     2_000
+
+      assert_receive {:step_failed,
+                      %{
+                        run_id: ^run_id,
+                        step_id: "retry_step",
+                        attempt: 0,
+                        error: %{type: "step_execution_error"}
+                      }},
+                     2_000
+
+      assert_receive {:run_status_changed, %{run_id: ^run_id, status: :sleeping}}, 2_000
+
+      assert {:ok,
+              %{
+                status: :sleeping,
+                error: %{
+                  "type" => "operation_retry",
+                  "operation_id" => "google_sheets.append_row",
+                  "failed_attempt" => 1,
+                  "next_attempt" => 1
+                }
+              }} = Workflows.get_run(scope, run_id)
+
+      assert {:ok, [timer]} =
+               Workflows.claim_due_timers(now: DateTime.utc_now(), claimed_by: "retry-test")
+
+      assert timer.run_id == run_id
+      assert :ok = Workflows.deliver_run_event(run_id, {:timer_fired, timer}, registry: registry)
+
+      assert_receive {:run_status_changed, %{run_id: ^run_id, status: :running}}, 2_000
+
+      assert_receive {:step_started, %{run_id: ^run_id, step_id: "retry_step", attempt: 1}},
+                     2_000
+
+      assert_receive {:step_completed, %{run_id: ^run_id, step_id: "retry_step", attempt: 1}},
+                     2_000
+
+      assert_receive {:run_status_changed, %{run_id: ^run_id, status: :completed}}, 2_000
+
+      assert {:ok,
+              %{
+                status: :completed,
+                error: nil,
+                output: %{"value" => [%{"attempt" => 1, "value" => "ok"}]}
+              }} =
+               Workflows.get_run(scope, run_id)
+
+      refute_receive {:run_status_changed, %{run_id: ^run_id, status: :failed}}, 100
     end
   end
 

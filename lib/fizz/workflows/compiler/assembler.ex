@@ -8,6 +8,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.Expressions.AccessPlan
   alias Fizz.Workflows.Runtime.ConfigResolver
+  alias Fizz.Workflows.StepExecutionError
   alias Runic.Workflow
 
   @row_safe_implicit_aggregator_operations ~w(collect count first last)
@@ -1665,9 +1666,19 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     case executor.execute(config, input, context) do
       {:ok, output} -> output
       {:skip, reason} -> {:skip, reason}
-      {:error, reason} -> raise "step execution failed: #{inspect(reason)}"
+      {:error, reason} -> raise step_execution_error(reason, context)
       other -> other
     end
+  end
+
+  defp step_execution_error(reason, context) do
+    StepExecutionError.exception(
+      reason: reason,
+      step_id: Map.get(context, :step_id),
+      step_type_id: Map.get(context, :type_id),
+      operation_id: Map.get(context, :operation_id),
+      operation_version: Map.get(context, :operation_version)
+    )
   end
 
   defp matched_switch_branch(compiled_config, resolution_context) do

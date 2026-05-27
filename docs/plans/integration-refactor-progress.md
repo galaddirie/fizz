@@ -128,6 +128,12 @@ The same uncommitted slice also continues operation-error work:
   initial/max delay, and retryable categories/codes.
 - `OperationExecutor` normalizes raw operation module failures before returning them to
   the workflow runner.
+- Added `Fizz.Workflows.StepExecutionError` so Runic failed runnables preserve the
+  original executor reason plus step and operation identifiers.
+- Added `Fizz.Workflows.Runner.OperationRetry` and worker handling for retryable
+  `OperationError` values. The runner now persists retry state on `workflow_runs.error`,
+  writes an `operation_retry_v1` durable timer, sleeps the run when there is no other
+  active work, and resumes the same runnable with incremented attempt metadata.
 - Google Sheets client failures now return `OperationError` for validation, credential,
   HTTP rate-limit, transient provider, and transport/network failures.
 - Google Sheets operation definitions publish retry metadata for rate-limit, network,
@@ -140,6 +146,8 @@ Validation completed so far:
 ```sh
 mix test test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/operation_executor_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/client_test.exs test/fizz/integrations/google/sheets/columns_resolver_test.exs test/fizz/integrations/operation_error_test.exs test/fizz/integrations/retry_policy_test.exs
 mix test test/fizz/fields_test.exs test/fizz/fields/credential_test.exs test/fizz/fields/credential_options_test.exs test/fizz/fields/credential_secret_test.exs test/fizz/fields/credential_workos_oauth_autobind_test.exs test/fizz/integrations/catalog_test.exs test/fizz/integrations/catalog_validation_test.exs test/fizz/integrations/dynamic_resolver_test.exs test/fizz/integrations/google/sheets/actions/append_row_test.exs test/fizz/integrations/google/sheets/columns_resolver_test.exs test/fizz/steps/credential_field_test.exs test/fizz/steps/registry_operation_definitions_test.exs test/fizz/workflows/compiler_test.exs test/fizz/workflows/runtime/context_builder_test.exs test/fizz/workflows/draft_validator_test.exs test/fizz/triggers/registration_manager_test.exs test/fizz/triggers/basic_triggers_integration_test.exs test/fizz_web/controllers/triggers/webhook_controller_test.exs
+mix test test/fizz/workflows/runner/worker_failure_test.exs
+mix test test/fizz/integrations/operation_executor_test.exs test/fizz/integrations/operation_error_test.exs test/fizz/integrations/retry_policy_test.exs test/fizz/workflows/runner/worker_test.exs test/fizz/workflows/timer_poller_test.exs test/fizz/workflows/rehydration_test.exs
 ```
 
 ## Current Architecture Decisions
@@ -246,16 +254,19 @@ Rules going forward:
 
 ### Phase 6 - Execution Semantics
 
-The first two non-durable slices have started: operation modules now receive typed
-execution context through `OperationExecutor`, and operation failures are being
-normalized before durable retry handling exists.
+The first durable retry slice has started. Operation modules now receive typed execution
+context through `OperationExecutor`; operation failures normalize into
+`OperationError`; retry policies are declared on operation definitions; and the runner
+can persist retryable operation failures through `workflow_runs.error` plus durable
+retry timers that resume the same runnable.
 
 Recommended order:
 
 1. Finish any remaining Google Sheets action-level error normalization gaps.
-2. Decide how retryable `OperationError` values are persisted on workflow runs.
-3. Add runner resume/backoff handling.
-4. Only after that, move durable retries into Oban or the existing runnable worker model.
+2. Add crash/passivation recovery coverage for pending operation retry timers.
+3. Decide whether durable operation retries should remain on the existing timer/worker
+   model or move into Oban.
+4. Add provider/network-domain retry policy declarations beyond Google Sheets.
 
 Likely files:
 
