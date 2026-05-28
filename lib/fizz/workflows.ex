@@ -1934,6 +1934,12 @@ defmodule Fizz.Workflows do
   defp normalize_json(%DateTime{} = value), do: DateTime.to_iso8601(value)
   defp normalize_json(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
 
+  defp normalize_json(%_{} = value) do
+    value
+    |> Map.from_struct()
+    |> normalize_json()
+  end
+
   defp normalize_json(value) when is_map(value) do
     Map.new(value, fn {key, nested_value} -> {to_string(key), normalize_json(nested_value)} end)
   end

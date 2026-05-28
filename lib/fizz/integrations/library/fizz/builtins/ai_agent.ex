@@ -177,9 +177,34 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
 
   defp run_provider_chat(assembled, ctx) do
     with {:ok, response} <- ChatModelProviders.generate(assembled, ctx) do
-      {:ok, Map.put(assembled, "response", response)}
+      {:ok, Map.put(assembled, "response", provider_response_payload(response))}
     end
   end
+
+  defp provider_response_payload(%ReqLLM.Response{} = response) do
+    %{
+      "id" => response.id,
+      "model" => response.model,
+      "ok" => ReqLLM.Response.ok?(response),
+      "text" => ReqLLM.Response.text(response),
+      "thinking" => blank_to_nil(ReqLLM.Response.thinking(response)),
+      "object" => normalize_output_value(response.object),
+      "tool_calls" => normalize_output_value(ReqLLM.Response.tool_calls(response)),
+      "usage" => normalize_output_value(ReqLLM.Response.usage(response)),
+      "finish_reason" => normalize_output_value(ReqLLM.Response.finish_reason(response)),
+      "error" => normalize_output_value(response.error)
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp provider_response_payload(response), do: normalize_output_value(response)
+
+  defp blank_to_nil(value) when is_binary(value) do
+    if value == "", do: nil, else: value
+  end
+
+  defp blank_to_nil(value), do: value
 
   defp normalize_model_config(%{"kind" => "ai.chat_model"} = model_config) do
     model_spec = Map.get(model_config, "model_spec")
@@ -345,6 +370,35 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
     do: Map.new(tool, fn {key, value} -> {to_string(key), value} end)
 
   defp normalize_tool(tool), do: tool
+
+  defp normalize_output_value(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp normalize_output_value(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+
+  defp normalize_output_value(%_{} = value) do
+    value
+    |> Map.from_struct()
+    |> normalize_output_value()
+  end
+
+  defp normalize_output_value(value) when is_map(value) do
+    Map.new(value, fn {key, nested_value} ->
+      {to_string(key), normalize_output_value(nested_value)}
+    end)
+  end
+
+  defp normalize_output_value(value) when is_list(value) do
+    Enum.map(value, &normalize_output_value/1)
+  end
+
+  defp normalize_output_value(nil), do: nil
+
+  defp normalize_output_value(value)
+       when is_binary(value) or is_number(value) or is_boolean(value),
+       do: value
+
+  defp normalize_output_value(value) when is_atom(value), do: Atom.to_string(value)
+
+  defp normalize_output_value(value), do: inspect(value)
 
   defp slot_value(input, key) when is_map(input) and is_binary(key) do
     case Map.fetch(input, key) do

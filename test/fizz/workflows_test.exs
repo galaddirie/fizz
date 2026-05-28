@@ -259,6 +259,48 @@ defmodule Fizz.WorkflowsTest do
     assert_worker_shutdown(run.id)
   end
 
+  test "complete_run normalizes structs in output payloads" do
+    scope = WorkflowsFixtures.project_scope_fixture()
+    %{version: version} = WorkflowsFixtures.published_version_fixture(scope)
+    run = insert_running_run(scope, version)
+
+    response = %ReqLLM.Response{
+      id: "resp_test",
+      model: "test-model",
+      context: nil,
+      message: %ReqLLM.Message{
+        role: :assistant,
+        content: [ReqLLM.Message.ContentPart.text("done")]
+      },
+      usage: %{input_tokens: 7, output_tokens: 3, total_tokens: 10},
+      finish_reason: :stop
+    }
+
+    assert {:ok, completed_run} =
+             Workflows.complete_run(run.id, %{
+               "response" => response,
+               "finished_at" => run.started_at
+             })
+
+    assert completed_run.status == :completed
+    assert completed_run.output["response"]["id"] == "resp_test"
+
+    assert completed_run.output["response"]["message"]["content"] == [
+             %{
+               "data" => nil,
+               "file_id" => nil,
+               "filename" => nil,
+               "media_type" => nil,
+               "metadata" => %{},
+               "text" => "done",
+               "type" => ":text",
+               "url" => nil
+             }
+           ]
+
+    assert completed_run.output["finished_at"] == DateTime.to_iso8601(run.started_at)
+  end
+
   test "start_run requires bindings for declared credentials" do
     scope = WorkflowsFixtures.project_scope_fixture()
 
@@ -723,6 +765,24 @@ defmodule Fizz.WorkflowsTest do
         ref = Process.monitor(pid)
         assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
     end
+  end
+
+  defp insert_running_run(scope, version) do
+    now = DateTime.utc_now()
+
+    %WorkflowRun{}
+    |> WorkflowRun.changeset(%{
+      user_id: scope.user.id,
+      workflow_definition_id: version.workflow_definition_id,
+      workflow_definition_version_id: version.id,
+      project_id: scope.project.id,
+      workos_organization_id: scope.project.workos_organization_id,
+      status: :running,
+      input: %{},
+      last_active_at: now,
+      started_at: now
+    })
+    |> Repo.insert!()
   end
 
   defp insert_completed_run(scope, version) do
