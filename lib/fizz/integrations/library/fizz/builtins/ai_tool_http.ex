@@ -10,8 +10,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIToolHttp do
     description: "Declare an HTTP tool for AI agent execution",
     icon: "hero-globe-alt",
     kind: :transform,
-    integration: "fizz",
-    role: :subnode
+    integration: "fizz"
 
   @behaviour Fizz.Workflows.StepExecutor
 
@@ -31,18 +30,22 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIToolHttp do
 
   @output_schema %{
     "type" => "object",
+    "provides" => ["ai.tool"],
     "properties" => %{
+      "kind" => %{"const" => "ai.tool"},
       "type" => %{"type" => "string"},
       "name" => %{"type" => "string"},
       "description" => %{"type" => "string"},
       "request" => %{"type" => "object"}
-    }
+    },
+    "required" => ["kind", "type", "name", "request"]
   }
 
   @impl true
   def execute(config, _input, _ctx) do
     {:ok,
      %{
+       "kind" => "ai.tool",
        "type" => "http",
        "name" => Map.get(config, "name"),
        "description" => Map.get(config, "description", ""),

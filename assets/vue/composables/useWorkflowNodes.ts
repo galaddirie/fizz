@@ -8,6 +8,7 @@ import {
   DEFAULT_GROUP_NAME_FONT_SIZE,
 } from '@/constants/layout';
 import { unwrapData } from '@/lib/dataUtils';
+import { dependencyInputHandles, isDependencyTargetHandle } from '@/lib/connectionHandles';
 import type {
   Workflow,
   StepType,
@@ -332,6 +333,16 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const optimisticStepPositions = optimisticLayoutActive?.stepPositions ?? {};
     const optimisticGroupBoundsById = optimisticLayoutActive?.groupBoundsById ?? {};
     const optimisticGroupIdByStepId = optimisticLayoutActive?.groupIdByStepId ?? {};
+    const stepById = new Map(steps.map(step => [step.id, step]));
+    const attachedDependencySourceIds = new Set<string>();
+
+    for (const connection of options.workflow().draft?.connections || []) {
+      const targetStep = stepById.get(connection.target_step_id);
+      const targetType = targetStep ? stepTypes[targetStep.type_id] : undefined;
+      if (isDependencyTargetHandle(targetType, connection.target_input)) {
+        attachedDependencySourceIds.add(connection.source_step_id);
+      }
+    }
 
     const groupByStepId = new Map<string, string>();
     const groupStepIdsByGroupId = new Map<string, Set<string>>();
@@ -498,11 +509,11 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         }
       }
 
-      const isSubnode = stepType?.node_role === 'subnode';
+      const isAttachedDependency = attachedDependencySourceIds.has(step.id);
 
       const node = {
         id: step.id,
-        type: isSubnode ? 'subnode' : 'step',
+        type: isAttachedDependency ? 'subnode' : 'step',
         class: 'nopan',
         position:
           optimisticStepPositions[step.id] ||
@@ -519,15 +530,14 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           icon: stepType?.icon,
           category: stepType?.category,
           step_kind: stepType?.step_kind,
-          node_role: stepType?.node_role,
           status: displayStatus,
           stats:
             totalDurationUs !== undefined || stepOutputItemCount !== undefined
               ? { duration_us: totalDurationUs, out: stepOutputItemCount }
               : undefined,
-          subnode_inputs: stepType?.subnode_inputs ?? [],
+          dependency_inputs: dependencyInputHandles(stepType),
           itemStats: stepItemStats,
-          hasInput: stepType?.step_kind !== 'trigger' && stepType?.node_role !== 'subnode',
+          hasInput: stepType?.step_kind !== 'trigger' && !isAttachedDependency,
           hasOutput: true,
           disabled: isDisabled,
           pinned: isPinned,

@@ -58,7 +58,12 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Condition do
   @input_schema %{"description" => "Any data"}
 
   @output_schema %{
-    "description" => "Input data, passed through if condition is true"
+    "description" => "Input data routed through configured branch outputs",
+    "outputs" => [
+      %{"id" => "main", "kind" => "flow"},
+      %{"id" => "true", "kind" => "flow", "config_key" => "true_output"},
+      %{"id" => "false", "kind" => "flow", "config_key" => "false_output"}
+    ]
   }
 
   @behaviour Fizz.Workflows.StepExecutor

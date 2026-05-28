@@ -5,6 +5,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   alias Fizz.Integrations.Library.Fizz.Builtins.Aggregator, as: AggregatorExecutor
   alias Fizz.Integrations.Library.Fizz.Builtins.Join, as: JoinExecutor
+  alias Fizz.Integrations.Steps.ConnectionHandles
   alias Fizz.Workflows.ExecutionContext
   alias Fizz.Workflows.Expressions.AccessPlan
   alias Fizz.Workflows.Runtime.ConfigResolver
@@ -15,12 +16,12 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
   @spec assemble(map()) :: {:ok, Runic.Workflow.t()} | {:error, [map()]}
   def assemble(ir) when is_map(ir) do
-    connection_indexes = build_connection_indexes(ir.connections)
+    connection_indexes = build_connection_indexes(planned_flow_connections(ir))
     referenced_step_ids = referenced_step_ids(ir.steps)
     accumulators = build_accumulators(referenced_step_ids)
-    subnode_input_assemblies = compute_subnode_input_assemblies(ir, connection_indexes)
-    step_scopes = compute_step_scopes(ir, subnode_input_assemblies, connection_indexes)
-    steps = build_steps(ir.steps, accumulators, step_scopes, subnode_input_assemblies)
+    dependency_input_assemblies = compute_dependency_input_assemblies(ir)
+    step_scopes = compute_step_scopes(ir, connection_indexes)
+    steps = build_steps(ir.steps, accumulators, step_scopes, dependency_input_assemblies)
 
     workflow =
       Workflow.new(name: ir.definition_version_id || "fizz_workflow")
@@ -29,7 +30,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         trigger_manifest: trigger_manifest(ir.steps),
         result_step_ids: result_step_ids(ir, connection_indexes)
       })
-      |> add_steps(ir, steps, accumulators, subnode_input_assemblies, connection_indexes)
+      |> add_steps(ir, steps, accumulators, dependency_input_assemblies, connection_indexes)
       |> draw_meta_ref_edges(steps)
 
     {:ok, workflow}
@@ -38,22 +39,25 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       {:error, [%{message: Exception.message(exception)}]}
   end
 
-  defp add_steps(workflow, ir, steps, accumulators, subnode_input_assemblies, connection_indexes) do
+  defp add_steps(
+         workflow,
+         ir,
+         steps,
+         accumulators,
+         dependency_input_assemblies,
+         connection_indexes
+       ) do
     Enum.reduce(ir.topo_order, workflow, fn step_id, acc ->
       step_data = Map.fetch!(steps, step_id)
 
       acc =
         case Map.get(step_data, :kind) do
-          :embedded_subnode ->
-            acc
-
           :join ->
             {acc, parent_sources} =
               resolve_parent_sources(
                 acc,
                 steps,
                 step_id,
-                subnode_input_assemblies,
                 connection_indexes
               )
 
@@ -65,23 +69,29 @@ defmodule Fizz.Workflows.Compiler.Assembler do
                 acc,
                 steps,
                 step_id,
-                subnode_input_assemblies,
                 connection_indexes
               )
 
             add_implicit_join_aggregator_step(acc, step_data, parent_sources)
 
-          :root_with_subnodes ->
+          :with_dependencies ->
             {acc, parent_sources} =
               resolve_parent_sources(
                 acc,
                 steps,
                 step_id,
-                subnode_input_assemblies,
                 connection_indexes
               )
 
-            add_root_with_subnodes_step(acc, step_data, parent_sources)
+            dependency_input_assembly = Map.fetch!(dependency_input_assemblies, step_id)
+
+            add_step_with_dependencies(
+              acc,
+              steps,
+              step_data,
+              parent_sources,
+              dependency_input_assembly
+            )
 
           _ ->
             {acc, parent_sources} =
@@ -89,7 +99,6 @@ defmodule Fizz.Workflows.Compiler.Assembler do
                 acc,
                 steps,
                 step_id,
-                subnode_input_assemblies,
                 connection_indexes
               )
 
@@ -108,18 +117,32 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp add_root_with_subnodes_step(workflow, step_data, parent_sources) do
+  defp add_step_with_dependencies(
+         workflow,
+         steps,
+         step_data,
+         parent_sources,
+         dependency_input_assembly
+       ) do
     parent_refs = Enum.map(parent_sources, & &1.parent_ref)
 
     workflow =
       add_component_spec(workflow, step_data.primary_spec, parent_refs)
 
-    workflow =
-      Enum.reduce(step_data.subnode_specs, workflow, fn spec, workflow_acc ->
-        add_component_spec(workflow_acc, spec, parent_refs)
-      end)
+    {workflow, dependency_parent_refs} =
+      resolve_dependency_parent_refs(
+        workflow,
+        steps,
+        step_data.step_id,
+        dependency_input_assembly
+      )
 
-    Enum.reduce(step_data.internal_specs, workflow, &add_component_spec(&2, &1))
+    Enum.reduce(step_data.internal_specs, workflow, fn spec, workflow_acc ->
+      add_component_spec(
+        workflow_acc,
+        Map.put(spec, :parents, [step_data.primary_name | dependency_parent_refs])
+      )
+    end)
   end
 
   defp attach_output_accumulators(workflow, step_data, accumulators, step_id) do
@@ -322,6 +345,13 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     )
   end
 
+  defp planned_flow_connections(%{connection_plan: %{connections: connections}}) do
+    connections
+    |> Map.values()
+    |> Enum.filter(&(&1.kind == :flow))
+    |> Enum.sort_by(& &1.order)
+  end
+
   defp indexed_connections(connection_indexes, direction, step_id) do
     connection_indexes
     |> Map.fetch!(direction)
@@ -347,7 +377,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     output_step_ids =
       ir.steps
       |> Map.values()
-      |> Enum.filter(&(&1.type_id == "data_output" and &1.node_role != :subnode))
+      |> Enum.filter(&(&1.type_id == "data_output"))
       |> Enum.map(& &1.id)
       |> Enum.sort()
 
@@ -360,7 +390,6 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp terminal_step_ids(ir, connection_indexes) do
     ir.steps
     |> Map.values()
-    |> Enum.reject(&(&1.node_role == :subnode))
     |> Enum.reject(&MapSet.member?(connection_indexes.source_step_ids, &1.id))
     |> Enum.map(& &1.id)
     |> Enum.sort()
@@ -387,11 +416,10 @@ defmodule Fizz.Workflows.Compiler.Assembler do
          workflow,
          steps,
          step_id,
-         subnode_input_assemblies,
          connection_indexes
        ) do
     step_id
-    |> incoming_flow_connections(connection_indexes, subnode_input_assemblies)
+    |> incoming_flow_connections(connection_indexes)
     |> ordered_connection_groups()
     |> Enum.reduce({workflow, []}, fn {source_step_id, connections},
                                       {workflow_acc, parent_sources} ->
@@ -437,6 +465,66 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     {workflow, union_name}
   end
 
+  defp resolve_dependency_parent_refs(workflow, steps, target_step_id, dependency_input_assembly) do
+    dependency_input_assembly.input_specs
+    |> Enum.reduce({workflow, []}, fn input_spec, {workflow_acc, parent_refs} ->
+      input_spec.connections
+      |> Enum.with_index()
+      |> Enum.reduce({workflow_acc, parent_refs}, fn {connection, index},
+                                                     {connection_workflow, refs_acc} ->
+        source_step = Map.fetch!(steps, connection.source_step_id)
+
+        refs =
+          source_step
+          |> source_refs_for(connection.source_output)
+          |> Enum.uniq()
+
+        case refs do
+          [] ->
+            raise ArgumentError,
+                  "dependency connection from `#{connection.source_step_id}` to `#{target_step_id}` references an unknown output handle"
+
+          [ref] ->
+            {connection_workflow, refs_acc ++ [ref]}
+
+          _multiple_refs ->
+            {connection_workflow, union_ref} =
+              add_dependency_parent_union(
+                connection_workflow,
+                target_step_id,
+                input_spec.id,
+                connection.source_step_id,
+                index,
+                refs
+              )
+
+            {connection_workflow, refs_acc ++ [union_ref]}
+        end
+      end)
+    end)
+  end
+
+  defp add_dependency_parent_union(
+         workflow,
+         target_step_id,
+         input_id,
+         source_step_id,
+         index,
+         refs
+       ) do
+    union_name =
+      "#{target_step_id}__dependency__#{input_id}__from__#{source_step_id}__#{index}__union"
+
+    union_step = passthrough_step(union_name)
+
+    workflow =
+      Enum.reduce(refs, workflow, fn ref, workflow_acc ->
+        Workflow.add(workflow_acc, union_step, to: ref, validate: :off)
+      end)
+
+    {workflow, union_name}
+  end
+
   defp build_accumulators(step_ids) do
     Map.new(step_ids, fn step_id ->
       accumulator_name = "#{step_id}__output"
@@ -448,33 +536,29 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp build_steps(steps, accumulators, step_scopes, subnode_input_assemblies) do
+  defp build_steps(steps, accumulators, step_scopes, dependency_input_assemblies) do
     Map.new(steps, fn {step_id, step} ->
-      subnode_input_assembly = Map.get(subnode_input_assemblies.roots, step_id)
+      dependency_input_assembly = Map.get(dependency_input_assemblies, step_id)
 
       {step_id,
        build_step(
          step,
-         steps,
          accumulators,
          Map.get(step_scopes, step_id),
-         subnode_input_assembly
+         dependency_input_assembly
        )}
     end)
   end
 
-  defp build_step(step, steps, accumulators, step_scope, subnode_input_assembly) do
+  defp build_step(step, accumulators, step_scope, dependency_input_assembly) do
     meta_refs =
       step
       |> executor_dependencies()
       |> build_meta_refs(accumulators)
 
     cond do
-      step.node_role == :subnode ->
-        build_embedded_subnode_step()
-
-      subnode_input_assembly != nil ->
-        build_root_step(step, steps, accumulators, meta_refs, subnode_input_assembly)
+      dependency_input_assembly != nil ->
+        build_step_with_dependency_inputs(step, meta_refs, dependency_input_assembly)
 
       step.type_id == "splitter" ->
         build_splitter_step(step, meta_refs)
@@ -494,17 +578,6 @@ defmodule Fizz.Workflows.Compiler.Assembler do
       true ->
         build_plain_step(step, meta_refs)
     end
-  end
-
-  defp build_embedded_subnode_step do
-    %{
-      kind: :embedded_subnode,
-      entry_specs: [],
-      internal_specs: [],
-      source_refs: %{},
-      capture_refs: [],
-      meta_targets: []
-    }
   end
 
   @credential_runtime_keys [
@@ -557,43 +630,24 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp build_root_step(step, steps, accumulators, meta_refs, subnode_input_assembly) do
+  defp build_step_with_dependency_inputs(step, meta_refs, dependency_input_assembly) do
     primary_name = "#{step.id}__primary"
     primary_capture = passthrough_step(primary_name)
 
-    {subnode_specs, subnode_meta_targets} =
-      subnode_input_assembly.subnode_step_ids
-      |> Enum.map(fn subnode_id ->
-        subnode_step = Map.fetch!(steps, subnode_id)
-        subnode_meta_refs = build_meta_refs(subnode_step.dependencies, accumulators)
-        component = build_executor_component(subnode_step, subnode_id, subnode_meta_refs)
-        spec = %{component: component}
-
-        {spec, meta_targets(component, subnode_meta_refs)}
-      end)
-      |> Enum.unzip()
-
-    root_component =
-      build_root_executor_component(step, step.id, meta_refs, subnode_input_assembly)
-
-    subnode_parent_refs = Enum.flat_map(subnode_input_assembly.input_specs, & &1.step_ids)
+    component =
+      build_connected_executor_component(step, step.id, meta_refs, dependency_input_assembly)
 
     %{
-      kind: :root_with_subnodes,
+      kind: :with_dependencies,
+      step_id: step.id,
+      primary_name: primary_name,
       entry_specs: [],
       primary_spec: %{component: primary_capture},
-      subnode_specs: subnode_specs,
-      internal_specs: [
-        %{component: root_component, parents: [primary_name | subnode_parent_refs]}
-      ],
+      internal_specs: [%{component: component}],
       source_refs: %{"main" => [step.id]},
       capture_refs: [step.id],
-      captured_outputs:
-        [%{step_id: step.id, refs: [step.id]}] ++
-          Enum.map(subnode_input_assembly.subnode_step_ids, fn subnode_id ->
-            %{step_id: subnode_id, refs: [subnode_id]}
-          end),
-      meta_targets: meta_targets(root_component, meta_refs) ++ List.flatten(subnode_meta_targets)
+      captured_outputs: [%{step_id: step.id, refs: [step.id]}],
+      meta_targets: meta_targets(component, meta_refs)
     }
   end
 
@@ -1005,17 +1059,17 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     |> Map.put(:meta_refs, meta_refs)
   end
 
-  defp build_root_executor_component(step, name, [], subnode_input_assembly) do
+  defp build_connected_executor_component(step, name, [], dependency_input_assembly) do
     executor = step.executor
     compiled_config = step.compiled_config
     step_context = base_step_context(step)
-    input_specs = subnode_input_assembly.input_specs
-    parent_count = 1 + length(subnode_input_assembly.subnode_step_ids)
+    input_specs = dependency_input_assembly.input_specs
+    parent_count = 1 + dependency_input_assembly.connection_count
 
     Runic.step(
       fn input ->
         {resolution_input, executor_input} =
-          __MODULE__.assemble_root_input(input, ^input_specs, ^parent_count)
+          __MODULE__.assemble_connected_input(input, ^input_specs, ^parent_count)
 
         config =
           ConfigResolver.resolve_config(^compiled_config, %{
@@ -1036,18 +1090,18 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     )
   end
 
-  defp build_root_executor_component(step, name, meta_refs, subnode_input_assembly) do
+  defp build_connected_executor_component(step, name, meta_refs, dependency_input_assembly) do
     executor = step.executor
     compiled_config = step.compiled_config
     step_context = base_step_context(step)
     dependencies = step.dependencies
-    input_specs = subnode_input_assembly.input_specs
-    parent_count = 1 + length(subnode_input_assembly.subnode_step_ids)
+    input_specs = dependency_input_assembly.input_specs
+    parent_count = 1 + dependency_input_assembly.connection_count
 
     Runic.step(
       fn input, meta_ctx ->
         {resolution_input, executor_input} =
-          __MODULE__.assemble_root_input(input, ^input_specs, ^parent_count)
+          __MODULE__.assemble_connected_input(input, ^input_specs, ^parent_count)
 
         resolution_context =
           __MODULE__.resolution_context(resolution_input, meta_ctx, ^dependencies)
@@ -1171,91 +1225,56 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     step_refs ++ runtime_refs
   end
 
-  defp compute_subnode_input_assemblies(ir, connection_indexes) do
-    root_defs =
-      ir.steps
-      |> Enum.reduce(%{}, fn {step_id, step}, acc ->
-        input_defs = normalize_subnode_input_defs(Map.get(step, :subnode_inputs, []))
+  defp compute_dependency_input_assemblies(ir) do
+    ir.connection_plan.by_target_step
+    |> Enum.reduce(%{}, fn {target_step_id, target_entry}, acc ->
+      dependencies = Map.get(target_entry, :dependencies, %{})
 
-        if input_defs == [] do
-          acc
-        else
-          Map.put(acc, step_id, %{
-            root_step_id: step_id,
-            input_defs: input_defs,
-            input_ids: MapSet.new(Enum.map(input_defs, & &1.id))
-          })
-        end
-      end)
+      if dependencies == %{} do
+        acc
+      else
+        step = Map.fetch!(ir.steps, target_step_id)
 
-    {root_defs, owners} =
-      Enum.reduce(ir.connections, {root_defs, %{}}, fn connection, {roots, owners} ->
-        case Map.get(roots, connection.target_step_id) do
-          %{input_ids: input_ids} = root when connection.target_input != "main" ->
-            if MapSet.member?(input_ids, connection.target_input) do
-              source_step = Map.fetch!(ir.steps, connection.source_step_id)
-              input_def = find_subnode_input_def!(root.input_defs, connection.target_input)
-              validate_subnode_input_connection!(connection, source_step, input_def, owners)
-
-              updated_root =
-                update_root_input_assignment(root, input_def, connection.source_step_id)
-
-              updated_owners =
-                Map.put(owners, connection.source_step_id, %{
-                  root_step_id: connection.target_step_id,
-                  input_id: input_def.id
-                })
-
-              {Map.put(roots, connection.target_step_id, updated_root), updated_owners}
-            else
-              raise ArgumentError,
-                    "connection `#{connection.id}` targets unknown input handle `#{connection.target_input}` on step `#{connection.target_step_id}`"
-            end
-
-          _root when connection.target_input != "main" ->
-            raise ArgumentError,
-                  "connection `#{connection.id}` targets unknown input handle `#{connection.target_input}` on step `#{connection.target_step_id}`"
-
-          _otherwise ->
-            {roots, owners}
-        end
-      end)
-
-    validate_subnode_ownership!(ir, owners, connection_indexes)
-
-    roots =
-      Map.new(root_defs, fn {root_step_id, root} ->
         input_specs =
-          Enum.map(root.input_defs, fn input_def ->
-            step_ids = Map.get(root, {:subnode_input, input_def.id}, [])
-            validate_subnode_input_cardinality!(root_step_id, input_def, step_ids)
+          step
+          |> ConnectionHandles.input_handles()
+          |> Enum.filter(&(&1.kind == :dependency))
+          |> Enum.map(fn handle ->
+            connection_ids = Map.get(dependencies, handle.id, [])
 
-            Map.put(input_def, :step_ids, step_ids)
+            connections =
+              connection_ids
+              |> Enum.map(&Map.fetch!(ir.connection_plan.connections, &1))
+              |> Enum.sort_by(& &1.order)
+
+            %{
+              id: handle.id,
+              input_key: handle.key,
+              cardinality: handle.cardinality,
+              connection_ids: Enum.map(connections, & &1.id),
+              step_ids: Enum.map(connections, & &1.source_step_id),
+              connections: connections
+            }
           end)
 
-        subnode_step_ids =
-          input_specs
-          |> Enum.flat_map(& &1.step_ids)
-          |> Enum.uniq()
-
-        {root_step_id,
-         %{
-           root_step_id: root_step_id,
-           input_specs: input_specs,
-           subnode_step_ids: subnode_step_ids,
-           input_ids: root.input_ids
-         }}
-      end)
-
-    %{roots: roots, owners: owners}
+        Map.put(acc, target_step_id, %{
+          target_step_id: target_step_id,
+          input_specs: input_specs,
+          connection_count:
+            input_specs
+            |> Enum.flat_map(& &1.connection_ids)
+            |> length()
+        })
+      end
+    end)
   end
 
-  defp compute_step_scopes(ir, subnode_input_assemblies, connection_indexes) do
+  defp compute_step_scopes(ir, connection_indexes) do
     Enum.reduce(ir.topo_order, %{}, fn step_id, scopes ->
       step = Map.fetch!(ir.steps, step_id)
 
       parent_contexts =
-        incoming_parent_contexts(step_id, connection_indexes, scopes, subnode_input_assemblies)
+        incoming_parent_contexts(step_id, connection_indexes, scopes)
 
       validate_split_convergence!(step, parent_contexts)
 
@@ -1276,9 +1295,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     end)
   end
 
-  defp incoming_parent_contexts(step_id, connection_indexes, scopes, subnode_input_assemblies) do
+  defp incoming_parent_contexts(step_id, connection_indexes, scopes) do
     step_id
-    |> incoming_flow_connections(connection_indexes, subnode_input_assemblies)
+    |> incoming_flow_connections(connection_indexes)
     |> ordered_connection_groups()
     |> Enum.map(fn {source_step_id, source_connections} ->
       parent_scope = Map.get(scopes, source_step_id, %{outgoing_lineage: []})
@@ -1289,137 +1308,6 @@ defmodule Fizz.Workflows.Compiler.Assembler do
         connections: source_connections
       }
     end)
-  end
-
-  defp normalize_subnode_input_defs(input_defs) do
-    Enum.map(input_defs, fn input_def ->
-      %{
-        id: Map.get(input_def, "id") || Map.get(input_def, :id),
-        input_key:
-          Map.get(input_def, "input_key") || Map.get(input_def, :input_key) ||
-            Map.get(input_def, "id") || Map.get(input_def, :id),
-        required?: Map.get(input_def, "required") || Map.get(input_def, :required) || false,
-        cardinality:
-          normalize_subnode_input_cardinality(
-            Map.get(input_def, "cardinality") || Map.get(input_def, :cardinality) || "one"
-          ),
-        allowed_type_ids:
-          input_def
-          |> Map.get("accepts", Map.get(input_def, :accepts, %{}))
-          |> then(fn accepts ->
-            if is_map(accepts) do
-              Map.get(accepts, "type_ids") || Map.get(accepts, :type_ids) || []
-            else
-              []
-            end
-          end)
-      }
-    end)
-  end
-
-  defp normalize_subnode_input_cardinality(value) when value in [:one, "one"], do: :one
-  defp normalize_subnode_input_cardinality(value) when value in [:many, "many"], do: :many
-
-  defp normalize_subnode_input_cardinality(value) do
-    raise ArgumentError, "unsupported subnode input cardinality: #{inspect(value)}"
-  end
-
-  defp find_subnode_input_def!(input_defs, input_id) do
-    Enum.find(input_defs, &(&1.id == input_id)) ||
-      raise ArgumentError, "unknown subnode input `#{input_id}`"
-  end
-
-  defp update_root_input_assignment(root, input_def, source_step_id) do
-    Map.update(root, {:subnode_input, input_def.id}, [source_step_id], &(&1 ++ [source_step_id]))
-  end
-
-  defp validate_subnode_input_connection!(connection, source_step, input_def, owners) do
-    unless source_step.node_role == :subnode do
-      raise ArgumentError,
-            "connection `#{connection.id}` targets subnode input `#{input_def.id}` on `#{connection.target_step_id}` but source step `#{source_step.id}` is not a subnode"
-    end
-
-    if connection.source_output != "main" do
-      raise ArgumentError,
-            "subnode connection `#{connection.id}` must use source output `main`, got `#{connection.source_output}`"
-    end
-
-    if input_def.allowed_type_ids != [] and source_step.type_id not in input_def.allowed_type_ids do
-      allowed = Enum.join(input_def.allowed_type_ids, ", ")
-
-      raise ArgumentError,
-            "subnode input `#{input_def.id}` on `#{connection.target_step_id}` accepts [#{allowed}], got `#{source_step.type_id}`"
-    end
-
-    case Map.get(owners, connection.source_step_id) do
-      nil ->
-        :ok
-
-      %{root_step_id: root_step_id, input_id: input_id} ->
-        raise ArgumentError,
-              "subnode step `#{connection.source_step_id}` is already assigned to input `#{input_id}` on root `#{root_step_id}`"
-    end
-  end
-
-  defp validate_subnode_ownership!(ir, owners, connection_indexes) do
-    Enum.each(ir.steps, fn
-      {step_id, %{node_role: :subnode}} = _entry ->
-        unless Map.has_key?(owners, step_id) do
-          raise ArgumentError, "subnode step `#{step_id}` must be connected to a root input"
-        end
-
-        incoming = incoming_connections(step_id, connection_indexes)
-
-        if incoming != [] do
-          raise ArgumentError,
-                "subnode step `#{step_id}` cannot have authored incoming connections"
-        end
-
-        outgoing = outgoing_connections(step_id, connection_indexes)
-        owner = Map.fetch!(owners, step_id)
-
-        valid_outgoing? =
-          Enum.all?(outgoing, fn connection ->
-            connection.target_step_id == owner.root_step_id and
-              connection.target_input == owner.input_id
-          end)
-
-        unless valid_outgoing? and length(outgoing) == 1 do
-          raise ArgumentError,
-                "subnode step `#{step_id}` must connect to exactly one root input"
-        end
-
-      _entry ->
-        :ok
-    end)
-  end
-
-  defp validate_subnode_input_cardinality!(root_step_id, input_def, step_ids) do
-    case {input_def.cardinality, input_def.required?, length(step_ids)} do
-      {:one, true, 1} ->
-        :ok
-
-      {:one, false, 0} ->
-        :ok
-
-      {:one, false, 1} ->
-        :ok
-
-      {:one, _required?, 0} ->
-        raise ArgumentError,
-              "root step `#{root_step_id}` is missing required subnode input `#{input_def.id}`"
-
-      {:one, _required?, count} when count > 1 ->
-        raise ArgumentError,
-              "root step `#{root_step_id}` input `#{input_def.id}` only accepts one subnode"
-
-      {:many, true, 0} ->
-        raise ArgumentError,
-              "root step `#{root_step_id}` is missing required subnode input `#{input_def.id}`"
-
-      {:many, _required?, _count} ->
-        :ok
-    end
   end
 
   defp validate_split_convergence!(%{type_id: type_id}, _parent_contexts)
@@ -1559,27 +1447,12 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Map.get(source_refs, output_handle, [])
   end
 
-  defp incoming_flow_connections(step_id, connection_indexes, subnode_input_assemblies) do
-    input_ids =
-      subnode_input_assemblies.roots
-      |> Map.get(step_id, %{input_ids: MapSet.new()})
-      |> Map.get(:input_ids, MapSet.new())
-
+  defp incoming_flow_connections(step_id, connection_indexes) do
     connection_indexes
     |> indexed_connections(:incoming, step_id)
     |> Enum.filter(fn connection ->
-      connection.target_step_id == step_id and
-        (connection.target_input == "main" or
-           not MapSet.member?(input_ids, connection.target_input))
+      connection.target_step_id == step_id
     end)
-  end
-
-  defp incoming_connections(step_id, connection_indexes) do
-    indexed_connections(connection_indexes, :incoming, step_id)
-  end
-
-  defp outgoing_connections(step_id, connection_indexes) do
-    indexed_connections(connection_indexes, :outgoing, step_id)
   end
 
   defp ordered_connection_groups(connections) do
@@ -1711,43 +1584,47 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp normalize_aggregator_operation(_operation), do: "collect"
 
   @doc false
-  def assemble_root_input(input, input_specs, 1) do
-    {input, build_root_executor_input(input, input_specs, [])}
+  def assemble_connected_input(input, input_specs, 1) do
+    {input, build_connected_executor_input(input, input_specs, [])}
   end
 
-  def assemble_root_input([primary | subnode_values], input_specs, parent_count)
+  def assemble_connected_input([primary | dependency_values], input_specs, parent_count)
       when is_list(input_specs) and parent_count > 1 do
-    {primary, build_root_executor_input(primary, input_specs, subnode_values)}
+    {primary, build_connected_executor_input(primary, input_specs, dependency_values)}
   end
 
-  def assemble_root_input(input, input_specs, _parent_count) do
-    {input, build_root_executor_input(input, input_specs, [])}
+  def assemble_connected_input(input, input_specs, _parent_count) do
+    {input, build_connected_executor_input(input, input_specs, [])}
   end
 
-  defp build_root_executor_input(primary, input_specs, subnode_values) do
+  def assemble_root_input(input, input_specs, parent_count) do
+    assemble_connected_input(input, input_specs, parent_count)
+  end
+
+  defp build_connected_executor_input(primary, input_specs, dependency_values) do
     {assembled_input, remaining_values} =
-      Enum.reduce(input_specs, {%{"_primary" => primary}, subnode_values}, fn input_spec,
-                                                                              {assembled, values} ->
-        {subnode_value, remaining} = take_subnode_value(input_spec, values)
-        {Map.put(assembled, input_spec.input_key, subnode_value), remaining}
+      Enum.reduce(input_specs, {%{"main" => primary}, dependency_values}, fn input_spec,
+                                                                             {assembled, values} ->
+        {dependency_value, remaining} = take_dependency_value(input_spec, values)
+        {Map.put(assembled, input_spec.input_key, dependency_value), remaining}
       end)
 
     case remaining_values do
       [] -> assembled_input
-      _ -> raise ArgumentError, "unexpected extra subnode values for root executor input"
+      _ -> raise ArgumentError, "unexpected extra dependency values for connected executor input"
     end
   end
 
-  defp take_subnode_value(%{cardinality: :many, step_ids: step_ids}, values) do
+  defp take_dependency_value(%{cardinality: :many, step_ids: step_ids}, values) do
     Enum.split(values, length(step_ids))
   end
 
-  defp take_subnode_value(%{cardinality: :one, step_ids: []}, values), do: {nil, values}
+  defp take_dependency_value(%{cardinality: :one, step_ids: []}, values), do: {nil, values}
 
-  defp take_subnode_value(%{cardinality: :one, step_ids: [_step_id]}, [value | rest]),
+  defp take_dependency_value(%{cardinality: :one, step_ids: [_step_id]}, [value | rest]),
     do: {value, rest}
 
-  defp take_subnode_value(%{cardinality: :one, step_ids: [_step_id]}, []) do
+  defp take_dependency_value(%{cardinality: :one, step_ids: [_step_id]}, []) do
     {nil, []}
   end
 

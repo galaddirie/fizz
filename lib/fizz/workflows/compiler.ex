@@ -15,12 +15,13 @@ defmodule Fizz.Workflows.Compiler do
   """
 
   alias Fizz.Workflows.Compiler.Assembler
+  alias Fizz.Workflows.Compiler.ConnectionPlan
   alias Fizz.Workflows.Compiler.ExpressionCompiler
   alias Fizz.Workflows.Compiler.Hasher
   alias Fizz.Workflows.Compiler.Normalizer
   alias Fizz.Workflows.WorkflowDefinitionVersion
 
-  @compiler_version 4
+  @compiler_version 5
 
   @doc """
   Returns the current compiler version used in compiled workflow metadata.
@@ -36,7 +37,8 @@ defmodule Fizz.Workflows.Compiler do
   def compile(%WorkflowDefinitionVersion{} = version) do
     with {:ok, ir} <- Normalizer.normalize(version),
          {:ok, compiled_ir} <- ExpressionCompiler.compile(ir),
-         {:ok, workflow} <- Assembler.assemble(compiled_ir) do
+         {:ok, planned_ir} <- ConnectionPlan.build(compiled_ir),
+         {:ok, workflow} <- Assembler.assemble(planned_ir) do
       {:ok, workflow, Hasher.hash(ir)}
     end
   end

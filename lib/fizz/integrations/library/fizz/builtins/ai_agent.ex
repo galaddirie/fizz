@@ -1,70 +1,34 @@
 defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
   @moduledoc """
-  Root AI step that assembles typed subnode outputs into a provider payload.
+  AI step that assembles connected model/schema/tool dependencies into a provider payload.
 
-  Subnode outputs are injected by the workflow runtime under:
+  Connected values are injected by the workflow runtime under:
 
-  - `_primary` - upstream flow input
-  - `model` - output from `openai_model` or `anthropic_model`
-  - `structured_schema` - optional output from `ai_structure_schema`
-  - `tools` - zero or more outputs from `ai_tool_http`
+  - `main` - upstream flow input
+  - `model` - output from a node that provides `ai.chat_model`
+  - `structured_schema` - optional output from a node that provides `ai.schema`
+  - `tools` - zero or more outputs from nodes that provide `ai.tool`
 
   `mode: "assemble_only"` returns the assembled payload without calling a
   provider.
 
-  `mode: "provider_chat"` calls `OpenAI.Client.generate_text/5` for OpenAI text
-  responses, or `OpenAI.Client.generate_object/6` when a structured schema is
-  connected. Anthropic execution still returns
-  `{:error, :anthropic_chat_not_implemented}`. Tool descriptors are included in
-  the assembled output, but they are not forwarded to the provider call yet.
+  `mode: "provider_chat"` delegates to `ChatModelProviders`, which dispatches by
+  the connected model's provider-prefixed `model_spec`.
   """
 
   use Fizz.Integrations.Steps.Definition,
     id: "ai_agent",
     name: "AI Agent",
     category: "AI",
-    description: "Assemble AI subnodes into a payload or execute an OpenAI chat request",
+    description: "Assemble AI dependencies into a payload or execute a chat request",
     icon: "hero-bolt",
     kind: :action,
-    integration: "fizz",
-    role: :root
-
-  alias Fizz.Accounts.Scope
-  alias Fizz.Integrations.Library.OpenAI.Client, as: OpenAIClient
+    integration: "fizz"
 
   @behaviour Fizz.Workflows.StepExecutor
 
-  @subnode_inputs [
-    %{
-      "id" => "model",
-      "title" => "Model",
-      "description" => "LLM model config provider",
-      "required" => true,
-      "cardinality" => "one",
-      "accepts" => %{"type_ids" => ["openai_model", "anthropic_model"]},
-      "input_key" => "model"
-    },
-    %{
-      "id" => "structured_schema",
-      "title" => "Structured Schema",
-      "description" => "Optional structured response schema",
-      "required" => false,
-      "cardinality" => "one",
-      "accepts" => %{"type_ids" => ["ai_structure_schema"]},
-      "input_key" => "structured_schema"
-    },
-    %{
-      "id" => "tools",
-      "title" => "Tools",
-      "description" => "Optional tool descriptors",
-      "required" => false,
-      "cardinality" => "many",
-      "accepts" => %{"type_ids" => ["ai_tool_http"]},
-      "input_key" => "tools"
-    }
-  ]
-
   alias Fizz.Fields
+  alias Fizz.Integrations.Library.Fizz.Builtins.ChatModelProviders
 
   @fields [
     Fields.select("mode",
@@ -88,15 +52,52 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
     )
   ]
 
+  @input_schema %{
+    "type" => "object",
+    "required" => ["model"],
+    "properties" => %{
+      "main" => %{
+        "title" => "Input",
+        "description" => "Primary flow input",
+        "connection" => %{"kind" => "flow"}
+      },
+      "model" => %{
+        "title" => "Model",
+        "description" => "LLM model provider",
+        "connection" => %{
+          "kind" => "dependency",
+          "cardinality" => "one",
+          "accepts" => %{"provides" => ["ai.chat_model"]}
+        }
+      },
+      "structured_schema" => %{
+        "title" => "Structured Schema",
+        "description" => "Optional structured response schema",
+        "connection" => %{
+          "kind" => "dependency",
+          "cardinality" => "one",
+          "accepts" => %{"provides" => ["ai.schema"]}
+        }
+      },
+      "tools" => %{
+        "title" => "Tools",
+        "description" => "Optional tool descriptors",
+        "type" => "array",
+        "items" => %{"type" => "object"},
+        "connection" => %{
+          "kind" => "dependency",
+          "cardinality" => "many",
+          "accepts" => %{"provides" => ["ai.tool"]}
+        }
+      }
+    }
+  }
+
   @output_schema %{
     "type" => "object",
     "properties" => %{
-      "_primary" => %{"description" => "Primary flow input"},
-      "provider" => %{"type" => "string"},
-      "credential_ref" => %{"type" => "object"},
-      "model" => %{"type" => "string"},
-      "temperature" => %{"type" => "number"},
-      "max_tokens" => %{"type" => "integer"},
+      "main" => %{"description" => "Primary flow input"},
+      "model" => %{"type" => "object"},
       "messages" => %{"type" => "array"},
       "tools" => %{"type" => "array"},
       "structured_schema" => %{"type" => "object"},
@@ -108,7 +109,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
   @impl true
   def execute(config, input, ctx) when is_map(ctx) do
     with {:ok, model_config} <- normalize_model_config(slot_value(input, "model")),
-         {:ok, messages} <- build_messages(config, slot_value(input, "_primary")),
+         {:ok, messages} <- build_messages(config, slot_value(input, "main")),
          {:ok, structured_schema} <-
            normalize_structured_schema(slot_value(input, "structured_schema")),
          {:ok, assembled} <- build_output(input, model_config, messages, structured_schema) do
@@ -145,23 +146,14 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
   end
 
   defp build_output(input, model_config, messages, structured_schema) do
-    provider = Map.get(model_config, "provider", "openai_api_key")
-    credential_ref = Map.get(model_config, "credential_ref")
-    model = Map.get(model_config, "model")
-    temperature = Map.get(model_config, "temperature", 0.2)
-    max_tokens = Map.get(model_config, "max_tokens", 800)
     tools = normalize_tools(slot_value(input, "tools"))
-    primary = slot_value(input, "_primary")
+    primary = slot_value(input, "main")
 
-    if is_binary(model) and model != "" and is_map(credential_ref) do
+    if valid_model_config?(model_config) do
       assembled =
         %{
-          "_primary" => primary,
-          "provider" => provider,
-          "credential_ref" => credential_ref,
-          "model" => model,
-          "temperature" => temperature,
-          "max_tokens" => max_tokens,
+          "main" => primary,
+          "model" => model_config,
           "messages" => messages,
           "tools" => tools
         }
@@ -169,106 +161,58 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
 
       {:ok, assembled}
     else
-      {:error, {:invalid_subnode_output, :model}}
+      {:error, {:invalid_dependency_output, :model}}
     end
   end
 
+  defp valid_model_config?(%{
+         "kind" => "ai.chat_model",
+         "credential_ref" => credential_ref,
+         "model_spec" => model_spec
+       })
+       when is_map(credential_ref) and is_binary(model_spec) and model_spec != "",
+       do: true
+
+  defp valid_model_config?(_model_config), do: false
+
   defp run_provider_chat(assembled, ctx) do
-    with {:ok, scope, organization_id} <- scope_and_organization(ctx),
-         {:ok, response} <- generate_provider_response(scope, organization_id, assembled) do
+    with {:ok, response} <- ChatModelProviders.generate(assembled, ctx) do
       {:ok, Map.put(assembled, "response", response)}
     end
   end
 
-  defp generate_provider_response(scope, organization_id, assembled) do
-    case assembled["provider"] do
-      "openai_api_key" ->
-        generate_openai_response(scope, organization_id, assembled)
+  defp normalize_model_config(%{"kind" => "ai.chat_model"} = model_config) do
+    model_spec = Map.get(model_config, "model_spec")
+    credential_ref = Map.get(model_config, "credential_ref")
 
-      "anthropic_api_key" ->
-        {:error, :anthropic_chat_not_implemented}
-
-      provider when is_binary(provider) ->
-        {:error, {:unsupported_provider, provider}}
-
-      _ ->
-        {:error, :missing_provider}
-    end
-  end
-
-  defp generate_openai_response(
-         scope,
-         organization_id,
-         %{"structured_schema" => structured_schema} = assembled
-       ) do
-    OpenAIClient.generate_object(
-      scope,
-      organization_id,
-      assembled["model"],
-      assembled["messages"],
-      Map.fetch!(structured_schema, "json_schema"),
-      generation_opts(assembled)
-    )
-    |> normalize_provider_error(assembled["model"])
-  end
-
-  defp generate_openai_response(scope, organization_id, assembled) do
-    OpenAIClient.generate_text(
-      scope,
-      organization_id,
-      assembled["model"],
-      assembled["messages"],
-      generation_opts(assembled)
-    )
-    |> normalize_provider_error(assembled["model"])
-  end
-
-  defp normalize_provider_error({:error, :not_found}, model) when is_binary(model) do
-    {:error, {:model_not_found, model}}
-  end
-
-  defp normalize_provider_error(result, _model), do: result
-
-  defp generation_opts(assembled) do
-    []
-    |> maybe_put_opt(:temperature, assembled["temperature"])
-    |> maybe_put_opt(:max_tokens, assembled["max_tokens"])
-    |> maybe_put_opt(:credential_ref, assembled["credential_ref"])
-  end
-
-  defp maybe_put_opt(opts, _key, nil), do: opts
-  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
-
-  defp normalize_model_config(%{"model" => model} = model_config) when is_binary(model) do
-    if is_map(Map.get(model_config, "credential_ref")) do
+    if is_binary(model_spec) and model_spec != "" and is_map(credential_ref) do
       {:ok, model_config}
     else
-      {:error, {:invalid_subnode_output, :model}}
+      {:error, {:invalid_dependency_output, :model}}
     end
   end
 
-  defp normalize_model_config(%{model: model} = model_config) when is_binary(model) do
+  defp normalize_model_config(%{kind: "ai.chat_model"} = model_config) do
+    model_spec = Map.get(model_config, :model_spec)
     credential_ref = Map.get(model_config, :credential_ref)
 
-    if is_map(credential_ref) do
+    if is_binary(model_spec) and model_spec != "" and is_map(credential_ref) do
       {:ok,
        %{
-         "provider" => Map.get(model_config, :provider, "openai_api_key"),
+         "kind" => "ai.chat_model",
+         "provider" => Map.get(model_config, :provider),
          "credential_ref" => credential_ref,
-         "model" => model,
+         "model_spec" => model_spec,
          "temperature" => Map.get(model_config, :temperature, 0.2),
-         "max_tokens" => Map.get(model_config, :max_tokens, 800)
+         "max_tokens" => Map.get(model_config, :max_tokens, 800),
+         "capabilities" => Map.get(model_config, :capabilities, [])
        }}
     else
-      {:error, {:invalid_subnode_output, :model}}
+      {:error, {:invalid_dependency_output, :model}}
     end
   end
 
-  defp normalize_model_config(model) when is_binary(model) do
-    {:error, {:invalid_subnode_output, :model}}
-  end
-
-  defp normalize_model_config(_), do: {:error, {:invalid_subnode_output, :model}}
+  defp normalize_model_config(_), do: {:error, {:invalid_dependency_output, :model}}
 
   defp build_messages(config, primary) do
     messages =
@@ -301,27 +245,31 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
 
   defp normalize_structured_schema(nil), do: {:ok, nil}
 
-  defp normalize_structured_schema(%{"json_schema" => json_schema} = schema)
+  defp normalize_structured_schema(%{"kind" => "ai.schema", "schema" => json_schema} = schema)
        when is_map(json_schema) and map_size(json_schema) > 0 do
     {:ok,
      %{
+       "kind" => "ai.schema",
        "name" => schema_name(schema),
-       "json_schema" => unwrap_pasted_schema(json_schema),
-       "strict" => strict_schema?(schema)
+       "schema" => unwrap_pasted_schema(json_schema),
+       "strict" => strict_schema?(schema),
+       "response_format" => Map.get(schema, "response_format")
      }}
   end
 
-  defp normalize_structured_schema(%{json_schema: json_schema} = schema)
+  defp normalize_structured_schema(%{kind: "ai.schema", schema: json_schema} = schema)
        when is_map(json_schema) and map_size(json_schema) > 0 do
     normalize_structured_schema(%{
+      "kind" => "ai.schema",
       "name" => Map.get(schema, :name),
-      "json_schema" => json_schema,
-      "strict" => Map.get(schema, :strict, true)
+      "schema" => json_schema,
+      "strict" => Map.get(schema, :strict, true),
+      "response_format" => Map.get(schema, :response_format)
     })
   end
 
   defp normalize_structured_schema(_schema),
-    do: {:error, {:invalid_subnode_output, :structured_schema}}
+    do: {:error, {:invalid_dependency_output, :structured_schema}}
 
   defp unwrap_pasted_schema(%{"json_schema" => json_schema} = schema)
        when is_map(json_schema) and map_size(json_schema) > 0 do
@@ -353,7 +301,11 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
     |> Map.put("response_format", response_format)
   end
 
-  defp response_format(%{"name" => name, "json_schema" => json_schema, "strict" => strict}) do
+  defp response_format(%{"response_format" => response_format}) when is_map(response_format) do
+    response_format
+  end
+
+  defp response_format(%{"name" => name, "schema" => json_schema, "strict" => strict}) do
     %{
       "type" => "json_schema",
       "json_schema" => %{
@@ -382,9 +334,17 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
   defp to_prompt_value(value), do: Jason.encode!(value)
 
   defp normalize_tools(nil), do: []
-  defp normalize_tools(tools) when is_list(tools), do: Enum.reject(tools, &is_nil/1)
-  defp normalize_tools(tool) when is_map(tool), do: [tool]
+
+  defp normalize_tools(tools) when is_list(tools),
+    do: tools |> Enum.reject(&is_nil/1) |> Enum.map(&normalize_tool/1)
+
+  defp normalize_tools(tool) when is_map(tool), do: [normalize_tool(tool)]
   defp normalize_tools(tool), do: [%{"value" => tool}]
+
+  defp normalize_tool(%{kind: "ai.tool"} = tool),
+    do: Map.new(tool, fn {key, value} -> {to_string(key), value} end)
+
+  defp normalize_tool(tool), do: tool
 
   defp slot_value(input, key) when is_map(input) and is_binary(key) do
     case Map.fetch(input, key) do
@@ -398,7 +358,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
 
   defp slot_value(_input, _key), do: nil
 
-  defp slot_key_atom("_primary"), do: :_primary
+  defp slot_key_atom("main"), do: :main
   defp slot_key_atom("model"), do: :model
   defp slot_key_atom("structured_schema"), do: :structured_schema
   defp slot_key_atom("tools"), do: :tools
@@ -436,41 +396,4 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgent do
   end
 
   defp config_error_key("system_prompt"), do: :system_prompt
-
-  defp scope_and_organization(ctx) when is_map(ctx) do
-    with {:ok, scope} <- scope_from_context(ctx),
-         {:ok, organization_id} <- organization_from_scope(scope) do
-      {:ok, scope, organization_id}
-    end
-  end
-
-  defp scope_and_organization(_), do: {:error, :scope_not_available}
-
-  defp scope_from_context(ctx) when is_map(ctx) do
-    metadata = Map.get(ctx, :metadata) || Map.get(ctx, "metadata")
-
-    scope =
-      Map.get(ctx, :scope) ||
-        Map.get(ctx, "scope") ||
-        Map.get(ctx, :current_scope) ||
-        Map.get(ctx, "current_scope") ||
-        if(is_map(metadata), do: Map.get(metadata, :scope) || Map.get(metadata, "scope"))
-
-    case scope do
-      %Scope{} = scope -> {:ok, scope}
-      _ -> {:error, :scope_not_available}
-    end
-  end
-
-  defp scope_from_context(_), do: {:error, :scope_not_available}
-
-  defp organization_from_scope(%Scope{organization_id: organization_id} = _scope)
-       when is_binary(organization_id) and byte_size(organization_id) > 0,
-       do: {:ok, organization_id}
-
-  defp organization_from_scope(%Scope{project: %{workos_organization_id: organization_id}})
-       when is_binary(organization_id) and byte_size(organization_id) > 0,
-       do: {:ok, organization_id}
-
-  defp organization_from_scope(%Scope{}), do: {:error, :organization_scope_required}
 end

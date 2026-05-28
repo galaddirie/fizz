@@ -10,8 +10,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIStructureSchema do
     description: "Declare the structured response schema expected from an AI agent",
     icon: "hero-code-bracket-square",
     kind: :transform,
-    integration: "fizz",
-    role: :subnode
+    integration: "fizz"
 
   @behaviour Fizz.Workflows.StepExecutor
 
@@ -45,12 +44,15 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIStructureSchema do
 
   @output_schema %{
     "type" => "object",
+    "provides" => ["ai.schema"],
     "properties" => %{
+      "kind" => %{"const" => "ai.schema"},
       "name" => %{"type" => "string"},
-      "json_schema" => %{"type" => "object"},
+      "schema" => %{"type" => "object"},
       "strict" => %{"type" => "boolean"},
       "response_format" => %{"type" => "object", "description" => "Provider response format hint"}
-    }
+    },
+    "required" => ["kind", "name", "schema"]
   }
 
   @impl true
@@ -61,8 +63,9 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIStructureSchema do
 
       {:ok,
        %{
+         "kind" => "ai.schema",
          "name" => name,
-         "json_schema" => json_schema,
+         "schema" => json_schema,
          "strict" => strict,
          "response_format" => response_format(name, json_schema, strict)
        }}

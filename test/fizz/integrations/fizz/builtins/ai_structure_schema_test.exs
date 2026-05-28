@@ -27,7 +27,8 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIStructureSchemaTest do
     }
 
     assert {:ok, output} = AIStructureSchema.execute(config, %{}, %{})
-    assert output["json_schema"] == json_schema
+    assert output["kind"] == "ai.schema"
+    assert output["schema"] == json_schema
     assert get_in(output, ["response_format", "json_schema", "schema"]) == json_schema
   end
 end

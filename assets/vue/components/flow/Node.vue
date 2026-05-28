@@ -7,8 +7,8 @@ import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from
 import { useThemeStore } from '@/stores/theme';
 import type {
   StepHandleQuickAddRequest,
+  StepInputHandle,
   StepNodeData,
-  StepSubnodeInput,
   WorkflowValidationError,
 } from '@/types/workflow';
 import {
@@ -51,7 +51,7 @@ import { PlayIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroicons/vue/24/s
 const props = defineProps<NodeProps<StepNodeData>>();
 const themeStore = useThemeStore();
 const canEdit = computed(() => props.data.canEdit ?? true);
-const isSubnode = computed(() => props.data.node_role === 'subnode');
+const isSubnode = computed(() => false);
 
 const isEditing = ref(false);
 const nameDraft = ref(props.data.name || 'Untitled Step');
@@ -317,8 +317,8 @@ const showInputHandle = computed(
   () => props.data.hasInput !== false && props.data.step_kind !== 'trigger'
 );
 const showOutputHandle = computed(() => props.data.hasOutput !== false);
-const subnodeInputHandles = computed<StepSubnodeInput[]>(() => {
-  const inputs = props.data.subnode_inputs ?? [];
+const dependencyInputHandles = computed<StepInputHandle[]>(() => {
+  const inputs = props.data.dependency_inputs ?? [];
   return inputs.filter(input => input.id && input.id !== 'main');
 });
 
@@ -339,13 +339,13 @@ const handleOutputQuickAdd = (screenPoint: { x: number; y: number }) => {
   props.data.onHandleQuickAdd?.(request);
 };
 
-const handleSubnodeInputQuickAdd = (
-  input: StepSubnodeInput,
+const handleDependencyInputQuickAdd = (
+  input: StepInputHandle,
   screenPoint: { x: number; y: number }
 ) => {
   if (!canEdit.value) return;
 
-  const acceptedTypeIds = input.accepts?.type_ids ?? [];
+  const acceptedProvides = input.accepts?.provides ?? [];
   const request: StepHandleQuickAddRequest = {
     screenPoint,
     autoConnect: {
@@ -353,8 +353,8 @@ const handleSubnodeInputQuickAdd = (
       target_input: input.id,
     },
     filter: {
-      mode: 'subnode_input',
-      accepted_type_ids: acceptedTypeIds.length > 0 ? acceptedTypeIds : undefined,
+      mode: 'dependency_input',
+      accepted_provides: acceptedProvides.length > 0 ? acceptedProvides : undefined,
     },
   };
 
@@ -463,14 +463,14 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       <Handle id="main" type="target" :position="Position.Left" :node-id="props.id" />
     </div>
 
-    <!-- Subnode Input Handles (bottom edge, flush on the edge) -->
-    <template v-if="subnodeInputHandles.length > 0">
+    <!-- Dependency Input Handles (bottom edge, flush on the edge) -->
+    <template v-if="dependencyInputHandles.length > 0">
       <div
-        v-for="(input, idx) in subnodeInputHandles"
+        v-for="(input, idx) in dependencyInputHandles"
         :key="input.id"
         class="absolute bottom-0 z-10 flex flex-col items-center"
         :style="{
-          left: `${((idx + 1) / (subnodeInputHandles.length + 1)) * 100}%`,
+          left: `${((idx + 1) / (dependencyInputHandles.length + 1)) * 100}%`,
           transform: 'translateX(-50%) translateY(calc(40% - 8px))'
         }"
       >
@@ -483,7 +483,7 @@ const handleNameKeydown = (event: KeyboardEvent) => {
           :position="Position.Bottom"
           :node-id="props.id"
           :show-add-button="canEdit"
-          @add-click="point => handleSubnodeInputQuickAdd(input, point)"
+          @add-click="point => handleDependencyInputQuickAdd(input, point)"
         />
       </div>
     </template>

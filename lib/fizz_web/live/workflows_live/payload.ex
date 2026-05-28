@@ -56,11 +56,9 @@ defmodule FizzWeb.WorkflowsLive.Payload do
       category: type.category,
       icon: type.icon,
       step_kind: Atom.to_string(type.step_kind),
-      node_role: Atom.to_string(type.node_role),
       config_schema: type.config_schema || %{},
       input_schema: type.input_schema || %{},
-      output_schema: type.output_schema || %{},
-      subnode_inputs: type.subnode_inputs || []
+      output_schema: type.output_schema || %{}
     }
   end
 

@@ -131,7 +131,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
     source_step = Enum.at(joined_draft.steps, 0)
     target_step = Enum.at(joined_draft.steps, 1)
 
-    assert {:ok, draft_after_add, 1, _undo_state_after_add} =
+    assert {:error, {:unknown_target_input, "secondary"}} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{
                type: :add_connection,
                params: %{
@@ -142,6 +142,17 @@ defmodule Fizz.Workflows.DraftSessionTest do
                }
              })
 
+    assert {:ok, draft_after_add, 1, _undo_state_after_add} =
+             DraftSession.apply_operation(draft.id, scope.user.id, %{
+               type: :add_connection,
+               params: %{
+                 source_step_id: target_step.id,
+                 target_step_id: source_step.id,
+                 source_output: "main",
+                 target_input: "main"
+               }
+             })
+
     assert length(draft_after_add.connections) == 2
 
     added_connection =
@@ -149,7 +160,7 @@ defmodule Fizz.Workflows.DraftSessionTest do
         connection.id not in Enum.map(joined_draft.connections, & &1.id)
       end)
 
-    assert added_connection.target_input == "secondary"
+    assert added_connection.target_input == "main"
 
     assert {:ok, draft_after_remove, 2, _undo_state_after_remove} =
              DraftSession.apply_operation(draft.id, scope.user.id, %{

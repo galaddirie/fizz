@@ -24,7 +24,6 @@ defmodule Fizz.Integrations.Steps.Type do
   """
 
   @type step_kind :: :action | :trigger | :control_flow | :transform
-  @type node_role :: :root | :subnode
 
   @brand_action_separator ~r/\s+(?:--|—|–)\s+/u
 
@@ -37,13 +36,11 @@ defmodule Fizz.Integrations.Steps.Type do
           icon: String.t(),
           provider: String.t() | nil,
           integration: String.t() | nil,
-          node_role: node_role(),
           fields: [Fizz.Fields.Definition.t()],
           config_schema: map(),
           default_config: map(),
           input_schema: map(),
           output_schema: map(),
-          subnode_inputs: [map()],
           retry: Fizz.Workflows.RetryPolicy.t(),
           executor: String.t(),
           step_kind: step_kind(),
@@ -61,14 +58,12 @@ defmodule Fizz.Integrations.Steps.Type do
              :icon,
              :provider,
              :integration,
-             :node_role,
              :step_kind,
              :executor,
              :default_config,
              :config_schema,
              :input_schema,
-             :output_schema,
-             :subnode_inputs
+             :output_schema
            ]}
   @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
@@ -85,12 +80,10 @@ defmodule Fizz.Integrations.Steps.Type do
     :inserted_at,
     :updated_at,
     fields: [],
-    node_role: :root,
     config_schema: %{},
     default_config: %{},
     input_schema: %{},
     output_schema: %{},
-    subnode_inputs: [],
     retry: %Fizz.Workflows.RetryPolicy{}
   ]
 

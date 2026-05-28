@@ -46,9 +46,10 @@ defmodule Fizz.Integrations.Steps.Registry do
 
   use GenServer
 
+  alias Fizz.Integrations.Steps.ConnectionHandles
+  alias Fizz.Integrations.Steps.Type, as: StepType
   alias Fizz.Fields
   alias Fizz.Workflows.RetryPolicy
-  alias Fizz.Integrations.Steps.Type, as: StepType
 
   require Logger
 
@@ -284,7 +285,8 @@ defmodule Fizz.Integrations.Steps.Registry do
       icon: type.icon,
       category: type.category,
       step_kind: Atom.to_string(type.step_kind),
-      node_role: Atom.to_string(type.node_role)
+      input_schema: type.input_schema || %{},
+      output_schema: type.output_schema || %{}
     }
   end
 
@@ -305,6 +307,7 @@ defmodule Fizz.Integrations.Steps.Registry do
     |> validate_icons!()
     |> validate_fields!()
     |> validate_retry_policies!()
+    |> validate_connection_handles!()
     |> validate_config_schemas!()
   end
 
@@ -355,6 +358,11 @@ defmodule Fizz.Integrations.Steps.Registry do
       RetryPolicy.validate!(type.retry)
     end)
 
+    types
+  end
+
+  defp validate_connection_handles!(types) do
+    Enum.each(types, &ConnectionHandles.validate_step_type!/1)
     types
   end
 

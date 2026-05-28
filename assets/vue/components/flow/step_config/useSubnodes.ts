@@ -1,6 +1,7 @@
 import { computed } from 'vue';
 import type { Node } from '@vue-flow/core';
-import type { StepNodeData, StepSubnodeInput, StepType } from '@/types/workflow';
+import { dependencyInputHandles } from '@/lib/connectionHandles';
+import type { StepInputHandle, StepNodeData, StepType } from '@/types/workflow';
 
 interface UseSubnodesOptions {
     node: () => Node<StepNodeData> | null;
@@ -34,10 +35,10 @@ export function useSubnodes({
         return upstreamIds.map(stepId => stepNameById()?.[stepId] || stepId);
     });
 
-    const subnodeInputs = computed<StepSubnodeInput[]>(() => {
-        const typeInputs = stepType()?.subnode_inputs;
-        if (typeInputs?.length) return typeInputs;
-        return node()?.data?.subnode_inputs ?? [];
+    const subnodeInputs = computed<StepInputHandle[]>(() => {
+        const typeInputs = dependencyInputHandles(stepType());
+        if (typeInputs.length) return typeInputs;
+        return node()?.data?.dependency_inputs ?? [];
     });
 
     const incomingConnectionsByTargetInputForStep = computed<Record<string, string[]>>(() => {

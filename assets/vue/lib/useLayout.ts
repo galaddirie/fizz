@@ -45,17 +45,8 @@ export function useLayout() {
 
     previousDirection.value = normalizedDirection;
 
-    // Filter nodes and edges. Only connected subnodes are handled in the dedicated subtree pass.
+    // Filter nodes and edges. Only connected dependency nodes are handled in the dedicated subtree pass.
     const subnodeIds = new Set(nodes.filter(n => n.type === 'subnode').map(n => n.id));
-
-    // A subnode connection is one where the target handle is not "main"
-    const isSubnodeConn = (
-      edge: Edge
-    ): edge is SubnodeConnection =>
-      typeof edge.source === 'string' &&
-      typeof edge.target === 'string' &&
-      typeof edge.targetHandle === 'string' &&
-      edge.targetHandle !== 'main';
 
     const nodeDimensions = (node: Node | null | undefined, fallback: { width: number; height: number }) => {
       const measured = node as SizedNode | null | undefined;
@@ -66,6 +57,25 @@ export function useLayout() {
     };
 
     const nodeById = new Map(nodes.map(node => [node.id, node]));
+    const isSubnodeConn = (edge: Edge): edge is SubnodeConnection => {
+      if (
+        typeof edge.source !== 'string' ||
+        typeof edge.target !== 'string' ||
+        typeof edge.targetHandle !== 'string'
+      ) {
+        return false;
+      }
+
+      const targetNode = nodeById.get(edge.target);
+      const targetData = targetNode?.data as
+        | { dependency_inputs?: Array<{ id?: string | null }> }
+        | undefined;
+
+      return Array.isArray(targetData?.dependency_inputs)
+        ? targetData.dependency_inputs.some(input => input?.id === edge.targetHandle)
+        : false;
+    };
+
     const subnodeConnections: SubnodeConnection[] = [];
     edges.forEach(edge => {
       if (!isSubnodeConn(edge)) return;
@@ -221,10 +231,10 @@ export function useLayout() {
     const getOrderedInputIds = (parentId: string, inputMap: Map<string, string[]>) => {
       const parentNode = nodeById.get(parentId) ?? findNode(parentId);
       const parentData = parentNode?.data as
-        | { subnode_inputs?: Array<{ id?: string | null }> }
+        | { dependency_inputs?: Array<{ id?: string | null }> }
         | undefined;
-      const parentInputs = Array.isArray(parentData?.subnode_inputs)
-        ? parentData.subnode_inputs
+      const parentInputs = Array.isArray(parentData?.dependency_inputs)
+        ? parentData.dependency_inputs
             .map((input: { id?: string | null }) => input?.id)
             .filter((inputId): inputId is string => !!inputId && inputId !== 'main')
         : [];

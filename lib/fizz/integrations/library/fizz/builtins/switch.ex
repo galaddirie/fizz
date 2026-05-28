@@ -66,7 +66,12 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Switch do
   @input_schema %{"description" => "Any data"}
 
   @output_schema %{
-    "description" => "Tagged tuple {:branch, output_name, input_data}"
+    "description" => "Input data routed through matching case output",
+    "outputs" => [
+      %{"id" => "main", "kind" => "flow"},
+      %{"id" => "default", "kind" => "flow", "config_key" => "default_output"},
+      %{"kind" => "flow", "dynamic_outputs_from" => "cases[].output"}
+    ]
   }
 
   @behaviour Fizz.Workflows.StepExecutor

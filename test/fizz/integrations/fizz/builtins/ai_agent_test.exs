@@ -3,7 +3,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgentTest do
 
   alias Fizz.Integrations.Library.Fizz.Builtins.AIAgent
 
-  test "unwraps nested structured schema subnode output when assembling payload" do
+  test "unwraps nested structured schema dependency output when assembling payload" do
     json_schema = %{
       "type" => "object",
       "additionalProperties" => false,
@@ -12,16 +12,18 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgentTest do
     }
 
     input = %{
-      "_primary" => %{"number" => 7},
+      "main" => %{"number" => 7},
       "model" => %{
+        "kind" => "ai.chat_model",
         "provider" => "openai_api_key",
         "credential_ref" => %{"id" => "credential-id", "provider" => "openai_api_key"},
-        "model" => "gpt-5.5"
+        "model_spec" => "openai:gpt-5.5"
       },
       "structured_schema" => %{
+        "kind" => "ai.schema",
         "name" => "multiply_by_10_result",
         "strict" => true,
-        "json_schema" => %{
+        "schema" => %{
           "name" => "multiply_by_10_result",
           "strict" => true,
           "json_schema" => json_schema
@@ -36,7 +38,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.AIAgentTest do
                %{}
              )
 
-    assert get_in(output, ["structured_schema", "json_schema"]) == json_schema
+    assert get_in(output, ["structured_schema", "schema"]) == json_schema
     assert get_in(output, ["response_format", "json_schema", "schema"]) == json_schema
   end
 end

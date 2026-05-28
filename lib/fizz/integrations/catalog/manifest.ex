@@ -53,6 +53,14 @@ defmodule Fizz.Integrations.Catalog.Manifest do
     |> Enum.flat_map(& &1.step_modules())
   end
 
+  @spec chat_model_provider_modules() :: [module()]
+  def chat_model_provider_modules do
+    [
+      Fizz.Integrations.Library.OpenAI.ChatModelProvider,
+      Fizz.Integrations.Library.Anthropic.ChatModelProvider
+    ]
+  end
+
   @spec definitions() :: map()
   def definitions do
     %{

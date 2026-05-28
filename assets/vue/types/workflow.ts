@@ -117,18 +117,24 @@ export interface CredentialOption {
 // =============================================================================
 
 export type StepKind = 'trigger' | 'action' | 'transform' | 'control_flow';
-export type NodeRole = 'root' | 'subnode';
 
-export interface StepSubnodeInput {
+export interface StepInputHandle {
   id: string;
+  key?: string;
   title?: string;
   description?: string;
+  kind: 'flow' | 'dependency';
   required?: boolean;
   cardinality?: 'one' | 'many';
   accepts?: {
-    type_ids?: string[];
+    provides?: string[];
   };
-  input_key?: string;
+}
+
+export interface StepOutputHandle {
+  id: string;
+  kind: 'flow' | 'dependency';
+  provides: string[];
 }
 
 export interface AddStepAutoConnect {
@@ -138,14 +144,14 @@ export interface AddStepAutoConnect {
   target_input?: string;
 }
 
-export type HandleQuickAddFilterMode = 'output' | 'subnode_input';
+export type HandleQuickAddFilterMode = 'output' | 'dependency_input';
 
 export interface StepHandleQuickAddRequest {
   screenPoint: { x: number; y: number };
   autoConnect: AddStepAutoConnect;
   filter: {
     mode: HandleQuickAddFilterMode;
-    accepted_type_ids?: string[];
+    accepted_provides?: string[];
   };
 }
 
@@ -156,11 +162,9 @@ export interface StepType {
   category: string;
   icon?: string;
   step_kind: StepKind;
-  node_role?: NodeRole;
   config_schema?: Record<string, unknown>;
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
-  subnode_inputs?: StepSubnodeInput[];
 }
 
 export interface NodeLibraryItem {
@@ -170,7 +174,8 @@ export interface NodeLibraryItem {
   category: string;
   icon: string;
   step_kind: StepKind;
-  node_role?: NodeRole;
+  input_schema?: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -186,14 +191,13 @@ export interface StepNodeData {
   icon?: string;
   category?: string;
   step_kind?: StepKind;
-  node_role?: NodeRole;
   status?: StepExecutionStatus;
   stats?: {
     duration_us?: number;
     bytes?: number;
     out?: number;
   };
-  subnode_inputs?: StepSubnodeInput[];
+  dependency_inputs?: StepInputHandle[];
   // Fan-out item stats for multi-item steps
   itemStats?: {
     isMultiItem: boolean;

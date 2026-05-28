@@ -2,6 +2,7 @@ defmodule Fizz.Workflows.DraftSession.Operation do
   @moduledoc false
 
   alias Ecto.Changeset
+  alias Fizz.Integrations.Steps.ConnectionHandles
   alias Fizz.Integrations.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias Fizz.Workflows.WorkflowDefinitionVersion
@@ -193,7 +194,8 @@ defmodule Fizz.Workflows.DraftSession.Operation do
   defp add_connection(%WorkflowDefinitionVersion{} = draft, params) do
     with {:ok, connection} <- build_connection_for_add(params),
          :ok <- validate_connection_steps(draft.steps, connection),
-         :ok <- validate_connection_shape(draft.connections, connection) do
+         :ok <- validate_connection_shape(draft.connections, connection),
+         :ok <- validate_connection_handles(draft.steps, draft.connections, connection) do
       {:ok, %{draft | connections: draft.connections ++ [connection]},
        %{
          type: :remove_connection,
@@ -643,7 +645,8 @@ defmodule Fizz.Workflows.DraftSession.Operation do
             with {:ok, connection_attrs} <- build_auto_connect(step.id, auto_connect),
                  {:ok, connection} <- build_connection(connection_attrs),
                  :ok <- validate_connection_steps(draft.steps, connection),
-                 :ok <- validate_connection_shape(draft.connections, connection) do
+                 :ok <- validate_connection_shape(draft.connections, connection),
+                 :ok <- validate_connection_handles(draft.steps, draft.connections, connection) do
               {:ok, [connection], draft.connections ++ [connection]}
             end
 
@@ -1018,6 +1021,92 @@ defmodule Fizz.Workflows.DraftSession.Operation do
         :ok
     end
   end
+
+  defp validate_connection_handles(steps, existing_connections, %Connection{} = connection)
+       when is_list(steps) do
+    with {:ok, source_step} <- fetch_step(steps, connection.source_step_id),
+         {:ok, target_step} <- fetch_step(steps, connection.target_step_id),
+         {:ok, source_type} <- StepRegistry.get(source_step.type_id),
+         {:ok, target_type} <- StepRegistry.get(target_step.type_id),
+         {:ok, source_handle} <- draft_source_handle(source_type, source_step, connection),
+         {:ok, target_handle} <- draft_target_handle(target_type, connection),
+         :ok <- validate_draft_handle_compatibility(source_handle, target_handle),
+         :ok <- validate_draft_cardinality(existing_connections, connection, target_handle) do
+      :ok
+    else
+      {:error, :not_found} -> {:error, :unknown_step_type}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp draft_source_handle(source_type, source_step, connection) do
+    source =
+      source_type
+      |> Map.from_struct()
+      |> Map.put(:compiled_config, source_step.config || %{})
+
+    with {:ok, handles} <- ConnectionHandles.output_handles(source) do
+      case Enum.find(handles, &(&1.id == connection.source_output)) do
+        nil -> {:error, {:unknown_source_output, connection.source_output}}
+        handle -> {:ok, handle}
+      end
+    else
+      {:error, message} -> {:error, {:invalid_source_output, message}}
+    end
+  end
+
+  defp draft_target_handle(target_type, connection) do
+    target_type
+    |> ConnectionHandles.input_handles()
+    |> Enum.find(&(&1.id == connection.target_input))
+    |> case do
+      nil -> {:error, {:unknown_target_input, connection.target_input}}
+      handle -> {:ok, handle}
+    end
+  end
+
+  defp validate_draft_handle_compatibility(%{kind: source_kind}, %{kind: :flow})
+       when source_kind != :flow,
+       do: {:error, :incompatible_connection_handles}
+
+  defp validate_draft_handle_compatibility(source_handle, %{
+         kind: :dependency,
+         accepts: %{provides: accepted_provides}
+       }) do
+    source_provides = Map.get(source_handle, :provides, [])
+
+    case accepted_provides do
+      [] ->
+        :ok
+
+      accepted_provides ->
+        if Enum.any?(accepted_provides, &(&1 in source_provides)) do
+          :ok
+        else
+          {:error, :incompatible_connection_handles}
+        end
+    end
+  end
+
+  defp validate_draft_handle_compatibility(_source_handle, _target_handle), do: :ok
+
+  defp validate_draft_cardinality(existing_connections, connection, %{
+         kind: :dependency,
+         cardinality: :one
+       }) do
+    occupied? =
+      Enum.any?(existing_connections, fn existing ->
+        existing.target_step_id == connection.target_step_id and
+          existing.target_input == connection.target_input
+      end)
+
+    case occupied? do
+      true -> {:error, :connection_cardinality_exceeded}
+      false -> :ok
+    end
+  end
+
+  defp validate_draft_cardinality(_existing_connections, _connection, _target_handle), do: :ok
 
   defp validate_step_ids_exist(steps, step_ids) do
     step_id_set = MapSet.new(Enum.map(steps, & &1.id))

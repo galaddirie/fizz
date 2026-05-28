@@ -12,7 +12,6 @@ defmodule Fizz.Integrations.Library.Anthropic.Nodes.Model do
     description: "Configure Anthropic model parameters for AI agent steps",
     icon: "/images/anthropic.svg",
     kind: :transform,
-    role: :subnode,
     provider: "anthropic_api_key",
     integration: "anthropic"
 
@@ -51,13 +50,17 @@ defmodule Fizz.Integrations.Library.Anthropic.Nodes.Model do
 
   @output_schema %{
     "type" => "object",
+    "provides" => ["ai.chat_model"],
     "properties" => %{
+      "kind" => %{"const" => "ai.chat_model"},
       "provider" => %{"type" => "string"},
       "credential_ref" => %{"type" => "object"},
-      "model" => %{"type" => "string"},
+      "model_spec" => %{"type" => "string"},
       "temperature" => %{"type" => "number"},
-      "max_tokens" => %{"type" => "integer"}
-    }
+      "max_tokens" => %{"type" => "integer"},
+      "capabilities" => %{"type" => "array", "items" => %{"type" => "string"}}
+    },
+    "required" => ["kind", "provider", "credential_ref", "model_spec"]
   }
 
   @impl true
@@ -65,11 +68,13 @@ defmodule Fizz.Integrations.Library.Anthropic.Nodes.Model do
     with {:ok, credential_ref} <- normalize_credential_ref(config) do
       {:ok,
        %{
+         "kind" => "ai.chat_model",
          "provider" => "anthropic_api_key",
          "credential_ref" => credential_ref,
-         "model" => Map.get(config, "model", "claude-3-5-sonnet-latest"),
+         "model_spec" => "anthropic:" <> Map.get(config, "model", "claude-3-5-sonnet-latest"),
          "temperature" => normalize_temperature(Map.get(config, "temperature", 0.2)),
-         "max_tokens" => normalize_max_tokens(Map.get(config, "max_tokens", 800))
+         "max_tokens" => normalize_max_tokens(Map.get(config, "max_tokens", 800)),
+         "capabilities" => ["chat"]
        }}
     end
   end

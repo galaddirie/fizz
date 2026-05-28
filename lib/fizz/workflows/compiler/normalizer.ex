@@ -35,9 +35,9 @@ defmodule Fizz.Workflows.Compiler.Normalizer do
           config: step.config,
           executor: executor,
           step_kind: type.step_kind,
-          node_role: type.node_role,
           config_schema: type.config_schema,
-          subnode_inputs: type.subnode_inputs,
+          input_schema: type.input_schema,
+          output_schema: type.output_schema,
           retry: type.retry
         }
 

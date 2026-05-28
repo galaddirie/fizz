@@ -201,7 +201,7 @@ defmodule Fizz.Workflows.CompilerTest do
     assert [%{"status" => "pending"}] = Workflow.raw_productions(workflow, ids.matched_step)
   end
 
-  test "root steps assemble input-connected subnodes into runnable input payloads" do
+  test "steps assemble connected dependencies into runnable input payloads" do
     {version, ids} = ai_agent_version()
     expected_schema = ai_agent_response_schema()
 
@@ -216,9 +216,17 @@ defmodule Fizz.Workflows.CompilerTest do
 
     [output] = Workflow.raw_productions(workflow, ids.agent)
 
-    assert output["_primary"] == %{"name" => "Ada Lovelace", "topic" => "algebra"}
-    assert output["provider"] == "openai_api_key"
-    assert output["model"] == "gpt-5.5"
+    assert output["main"] == %{"name" => "Ada Lovelace", "topic" => "algebra"}
+
+    assert %{
+             "kind" => "ai.chat_model",
+             "provider" => "openai_api_key",
+             "credential_ref" => %{"provider" => "openai_api_key"},
+             "model_spec" => "openai:gpt-5.5",
+             "temperature" => 0.3,
+             "max_tokens" => 300,
+             "capabilities" => ["chat", "structured_output", "tools"]
+           } = output["model"]
 
     assert output["messages"] == [
              %{"role" => "system", "content" => "Solve carefully."},
@@ -226,9 +234,18 @@ defmodule Fizz.Workflows.CompilerTest do
            ]
 
     assert output["structured_schema"] == %{
+             "kind" => "ai.schema",
              "name" => "agent_response",
-             "json_schema" => expected_schema,
-             "strict" => true
+             "schema" => expected_schema,
+             "strict" => true,
+             "response_format" => %{
+               "type" => "json_schema",
+               "json_schema" => %{
+                 "name" => "agent_response",
+                 "schema" => expected_schema,
+                 "strict" => true
+               }
+             }
            }
 
     assert output["response_format"] == %{
@@ -242,6 +259,7 @@ defmodule Fizz.Workflows.CompilerTest do
 
     assert output["tools"] == [
              %{
+               "kind" => "ai.tool",
                "type" => "http",
                "name" => "lookup_user",
                "description" => "",
@@ -254,26 +272,26 @@ defmodule Fizz.Workflows.CompilerTest do
            ]
   end
 
-  test "compile rejects root steps missing required subnode inputs" do
-    version = missing_required_subnode_input_version()
+  test "compile rejects steps missing required dependency inputs" do
+    version = missing_required_dependency_input_version()
 
     assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "missing required subnode input `model`"
+    assert message =~ "missing required dependency input `model`"
   end
 
-  test "compile rejects subnodes whose type does not match the target input" do
-    version = invalid_subnode_input_type_version()
+  test "compile rejects dependencies whose provides metadata does not match the target input" do
+    version = invalid_dependency_input_capability_version()
 
     assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "subnode input `model`"
-    assert message =~ "got `ai_tool_http`"
+    assert message =~ "dependency input `model`"
+    assert message =~ "got `ai_tool_http` with provides [ai.tool]"
   end
 
-  test "compile rejects unattached subnodes" do
+  test "dependency-capable nodes can run as regular standalone nodes" do
     version = unattached_subnode_version()
 
-    assert {:error, [%{message: message}]} = Compiler.compile(version)
-    assert message =~ "must be connected to a root input"
+    assert {:ok, %Runic.Workflow{} = workflow, _compiled_hash} = Compiler.compile(version)
+    assert Workflow.get_component(workflow, Enum.at(version.steps, 2).id)
   end
 
   defp simple_version do
@@ -741,7 +759,7 @@ defmodule Fizz.Workflows.CompilerTest do
     {version, %{agent: agent_id}}
   end
 
-  defp missing_required_subnode_input_version do
+  defp missing_required_dependency_input_version do
     entry_id = Ecto.UUID.generate()
     agent_id = Ecto.UUID.generate()
 
@@ -780,7 +798,7 @@ defmodule Fizz.Workflows.CompilerTest do
     }
   end
 
-  defp invalid_subnode_input_type_version do
+  defp invalid_dependency_input_capability_version do
     entry_id = Ecto.UUID.generate()
     agent_id = Ecto.UUID.generate()
     tool_id = Ecto.UUID.generate()

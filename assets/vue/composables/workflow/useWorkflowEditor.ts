@@ -38,6 +38,7 @@ import type {
   Workflow,
   WorkflowDraft,
 } from '@/types/workflow';
+import { stepTypeProvides } from '@/lib/connectionHandles';
 import type {
   WorkflowEditorCommandType,
   WorkflowEditorEmits,
@@ -440,6 +441,13 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
   });
   syncResetRef.value = () => { nodeInteraction.resetPendingNodeRemovals(); edgeInteraction.resetPendingEdgeRemovals(); };
   const nodeLibraryItems = computed<NodeLibraryItem[]>(() => props.nodeLibraryItems ?? []);
+  const stepTypeById = computed<Record<string, StepType | undefined>>(() => {
+    const map: Record<string, StepType> = {};
+    for (const stepType of props.stepTypes ?? []) {
+      map[stepType.id] = stepType;
+    }
+    return map;
+  });
   const isAddStepPickerOpen = ref(false);
   const addStepPickerX = ref(0);
   const addStepPickerY = ref(0);
@@ -450,24 +458,25 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
 
     if (quickAddRequest.filter.mode === 'output') {
       return nodeLibraryItems.value.filter(item => {
-        const isRootNode = item.node_role !== 'subnode';
-        return isRootNode && item.step_kind !== 'trigger';
+        return item.step_kind !== 'trigger';
       });
     }
 
-    const acceptedTypeIds = quickAddRequest.filter.accepted_type_ids ?? [];
+    const acceptedProvides = quickAddRequest.filter.accepted_provides ?? [];
 
     return nodeLibraryItems.value.filter(item => {
-      if (item.node_role !== 'subnode') return false;
-      if (acceptedTypeIds.length === 0) return true;
-      return acceptedTypeIds.includes(item.type_id);
+      if (item.step_kind === 'trigger') return false;
+      if (acceptedProvides.length === 0) return true;
+
+      const itemStepType = stepTypeById.value[item.type_id];
+      const provides = stepTypeProvides(itemStepType ?? item);
+      return acceptedProvides.some(capability => provides.includes(capability));
     });
   });
 
-  const resolveAddStepSize = (typeId: string) => {
-    const selectedItem = nodeLibraryItems.value.find(item => item.type_id === typeId);
-    const isSubnode = selectedItem?.node_role === 'subnode';
-    const nodeType = isSubnode ? 'subnode' : 'step';
+  const resolveAddStepSize = (_typeId: string) => {
+    const isAttachedDependency = pendingHandleQuickAdd.value?.filter.mode === 'dependency_input';
+    const nodeType = isAttachedDependency ? 'subnode' : 'step';
 
     const measuredNode = getNodes.value.find(
       node => node.type === nodeType && node.dimensions.width > 0 && node.dimensions.height > 0
@@ -480,7 +489,7 @@ export function useWorkflowEditor(props: WorkflowEditorProps, emit: WorkflowEdit
       };
     }
 
-    return isSubnode ? SUBNODE_FALLBACK_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
+    return isAttachedDependency ? SUBNODE_FALLBACK_DIMENSIONS : DEFAULT_NODE_DIMENSIONS;
   };
 
   const openAddStepPicker = (

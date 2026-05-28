@@ -131,17 +131,17 @@ const state = inject(StepConfigKey)!;
       </div>
     </div>
 
-    <!-- Sub-node Inputs -->
+    <!-- Dependency Inputs -->
     <div
       v-if="state.subnodeInputRows.value.length > 0"
       class="mt-6 border-t border-base-200/60 pt-6"
     >
       <div class="mb-4">
         <span class="text-[10px] font-semibold uppercase tracking-widest text-base-content/30">
-          Sub-node Inputs
+          Dependency Inputs
         </span>
         <p class="mt-1 text-[11px] text-base-content/35">
-          Inputs populated from connected sub-node outputs.
+          Inputs populated from connected dependency outputs.
         </p>
       </div>
 
@@ -215,8 +215,8 @@ const state = inject(StepConfigKey)!;
               <span class="font-medium text-base-content/40">{{ row.input.title || row.input.id }}:</span>
               <span class="text-base-content/30">
                 {{
-                  row.input.accepts?.type_ids?.length
-                    ? row.input.accepts.type_ids.join(', ')
+                  row.input.accepts?.provides?.length
+                    ? row.input.accepts.provides.join(', ')
                     : 'None'
                 }}
               </span>

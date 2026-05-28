@@ -1,11 +1,9 @@
 defmodule Fizz.Integrations.Library.OpenAI.Nodes.Model do
   @moduledoc """
-  AI agent subnode that normalizes OpenAI model settings.
+  Produces OpenAI chat model settings for AI agent dependency handles.
 
   It requires an `openai_api_key` credential reference and emits the provider
-  payload consumed by `ai_agent`: provider, credential reference, model,
-  temperature, and max token settings. Message prompts live on the main AI
-  Agent config; structured output is supplied by the optional schema subnode.
+  payload consumed by `ai_agent`.
   """
 
   use Fizz.Integrations.Steps.Definition,
@@ -15,7 +13,6 @@ defmodule Fizz.Integrations.Library.OpenAI.Nodes.Model do
     description: "Provide OpenAI model settings and credential selection for AI agent steps",
     icon: "/images/openai.svg",
     kind: :transform,
-    role: :subnode,
     provider: "openai_api_key",
     integration: "openai"
 
@@ -54,13 +51,17 @@ defmodule Fizz.Integrations.Library.OpenAI.Nodes.Model do
 
   @output_schema %{
     "type" => "object",
+    "provides" => ["ai.chat_model"],
     "properties" => %{
+      "kind" => %{"const" => "ai.chat_model"},
       "provider" => %{"type" => "string"},
       "credential_ref" => %{"type" => "object"},
-      "model" => %{"type" => "string"},
+      "model_spec" => %{"type" => "string"},
       "temperature" => %{"type" => "number"},
-      "max_tokens" => %{"type" => "integer"}
-    }
+      "max_tokens" => %{"type" => "integer"},
+      "capabilities" => %{"type" => "array", "items" => %{"type" => "string"}}
+    },
+    "required" => ["kind", "provider", "credential_ref", "model_spec"]
   }
 
   @impl true
@@ -68,11 +69,13 @@ defmodule Fizz.Integrations.Library.OpenAI.Nodes.Model do
     with {:ok, credential_ref} <- normalize_credential_ref(config) do
       {:ok,
        %{
+         "kind" => "ai.chat_model",
          "provider" => "openai_api_key",
          "credential_ref" => credential_ref,
-         "model" => Map.get(config, "model", "gpt-5.5"),
+         "model_spec" => "openai:" <> Map.get(config, "model", "gpt-5.5"),
          "temperature" => normalize_temperature(Map.get(config, "temperature", 0.2)),
-         "max_tokens" => normalize_max_tokens(Map.get(config, "max_tokens", 800))
+         "max_tokens" => normalize_max_tokens(Map.get(config, "max_tokens", 800)),
+         "capabilities" => ["chat", "structured_output", "tools"]
        }}
     end
   end
