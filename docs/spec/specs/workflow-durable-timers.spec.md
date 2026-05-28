@@ -52,6 +52,16 @@ surface:
   statement: Runic SchedulerPolicy owns in-process timeouts, retry backoff, and deadline enforcement within running Workers; durable timers are exclusively a platform concern for workflow-level waits that must survive Worker shutdown.
   priority: must
   stability: stable
+
+- id: workflows.durable_timers.bounded_delivery
+  statement: Poller-to-worker timer delivery must use a bounded call with explicit timeout handling rather than relying on an unbounded worker call hidden inside the poller delivery task.
+  priority: must
+  stability: stable
+
+- id: workflows.durable_timers.timeout_claim_resolution
+  statement: A timer delivery timeout must settle the FIRING claim through an explicit durable contract: release the claim only when late success is impossible, retain an in-flight token until acknowledgement, or mark the delivery skipped or failed through an explicit transition. A single timer must not be processed late and then redelivered as new work after claim recovery.
+  priority: must
+  stability: draft
 ```
 
 ## Scenarios
@@ -123,6 +133,33 @@ surface:
   covers:
     - workflows.durable_timers.state_machine
     - workflows.durable_timers.polling_skip_locked
+
+- id: workflows.durable_timers.delivery_timeout_releases_claim
+  given:
+    - a due timer is claimed and moved to FIRING
+    - worker delivery times out before the worker accepts the event
+  when:
+    - the timeout handler runs under a release-and-retry delivery contract
+  then:
+    - the timer claim is released back to PENDING
+    - claim metadata is cleared
+    - no FIRED marker is written
+    - a later poll may retry delivery
+  covers:
+    - workflows.durable_timers.bounded_delivery
+    - workflows.durable_timers.timeout_claim_resolution
+
+- id: workflows.durable_timers.late_ack_does_not_redeliver
+  given:
+    - a timer delivery call reaches the worker
+    - the poller times out before it observes the worker acknowledgement
+  when:
+    - the worker later finishes processing the timer event
+  then:
+    - the durable timer row cannot also be recovered as a fresh PENDING timer for duplicate delivery
+    - the timer reaches exactly one durable settlement state
+  covers:
+    - workflows.durable_timers.timeout_claim_resolution
 ```
 
 ## Verification
@@ -157,16 +194,27 @@ surface:
     - workflows.durable_timers.creation_from_intent
     - workflows.durable_timers.polling_skip_locked
     - workflows.durable_timers.cancellation_on_termination
-```
 
-## Exceptions
-
-```spec-exceptions
-- id: workflows.durable_timers.impl_pending
-  note: The repository does not yet contain the TimerPoller, timer creation from step intents, or cancellation-on-termination logic that would enforce these durable timer contracts in code.
-  relates_to:
+- kind: source_file
+  target: lib/fizz/workflows/timer_poller.ex
+  covers:
     - workflows.durable_timers.state_machine
-    - workflows.durable_timers.creation_from_intent
     - workflows.durable_timers.polling_skip_locked
-    - workflows.durable_timers.cancellation_on_termination
+    - workflows.durable_timers.bounded_delivery
+
+- kind: source_file
+  target: lib/fizz/workflows/runner/worker.ex
+  covers:
+    - workflows.durable_timers.passivation_interaction
+    - workflows.durable_timers.timeout_claim_resolution
+
+- kind: test_file
+  target: test/fizz/workflows/timer_poller_test.exs
+  covers:
+    - workflows.durable_timers.sleep_and_fire
+    - workflows.durable_timers.cancel_on_workflow_termination
+    - workflows.durable_timers.concurrent_poller_contention
+    - workflows.durable_timers.poller_crash_during_firing
+    - workflows.durable_timers.delivery_timeout_releases_claim
+    - workflows.durable_timers.late_ack_does_not_redeliver
 ```

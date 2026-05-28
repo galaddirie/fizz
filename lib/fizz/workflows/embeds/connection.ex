@@ -3,6 +3,8 @@ defmodule Fizz.Workflows.Embeds.Connection do
 
   import Ecto.Changeset
 
+  alias Fizz.Workflows.Embeds.Validation
+
   @default_handle "main"
   @primary_key false
 
@@ -19,17 +21,8 @@ defmodule Fizz.Workflows.Embeds.Connection do
     connection
     |> cast(attrs, [:id, :source_step_id, :source_output, :target_step_id, :target_input])
     |> validate_required([:id, :source_step_id, :target_step_id])
-    |> validate_uuid(:id)
-    |> validate_uuid(:source_step_id)
-    |> validate_uuid(:target_step_id)
-  end
-
-  defp validate_uuid(changeset, field) do
-    validate_change(changeset, field, fn ^field, value ->
-      case Ecto.UUID.cast(value) do
-        {:ok, _uuid} -> []
-        :error -> [{field, "must be a valid UUID"}]
-      end
-    end)
+    |> Validation.validate_uuid(:id)
+    |> Validation.validate_uuid(:source_step_id)
+    |> Validation.validate_uuid(:target_step_id)
   end
 end

@@ -2,7 +2,6 @@ defmodule Fizz.Workflows.Store.SqliteStore do
   @moduledoc false
 
   @behaviour Runic.Runner.Store
-  use GenServer
 
   alias Fizz.Repo
   alias Fizz.Workflows.Store.Paths
@@ -24,24 +23,6 @@ defmodule Fizz.Workflows.Store.SqliteStore do
           run_id: String.t() | nil,
           db_path: String.t() | nil
         }
-
-  def start_link(opts) do
-    runner_name = Keyword.get(opts, :runner_name, __MODULE__)
-    GenServer.start_link(__MODULE__, opts, name: Module.concat(runner_name, Store))
-  end
-
-  def child_spec(opts) do
-    runner_name = Keyword.get(opts, :runner_name, __MODULE__)
-
-    %{
-      id: {__MODULE__, runner_name},
-      start: {__MODULE__, :start_link, [opts]},
-      type: :worker
-    }
-  end
-
-  @impl GenServer
-  def init(opts), do: {:ok, opts}
 
   @impl Runic.Runner.Store
   def init_store(opts) do
@@ -98,17 +79,9 @@ defmodule Fizz.Workflows.Store.SqliteStore do
 
   @impl Runic.Runner.Store
   def save(run_id, log, store_state) do
-    with {:ok, state} <- ensure_initialized(run_id, store_state),
-         {:ok, _checkpoint_seq} <- confirm_fence(run_id, state),
-         :ok <- persist_checkpoint(state, log) do
-      :ok
-    else
-      {:error, :stale_owner} ->
-        raise StaleOwnerError, run_id: run_id, fence_token: store_state.fence_token
-
-      {:error, reason} ->
-        {:error, reason}
-    end
+    with_fenced_write(run_id, store_state, fn db, state ->
+      persist_checkpoint(db, state, log)
+    end)
   end
 
   @impl Runic.Runner.Store
@@ -127,11 +100,11 @@ defmodule Fizz.Workflows.Store.SqliteStore do
 
   @impl Runic.Runner.Store
   def save_fact(hash, value, store_state) do
-    with {:ok, state} <-
-           ensure_initialized(store_state.run_id || raise_missing_run_id(), store_state),
-         :ok <- persist_fact(state, hash, value) do
-      :ok
-    end
+    run_id = store_state.run_id || raise_missing_run_id()
+
+    with_fenced_write(run_id, store_state, fn db, _state ->
+      persist_fact(db, hash, value)
+    end)
   end
 
   @impl Runic.Runner.Store
@@ -178,7 +151,7 @@ defmodule Fizz.Workflows.Store.SqliteStore do
     sql = """
     UPDATE #{lease_table}
     SET checkpoint_seq = checkpoint_seq + 1
-    WHERE run_id = $1 AND fence_token = $2
+    WHERE run_id = $1 AND fence_token = $2 AND lease_expiry > NOW()
     RETURNING checkpoint_seq
     """
 
@@ -201,26 +174,48 @@ defmodule Fizz.Workflows.Store.SqliteStore do
     end
   end
 
-  defp persist_checkpoint(state, log) do
-    serialized_log = :erlang.term_to_binary(log, [:compressed])
+  defp with_fenced_write(run_id, store_state, fun) when is_function(fun, 2) do
+    state = %{store_state | run_id: run_id, db_path: db_path(run_id, store_state)}
 
+    with {:ok, _checkpoint_seq} <- confirm_fence(run_id, state),
+         :ok <- write_sqlite(state, fun) do
+      :ok
+    else
+      {:error, :stale_owner} ->
+        raise StaleOwnerError, run_id: run_id, fence_token: store_state.fence_token
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp write_sqlite(state, fun) do
     with_db(state, fn db ->
-      result =
-        Sqlite.transaction(db, fn ->
-          with :ok <- upsert_fence(db, state.fence_token),
-               :ok <- upsert_meta(db, state),
-               :ok <- persist_facts_rows(db, facts_from_log(log)),
-               :ok <- reset_workflow_log(db),
-               :ok <- persist_snapshot(db, serialized_log) do
-            :ok
-          end
-        end)
+      with :ok <- SqliteMigrations.migrate(db) do
+        result =
+          Sqlite.transaction(db, fn ->
+            with :ok <- upsert_fence(db, state.fence_token),
+                 :ok <- upsert_meta(db, state) do
+              fun.(db, state)
+            end
+          end)
 
-      with :ok <- result,
-           :ok <- Sqlite.wal_checkpoint(db, :passive) do
-        :ok
+        with :ok <- result,
+             :ok <- Sqlite.wal_checkpoint(db, :passive) do
+          :ok
+        end
       end
     end)
+  end
+
+  defp persist_checkpoint(db, _state, log) do
+    serialized_log = :erlang.term_to_binary(log, [:compressed])
+
+    with :ok <- persist_facts_rows(db, facts_from_log(log)),
+         :ok <- reset_workflow_log(db),
+         :ok <- persist_snapshot(db, serialized_log) do
+      :ok
+    end
   end
 
   defp load_workflow_log(db) do
@@ -255,26 +250,26 @@ defmodule Fizz.Workflows.Store.SqliteStore do
     end
   end
 
-  defp persist_fact(state, hash, value) do
+  defp persist_fact(db, hash, value) do
     value_blob = :erlang.term_to_binary(value, [:compressed])
 
-    with_db(state, fn db ->
-      with :ok <- SqliteMigrations.migrate(db),
-           :ok <- upsert_fence(db, state.fence_token),
-           :ok <- upsert_meta(db, state),
-           {:ok, _rows} <-
-             Sqlite.query(
-               db,
-               """
-               INSERT INTO facts (hash, value) VALUES (?, ?)
-               ON CONFLICT(hash) DO UPDATE SET value = excluded.value
-               """,
-               [hash, {:blob, value_blob}]
-             ),
-           :ok <- Sqlite.wal_checkpoint(db, :passive) do
-        :ok
-      end
-    end)
+    case Sqlite.first_value(db, "SELECT value FROM facts WHERE hash = ?", [hash]) do
+      {:ok, ^value_blob} -> :ok
+      {:ok, _existing_blob} -> {:error, :fact_hash_conflict}
+      {:error, :not_found} -> insert_fact(db, hash, value_blob)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp insert_fact(db, hash, value_blob) do
+    case Sqlite.query(
+           db,
+           "INSERT INTO facts (hash, value) VALUES (?, ?)",
+           [hash, {:blob, value_blob}]
+         ) do
+      {:ok, _rows} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp ensure_initialized(run_id, state) do

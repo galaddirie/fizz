@@ -30,11 +30,14 @@ defmodule Fizz.Workflows.SignalRouter do
   end
 
   @doc """
-  Accepts a signal into the durable inbox and attempts delivery immediately.
+  Accepts a signal into the durable inbox.
+
+  When a router server is provided in `opts`, delivery is attempted through that
+  router so claim, timeout, and settlement behavior matches drained delivery.
   """
   def accept_signal(run_id, signal_id, signal_name, payload, opts \\ []) do
     with {:ok, signal} <- Workflows.create_signal_inbox(run_id, signal_id, signal_name, payload) do
-      _ = deliver_signal(signal.id, opts)
+      _ = maybe_deliver_signal(signal.id, opts)
       Workflows.get_signal(signal.id)
     end
   end
@@ -70,10 +73,13 @@ defmodule Fizz.Workflows.SignalRouter do
 
   @impl true
   def handle_call({:deliver_signal, signal_row_id, extra_opts}, _from, state) do
-    opts = Keyword.merge(state.worker_opts, extra_opts)
+    worker_opts =
+      state.worker_opts
+      |> Keyword.merge(Keyword.get(extra_opts, :worker_opts, []))
+      |> Keyword.put(:delivery_timeout_ms, state.delivery_timeout_ms)
 
     result =
-      do_claim_and_deliver_signal(signal_row_id, opts,
+      do_claim_and_deliver_signal(signal_row_id, worker_opts,
         claimed_by: state.claimed_by,
         claim_ttl_ms: state.claim_ttl_ms
       )
@@ -100,9 +106,9 @@ defmodule Fizz.Workflows.SignalRouter do
            ) do
       signals
       |> Task.async_stream(
-        &deliver_claimed_signal(&1, state.worker_opts),
+        &deliver_claimed_signal(&1, state.worker_opts, state.delivery_timeout_ms),
         max_concurrency: state.max_concurrency,
-        timeout: state.delivery_timeout_ms,
+        timeout: delivery_task_timeout_ms(state.delivery_timeout_ms),
         on_timeout: :kill_task
       )
       |> Enum.reduce([], fn
@@ -115,32 +121,41 @@ defmodule Fizz.Workflows.SignalRouter do
     end
   end
 
-  defp deliver_signal(signal_row_id, opts) when is_binary(signal_row_id) do
+  defp maybe_deliver_signal(signal_row_id, opts) do
     case Keyword.get(opts, :server) do
-      nil ->
-        do_claim_and_deliver_signal(signal_row_id, Keyword.get(opts, :worker_opts, []),
-          claimed_by: Keyword.get(opts, :claimed_by, default_claimed_by()),
-          claim_ttl_ms: Keyword.get(opts, :claim_ttl_ms, @default_claim_ttl_ms)
-        )
-
-      server ->
-        GenServer.call(
-          server,
-          {:deliver_signal, signal_row_id, Keyword.drop(opts, [:server])},
-          call_timeout_ms()
-        )
+      nil -> :ok
+      _server -> deliver_signal(signal_row_id, opts)
     end
+  end
+
+  defp deliver_signal(signal_row_id, opts) when is_binary(signal_row_id) do
+    GenServer.call(
+      Keyword.fetch!(opts, :server),
+      {:deliver_signal, signal_row_id, Keyword.drop(opts, [:server])},
+      call_timeout_ms()
+    )
   end
 
   defp do_claim_and_deliver_signal(signal_row_id, worker_opts, opts) do
     case Workflows.claim_signal(signal_row_id, opts) do
-      {:ok, %SignalInbox{} = signal} -> deliver_claimed_signal(signal, worker_opts)
-      {:error, :not_found} -> delivered_or_noop(signal_row_id)
-      {:error, reason} -> {:error, reason}
+      {:ok, %SignalInbox{} = signal} ->
+        deliver_claimed_signal(
+          signal,
+          worker_opts,
+          Keyword.fetch!(worker_opts, :delivery_timeout_ms)
+        )
+
+      {:error, :not_found} ->
+        delivered_or_noop(signal_row_id)
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  defp deliver_claimed_signal(%SignalInbox{} = signal, worker_opts) do
+  defp deliver_claimed_signal(%SignalInbox{} = signal, worker_opts, delivery_timeout_ms) do
+    worker_opts = Keyword.put(worker_opts, :delivery_timeout_ms, delivery_timeout_ms)
+
     case Workflows.deliver_run_event(signal.run_id, {:signal, signal}, worker_opts) do
       :ok ->
         :ok = Workflows.mark_signal_delivered(signal.id)
@@ -173,6 +188,9 @@ defmodule Fizz.Workflows.SignalRouter do
   defp server_name(opts), do: Keyword.get(opts, :server, __MODULE__)
 
   defp default_claimed_by, do: "#{Atom.to_string(node())}:signal_router"
+
+  defp delivery_task_timeout_ms(:infinity), do: :infinity
+  defp delivery_task_timeout_ms(timeout_ms), do: timeout_ms + 5_000
 
   defp call_timeout_ms do
     Application.get_env(:fizz, __MODULE__, [])

@@ -8,14 +8,6 @@ defmodule Fizz.Workflows.LeaseManager do
   @lease_ttl_ms 30_000
   @renew_interval_ms 10_000
 
-  @type expired_lease :: %{
-          run_id: String.t(),
-          owner_node: String.t() | nil,
-          fence_token: integer(),
-          checkpoint_seq: integer(),
-          lease_expiry: DateTime.t()
-        }
-
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
@@ -44,11 +36,6 @@ defmodule Fizz.Workflows.LeaseManager do
   @spec renew(keyword()) :: {:ok, [String.t()]} | {:error, term()}
   def renew(opts \\ []) do
     GenServer.call(server_name(opts), :renew)
-  end
-
-  @spec list_expired(keyword()) :: {:ok, [expired_lease()]} | {:error, term()}
-  def list_expired(opts \\ []) do
-    GenServer.call(server_name(opts), :list_expired)
   end
 
   @impl GenServer
@@ -96,10 +83,6 @@ defmodule Fizz.Workflows.LeaseManager do
   def handle_call(:renew, _from, state) do
     {result, state} = renew_leases(state)
     {:reply, result, state}
-  end
-
-  def handle_call(:list_expired, _from, state) do
-    {:reply, do_list_expired(state), state}
   end
 
   @impl true
@@ -190,33 +173,6 @@ defmodule Fizz.Workflows.LeaseManager do
           {{:error, reason}, state}
       end
     end
-  end
-
-  defp do_list_expired(state) do
-    sql = """
-    SELECT run_id, owner_node, fence_token, checkpoint_seq, lease_expiry
-    FROM #{state.lease_table}
-    WHERE lease_expiry < NOW()
-    ORDER BY lease_expiry ASC
-    """
-
-    case Ecto.Adapters.SQL.query(state.repo, sql, []) do
-      {:ok, %{rows: rows}} ->
-        {:ok, Enum.map(rows, &expired_lease_from_row/1)}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp expired_lease_from_row([run_id, owner_node, fence_token, checkpoint_seq, lease_expiry]) do
-    %{
-      run_id: load_uuid(run_id),
-      owner_node: owner_node,
-      fence_token: fence_token,
-      checkpoint_seq: checkpoint_seq,
-      lease_expiry: lease_expiry
-    }
   end
 
   defp schedule_renewal(interval_ms) do

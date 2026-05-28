@@ -92,6 +92,69 @@ defmodule Fizz.Workflows.TimerPollerTest do
     assert {:ok, %DurableTimer{status: :cancelled}} = Workflows.get_timer(timer.id)
   end
 
+  test "delivery timeout releases a timer claim before worker acceptance", %{scope: scope} do
+    put_workflow_runtime(idle_timeout_ms: 1_000)
+
+    %{version: version} =
+      published_version_fixture(scope, long_running_snapshot_attrs(60_000))
+
+    poller = unique_name(:poller)
+
+    start_supervised!(
+      {TimerPoller,
+       name: poller, interval_ms: 60_000, claim_ttl_ms: 60_000, delivery_timeout_ms: 10}
+    )
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"kind" => "initial"})
+
+    timer =
+      eventually(fn ->
+        case pending_timers_for_run(run.id) do
+          [%DurableTimer{} = timer] -> {:ok, make_timer_due(timer)}
+          _ -> :retry
+        end
+      end)
+
+    worker_pid =
+      eventually(fn ->
+        case Worker.lookup(run.id) do
+          nil -> :retry
+          pid -> {:ok, pid}
+        end
+      end)
+
+    :ok = :sys.suspend(worker_pid)
+
+    try do
+      assert {:ok, []} = TimerPoller.poll(server: poller)
+
+      assert {:ok, %DurableTimer{} = released_timer} = Workflows.get_timer(timer.id)
+      assert released_timer.status == :pending
+      assert released_timer.claimed_at == nil
+      assert released_timer.claimed_by == nil
+
+      :ok = :sys.resume(worker_pid)
+      _ = :sys.get_state(worker_pid)
+
+      assert {:ok, %DurableTimer{} = pending_timer} = Workflows.get_timer(timer.id)
+      assert pending_timer.status == :pending
+    after
+      try do
+        :sys.resume(worker_pid)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      try do
+        Workflows.cancel_run(scope, run.id)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      assert_worker_shutdown(run.id)
+    end
+  end
+
   test "concurrent pollers claim disjoint timer batches with skip locked", %{scope: scope} do
     runs =
       for _ <- 1..4 do
@@ -210,6 +273,12 @@ defmodule Fizz.Workflows.TimerPollerTest do
     %DurableTimer{}
     |> DurableTimer.changeset(Map.merge(defaults, attrs))
     |> Repo.insert!()
+  end
+
+  defp make_timer_due(%DurableTimer{} = timer) do
+    timer
+    |> DurableTimer.changeset(%{fire_at: DateTime.add(DateTime.utc_now(), -1, :second)})
+    |> Repo.update!()
   end
 
   defp reload_timers(timers) do

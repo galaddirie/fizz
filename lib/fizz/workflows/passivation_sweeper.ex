@@ -12,6 +12,7 @@ defmodule Fizz.Workflows.PassivationSweeper do
 
   require Logger
 
+  alias Fizz.Repo
   alias Fizz.Workflows
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Store.{LitestreamManager, Paths, Sqlite}
@@ -54,6 +55,8 @@ defmodule Fizz.Workflows.PassivationSweeper do
         Keyword.get(opts, :passivation_timeout_ms, @default_passivation_timeout_ms),
       worker_opts: Keyword.get(opts, :worker_opts, []),
       data_dir: data_dir,
+      repo: Keyword.get(opts, :repo, Repo),
+      wal_checkpoint: Keyword.get(opts, :wal_checkpoint, &LitestreamManager.wal_checkpoint/1),
       litestream_server: Keyword.get(opts, :litestream_server, LitestreamManager)
     }
 
@@ -119,19 +122,55 @@ defmodule Fizz.Workflows.PassivationSweeper do
   end
 
   defp prepare_run_for_passivation(run, state) do
-    case Worker.stop(run.id, Keyword.merge([persist: true], state.worker_opts)) do
+    case Worker.passivate(run.id, Keyword.merge([persist: true], state.worker_opts)) do
       :ok ->
         :ok
 
       {:error, :not_found} ->
-        if checkpoint_available?(run, state) do
-          :ok
-        else
-          {:error, :checkpoint_not_found}
-        end
+        prepare_db_only_run_for_passivation(run, state)
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  defp prepare_db_only_run_for_passivation(%{status: :sleeping} = run, state) do
+    with :ok <- require_no_active_lease(run, state),
+         true <- checkpoint_available?(run, state) do
+      :ok
+    else
+      false -> {:error, :checkpoint_not_found}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp prepare_db_only_run_for_passivation(run, _state) do
+    {:error, {:worker_not_found, run.status}}
+  end
+
+  defp require_no_active_lease(run, state) do
+    case active_lease?(run, state) do
+      {:ok, false} -> :ok
+      {:ok, true} -> {:error, :active_lease}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp active_lease?(run, state) do
+    case Ecto.Adapters.SQL.query(
+           state.repo,
+           """
+           SELECT 1
+           FROM workflow_run_leases
+           WHERE run_id = $1
+             AND lease_expiry > NOW()
+           LIMIT 1
+           """,
+           [dump_uuid(run.id)]
+         ) do
+      {:ok, %{rows: []}} -> {:ok, false}
+      {:ok, %{rows: [_row | _]}} -> {:ok, true}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -153,17 +192,17 @@ defmodule Fizz.Workflows.PassivationSweeper do
   defp cold_evict(run, state) do
     db_path = db_path(run, state)
 
-    case LitestreamManager.wal_checkpoint(db_path) do
+    case state.wal_checkpoint.(db_path) do
       :ok ->
-        :ok
+        delete_local_files(db_path)
 
       {:error, reason} ->
         Logger.warning(
           "WAL checkpoint failed for run #{run.id} before cold eviction: #{inspect(reason)}"
         )
-    end
 
-    delete_local_files(db_path)
+        :ok
+    end
   end
 
   defp maybe_cold_evict(run, state, true), do: cold_evict(run, state)
@@ -189,6 +228,8 @@ defmodule Fizz.Workflows.PassivationSweeper do
   defp schedule_sweep(_interval_ms), do: :ok
 
   defp server_name(opts), do: Keyword.get(opts, :server, __MODULE__)
+
+  defp dump_uuid(run_id), do: Ecto.UUID.dump!(run_id)
 
   defp call_timeout_ms do
     Application.get_env(:fizz, __MODULE__, [])

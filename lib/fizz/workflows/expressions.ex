@@ -104,7 +104,7 @@ defmodule Fizz.Workflows.Expressions do
   def classify(value) when not is_binary(value), do: :literal
 
   def classify(value) do
-    if expression?(value) do
+    if expression_string?(value) do
       case parse(value) do
         {:ok, parsed} -> classify_parsed(parsed)
         {:error, _reason} -> :template
@@ -113,6 +113,12 @@ defmodule Fizz.Workflows.Expressions do
       :literal
     end
   end
+
+  @spec expression_string?(term()) :: boolean()
+  def expression_string?(value) when is_binary(value),
+    do: String.contains?(value, "{{") or String.contains?(value, "{%")
+
+  def expression_string?(_value), do: false
 
   @spec resolve(struct() | term(), map()) :: term()
   def resolve(%AccessPlan.Literal{value: value}, _context), do: value
@@ -390,8 +396,6 @@ defmodule Fizz.Workflows.Expressions do
   defp predicate_object?(%Object{filters: filters}) do
     Enum.any?(filters, &MapSet.member?(@predicate_filters, &1.function))
   end
-
-  defp expression?(value), do: String.contains?(value, "{{") or String.contains?(value, "{%")
 
   defp single_object(%Solid.Template{parsed_template: [%Object{} = object]}), do: object
 

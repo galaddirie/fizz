@@ -7,7 +7,6 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   alias Fizz.Accounts
   alias Fizz.Accounts.{ApiCredential, Scope}
   alias Fizz.Workflows
-  alias Fizz.Workflows.DraftSession
   alias Fizz.WorkflowsFixtures
   alias FizzWeb.Presence
 
@@ -47,11 +46,11 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
   setup do
     previous_http_client = Application.get_env(:fizz, :workos_http_client_module)
     previous_workos_client = Application.get_env(:workos, WorkOS.Client)
-    previous_draft_session = Application.get_env(:fizz, DraftSession, [])
+    previous_draft_session = Application.get_env(:fizz, Fizz.Workflows.DraftSession, [])
 
     Application.put_env(:fizz, :workos_http_client_module, ReqMock)
 
-    Application.put_env(:fizz, DraftSession,
+    Application.put_env(:fizz, Fizz.Workflows.DraftSession,
       persist_debounce_ms: 25,
       idle_timeout_ms: 75,
       persist_retry_base_ms: 25,
@@ -66,7 +65,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
 
     on_exit(fn ->
       restore_env(:fizz, :workos_http_client_module, previous_http_client)
-      Application.put_env(:fizz, DraftSession, previous_draft_session)
+      Application.put_env(:fizz, Fizz.Workflows.DraftSession, previous_draft_session)
       restore_env(:workos, WorkOS.Client, previous_workos_client)
     end)
 
@@ -320,7 +319,9 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
              end)
   end
 
-  test "editor_command add_step applies an operation through DraftSession", %{conn: conn} do
+  test "editor_command add_step applies an operation through the Workflows facade", %{
+    conn: conn
+  } do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)
 
@@ -337,7 +338,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     })
 
     assert {:ok, draft, 1, undo_state, _editor_state} =
-             DraftSession.join(view_version_id(view), project_scope, user.id)
+             Workflows.join_draft_session(view_version_id(view), project_scope, user.id)
 
     assert length(draft.steps) == 1
     assert undo_state.canUndo
@@ -775,7 +776,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     assert %DateTime{} = published_version.published_at
   end
 
-  test "undo and redo commands work through DraftSession", %{conn: conn} do
+  test "undo and redo commands work through the Workflows facade", %{conn: conn} do
     %{conn: conn, definition: definition, project_scope: project_scope, user: user} =
       editor_fixture(conn)
 
@@ -798,7 +799,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     version_id = view_version_id(view)
 
     assert {:ok, draft_after_undo, 2, undo_state_after_undo, _editor_state} =
-             DraftSession.join(version_id, project_scope, user.id)
+             Workflows.join_draft_session(version_id, project_scope, user.id)
 
     assert draft_after_undo.steps == []
     refute undo_state_after_undo.canUndo
@@ -809,7 +810,7 @@ defmodule FizzWeb.WorkflowEditorLiveTest do
     |> render_hook("editor_command", %{"type" => "redo", "payload" => %{"count" => 1}})
 
     assert {:ok, draft_after_redo, 3, undo_state_after_redo, _editor_state} =
-             DraftSession.join(version_id, project_scope, user.id)
+             Workflows.join_draft_session(version_id, project_scope, user.id)
 
     assert length(draft_after_redo.steps) == 1
     assert undo_state_after_redo.canUndo

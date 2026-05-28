@@ -2,8 +2,9 @@ defmodule FizzWeb.WorkflowsLive.Payload do
   @moduledoc false
 
   alias Fizz.Integrations.Steps.Type, as: StepType
+  alias Fizz.Workflows.DraftValidator
   alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
-  alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion}
+  alias Fizz.Workflows.{WorkflowDefinition, WorkflowDefinitionVersion, WorkflowRun}
 
   @spec workflow(WorkflowDefinition.t(), WorkflowDefinitionVersion.t(), String.t() | nil) :: map()
   def workflow(
@@ -62,6 +63,94 @@ defmodule FizzWeb.WorkflowsLive.Payload do
     }
   end
 
+  @spec node_library_item(StepType.t()) :: map()
+  def node_library_item(%StepType{} = type) do
+    %{
+      type_id: type.id,
+      name: type.name,
+      description: type.description,
+      icon: type.icon,
+      category: type.category,
+      step_kind: Atom.to_string(type.step_kind),
+      input_schema: type.input_schema || %{},
+      output_schema: type.output_schema || %{}
+    }
+  end
+
+  @spec execution(WorkflowRun.t()) :: map()
+  def execution(%WorkflowRun{} = run) do
+    %{
+      id: run.id,
+      workflow_definition_id: run.workflow_definition_id,
+      workflow_definition_version_id: run.workflow_definition_version_id,
+      project_id: run.project_id,
+      status: execution_status(run.status),
+      trigger: %{
+        type: trigger_type(run.triggered_by),
+        data: run.triggered_by || %{}
+      },
+      triggered_by: run.triggered_by || %{},
+      input: run.input || %{},
+      output: run.output,
+      error: execution_error(run.error),
+      metadata: %{},
+      compiled_hash: run.compiled_hash,
+      triggered_by_user_id: triggered_by_user_id(run.triggered_by),
+      started_at: datetime(run.started_at),
+      completed_at: datetime(run.completed_at),
+      inserted_at: datetime(run.inserted_at),
+      updated_at: datetime(run.updated_at)
+    }
+  end
+
+  @spec execution_status(atom() | String.t()) :: String.t()
+  def execution_status(:pending), do: "pending"
+  def execution_status(:running), do: "running"
+  def execution_status(:sleeping), do: "paused"
+  def execution_status(:passivated), do: "paused"
+  def execution_status(:completed), do: "completed"
+  def execution_status(:failed), do: "failed"
+  def execution_status(:cancelled), do: "cancelled"
+  def execution_status(:continued), do: "completed"
+  def execution_status(status) when is_binary(status), do: status
+  def execution_status(status), do: Atom.to_string(status)
+
+  @spec execution_error(term()) :: map() | nil
+  def execution_error(nil), do: nil
+
+  def execution_error(%{} = error) do
+    %{
+      type: Map.get(error, :type) || Map.get(error, "type") || "runtime_error",
+      message: Map.get(error, :message) || Map.get(error, "message") || inspect(error),
+      details: error
+    }
+  end
+
+  def execution_error(error) do
+    %{type: "runtime_error", message: inspect(error), details: %{}}
+  end
+
+  @spec validation_error(DraftValidator.ValidationError.t()) :: map()
+  def validation_error(%DraftValidator.ValidationError{} = error) do
+    %{
+      step_id: error.step_id,
+      field: error.field,
+      message: error.message,
+      severity: Atom.to_string(error.severity),
+      code: Atom.to_string(error.code)
+    }
+  end
+
+  @spec validation_errors([DraftValidator.ValidationError.t()]) :: [map()]
+  def validation_errors(errors) when is_list(errors) do
+    Enum.map(errors, &validation_error/1)
+  end
+
+  @spec validation_error_map([DraftValidator.ValidationError.t()], String.t()) :: map()
+  def validation_error_map(errors, global_key) when is_list(errors) and is_binary(global_key) do
+    Enum.group_by(errors, fn error -> error.step_id || global_key end, & &1)
+  end
+
   @spec snapshot_attrs(WorkflowDefinitionVersion.t()) :: map()
   def snapshot_attrs(%WorkflowDefinitionVersion{} = draft) do
     %{
@@ -93,6 +182,22 @@ defmodule FizzWeb.WorkflowsLive.Payload do
   def datetime(%DateTime{} = value), do: DateTime.to_iso8601(value)
   def datetime(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
   def datetime(value), do: value
+
+  defp trigger_type(%{} = triggered_by) do
+    Map.get(triggered_by, :type) ||
+      Map.get(triggered_by, "type") ||
+      Map.get(triggered_by, :kind) ||
+      Map.get(triggered_by, "kind") ||
+      "manual"
+  end
+
+  defp trigger_type(_triggered_by), do: "manual"
+
+  defp triggered_by_user_id(%{} = triggered_by) do
+    Map.get(triggered_by, :user_id) || Map.get(triggered_by, "user_id")
+  end
+
+  defp triggered_by_user_id(_triggered_by), do: nil
 
   defp latest_version(
          %WorkflowDefinition{versions: versions},

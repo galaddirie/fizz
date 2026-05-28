@@ -65,9 +65,14 @@ defmodule Fizz.Workflows.SignalRouterTest do
 
   test "signal to a terminal run is recorded but skipped", %{scope: scope} do
     run = insert_run(scope, :completed)
+    router = unique_name(:router)
+
+    start_supervised!({SignalRouter, name: router, interval_ms: 60_000})
 
     assert {:ok, %SignalInbox{} = signal} =
-             SignalRouter.accept_signal(run.id, "sig-terminal", "poke", %{"kind" => "terminal"})
+             SignalRouter.accept_signal(run.id, "sig-terminal", "poke", %{"kind" => "terminal"},
+               server: router
+             )
 
     assert signal.status == :skipped
   end
@@ -92,6 +97,9 @@ defmodule Fizz.Workflows.SignalRouterTest do
       published_version_fixture(scope, long_running_snapshot_attrs(100))
 
     assert {:ok, run} = Workflows.start_run(scope, version, %{"kind" => "initial"})
+    router = unique_name(:router)
+
+    start_supervised!({SignalRouter, name: router, interval_ms: 60_000})
 
     _timer =
       eventually(fn ->
@@ -102,7 +110,9 @@ defmodule Fizz.Workflows.SignalRouterTest do
       end)
 
     assert {:ok, %SignalInbox{id: signal_row_id}} =
-             SignalRouter.accept_signal(run.id, "sig-running", "poke", %{"kind" => "signal"})
+             SignalRouter.accept_signal(run.id, "sig-running", "poke", %{"kind" => "signal"},
+               server: router
+             )
 
     delivered_signal =
       eventually(fn ->
@@ -137,6 +147,108 @@ defmodule Fizz.Workflows.SignalRouterTest do
     assert_worker_shutdown(run.id)
   end
 
+  test "accepting a signal without a router leaves delivery to drain", %{scope: scope} do
+    put_workflow_runtime(idle_timeout_ms: 1_000)
+
+    %{version: version} =
+      published_version_fixture(scope, long_running_snapshot_attrs(60_000))
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"kind" => "initial"})
+
+    _timer =
+      eventually(fn ->
+        case pending_timers(run.id) do
+          [_ | _] -> {:ok, :ready}
+          _ -> :retry
+        end
+      end)
+
+    assert {:ok, %SignalInbox{id: signal_row_id, status: :pending}} =
+             SignalRouter.accept_signal(run.id, "sig-durable", "poke", %{"kind" => "signal"})
+
+    assert {:ok, %SignalInbox{status: :pending}} = Workflows.get_signal(signal_row_id)
+
+    router = unique_name(:router)
+    start_supervised!({SignalRouter, name: router, interval_ms: 60_000})
+
+    assert {:ok, [^signal_row_id]} = SignalRouter.drain(server: router)
+
+    assert eventually(fn ->
+             case Workflows.get_signal(signal_row_id) do
+               {:ok, %SignalInbox{status: :delivered} = signal} -> {:ok, signal}
+               _ -> :retry
+             end
+           end)
+
+    assert {:ok, _cancelled_run} = Workflows.cancel_run(scope, run.id)
+  end
+
+  test "delivery timeout releases a signal claim before worker acceptance", %{scope: scope} do
+    put_workflow_runtime(idle_timeout_ms: 1_000)
+
+    %{version: version} =
+      published_version_fixture(scope, long_running_snapshot_attrs(60_000))
+
+    router = unique_name(:router)
+
+    start_supervised!(
+      {SignalRouter,
+       name: router, interval_ms: 60_000, claim_ttl_ms: 60_000, delivery_timeout_ms: 10}
+    )
+
+    assert {:ok, run} = Workflows.start_run(scope, version, %{"kind" => "initial"})
+
+    _timer =
+      eventually(fn ->
+        case pending_timers(run.id) do
+          [_ | _] -> {:ok, :ready}
+          _ -> :retry
+        end
+      end)
+
+    worker_pid =
+      eventually(fn ->
+        case Worker.lookup(run.id) do
+          nil -> :retry
+          pid -> {:ok, pid}
+        end
+      end)
+
+    assert {:ok, %SignalInbox{} = signal} =
+             Workflows.create_signal_inbox(run.id, "sig-timeout", "poke", %{"kind" => "signal"})
+
+    :ok = :sys.suspend(worker_pid)
+
+    try do
+      assert {:ok, []} = SignalRouter.drain(server: router)
+
+      assert {:ok, %SignalInbox{} = released_signal} = Workflows.get_signal(signal.id)
+      assert released_signal.status == :pending
+      assert released_signal.claimed_at == nil
+      assert released_signal.claimed_by == nil
+
+      :ok = :sys.resume(worker_pid)
+      _ = :sys.get_state(worker_pid)
+
+      assert {:ok, %SignalInbox{} = pending_signal} = Workflows.get_signal(signal.id)
+      assert pending_signal.status == :pending
+    after
+      try do
+        :sys.resume(worker_pid)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      try do
+        Workflows.cancel_run(scope, run.id)
+      catch
+        :exit, _reason -> :ok
+      end
+
+      assert_worker_shutdown(run.id)
+    end
+  end
+
   test "signal to a passivated workflow wakes the worker", %{scope: scope} do
     put_workflow_runtime(idle_timeout_ms: 25)
 
@@ -144,10 +256,13 @@ defmodule Fizz.Workflows.SignalRouterTest do
       published_version_fixture(scope, long_running_snapshot_attrs(200))
 
     sweeper = unique_name(:sweeper)
+    router = unique_name(:router)
 
     start_supervised!(
       {PassivationSweeper, name: sweeper, interval_ms: 60_000, idle_threshold_ms: 25}
     )
+
+    start_supervised!({SignalRouter, name: router, interval_ms: 60_000})
 
     assert {:ok, run} = Workflows.start_run(scope, version, %{"kind" => "initial"})
 
@@ -187,7 +302,9 @@ defmodule Fizz.Workflows.SignalRouterTest do
     assert {:ok, %{status: :passivated}} = Workflows.get_run(scope, run.id)
 
     assert {:ok, %SignalInbox{id: signal_row_id}} =
-             SignalRouter.accept_signal(run.id, "sig-passive", "poke", %{"kind" => "signal"})
+             SignalRouter.accept_signal(run.id, "sig-passive", "poke", %{"kind" => "signal"},
+               server: router
+             )
 
     delivered_signal =
       eventually(fn ->

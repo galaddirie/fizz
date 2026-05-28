@@ -3,6 +3,8 @@ defmodule Fizz.Workflows.Embeds.Step do
 
   import Ecto.Changeset
 
+  alias Fizz.Workflows.Embeds.Validation
+
   @max_name_length 160
   @primary_key false
 
@@ -20,28 +22,9 @@ defmodule Fizz.Workflows.Embeds.Step do
     step
     |> cast(attrs, [:id, :type_id, :name, :config, :position, :notes])
     |> validate_required([:id, :type_id, :name, :config])
-    |> validate_uuid(:id)
+    |> Validation.validate_uuid(:id)
     |> validate_length(:name, min: 1, max: @max_name_length)
-    |> validate_map_field(:config)
-    |> validate_map_field(:position)
-  end
-
-  defp validate_uuid(changeset, field) do
-    validate_change(changeset, field, fn ^field, value ->
-      case Ecto.UUID.cast(value) do
-        {:ok, _uuid} -> []
-        :error -> [{field, "must be a valid UUID"}]
-      end
-    end)
-  end
-
-  defp validate_map_field(changeset, field) do
-    validate_change(changeset, field, fn ^field, value ->
-      if is_map(value) do
-        []
-      else
-        [{field, "must be a map"}]
-      end
-    end)
+    |> Validation.validate_map_field(:config)
+    |> Validation.validate_map_field(:position)
   end
 end

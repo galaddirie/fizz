@@ -132,7 +132,7 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
 
   defp compile_tree(value, known_step_ids, step_name_to_id, path, _step_id)
        when is_binary(value) do
-    if expression_string?(value) do
+    if Expressions.expression_string?(value) do
       case Expressions.to_access_plan(value,
              strict_filters: true,
              known_step_ids: known_step_ids,
@@ -195,7 +195,7 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
 
   defp validate_tree_detailed(value, known_step_ids, step_name_to_id, path)
        when is_binary(value) do
-    if expression_string?(value) do
+    if Expressions.expression_string?(value) do
       case Expressions.validate(value,
              strict_filters: true,
              known_step_ids: known_step_ids,
@@ -215,9 +215,6 @@ defmodule Fizz.Workflows.Compiler.ExpressionCompiler do
   end
 
   defp validate_tree_detailed(_value, _known_step_ids, _step_name_to_id, _path), do: []
-
-  defp expression_string?(value),
-    do: String.contains?(value, "{{") or String.contains?(value, "{%")
 
   defp format_path_error([], message), do: message
   defp format_path_error(path, message), do: "config.#{Enum.join(path, ".")}: #{message}"

@@ -4,15 +4,15 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   require Runic
 
   alias Fizz.Integrations.Library.Fizz.Builtins.Aggregator, as: AggregatorExecutor
-  alias Fizz.Integrations.Library.Fizz.Builtins.Join, as: JoinExecutor
   alias Fizz.Integrations.Steps.ConnectionHandles
-  alias Fizz.Workflows.ExecutionContext
+  alias Fizz.Workflows.Compiler.RuntimeCallbacks
+  alias Fizz.Workflows.Compiler.ScopePlanner
   alias Fizz.Workflows.Expressions.AccessPlan
   alias Fizz.Workflows.Runtime.ConfigResolver
-  alias Fizz.Workflows.StepExecutionError
   alias Runic.Workflow
 
-  @row_safe_implicit_aggregator_operations ~w(collect count first last)
+  import Fizz.Workflows.Compiler.CompiledConfig,
+    only: [optional_literal_string: 2, required_literal_string!: 2]
 
   @spec assemble(map()) :: {:ok, Runic.Workflow.t()} | {:error, [map()]}
   def assemble(ir) when is_map(ir) do
@@ -20,7 +20,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     referenced_step_ids = referenced_step_ids(ir.steps)
     accumulators = build_accumulators(referenced_step_ids)
     dependency_input_assemblies = compute_dependency_input_assemblies(ir)
-    step_scopes = compute_step_scopes(ir, connection_indexes)
+    step_scopes = ScopePlanner.plan!(ir.topo_order, ir.steps, connection_indexes)
     steps = build_steps(ir.steps, accumulators, step_scopes, dependency_input_assemblies)
 
     workflow =
@@ -909,7 +909,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Runic.reduce(
       AggregatorExecutor.init_for_operation(operation),
       fn item, acc ->
-        __MODULE__.aggregate_reduce(item, acc, ^operation)
+        RuntimeCallbacks.aggregate_reduce(item, acc, ^operation)
       end,
       name: ^name,
       map: ^mapped_from
@@ -927,7 +927,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Runic.reduce(
       AggregatorExecutor.init_for_operation(operation),
       fn item, acc, meta_ctx ->
-        __MODULE__.aggregate_reduce(item, acc, meta_ctx, ^operation)
+        RuntimeCallbacks.aggregate_reduce(item, acc, meta_ctx, ^operation)
       end,
       name: ^name,
       map: ^mapped_from
@@ -949,7 +949,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp build_aggregate_empty_component(name, operation, _dependencies, []) do
     Runic.step(
       fn input ->
-        __MODULE__.aggregate_empty_result(input, operation)
+        RuntimeCallbacks.aggregate_empty_result(input, operation)
       end,
       name: ^name
     )
@@ -958,7 +958,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp build_aggregate_empty_component(name, operation, _dependencies, meta_refs) do
     Runic.step(
       fn input, meta_ctx ->
-        __MODULE__.aggregate_empty_result(input, meta_ctx, operation)
+        RuntimeCallbacks.aggregate_empty_result(input, meta_ctx, operation)
       end,
       name: ^name
     )
@@ -968,7 +968,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp build_empty_collection_condition(name) do
     Runic.condition(
       fn input ->
-        __MODULE__.empty_collection?(input)
+        RuntimeCallbacks.empty_collection?(input)
       end,
       name: ^name
     )
@@ -977,7 +977,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp build_fixed_join_component(name, mode) do
     Runic.step(
       fn input ->
-        __MODULE__.execute_join(mode, input)
+        RuntimeCallbacks.execute_join(mode, input)
       end,
       name: ^name
     )
@@ -1004,7 +1004,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   defp flatten_collection_layer_step(name) do
     Runic.step(
       fn input ->
-        __MODULE__.flatten_collection_layer(input)
+        RuntimeCallbacks.flatten_collection_layer(input)
       end,
       name: ^name
     )
@@ -1025,11 +1025,11 @@ defmodule Fizz.Workflows.Compiler.Assembler do
             env: %{}
           })
 
-        __MODULE__.execute_executor(
+        RuntimeCallbacks.execute_executor(
           ^executor,
           config,
           input,
-          __MODULE__.executor_context(input, %{}, ^step_context)
+          RuntimeCallbacks.executor_context(input, %{}, ^step_context)
         )
       end,
       name: ^name
@@ -1044,14 +1044,14 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     Runic.step(
       fn input, meta_ctx ->
-        resolution_context = __MODULE__.resolution_context(input, meta_ctx, ^dependencies)
+        resolution_context = RuntimeCallbacks.resolution_context(input, meta_ctx, ^dependencies)
         config = ConfigResolver.resolve_config(^compiled_config, resolution_context)
 
-        __MODULE__.execute_executor(
+        RuntimeCallbacks.execute_executor(
           ^executor,
           config,
           input,
-          __MODULE__.executor_context(input, resolution_context, ^step_context)
+          RuntimeCallbacks.executor_context(input, resolution_context, ^step_context)
         )
       end,
       name: ^name
@@ -1069,7 +1069,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Runic.step(
       fn input ->
         {resolution_input, executor_input} =
-          __MODULE__.assemble_connected_input(input, ^input_specs, ^parent_count)
+          RuntimeCallbacks.assemble_connected_input(input, ^input_specs, ^parent_count)
 
         config =
           ConfigResolver.resolve_config(^compiled_config, %{
@@ -1079,11 +1079,11 @@ defmodule Fizz.Workflows.Compiler.Assembler do
             env: %{}
           })
 
-        __MODULE__.execute_executor(
+        RuntimeCallbacks.execute_executor(
           ^executor,
           config,
           executor_input,
-          __MODULE__.executor_context(executor_input, %{}, ^step_context)
+          RuntimeCallbacks.executor_context(executor_input, %{}, ^step_context)
         )
       end,
       name: ^name
@@ -1101,18 +1101,18 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     Runic.step(
       fn input, meta_ctx ->
         {resolution_input, executor_input} =
-          __MODULE__.assemble_connected_input(input, ^input_specs, ^parent_count)
+          RuntimeCallbacks.assemble_connected_input(input, ^input_specs, ^parent_count)
 
         resolution_context =
-          __MODULE__.resolution_context(resolution_input, meta_ctx, ^dependencies)
+          RuntimeCallbacks.resolution_context(resolution_input, meta_ctx, ^dependencies)
 
         config = ConfigResolver.resolve_config(^compiled_config, resolution_context)
 
-        __MODULE__.execute_executor(
+        RuntimeCallbacks.execute_executor(
           ^executor,
           config,
           executor_input,
-          __MODULE__.executor_context(executor_input, resolution_context, ^step_context)
+          RuntimeCallbacks.executor_context(executor_input, resolution_context, ^step_context)
         )
       end,
       name: ^name
@@ -1126,7 +1126,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     Runic.condition(
       fn input ->
-        __MODULE__.condition_branch_matches(input, compiled_config, executor, branch)
+        RuntimeCallbacks.condition_branch_matches(input, compiled_config, executor, branch)
       end,
       name: ^name
     )
@@ -1139,7 +1139,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     Runic.condition(
       fn input, meta_ctx ->
-        __MODULE__.condition_branch_matches(
+        RuntimeCallbacks.condition_branch_matches(
           input,
           meta_ctx,
           compiled_config,
@@ -1158,7 +1158,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     Runic.condition(
       fn input ->
-        __MODULE__.switch_branch_matches(input, compiled_config, branch_match)
+        RuntimeCallbacks.switch_branch_matches(input, compiled_config, branch_match)
       end,
       name: ^name
     )
@@ -1170,7 +1170,7 @@ defmodule Fizz.Workflows.Compiler.Assembler do
 
     Runic.condition(
       fn input, meta_ctx ->
-        __MODULE__.switch_branch_matches(
+        RuntimeCallbacks.switch_branch_matches(
           input,
           meta_ctx,
           compiled_config,
@@ -1226,216 +1226,48 @@ defmodule Fizz.Workflows.Compiler.Assembler do
   end
 
   defp compute_dependency_input_assemblies(ir) do
-    ir.connection_plan.by_target_step
-    |> Enum.reduce(%{}, fn {target_step_id, target_entry}, acc ->
-      dependencies = Map.get(target_entry, :dependencies, %{})
+    ir.connection_plan.dependency_inputs_by_target
+    |> Enum.reduce(%{}, fn {target_step_id, dependencies}, acc ->
+      case dependencies do
+        dependencies when dependencies == %{} ->
+          acc
 
-      if dependencies == %{} do
-        acc
-      else
-        step = Map.fetch!(ir.steps, target_step_id)
+        dependencies ->
+          step = Map.fetch!(ir.steps, target_step_id)
 
-        input_specs =
-          step
-          |> ConnectionHandles.input_handles()
-          |> Enum.filter(&(&1.kind == :dependency))
-          |> Enum.map(fn handle ->
-            connection_ids = Map.get(dependencies, handle.id, [])
+          input_specs =
+            step
+            |> ConnectionHandles.input_handles()
+            |> Enum.filter(&(&1.kind == :dependency))
+            |> Enum.map(fn handle ->
+              connection_ids = Map.get(dependencies, handle.id, [])
 
-            connections =
-              connection_ids
-              |> Enum.map(&Map.fetch!(ir.connection_plan.connections, &1))
-              |> Enum.sort_by(& &1.order)
+              connections =
+                connection_ids
+                |> Enum.map(&Map.fetch!(ir.connection_plan.connections, &1))
+                |> Enum.sort_by(& &1.order)
 
-            %{
-              id: handle.id,
-              input_key: handle.key,
-              cardinality: handle.cardinality,
-              connection_ids: Enum.map(connections, & &1.id),
-              step_ids: Enum.map(connections, & &1.source_step_id),
-              connections: connections
-            }
-          end)
+              %{
+                id: handle.id,
+                input_key: handle.key,
+                cardinality: handle.cardinality,
+                connection_ids: Enum.map(connections, & &1.id),
+                step_ids: Enum.map(connections, & &1.source_step_id),
+                connections: connections
+              }
+            end)
 
-        Map.put(acc, target_step_id, %{
-          target_step_id: target_step_id,
-          input_specs: input_specs,
-          connection_count:
-            input_specs
-            |> Enum.flat_map(& &1.connection_ids)
-            |> length()
-        })
+          Map.put(acc, target_step_id, %{
+            target_step_id: target_step_id,
+            input_specs: input_specs,
+            connection_count:
+              input_specs
+              |> Enum.flat_map(& &1.connection_ids)
+              |> length()
+          })
       end
     end)
   end
-
-  defp compute_step_scopes(ir, connection_indexes) do
-    Enum.reduce(ir.topo_order, %{}, fn step_id, scopes ->
-      step = Map.fetch!(ir.steps, step_id)
-
-      parent_contexts =
-        incoming_parent_contexts(step_id, connection_indexes, scopes)
-
-      validate_split_convergence!(step, parent_contexts)
-
-      aggregator_info = compute_aggregator_info(step, parent_contexts)
-      join_info = compute_join_info(step, parent_contexts)
-
-      outgoing_lineage =
-        compute_outgoing_lineage(step, parent_contexts, aggregator_info, join_info)
-
-      Map.put(scopes, step_id, %{
-        parent_contexts: parent_contexts,
-        reducer_map: Map.get(aggregator_info, :reducer_map),
-        implicit_aggregator_join?: Map.get(aggregator_info, :implicit_join?, false),
-        outgoing_lineage: outgoing_lineage,
-        join_mode: Map.get(join_info, :mode),
-        join_has_split?: Map.get(join_info, :has_split?, false)
-      })
-    end)
-  end
-
-  defp incoming_parent_contexts(step_id, connection_indexes, scopes) do
-    step_id
-    |> incoming_flow_connections(connection_indexes)
-    |> ordered_connection_groups()
-    |> Enum.map(fn {source_step_id, source_connections} ->
-      parent_scope = Map.get(scopes, source_step_id, %{outgoing_lineage: []})
-
-      %{
-        source_step_id: source_step_id,
-        lineage: Map.get(parent_scope, :outgoing_lineage, []),
-        connections: source_connections
-      }
-    end)
-  end
-
-  defp validate_split_convergence!(%{type_id: type_id}, _parent_contexts)
-       when type_id in ["join", "aggregator"],
-       do: :ok
-
-  defp validate_split_convergence!(step, parent_contexts) do
-    if length(parent_contexts) > 1 and Enum.any?(parent_contexts, &split_lineage?(&1.lineage)) do
-      raise ArgumentError,
-            "step `#{step.id}` merges split-derived parents implicitly; insert an explicit `join` step"
-    end
-  end
-
-  defp compute_aggregator_info(
-         %{type_id: "aggregator", id: step_id, compiled_config: compiled_config},
-         parent_contexts
-       ) do
-    operation =
-      required_literal_string!(Map.get(compiled_config, "operation"), "aggregator operation")
-
-    split_parent_contexts = Enum.filter(parent_contexts, &split_lineage?(&1.lineage))
-
-    reducer_maps =
-      split_parent_contexts
-      |> Enum.map(&effective_splitter(&1.lineage))
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-
-    cond do
-      split_parent_contexts == [] ->
-        %{reducer_map: nil, implicit_join?: false}
-
-      length(parent_contexts) == 1 and length(reducer_maps) == 1 ->
-        %{reducer_map: List.first(reducer_maps), implicit_join?: false}
-
-      true ->
-        validate_implicit_aggregator_operation!(step_id, operation)
-        %{reducer_map: nil, implicit_join?: true}
-    end
-  end
-
-  defp compute_aggregator_info(_step, _parent_contexts) do
-    %{reducer_map: nil, implicit_join?: false}
-  end
-
-  defp compute_join_info(
-         %{type_id: "join", id: step_id, compiled_config: compiled_config},
-         parent_contexts
-       ) do
-    explicit_mode = optional_literal_string(Map.get(compiled_config, "mode"), nil)
-    has_split? = Enum.any?(parent_contexts, &split_lineage?(&1.lineage))
-
-    mode =
-      explicit_mode ||
-        cond do
-          not has_split? -> "wait_all"
-          true -> "zip_nil"
-        end
-
-    validate_join_mode!(step_id, mode, has_split?)
-
-    %{
-      mode: mode,
-      has_split?: has_split?,
-      outgoing_lineage: []
-    }
-  end
-
-  defp compute_join_info(_step, _parent_contexts), do: %{}
-
-  defp validate_join_mode!(step_id, "wait_all", true) do
-    raise ArgumentError,
-          "join `#{step_id}` mode `wait_all` cannot be used with split-derived parents"
-  end
-
-  defp validate_join_mode!(_step_id, _mode, _has_split?), do: :ok
-
-  defp compute_outgoing_lineage(step, parent_contexts, aggregator_info, join_info) do
-    base_lineage =
-      parent_contexts
-      |> Enum.map(& &1.lineage)
-      |> unique_lineages()
-      |> List.first() || []
-
-    case step.type_id do
-      "splitter" ->
-        base_lineage ++ [step.id]
-
-      "aggregator" when aggregator_info.implicit_join? ->
-        []
-
-      "aggregator" when is_binary(aggregator_info.reducer_map) ->
-        pop_effective_splitter(base_lineage, aggregator_info.reducer_map, step.id)
-
-      "join" ->
-        Map.get(join_info, :outgoing_lineage, [])
-
-      _ ->
-        base_lineage
-    end
-  end
-
-  defp pop_effective_splitter(lineage, reducer_map, step_id) do
-    case Enum.split(lineage, max(length(lineage) - 1, 0)) do
-      {prefix, [^reducer_map]} ->
-        prefix
-
-      _ ->
-        raise ArgumentError,
-              "aggregator `#{step_id}` cannot reduce splitter `#{reducer_map}` from lineage #{inspect(lineage)}"
-    end
-  end
-
-  defp unique_lineages(lineages) do
-    Enum.reduce(lineages, [], fn lineage, acc ->
-      if Enum.any?(acc, &(&1 == lineage)) do
-        acc
-      else
-        acc ++ [lineage]
-      end
-    end)
-  end
-
-  defp split_lineage?([]), do: false
-  defp split_lineage?(_lineage), do: true
-
-  defp effective_splitter([]), do: nil
-  defp effective_splitter(lineage), do: List.last(lineage)
 
   defp passthrough_step(name) do
     Runic.step(fn input -> input end, name: ^name)
@@ -1483,288 +1315,9 @@ defmodule Fizz.Workflows.Compiler.Assembler do
     }
   end
 
-  @doc false
-  def resolution_context(input, meta_ctx, dependencies) do
-    workflow = Map.get(meta_ctx, :workflow) || %{}
-    metadata = Map.get(meta_ctx, :metadata) || %{}
-    execution_context = ExecutionContext.from_map(Map.put(meta_ctx, :input, input))
-
-    %{
-      input: input,
-      steps:
-        dependencies.step_ids
-        |> Enum.reduce(%{}, fn step_id, acc ->
-          Map.put(acc, step_id, Map.get(meta_ctx, {:step_output, step_id}))
-        end),
-      workflow: workflow,
-      env: Map.get(meta_ctx, :env) || %{},
-      metadata: metadata,
-      scope: execution_context.scope,
-      current_scope: execution_context.scope,
-      user_id: runtime_context_value(meta_ctx, workflow, metadata, :user_id),
-      project_id: runtime_context_value(meta_ctx, workflow, metadata, :project_id),
-      workos_organization_id:
-        runtime_context_value(meta_ctx, workflow, metadata, :workos_organization_id),
-      _credential_resolver: Map.get(meta_ctx, :_credential_resolver),
-      execution_context: execution_context
-    }
-  end
-
-  @doc false
-  def executor_context(input, resolution_context, step_context) do
-    step_context
-    |> Map.merge(%{
-      input: input,
-      steps: Map.get(resolution_context, :steps, %{}),
-      workflow: Map.get(resolution_context, :workflow, %{}),
-      env: Map.get(resolution_context, :env, %{}),
-      metadata: Map.get(resolution_context, :metadata, %{}),
-      scope: Map.get(resolution_context, :scope),
-      current_scope: Map.get(resolution_context, :current_scope),
-      user_id: Map.get(resolution_context, :user_id),
-      project_id: Map.get(resolution_context, :project_id),
-      workos_organization_id: Map.get(resolution_context, :workos_organization_id),
-      _credential_resolver: Map.get(resolution_context, :_credential_resolver)
-    })
-    |> ExecutionContext.put_legacy_aliases()
-  end
-
-  defp runtime_context_value(meta_ctx, workflow, metadata, key) do
-    Map.get(meta_ctx, key) || Map.get(workflow, key) || Map.get(metadata, key)
-  end
-
-  @doc false
-  def execute_executor(executor, config, input, context) do
-    case executor.execute(config, input, context) do
-      {:ok, output} -> output
-      {:skip, reason} -> {:skip, reason}
-      {:error, reason} -> raise step_execution_error(reason, context)
-      other -> other
-    end
-  end
-
-  defp step_execution_error(reason, context) do
-    StepExecutionError.exception(
-      reason: reason,
-      step_id: Map.get(context, :step_id),
-      step_type_id: Map.get(context, :type_id),
-      retry: Map.get(context, :retry)
-    )
-  end
-
-  defp matched_switch_branch(compiled_config, resolution_context) do
-    value =
-      compiled_config
-      |> Map.get("value")
-      |> ConfigResolver.resolve_value(resolution_context)
-
-    cases = Map.get(compiled_config, "cases", [])
-
-    case Enum.find_index(cases, fn case_def ->
-           match_value =
-             case_def
-             |> Map.get("match")
-             |> ConfigResolver.resolve_value(resolution_context)
-
-           normalize_switch_value(value) == normalize_switch_value(match_value)
-         end) do
-      nil -> :default
-      index -> {:case, index}
-    end
-  end
-
-  defp branch_match?(matched_branch, expected_branch), do: matched_branch == expected_branch
-
-  defp normalize_switch_value(value) when is_binary(value), do: String.trim(value)
-  defp normalize_switch_value(value) when is_number(value), do: to_string(value)
-  defp normalize_switch_value(value) when is_atom(value), do: Atom.to_string(value)
-  defp normalize_switch_value(value), do: value
-
-  defp normalize_aggregator_operation(operation) when is_binary(operation), do: operation
-  defp normalize_aggregator_operation(_operation), do: "collect"
-
-  @doc false
-  def assemble_connected_input(input, input_specs, 1) do
-    {input, build_connected_executor_input(input, input_specs, [])}
-  end
-
-  def assemble_connected_input([primary | dependency_values], input_specs, parent_count)
-      when is_list(input_specs) and parent_count > 1 do
-    {primary, build_connected_executor_input(primary, input_specs, dependency_values)}
-  end
-
-  def assemble_connected_input(input, input_specs, _parent_count) do
-    {input, build_connected_executor_input(input, input_specs, [])}
-  end
-
-  def assemble_root_input(input, input_specs, parent_count) do
-    assemble_connected_input(input, input_specs, parent_count)
-  end
-
-  defp build_connected_executor_input(primary, input_specs, dependency_values) do
-    {assembled_input, remaining_values} =
-      Enum.reduce(input_specs, {%{"main" => primary}, dependency_values}, fn input_spec,
-                                                                             {assembled, values} ->
-        {dependency_value, remaining} = take_dependency_value(input_spec, values)
-        {Map.put(assembled, input_spec.input_key, dependency_value), remaining}
-      end)
-
-    case remaining_values do
-      [] -> assembled_input
-      _ -> raise ArgumentError, "unexpected extra dependency values for connected executor input"
-    end
-  end
-
-  defp take_dependency_value(%{cardinality: :many, step_ids: step_ids}, values) do
-    Enum.split(values, length(step_ids))
-  end
-
-  defp take_dependency_value(%{cardinality: :one, step_ids: []}, values), do: {nil, values}
-
-  defp take_dependency_value(%{cardinality: :one, step_ids: [_step_id]}, [value | rest]),
-    do: {value, rest}
-
-  defp take_dependency_value(%{cardinality: :one, step_ids: [_step_id]}, []) do
-    {nil, []}
-  end
-
-  @doc false
-  def aggregate_reduce(item, acc, operation) do
-    operation = normalize_aggregator_operation(operation)
-    AggregatorExecutor.reducer_for_operation(operation).(item, acc)
-  end
-
-  @doc false
-  def aggregate_reduce(item, acc, _meta_ctx, operation) do
-    operation = normalize_aggregator_operation(operation)
-    AggregatorExecutor.reducer_for_operation(operation).(item, acc)
-  end
-
-  @doc false
-  def aggregate_empty_result(_input, operation) do
-    operation
-    |> normalize_aggregator_operation()
-    |> AggregatorExecutor.init_for_operation()
-  end
-
-  @doc false
-  def aggregate_empty_result(_input, _meta_ctx, operation) do
-    operation
-    |> normalize_aggregator_operation()
-    |> AggregatorExecutor.init_for_operation()
-  end
-
-  @doc false
-  def execute_join(mode, input) do
-    {:ok, output} = JoinExecutor.execute(%{"mode" => mode, "flatten" => false}, input, %{})
-    output
-  end
-
-  @doc false
-  def flatten_collection_layer(input) when is_list(input) do
-    Enum.flat_map(input, fn
-      item when is_list(item) -> item
-      item -> [item]
-    end)
-  end
-
-  def flatten_collection_layer(input), do: input
-
-  @doc false
-  def empty_collection?(input) when is_list(input), do: input == []
-  def empty_collection?(input) when is_map(input), do: map_size(input) == 0
-  def empty_collection?(%Range{} = input), do: Enum.empty?(input)
-  def empty_collection?(nil), do: true
-  def empty_collection?(_input), do: false
-
-  @doc false
-  def condition_branch_matches(input, compiled_config, executor, branch) do
-    config =
-      ConfigResolver.resolve_config(compiled_config, %{
-        input: input,
-        steps: %{},
-        workflow: %{},
-        env: %{}
-      })
-
-    case {branch, executor.execute(config, input, %{})} do
-      {true, {:ok, _output}} -> true
-      {false, {:skip, :condition_false}} -> true
-      _ -> false
-    end
-  end
-
-  @doc false
-  def condition_branch_matches(input, meta_ctx, compiled_config, dependencies, executor, branch) do
-    resolution_context = resolution_context(input, meta_ctx, dependencies)
-    config = ConfigResolver.resolve_config(compiled_config, resolution_context)
-
-    case {branch, executor.execute(config, input, %{})} do
-      {true, {:ok, _output}} -> true
-      {false, {:skip, :condition_false}} -> true
-      _ -> false
-    end
-  end
-
-  @doc false
-  def switch_branch_matches(input, compiled_config, branch_match) do
-    resolution_context = %{
-      input: input,
-      steps: %{},
-      workflow: %{},
-      env: %{}
-    }
-
-    branch_match?(matched_switch_branch(compiled_config, resolution_context), branch_match)
-  end
-
-  @doc false
-  def switch_branch_matches(input, meta_ctx, compiled_config, dependencies, branch_match) do
-    resolution_context = resolution_context(input, meta_ctx, dependencies)
-
-    branch_match?(matched_switch_branch(compiled_config, resolution_context), branch_match)
-  end
-
-  defp validate_implicit_aggregator_operation!(_step_id, operation)
-       when operation in @row_safe_implicit_aggregator_operations,
-       do: :ok
-
-  defp validate_implicit_aggregator_operation!(step_id, operation) do
-    supported = Enum.join(@row_safe_implicit_aggregator_operations, ", ")
-
-    raise ArgumentError,
-          "aggregator `#{step_id}` implicitly zips split-derived parents and only supports operations: #{supported}; add an explicit `join` or transform before using `#{operation}`"
-  end
-
   defp put_effective_join_mode(compiled_config, mode) do
     Map.put(compiled_config, "mode", %AccessPlan.Literal{value: mode})
   end
-
-  defp optional_literal_string(nil, default), do: default
-  defp optional_literal_string(%AccessPlan.Literal{value: nil}, default), do: default
-
-  defp optional_literal_string(%AccessPlan.Literal{value: value}, _default) when is_binary(value),
-    do: value
-
-  defp optional_literal_string(%AccessPlan.Literal{value: value}, label) do
-    raise ArgumentError, "#{label} must resolve to a string literal, got: #{inspect(value)}"
-  end
-
-  defp optional_literal_string(value, _default) when is_binary(value), do: value
-
-  defp optional_literal_string(value, label) do
-    raise ArgumentError, "#{label} must resolve to a string literal, got: #{inspect(value)}"
-  end
-
-  defp required_literal_string!(nil, label) do
-    raise ArgumentError, "#{label} must resolve to a string literal, got: nil"
-  end
-
-  defp required_literal_string!(%AccessPlan.Literal{value: nil}, label) do
-    raise ArgumentError, "#{label} must resolve to a string literal, got: nil"
-  end
-
-  defp required_literal_string!(value, label), do: optional_literal_string(value, label)
 
   defp referenced_step_ids(steps) do
     steps

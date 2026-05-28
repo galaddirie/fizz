@@ -14,6 +14,8 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
   import Fizz.WorkflowsFixtures
 
   alias Fizz.Workflows.PassivationSweeper
+  alias Fizz.Workflows.Runner.RunnableConsumerSupervisor
+  alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Runtime.ContextBuilder
   alias Fizz.Workflows.Store.{Paths, SqliteStore}
@@ -68,6 +70,71 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(ctx.scope, run.id)
   end
 
+  test "running workers with active tasks are not passivated by stale activity", ctx do
+    test_pid = self()
+    dispatcher = start_runnable_dispatcher!(:active_work)
+
+    start_runnable_consumer_supervisor!(
+      :active_work_consumer,
+      dispatcher,
+      ctx.task_supervisor
+    )
+
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
+
+    workflow =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(blocking_step(:long_running_step, test_pid))
+
+    pid = start_worker!(workflow, run, ctx, runnable_dispatcher: dispatcher)
+    ref = Process.monitor(pid)
+
+    assert :ok = Worker.run(pid, %{"value" => 1})
+    assert_receive {:step_started, :long_running_step, task_pid}, 2_000
+
+    state = :sys.get_state(pid)
+    assert map_size(state.active_tasks) == 1
+
+    update_last_active_at(run.id, old_time())
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute run.id in passivated_run_ids
+    refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, 200
+    assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+
+    send(task_pid, :release)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+  end
+
+  test "running workers with queued work are not passivated by stale activity", ctx do
+    dispatcher = start_runnable_dispatcher!(:queued_work)
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
+
+    workflow =
+      Runic.Workflow.new()
+      |> Runic.Workflow.add(Runic.step(fn input -> input end, name: :queued_step))
+
+    pid = start_worker!(workflow, run, ctx, runnable_dispatcher: dispatcher)
+    ref = Process.monitor(pid)
+
+    assert :ok = Worker.run(pid, %{"value" => 1})
+
+    state = :sys.get_state(pid)
+    assert [%{status: :queued}] = Map.values(state.active_tasks)
+
+    update_last_active_at(run.id, old_time())
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute run.id in passivated_run_ids
+    refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, 200
+    assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+
+    assert :ok = Worker.stop(pid, persist: false)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+  end
+
   test "completed and failed runs are not passivated", ctx do
     sweeper = start_sweeper!(ctx)
     completed_run = insert_run(ctx.scope, ctx.version, :completed, old_time())
@@ -98,6 +165,28 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
     assert run.id in passivated_run_ids
     assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+  end
+
+  test "running runs without a worker are not DB-only passivated", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :running, old_time())
+
+    persist_checkpoint!(run, ctx)
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute run.id in passivated_run_ids
+    assert {:ok, %{status: :running}} = Fizz.Workflows.get_run(ctx.scope, run.id)
+  end
+
+  test "runs without a worker and with an active lease are not DB-only passivated", ctx do
+    sweeper = start_sweeper!(ctx)
+    run = insert_run(ctx.scope, ctx.version, :sleeping, old_time())
+
+    persist_checkpoint!(run, ctx, active_lease?: true)
+
+    assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
+    refute run.id in passivated_run_ids
+    assert {:ok, %{status: :sleeping}} = Fizz.Workflows.get_run(ctx.scope, run.id)
   end
 
   test "passivated runs have local SQLite files evicted when litestream is running", ctx do
@@ -159,22 +248,36 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     assert Enum.count(statuses, &(&1 == :running)) == 1
   end
 
-  test "wal_checkpoint failure does not block passivation", ctx do
+  test "wal_checkpoint failure preserves local files", ctx do
     fake_litestream = start_fake_litestream!()
-    sweeper = start_sweeper!(ctx, litestream_server: fake_litestream)
+
+    wal_checkpoint = fn db_path ->
+      File.write!("#{db_path}-wal", "pending wal")
+      File.write!("#{db_path}-shm", "pending shm")
+      {:error, :checkpoint_failed}
+    end
+
+    sweeper =
+      start_sweeper!(ctx,
+        litestream_server: fake_litestream,
+        wal_checkpoint: wal_checkpoint
+      )
+
     run = insert_run(ctx.scope, ctx.version, :running, old_time())
 
     pid = start_idle_worker!(run, ctx)
     ref = Process.monitor(pid)
 
-    # Pre-delete the file so wal_checkpoint will fail
     db_path = run_db_path(run, ctx)
-    File.rm(db_path)
+    assert File.exists?(db_path)
 
     assert {:ok, passivated_run_ids} = PassivationSweeper.sweep(server: sweeper)
     assert run.id in passivated_run_ids
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
 
+    assert File.exists?(db_path)
+    assert File.read!("#{db_path}-wal") == "pending wal"
+    assert File.read!("#{db_path}-shm") == "pending shm"
     assert {:ok, %{status: :passivated}} = Fizz.Workflows.get_run(ctx.scope, run.id)
   end
 
@@ -209,6 +312,33 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     name
   end
 
+  defp start_runnable_dispatcher!(name) do
+    dispatcher = unique_name(name)
+
+    start_supervised!(
+      Supervisor.child_spec({RunnableDispatcher, name: dispatcher}, id: dispatcher)
+    )
+
+    dispatcher
+  end
+
+  defp start_runnable_consumer_supervisor!(name, dispatcher, task_supervisor) do
+    consumer_supervisor = unique_name(name)
+
+    start_supervised!(
+      Supervisor.child_spec(
+        {RunnableConsumerSupervisor,
+         name: consumer_supervisor,
+         dispatcher: dispatcher,
+         task_supervisor: task_supervisor,
+         max_concurrency: 1},
+        id: consumer_supervisor
+      )
+    )
+
+    consumer_supervisor
+  end
+
   defp run_db_path(run, ctx) do
     Paths.db_path(
       Path.expand(ctx.tmp_dir),
@@ -219,6 +349,12 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
   end
 
   defp start_idle_worker!(run, ctx) do
+    workflow = Runic.workflow(steps: [])
+
+    start_worker!(workflow, run, ctx)
+  end
+
+  defp start_worker!(workflow, run, ctx, opts \\ []) do
     fence_token = 1
 
     insert_lease(run.id, fence_token)
@@ -232,8 +368,6 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
         repo: Repo
       )
 
-    workflow = Runic.workflow(steps: [])
-
     start_supervised!(
       {Worker,
        [
@@ -244,6 +378,8 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
          fence_token: fence_token,
          registry: ctx.registry,
          task_supervisor: ctx.task_supervisor,
+         runnable_dispatcher:
+           Keyword.get(opts, :runnable_dispatcher, Fizz.Workflows.Runner.RunnableDispatcher),
          checkpoint_strategy: :every_cycle
        ]}
     )
@@ -268,16 +404,22 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     |> Repo.insert!()
   end
 
-  defp insert_lease(run_id, fence_token) do
+  defp insert_lease(run_id, fence_token, lease_expiry_sql \\ "NOW() + interval '30 seconds'") do
     assert {:ok, _result} =
              Ecto.Adapters.SQL.query(
                Repo,
                """
                INSERT INTO workflow_run_leases (run_id, owner_node, fence_token, checkpoint_seq, lease_expiry)
-               VALUES ($1, NULL, $2, 0, NOW() + interval '30 seconds')
+               VALUES ($1, NULL, $2, 0, #{lease_expiry_sql})
                """,
                [dump_uuid(run_id), fence_token]
              )
+  end
+
+  defp update_last_active_at(run_id, value) do
+    assert {_count, nil} =
+             from(run in WorkflowRun, where: run.id == ^run_id)
+             |> Repo.update_all(set: [last_active_at: value])
   end
 
   defp dump_uuid(run_id), do: Ecto.UUID.dump!(run_id)
@@ -286,7 +428,20 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
     DateTime.add(DateTime.utc_now(), -5, :minute)
   end
 
-  defp persist_checkpoint!(run, ctx) do
+  defp blocking_step(name, test_pid) do
+    Runic.step(
+      fn input ->
+        send(test_pid, {:step_started, name, self()})
+
+        receive do
+          :release -> input
+        end
+      end,
+      name: name
+    )
+  end
+
+  defp persist_checkpoint!(run, ctx, opts \\ []) do
     fence_token = 1
     insert_lease(run.id, fence_token)
 
@@ -301,6 +456,23 @@ defmodule Fizz.Workflows.PassivationSweeperTest do
 
     workflow = Runic.workflow(steps: [])
     :ok = SqliteStore.save(run.id, Runic.Workflow.event_log(workflow), store_state)
+
+    unless Keyword.get(opts, :active_lease?, false) do
+      expire_lease(run.id)
+    end
+  end
+
+  defp expire_lease(run_id) do
+    assert {:ok, _result} =
+             Ecto.Adapters.SQL.query(
+               Repo,
+               """
+               UPDATE workflow_run_leases
+               SET lease_expiry = NOW() - interval '1 second'
+               WHERE run_id = $1
+               """,
+               [dump_uuid(run_id)]
+             )
   end
 
   defp unique_name(name) do

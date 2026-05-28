@@ -80,9 +80,9 @@ defmodule Fizz.Workflows.TimerPoller do
       fired_timer_ids =
         timers
         |> Task.async_stream(
-          &deliver_timer(&1, state.worker_opts),
+          &deliver_timer(&1, state.worker_opts, state.delivery_timeout_ms),
           max_concurrency: state.max_concurrency,
-          timeout: state.delivery_timeout_ms,
+          timeout: delivery_task_timeout_ms(state.delivery_timeout_ms),
           on_timeout: :kill_task
         )
         |> Enum.reduce([], fn
@@ -95,7 +95,9 @@ defmodule Fizz.Workflows.TimerPoller do
     end
   end
 
-  defp deliver_timer(%DurableTimer{} = timer, worker_opts) do
+  defp deliver_timer(%DurableTimer{} = timer, worker_opts, delivery_timeout_ms) do
+    worker_opts = Keyword.put(worker_opts, :delivery_timeout_ms, delivery_timeout_ms)
+
     case Workflows.deliver_run_event(timer.run_id, {:timer_fired, timer}, worker_opts) do
       :ok ->
         :ok = Workflows.mark_timer_fired(timer.id)
@@ -123,6 +125,9 @@ defmodule Fizz.Workflows.TimerPoller do
   defp schedule_poll(_interval_ms), do: :ok
 
   defp server_name(opts), do: Keyword.get(opts, :server, __MODULE__)
+
+  defp delivery_task_timeout_ms(:infinity), do: :infinity
+  defp delivery_task_timeout_ms(timeout_ms), do: timeout_ms + 5_000
 
   defp call_timeout_ms do
     Application.get_env(:fizz, __MODULE__, [])

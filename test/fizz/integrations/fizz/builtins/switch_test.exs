@@ -53,6 +53,19 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.SwitchTest do
     assert {:ok, {:branch, "number", ^input}} = Switch.execute(config, input, %{})
   end
 
+  test "matched_branch returns compiler branch identity using executor matching rules" do
+    assert Switch.matched_branch(" active ", [%{"match" => :active, "output" => "active"}]) ==
+             {:case, 0}
+
+    assert Switch.matched_branch(42, [
+             %{"match" => "41", "output" => "wrong"},
+             %{"match" => "42", "output" => "number"}
+           ]) == {:case, 1}
+
+    assert Switch.matched_branch("missing", [%{"match" => "active", "output" => "active"}]) ==
+             :default
+  end
+
   test "validate_config enforces required fields" do
     assert {:error, [value: "is required", cases: "is required"]} = Switch.validate_config(%{})
 

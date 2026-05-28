@@ -21,6 +21,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Math do
     integration: "fizz"
 
   alias Fizz.Fields
+  alias Fizz.Workflows.Expressions
 
   @supported_operations ~w(add subtract multiply divide modulo power square_root abs round ceil floor)
 
@@ -99,7 +100,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Math do
           [{:value, "is required"} | errors]
 
         value when is_binary(value) ->
-          if expression_string?(value) do
+          if Expressions.expression_string?(value) do
             errors
           else
             case validate_number(value) do
@@ -132,7 +133,7 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Math do
             errors
 
           val when is_binary(val) ->
-            if expression_string?(val) do
+            if Expressions.expression_string?(val) do
               errors
             else
               case Float.parse(val) do
@@ -181,10 +182,4 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Math do
   end
 
   defp validate_number(other), do: {:error, "expected a number, got: #{inspect(other)}"}
-
-  defp expression_string?(value) when is_binary(value) do
-    String.contains?(value, "{{") and String.contains?(value, "}}")
-  end
-
-  defp expression_string?(_value), do: false
 end

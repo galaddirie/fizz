@@ -17,7 +17,6 @@ defmodule Fizz.Workflows.Runner.Worker do
 
   alias Fizz.Workflows
   alias Fizz.Workflows.{DurableTimer, SignalInbox}
-  alias Fizz.Workflows.LeaseManager
   alias Fizz.Workflows.Runner.StepRetry
   alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.StepExecutionTrace
@@ -40,6 +39,7 @@ defmodule Fizz.Workflows.Runner.Worker do
   require Logger
 
   @default_idle_timeout_ms 60_000
+  @default_delivery_timeout_ms 30_000
   @output_summary_limit 1_024
   @inspect_collection_limit 50
 
@@ -104,18 +104,63 @@ defmodule Fizz.Workflows.Runner.Worker do
   incorporated into the in-memory workflow state.
   """
   def deliver_event(pid, event) when is_pid(pid) do
-    GenServer.call(pid, {:deliver_event, event}, :infinity)
+    pid
+    |> deliver_event(event, timeout: :infinity)
+    |> legacy_delivery_reply()
   end
 
   def deliver_event(run_id, event) when is_binary(run_id) do
-    case lookup(run_id) do
+    run_id
+    |> deliver_event(event, timeout: :infinity)
+    |> legacy_delivery_reply()
+  end
+
+  @doc """
+  Delivers an external workflow event with a bounded caller timeout.
+
+  This API distinguishes a caller timeout before the worker accepts the event
+  from a worker reply after the event is incorporated or rejected.
+  """
+  def deliver_event(pid, event, opts) when is_pid(pid) and is_list(opts) do
+    timeout = Keyword.get(opts, :timeout, @default_delivery_timeout_ms)
+    call_deliver_event(pid, event, timeout)
+  end
+
+  def deliver_event(run_id, event, opts) when is_binary(run_id) and is_list(opts) do
+    case lookup(run_id, opts) do
       nil ->
         {:error, :not_found}
 
       pid ->
-        deliver_event(pid, event)
+        deliver_event(pid, event, opts)
     end
   end
+
+  defp call_deliver_event(pid, event, timeout) do
+    pid
+    |> GenServer.call({:deliver_event, event, delivery_deadline(timeout)}, timeout)
+    |> normalize_delivery_reply()
+  catch
+    :exit, {:timeout, _reason} -> {:error, :timeout}
+    :exit, {:noproc, _reason} -> {:error, :not_found}
+    :exit, reason -> {:error, reason}
+  end
+
+  defp normalize_delivery_reply(:ok), do: {:ok, :settled}
+  defp normalize_delivery_reply({:ok, :skipped}), do: {:ok, :skipped}
+  defp normalize_delivery_reply({:error, reason}), do: {:error, reason}
+  defp normalize_delivery_reply(reply), do: {:error, {:unexpected_delivery_reply, reply}}
+
+  defp delivery_deadline(:infinity), do: :infinity
+
+  defp delivery_deadline(timeout) when is_integer(timeout) do
+    System.monotonic_time(:millisecond) + timeout
+  end
+
+  defp legacy_delivery_reply({:ok, :settled}), do: :ok
+  defp legacy_delivery_reply({:ok, :accepted}), do: :ok
+  defp legacy_delivery_reply({:ok, :skipped}), do: {:ok, :skipped}
+  defp legacy_delivery_reply({:error, reason}), do: {:error, reason}
 
   @doc """
   Stops a worker and optionally persists a final checkpoint before shutdown.
@@ -133,6 +178,28 @@ defmodule Fizz.Workflows.Runner.Worker do
 
       pid ->
         stop(pid, opts)
+    end
+  end
+
+  @doc """
+  Stops an idle worker for passivation.
+
+  Returns `{:error, :active_work}` when the worker still has active, queued, or
+  immediately dispatchable work and must stay hot.
+  """
+  def passivate(target, opts \\ [])
+
+  def passivate(pid, opts) when is_pid(pid) do
+    GenServer.call(pid, {:passivate, opts}, :infinity)
+  end
+
+  def passivate(run_id, opts) when is_binary(run_id) and is_list(opts) do
+    case lookup(run_id, opts) do
+      nil ->
+        {:error, :not_found}
+
+      pid ->
+        passivate(pid, opts)
     end
   end
 
@@ -204,7 +271,42 @@ defmodule Fizz.Workflows.Runner.Worker do
     {:stop, :normal, :ok, state}
   end
 
+  def handle_call({:passivate, opts}, _from, state) do
+    case passivation_blocker(state) do
+      :none ->
+        state =
+          state
+          |> cancel_idle_timeout()
+          |> maybe_checkpoint_before_stop(opts)
+
+        {:stop, :normal, :ok, state}
+
+      reason ->
+        {:reply, {:error, reason}, state}
+    end
+  end
+
+  def handle_call({:deliver_event, event, deadline}, _from, state) do
+    case delivery_deadline_expired?(deadline) do
+      true ->
+        {:reply, {:error, :timeout}, state}
+
+      false ->
+        do_deliver_event(event, state)
+    end
+  end
+
   def handle_call({:deliver_event, event}, _from, state) do
+    do_deliver_event(event, state)
+  end
+
+  defp delivery_deadline_expired?(:infinity), do: false
+
+  defp delivery_deadline_expired?(deadline) do
+    System.monotonic_time(:millisecond) >= deadline
+  end
+
+  defp do_deliver_event(event, state) do
     case process_event(state, event) do
       {:continue, next_state} ->
         {:reply, :ok, next_state}
@@ -338,19 +440,11 @@ defmodule Fizz.Workflows.Runner.Worker do
       |> shutdown_active_tasks()
 
     # Safety net: if run is still non-terminal in DB, mark it as failed.
-    # fail_run/2 internally fetches the run and handles already-failed runs,
-    # so we just call it and handle errors gracefully.
+    # fail_run/2 owns terminal cleanup and handles already-failed runs, so we
+    # just call it and handle errors gracefully.
     case Workflows.fail_run(state.run_id, :worker_terminated) do
-      {:ok, _run} ->
-        _ =
-          broadcast(
-            state.run_id,
-            {:run_status_changed, status_payload(state.run_id, :failed)}
-          )
-
-      {:error, _reason} ->
-        # Run was already terminal or not found — nothing to do
-        :ok
+      {:ok, _run} -> :ok
+      {:error, _reason} -> :ok
     end
 
     :ok
@@ -887,11 +981,6 @@ defmodule Fizz.Workflows.Runner.Worker do
   defp complete_and_stop(state) do
     state = do_checkpoint(state)
     _ = Workflows.complete_run(state.run_id, workflow_output(state.workflow))
-
-    _ =
-      broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, :completed)})
-
-    _ = release_lease(state.run_id)
     state
   end
 
@@ -912,26 +1001,34 @@ defmodule Fizz.Workflows.Runner.Worker do
           state
       end
 
-    # 4. Mark run as failed in DB — log on error
+    # 4. Mark run as failed in DB and run terminal cleanup — log on error
     case Workflows.fail_run(state.run_id, reason) do
       {:ok, _run} -> :ok
       {:error, fail_reason} -> Logger.error("fail_run failed: #{inspect(fail_reason)}")
     end
 
-    # 5. Broadcast terminal status
-    _ = broadcast(state.run_id, {:run_status_changed, status_payload(state.run_id, :failed)})
-
-    # 6. Release lease
-    _ = release_lease(state.run_id)
-
     state
   end
 
-  defp release_lease(run_id) do
-    case LeaseManager.release(run_id) do
-      :ok -> :ok
-      {:error, :not_owner} -> :ok
-      {:error, _reason} = error -> error
+  defp passivation_blocker(%__MODULE__{active_tasks: active_tasks})
+       when map_size(active_tasks) > 0 do
+    :active_work
+  end
+
+  defp passivation_blocker(%__MODULE__{retrying_runnables: retrying_runnables})
+       when map_size(retrying_runnables) > 0 do
+    :active_work
+  end
+
+  defp passivation_blocker(%__MODULE__{local_timers: local_timers})
+       when map_size(local_timers) > 0 do
+    :active_work
+  end
+
+  defp passivation_blocker(%__MODULE__{} = state) do
+    case Workflow.is_runnable?(state.workflow) do
+      true -> :active_work
+      false -> :none
     end
   end
 
