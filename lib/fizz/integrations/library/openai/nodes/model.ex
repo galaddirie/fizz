@@ -21,6 +21,7 @@ defmodule Fizz.Integrations.Library.OpenAI.Nodes.Model do
   alias Fizz.Integrations.Auth.CredentialRef
   alias Fizz.Integrations.Auth.Providers.OpenAIApiKey
   alias Fizz.Fields
+  alias Fizz.Integrations.Library.OpenAI.ModelResolver
 
   @credential_field Fields.credential(OpenAIApiKey.provider_id(), :api_key,
                       key: "credential_ref",
@@ -31,11 +32,13 @@ defmodule Fizz.Integrations.Library.OpenAI.Nodes.Model do
 
   @fields [
     @credential_field,
-    Fields.string("model",
+    Fields.search("model",
       label: "Model",
       required?: true,
       default: "gpt-5.5",
-      description: "OpenAI model name"
+      placeholder: "Search OpenAI models...",
+      resolver: ModelResolver,
+      description: "OpenAI model name from the ReqLLM model catalog"
     ),
     Fields.number("temperature",
       label: "Temperature",

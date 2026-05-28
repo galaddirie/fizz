@@ -98,6 +98,18 @@ defmodule Fizz.Integrations.Catalog.Manifest do
         module: Fizz.Integrations.Library.Google.Sheets.ColumnsResolver
       },
       %Resolver{
+        id: "openai.models",
+        provider: "openai_api_key",
+        integration: "openai",
+        module: Fizz.Integrations.Library.OpenAI.ModelResolver
+      },
+      %Resolver{
+        id: "anthropic.models",
+        provider: "anthropic_api_key",
+        integration: "anthropic",
+        module: Fizz.Integrations.Library.Anthropic.ModelResolver
+      },
+      %Resolver{
         id: "credentials",
         module: Fizz.Fields.Credential
       }

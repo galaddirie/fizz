@@ -20,6 +20,9 @@ defmodule Fizz.Integrations.Library.Anthropic.Nodes.Model do
   alias Fizz.Integrations.Auth.CredentialRef
   alias Fizz.Integrations.Auth.Providers.AnthropicApiKey
   alias Fizz.Fields
+  alias Fizz.Integrations.Library.Anthropic.ModelResolver
+
+  @default_model "claude-sonnet-4-6"
 
   @credential_field Fields.credential(AnthropicApiKey.provider_id(), :api_key,
                       key: "credential_ref",
@@ -30,11 +33,13 @@ defmodule Fizz.Integrations.Library.Anthropic.Nodes.Model do
 
   @fields [
     @credential_field,
-    Fields.string("model",
+    Fields.search("model",
       label: "Model",
       required?: true,
-      default: "claude-3-5-sonnet-latest",
-      description: "Anthropic model name"
+      default: @default_model,
+      placeholder: "Search Anthropic models...",
+      resolver: ModelResolver,
+      description: "Anthropic model name from the ReqLLM model catalog"
     ),
     Fields.number("temperature",
       label: "Temperature",
@@ -71,7 +76,7 @@ defmodule Fizz.Integrations.Library.Anthropic.Nodes.Model do
          "kind" => "ai.chat_model",
          "provider" => "anthropic_api_key",
          "credential_ref" => credential_ref,
-         "model_spec" => "anthropic:" <> Map.get(config, "model", "claude-3-5-sonnet-latest"),
+         "model_spec" => "anthropic:" <> Map.get(config, "model", @default_model),
          "temperature" => normalize_temperature(Map.get(config, "temperature", 0.2)),
          "max_tokens" => normalize_max_tokens(Map.get(config, "max_tokens", 800)),
          "capabilities" => ["chat"]
