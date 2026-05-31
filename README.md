@@ -1,4 +1,5 @@
 # Fizz
+<img width="1508" height="785" alt="example_workflow" src="https://github.com/user-attachments/assets/2e42b3ca-f7cc-4c29-b0d7-6b762f880215" />
 
 ## Local Stack
 
