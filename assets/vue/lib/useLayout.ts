@@ -45,17 +45,8 @@ export function useLayout() {
 
     previousDirection.value = normalizedDirection;
 
-    // Filter nodes and edges. Only connected subnodes are handled in the dedicated subtree pass.
+    // Filter nodes and edges. Only connected dependency nodes are handled in the dedicated subtree pass.
     const subnodeIds = new Set(nodes.filter(n => n.type === 'subnode').map(n => n.id));
-
-    // A subnode connection is one where the target handle is not "main"
-    const isSubnodeConn = (
-      edge: Edge
-    ): edge is SubnodeConnection =>
-      typeof edge.source === 'string' &&
-      typeof edge.target === 'string' &&
-      typeof edge.targetHandle === 'string' &&
-      edge.targetHandle !== 'main';
 
     const nodeDimensions = (node: Node | null | undefined, fallback: { width: number; height: number }) => {
       const measured = node as SizedNode | null | undefined;
@@ -66,6 +57,25 @@ export function useLayout() {
     };
 
     const nodeById = new Map(nodes.map(node => [node.id, node]));
+    const isSubnodeConn = (edge: Edge): edge is SubnodeConnection => {
+      if (
+        typeof edge.source !== 'string' ||
+        typeof edge.target !== 'string' ||
+        typeof edge.targetHandle !== 'string'
+      ) {
+        return false;
+      }
+
+      const targetNode = nodeById.get(edge.target);
+      const targetData = targetNode?.data as
+        | { dependency_inputs?: Array<{ id?: string | null }> }
+        | undefined;
+
+      return Array.isArray(targetData?.dependency_inputs)
+        ? targetData.dependency_inputs.some(input => input?.id === edge.targetHandle)
+        : false;
+    };
+
     const subnodeConnections: SubnodeConnection[] = [];
     edges.forEach(edge => {
       if (!isSubnodeConn(edge)) return;
@@ -78,15 +88,15 @@ export function useLayout() {
     const parentEdgeBySubnodeId = new Map<string, SubnodeConnection>(
       subnodeConnections.map(edge => [edge.source, edge])
     );
-    const childrenByParentSlot = new Map<string, Map<string, string[]>>();
+    const childrenByParentInput = new Map<string, Map<string, string[]>>();
 
     subnodeConnections.forEach(edge => {
-      const slotId = edge.targetHandle;
-      const bySlot = childrenByParentSlot.get(edge.target) ?? new Map<string, string[]>();
-      const childIds = bySlot.get(slotId) ?? [];
+      const inputId = edge.targetHandle;
+      const byInput = childrenByParentInput.get(edge.target) ?? new Map<string, string[]>();
+      const childIds = byInput.get(inputId) ?? [];
       childIds.push(edge.source);
-      bySlot.set(slotId, childIds);
-      childrenByParentSlot.set(edge.target, bySlot);
+      byInput.set(inputId, childIds);
+      childrenByParentInput.set(edge.target, byInput);
     });
 
     const compareChildOrder = (leftId: string, rightId: string) => {
@@ -100,9 +110,9 @@ export function useLayout() {
       return left.id.localeCompare(right.id);
     };
 
-    childrenByParentSlot.forEach(slotMap => {
-      slotMap.forEach((childIds, slotId) => {
-        slotMap.set(slotId, childIds.sort(compareChildOrder));
+    childrenByParentInput.forEach(inputMap => {
+      inputMap.forEach((childIds, inputId) => {
+        inputMap.set(inputId, childIds.sort(compareChildOrder));
       });
     });
 
@@ -122,22 +132,22 @@ export function useLayout() {
       if (branchHeightForMetricsStack.has(nodeId)) return nodeHeight;
 
       branchHeightForMetricsStack.add(nodeId);
-      const slotMap = childrenByParentSlot.get(nodeId);
+      const inputMap = childrenByParentInput.get(nodeId);
 
-      if (!slotMap || slotMap.size === 0) {
+      if (!inputMap || inputMap.size === 0) {
         branchHeightForMetricsStack.delete(nodeId);
         branchHeightForMetricsCache.set(nodeId, nodeHeight);
         return nodeHeight;
       }
 
       let deepestChildStack = 0;
-      slotMap.forEach(childIds => {
-        const slotHeight = childIds.reduce((total, childId, index) => {
+      inputMap.forEach(childIds => {
+        const inputHeight = childIds.reduce((total, childId, index) => {
           const branchHeight = getSubnodeBranchHeightForMetrics(childId);
           const siblingGap = index < childIds.length - 1 ? SUBNODE_STACK_VERTICAL_GAP : 0;
           return total + branchHeight + siblingGap;
         }, 0);
-        deepestChildStack = Math.max(deepestChildStack, slotHeight);
+        deepestChildStack = Math.max(deepestChildStack, inputHeight);
       });
 
       const totalHeight = nodeHeight + SUBNODE_VERTICAL_GAP + deepestChildStack;
@@ -148,23 +158,23 @@ export function useLayout() {
 
     const mainSubtreeExtraHeightById = new Map<string, number>();
     mainNodes.forEach(node => {
-      const slotMap = childrenByParentSlot.get(node.id);
-      if (!slotMap || slotMap.size === 0) {
+      const inputMap = childrenByParentInput.get(node.id);
+      if (!inputMap || inputMap.size === 0) {
         mainSubtreeExtraHeightById.set(node.id, 0);
         return;
       }
 
-      let deepestSlotStack = 0;
-      slotMap.forEach(childIds => {
-        const slotHeight = childIds.reduce((total, childId, index) => {
+      let deepestInputStack = 0;
+      inputMap.forEach(childIds => {
+        const inputHeight = childIds.reduce((total, childId, index) => {
           const branchHeight = getSubnodeBranchHeightForMetrics(childId);
           const siblingGap = index < childIds.length - 1 ? SUBNODE_STACK_VERTICAL_GAP : 0;
           return total + branchHeight + siblingGap;
         }, 0);
-        deepestSlotStack = Math.max(deepestSlotStack, slotHeight);
+        deepestInputStack = Math.max(deepestInputStack, inputHeight);
       });
 
-      const extraHeight = deepestSlotStack > 0 ? SUBNODE_VERTICAL_GAP + deepestSlotStack : 0;
+      const extraHeight = deepestInputStack > 0 ? SUBNODE_VERTICAL_GAP + deepestInputStack : 0;
       mainSubtreeExtraHeightById.set(node.id, extraHeight);
     });
 
@@ -218,21 +228,21 @@ export function useLayout() {
       };
     });
 
-    const getOrderedSlotIds = (parentId: string, slotMap: Map<string, string[]>) => {
+    const getOrderedInputIds = (parentId: string, inputMap: Map<string, string[]>) => {
       const parentNode = nodeById.get(parentId) ?? findNode(parentId);
       const parentData = parentNode?.data as
-        | { subnode_slots?: Array<{ id?: string | null }> }
+        | { dependency_inputs?: Array<{ id?: string | null }> }
         | undefined;
-      const parentSlots = Array.isArray(parentData?.subnode_slots)
-        ? parentData.subnode_slots
-            .map((slot: { id?: string | null }) => slot?.id)
-            .filter((slotId): slotId is string => !!slotId && slotId !== 'main')
+      const parentInputs = Array.isArray(parentData?.dependency_inputs)
+        ? parentData.dependency_inputs
+            .map((input: { id?: string | null }) => input?.id)
+            .filter((inputId): inputId is string => !!inputId && inputId !== 'main')
         : [];
-      const connectedSlotIds = Array.from(slotMap.keys());
+      const connectedInputIds = Array.from(inputMap.keys());
 
       return [
-        ...parentSlots.filter(slotId => connectedSlotIds.includes(slotId)),
-        ...connectedSlotIds.filter(slotId => !parentSlots.includes(slotId)).sort(),
+        ...parentInputs.filter(inputId => connectedInputIds.includes(inputId)),
+        ...connectedInputIds.filter(inputId => !parentInputs.includes(inputId)).sort(),
       ];
     };
 
@@ -256,22 +266,22 @@ export function useLayout() {
       if (subtreeHeightStack.has(nodeId)) return nodeHeight;
 
       subtreeHeightStack.add(nodeId);
-      const slotMap = childrenByParentSlot.get(nodeId);
+      const inputMap = childrenByParentInput.get(nodeId);
 
-      if (!slotMap || slotMap.size === 0) {
+      if (!inputMap || inputMap.size === 0) {
         subtreeHeightStack.delete(nodeId);
         subtreeHeightCache.set(nodeId, nodeHeight);
         return nodeHeight;
       }
 
       let deepestChildStack = 0;
-      slotMap.forEach(childIds => {
-        const slotHeight = childIds.reduce((total, childId, index) => {
+      inputMap.forEach(childIds => {
+        const inputHeight = childIds.reduce((total, childId, index) => {
           const branchHeight = getBranchHeight(childId);
           const siblingGap = index < childIds.length - 1 ? SUBNODE_STACK_VERTICAL_GAP : 0;
           return total + branchHeight + siblingGap;
         }, 0);
-        deepestChildStack = Math.max(deepestChildStack, slotHeight);
+        deepestChildStack = Math.max(deepestChildStack, inputHeight);
       });
 
       const totalHeight = nodeHeight + SUBNODE_VERTICAL_GAP + deepestChildStack;
@@ -283,8 +293,8 @@ export function useLayout() {
     const placeSubtree = (parentId: string) => {
       if (placedParentIds.has(parentId)) return;
 
-      const slotMap = childrenByParentSlot.get(parentId);
-      if (!slotMap || slotMap.size === 0) {
+      const inputMap = childrenByParentInput.get(parentId);
+      if (!inputMap || inputMap.size === 0) {
         placedParentIds.add(parentId);
         return;
       }
@@ -299,15 +309,15 @@ export function useLayout() {
         height: parentNode.type === 'subnode' ? 64 : 50,
       });
 
-      const orderedSlotIds = getOrderedSlotIds(parentId, slotMap);
-      if (!orderedSlotIds.length) {
+      const orderedInputIds = getOrderedInputIds(parentId, inputMap);
+      if (!orderedInputIds.length) {
         placedParentIds.add(parentId);
         return;
       }
 
       const parentCenterX = parentPosition.x + parentWidth / 2;
-      const distributedAnchors = orderedSlotIds.map((_, index) => {
-        const ratio = (index + 1) / (orderedSlotIds.length + 1);
+      const distributedAnchors = orderedInputIds.map((_, index) => {
+        const ratio = (index + 1) / (orderedInputIds.length + 1);
         return parentPosition.x + ratio * parentWidth;
       });
 
@@ -322,21 +332,21 @@ export function useLayout() {
       const anchorCenterX =
         (distributedAnchors[0] + distributedAnchors[distributedAnchors.length - 1]) / 2;
       const recenterOffset = parentCenterX - anchorCenterX;
-      const anchorBySlot = new Map<string, number>();
+      const anchorByInput = new Map<string, number>();
 
-      orderedSlotIds.forEach((slotId, index) => {
-        anchorBySlot.set(slotId, distributedAnchors[index] + recenterOffset);
+      orderedInputIds.forEach((inputId, index) => {
+        anchorByInput.set(inputId, distributedAnchors[index] + recenterOffset);
       });
 
-      orderedSlotIds.forEach(slotId => {
-        const childIds = slotMap.get(slotId) ?? [];
-        const slotAnchorX = anchorBySlot.get(slotId) ?? parentCenterX;
+      orderedInputIds.forEach(inputId => {
+        const childIds = inputMap.get(inputId) ?? [];
+        const inputAnchorX = anchorByInput.get(inputId) ?? parentCenterX;
         let nextY = parentPosition.y + parentHeight + SUBNODE_VERTICAL_GAP;
 
         childIds.forEach(childId => {
           const { width: childWidth } = getSubnodeSize(childId);
           const childPosition = {
-            x: slotAnchorX - childWidth / 2,
+            x: inputAnchorX - childWidth / 2,
             y: nextY,
           };
 
@@ -355,11 +365,11 @@ export function useLayout() {
 
     // Start from roots first (parents that are not themselves attached as subnodes),
     // then place any remaining orphaned parent chains.
-    const rootParentIds = Array.from(childrenByParentSlot.keys()).filter(
+    const rootParentIds = Array.from(childrenByParentInput.keys()).filter(
       parentId => !parentEdgeBySubnodeId.has(parentId)
     );
     rootParentIds.forEach(placeSubtree);
-    Array.from(childrenByParentSlot.keys()).forEach(placeSubtree);
+    Array.from(childrenByParentInput.keys()).forEach(placeSubtree);
 
     const positionedSubNodes = nodes
       .filter(n => connectedSubnodeIds.has(n.id))

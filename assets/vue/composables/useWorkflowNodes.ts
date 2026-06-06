@@ -7,6 +7,8 @@ import {
   DEFAULT_GROUP_DIMENSIONS,
   DEFAULT_GROUP_NAME_FONT_SIZE,
 } from '@/constants/layout';
+import { unwrapData } from '@/lib/dataUtils';
+import { dependencyInputHandles, isDependencyTargetHandle } from '@/lib/connectionHandles';
 import type {
   Workflow,
   StepType,
@@ -17,6 +19,7 @@ import type {
   StepHandleQuickAddRequest,
   GroupNodeData,
   WorkflowNodeData,
+  WorkflowValidationError,
 } from '@/types/workflow';
 
 interface UseWorkflowNodesOptions {
@@ -24,6 +27,7 @@ interface UseWorkflowNodesOptions {
   stepTypes: () => StepType[];
   stepExecutions: () => StepExecution[];
   editorState: () => EditorState | undefined;
+  validationErrors: () => Record<string, WorkflowValidationError[]>;
   presences: () => UserPresence[];
   currentUserId: () => string | undefined;
   canEdit?: () => boolean;
@@ -58,6 +62,18 @@ interface UseWorkflowNodesOptions {
     group_id_by_step_id: Record<string, string | null>;
   }) => void;
   collabSeq?: () => number | undefined;
+  optimisticLayout?: () =>
+    | {
+        txnId: string;
+        targetSeq: number | null;
+        stepPositions: Record<string, XYPosition>;
+        groupBoundsById: Record<
+          string,
+          { x: number; y: number; width: number; height: number }
+        >;
+        groupIdByStepId: Record<string, string | null>;
+      }
+    | null;
   onToggleDisabled?: (stepId: string, isDisabled: boolean) => void;
   onTogglePin?: (stepId: string, isPinned: boolean) => void;
   onHandleQuickAdd?: (request: StepHandleQuickAddRequest) => void;
@@ -116,9 +132,23 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
 
     const utcOffset = typeof record.utc_offset === 'number' ? record.utc_offset : 0;
     const stdOffset = typeof record.std_offset === 'number' ? record.std_offset : 0;
+    const yearNumber = year as number;
+    const monthNumber = month as number;
+    const dayNumber = day as number;
+    const hourNumber = hour as number;
+    const minuteNumber = minute as number;
+    const secondNumber = second as number;
 
     return (
-      Date.UTC(year, month - 1, day, hour, minute, second, millisecond) -
+      Date.UTC(
+        yearNumber,
+        monthNumber - 1,
+        dayNumber,
+        hourNumber,
+        minuteNumber,
+        secondNumber,
+        millisecond
+      ) -
       (utcOffset + stdOffset) * 1000
     );
   };
@@ -131,6 +161,58 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     return durations.length > 0
       ? durations.reduce((total, duration) => total + duration, 0)
       : undefined;
+  };
+
+  const executionTimestampMs = (execution: StepExecution): number => {
+    return (
+      toTimestampMs(execution.completed_at) ??
+      toTimestampMs(execution.started_at) ??
+      toTimestampMs(execution.inserted_at) ??
+      0
+    );
+  };
+
+  const derivedOutputItemCount = (outputData: unknown): number | undefined => {
+    const output = unwrapData(outputData);
+
+    if (output === null || output === undefined) return undefined;
+    if (Array.isArray(output)) return output.length;
+    return 1;
+  };
+
+  const executionOutputItemCount = (execution: StepExecution): number | undefined => {
+    if (
+      typeof execution.output_item_count === 'number' &&
+      Number.isFinite(execution.output_item_count)
+    ) {
+      return execution.output_item_count;
+    }
+
+    return derivedOutputItemCount(execution.output_data);
+  };
+
+  const totalOutputItemCount = (executions: StepExecution[]): number | undefined => {
+    if (executions.length === 0) return undefined;
+
+    const latestExecutionByKey = new Map<string, StepExecution>();
+
+    for (const execution of executions) {
+      const key =
+        execution.item_index === null || execution.item_index === undefined
+          ? '__single__'
+          : `item:${execution.item_index}`;
+      const existing = latestExecutionByKey.get(key);
+
+      if (!existing || executionTimestampMs(execution) >= executionTimestampMs(existing)) {
+        latestExecutionByKey.set(key, execution);
+      }
+    }
+
+    const total = Array.from(latestExecutionByKey.values()).reduce((sum, execution) => {
+      return sum + (executionOutputItemCount(execution) ?? 0);
+    }, 0);
+
+    return total > 0 ? total : undefined;
   };
 
   // Group all step executions by step_id (for multi-item fan-out steps)
@@ -232,11 +314,12 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
 
   const nodes = computed<Node<WorkflowNodeData>[]>(() => {
     const steps = options.workflow().draft?.steps || [];
-    const groups = options.workflow().draft?.groups || [];
+    const groups = options.workflow().draft?.step_groups || [];
     const stepTypes = stepTypeById.value;
     const stepExecutions = stepExecutionByStepId.value;
     const itemStats = stepItemStatsByStepId.value;
     const editorState = options.editorState();
+    const validationErrors = options.validationErrors();
     const presences = options.presences();
     const currentUserId = options.currentUserId();
     const canEdit = options.canEdit?.() ?? true;
@@ -246,11 +329,58 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
     const groupingTargetId = groupingPreview.groupId ?? null;
     const groupingColor = groupingPreview.color ?? undefined;
     const previewGroupBoundsById = transientGroupBounds.value;
+    const optimisticLayoutActive = options.optimisticLayout?.() ?? null;
+    const optimisticStepPositions = optimisticLayoutActive?.stepPositions ?? {};
+    const optimisticGroupBoundsById = optimisticLayoutActive?.groupBoundsById ?? {};
+    const optimisticGroupIdByStepId = optimisticLayoutActive?.groupIdByStepId ?? {};
+    const stepById = new Map(steps.map(step => [step.id, step]));
+    const attachedDependencySourceIds = new Set<string>();
+
+    for (const connection of options.workflow().draft?.connections || []) {
+      const targetStep = stepById.get(connection.target_step_id);
+      const targetType = targetStep ? stepTypes[targetStep.type_id] : undefined;
+      if (isDependencyTargetHandle(targetType, connection.target_input)) {
+        attachedDependencySourceIds.add(connection.source_step_id);
+      }
+    }
 
     const groupByStepId = new Map<string, string>();
+    const groupStepIdsByGroupId = new Map<string, Set<string>>();
+
+    groups.forEach(group => {
+      const stepIds = new Set(group.step_ids || []);
+      groupStepIdsByGroupId.set(group.id, stepIds);
+
+      stepIds.forEach(stepId => {
+        groupByStepId.set(stepId, group.id);
+      });
+    });
+
+    Object.entries(optimisticGroupIdByStepId).forEach(([stepId, groupId]) => {
+      const previousGroupId = groupByStepId.get(stepId);
+
+      if (previousGroupId) {
+        groupStepIdsByGroupId.get(previousGroupId)?.delete(stepId);
+      }
+
+      if (groupId) {
+        groupByStepId.set(stepId, groupId);
+
+        if (!groupStepIdsByGroupId.has(groupId)) {
+          groupStepIdsByGroupId.set(groupId, new Set());
+        }
+
+        groupStepIdsByGroupId.get(groupId)?.add(stepId);
+        return;
+      }
+
+      groupByStepId.delete(stepId);
+    });
+
     const groupNodes = groups.map(group => {
       const position = group.position || {};
-      const previewBounds = previewGroupBoundsById[group.id];
+      const previewBounds =
+        optimisticGroupBoundsById[group.id] ?? previewGroupBoundsById[group.id];
       const previewX = previewBounds?.x;
       const previewY = previewBounds?.y;
       const previewWidth = previewBounds?.width;
@@ -273,10 +403,6 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           ? group.font_size
           : DEFAULT_GROUP_NAME_FONT_SIZE;
 
-      for (const stepId of group.step_ids || []) {
-        groupByStepId.set(stepId, group.id);
-      }
-
       const node = {
         id: group.id,
         type: 'group',
@@ -288,7 +414,7 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         data: {
           id: group.id,
           name: group.name || 'Group',
-          step_ids: group.step_ids || [],
+          step_ids: Array.from(groupStepIdsByGroupId.get(group.id) ?? []),
           collapsed: !!group.collapsed,
           color,
           font_size: fontSize,
@@ -320,9 +446,11 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
       const stepExecution = stepExecutions[step.id];
       const stepItemStats = itemStats[step.id];
       const allStepExecutions = stepExecutionsByStepId.value[step.id] || [];
+      const stepOutputItemCount = totalOutputItemCount(allStepExecutions);
       const isPinned = editorState?.pinned_outputs?.[step.id] !== undefined;
       const isDisabled = editorState?.disabled_steps?.includes(step.id);
       const lockedBy = editorState?.step_locks?.[step.id];
+      const stepValidationErrors = validationErrors[step.id] || [];
       const parentGroupId = groupByStepId.get(step.id);
       const isGroupingCandidate = groupingStepIds.has(step.id);
 
@@ -381,13 +509,16 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
         }
       }
 
-      const isSubnode = stepType?.node_role === 'subnode';
+      const isAttachedDependency = attachedDependencySourceIds.has(step.id);
 
       const node = {
         id: step.id,
-        type: isSubnode ? 'subnode' : 'step',
+        type: isAttachedDependency ? 'subnode' : 'step',
         class: 'nopan',
-        position: transientPositions.value[step.id] || step.position,
+        position:
+          optimisticStepPositions[step.id] ||
+          transientPositions.value[step.id] ||
+          step.position,
         parentNode: parentGroupId,
         zIndex: parentGroupId ? 20 : 10,
         data: {
@@ -399,19 +530,19 @@ export function useWorkflowNodes(options: UseWorkflowNodesOptions) {
           icon: stepType?.icon,
           category: stepType?.category,
           step_kind: stepType?.step_kind,
-          node_role: stepType?.node_role,
           status: displayStatus,
           stats:
-            stepExecution && totalDurationUs !== undefined
-              ? { duration_us: totalDurationUs, out: stepExecution.output_item_count }
+            totalDurationUs !== undefined || stepOutputItemCount !== undefined
+              ? { duration_us: totalDurationUs, out: stepOutputItemCount }
               : undefined,
-          subnode_slots: stepType?.subnode_slots ?? [],
+          dependency_inputs: dependencyInputHandles(stepType),
           itemStats: stepItemStats,
-          hasInput: stepType?.step_kind !== 'trigger' && stepType?.node_role !== 'subnode',
+          hasInput: stepType?.step_kind !== 'trigger' && !isAttachedDependency,
           hasOutput: true,
           disabled: isDisabled,
           pinned: isPinned,
           locked_by: lockedBy,
+          validation_errors: stepValidationErrors,
           selected_by: selectedBy,
           isGroupingCandidate,
           groupingColor: isGroupingCandidate ? groupingColor : undefined,

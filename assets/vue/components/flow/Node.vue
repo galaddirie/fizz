@@ -5,7 +5,12 @@ import type { NodeProps } from '@vue-flow/core';
 import Handle from './Handle.vue';
 import { colorMap, type NodeStatus, oklchToHex, darkenColor, lightenColor } from '@/lib/color';
 import { useThemeStore } from '@/stores/theme';
-import type { StepHandleQuickAddRequest, StepNodeData, StepSubnodeSlot } from '@/types/workflow';
+import type {
+  StepHandleQuickAddRequest,
+  StepInputHandle,
+  StepNodeData,
+  WorkflowValidationError,
+} from '@/types/workflow';
 import {
   GlobeAltIcon,
   ServerIcon,
@@ -46,7 +51,7 @@ import { PlayIcon, BookmarkIcon as BookmarkSolidIcon } from '@heroicons/vue/24/s
 const props = defineProps<NodeProps<StepNodeData>>();
 const themeStore = useThemeStore();
 const canEdit = computed(() => props.data.canEdit ?? true);
-const isSubnode = computed(() => props.data.node_role === 'subnode');
+const isSubnode = computed(() => false);
 
 const isEditing = ref(false);
 const nameDraft = ref(props.data.name || 'Untitled Step');
@@ -177,6 +182,17 @@ const statusConfig = computed(() => {
 });
 
 const currentStatusStyle = computed(() => statusConfig.value[effectiveStatus.value]);
+const validationErrors = computed<WorkflowValidationError[]>(() => props.data.validation_errors ?? []);
+const hasValidationErrors = computed(() => validationErrors.value.length > 0);
+const validationErrorCount = computed(() => validationErrors.value.length);
+const validationTooltip = computed(() =>
+  validationErrors.value
+    .map(error => {
+      const location = error.field ? `${error.field}: ` : '';
+      return `${location}${error.message}`;
+    })
+    .join('\n')
+);
 
 const hexToRgba = (hex: string, alpha: number) => {
   const normalized = hex.replace('#', '');
@@ -249,6 +265,15 @@ const nodeStyle = computed(() => {
       : currentStatusStyle.value.border;
   }
 
+  if (hasValidationErrors.value) {
+    const errorColor = oklchToHex(colorMap.failed);
+    shadow += `, 0 0 0 2px ${hexToRgba(errorColor, isDark ? 0.22 : 0.14)}`;
+
+    if (!hasStatusStyle.value) {
+      style.borderColor = hexToRgba(errorColor, isDark ? 0.7 : 0.5);
+    }
+  }
+
   if (props.data.selected_by?.length) {
     style['--tw-ring-color'] = props.data.selected_by[0].color;
   }
@@ -259,9 +284,17 @@ const nodeStyle = computed(() => {
 // Format duration for display
 const formatDuration = (us?: number): string => {
   if (typeof us !== 'number' || !Number.isFinite(us)) return '—';
+  if (us <= 0) return '<1µs';
   if (us < 1000) return `${us}µs`;
   if (us < 1_000_000) return `${(us / 1000).toFixed(1)}ms`;
-  return `${(us / 1_000_000).toFixed(2)}s`;
+  const seconds = us / 1_000_000;
+  if (seconds < 60) return `${seconds.toFixed(2)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
 };
 
 // Format bytes for display
@@ -284,9 +317,9 @@ const showInputHandle = computed(
   () => props.data.hasInput !== false && props.data.step_kind !== 'trigger'
 );
 const showOutputHandle = computed(() => props.data.hasOutput !== false);
-const subnodeInputHandles = computed<StepSubnodeSlot[]>(() => {
-  const slots = props.data.subnode_slots ?? [];
-  return slots.filter(slot => slot.id && slot.id !== 'main');
+const dependencyInputHandles = computed<StepInputHandle[]>(() => {
+  const inputs = props.data.dependency_inputs ?? [];
+  return inputs.filter(input => input.id && input.id !== 'main');
 });
 
 const handleOutputQuickAdd = (screenPoint: { x: number; y: number }) => {
@@ -306,22 +339,22 @@ const handleOutputQuickAdd = (screenPoint: { x: number; y: number }) => {
   props.data.onHandleQuickAdd?.(request);
 };
 
-const handleSubnodeSlotQuickAdd = (
-  slot: StepSubnodeSlot,
+const handleDependencyInputQuickAdd = (
+  input: StepInputHandle,
   screenPoint: { x: number; y: number }
 ) => {
   if (!canEdit.value) return;
 
-  const acceptedTypeIds = slot.accepts?.type_ids ?? [];
+  const acceptedProvides = input.accepts?.provides ?? [];
   const request: StepHandleQuickAddRequest = {
     screenPoint,
     autoConnect: {
       target_step_id: props.id,
-      target_input: slot.id,
+      target_input: input.id,
     },
     filter: {
-      mode: 'subnode_slot',
-      accepted_type_ids: acceptedTypeIds.length > 0 ? acceptedTypeIds : undefined,
+      mode: 'dependency_input',
+      accepted_provides: acceptedProvides.length > 0 ? acceptedProvides : undefined,
     },
   };
 
@@ -430,27 +463,27 @@ const handleNameKeydown = (event: KeyboardEvent) => {
       <Handle id="main" type="target" :position="Position.Left" :node-id="props.id" />
     </div>
 
-    <!-- Subnode Slot Handles (bottom edge, flush on the edge) -->
-    <template v-if="subnodeInputHandles.length > 0">
+    <!-- Dependency Input Handles (bottom edge, flush on the edge) -->
+    <template v-if="dependencyInputHandles.length > 0">
       <div
-        v-for="(slot, idx) in subnodeInputHandles"
-        :key="slot.id"
+        v-for="(input, idx) in dependencyInputHandles"
+        :key="input.id"
         class="absolute bottom-0 z-10 flex flex-col items-center"
         :style="{
-          left: `${((idx + 1) / (subnodeInputHandles.length + 1)) * 100}%`,
+          left: `${((idx + 1) / (dependencyInputHandles.length + 1)) * 100}%`,
           transform: 'translateX(-50%) translateY(calc(40% - 8px))'
         }"
       >
         <span class="pointer-events-none mb-1 whitespace-nowrap text-[9px] font-medium text-base-content/50">
-          {{ slot.title || slot.id }}
+          {{ input.title || input.id }}
         </span>
         <Handle
-          :id="slot.id"
+          :id="input.id"
           type="target"
           :position="Position.Bottom"
           :node-id="props.id"
           :show-add-button="canEdit"
-          @add-click="point => handleSubnodeSlotQuickAdd(slot, point)"
+          @add-click="point => handleDependencyInputQuickAdd(input, point)"
         />
       </div>
     </template>
@@ -512,6 +545,17 @@ const handleNameKeydown = (event: KeyboardEvent) => {
           </div>
 
           <div class="flex items-center gap-1">
+            <div
+              v-if="hasValidationErrors"
+              class="tooltip tooltip-left"
+              :data-tip="validationTooltip"
+            >
+              <div class="flex min-w-8 items-center justify-center gap-1 rounded-full border border-error/25 bg-error/10 px-2 py-0.5 text-[10px] font-semibold text-error shadow-sm">
+                <ExclamationCircleIcon class="size-3.5" />
+                <span>{{ validationErrorCount }}</span>
+              </div>
+            </div>
+
             <!-- Lock indicator -->
             <div
               v-if="data.locked_by"

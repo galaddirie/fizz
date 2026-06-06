@@ -1,10 +1,15 @@
 <template>
   <div class="field-wrapper">
-    <div v-if="mode === 'literal' && uiComponent !== 'default'">
+    <div v-if="isCredentialField">
+      <CredentialField :field="field" />
+    </div>
+
+    <div v-else-if="mode === 'literal' && uiComponent !== 'default'">
       <component
         :is="componentMap[uiComponent as keyof typeof componentMap]"
         :modelValue="modelValue"
         @update:modelValue="handleChange"
+        @validation="handleValidation"
         :field="field"
         :nodeId="nodeId"
         :showLabel="false"
@@ -14,8 +19,8 @@
     <div v-else-if="mode === 'literal'">
       <textarea
         class="w-full min-h-[100px] resize-y rounded-xl bg-base-200/30 px-3.5 py-2.5 font-mono text-sm leading-relaxed text-base-content outline-none ring-1 ring-base-content/[0.06] transition-all duration-200 placeholder:text-base-content/30 hover:ring-base-content/10 focus:bg-base-100 focus:ring-2 focus:ring-primary/25"
-        :value="typeof modelValue === 'object' ? JSON.stringify(modelValue, null, 2) : String(modelValue || '')"
-        @input="handleChange(($event.target as HTMLTextAreaElement).value)"
+        :value="typeof modelValue === 'object' ? JSON.stringify(modelValue, null, 2) : String(modelValue ?? '')"
+        @input="handleTextareaChange(($event.target as HTMLTextAreaElement).value)"
         :disabled="field.disabled"
         :readonly="field.readOnly"
       ></textarea>
@@ -27,8 +32,8 @@
     <div v-else class="space-y-2">
       <textarea
         class="w-full min-h-[100px] resize-y rounded-xl bg-base-200/30 px-3.5 py-2.5 font-mono text-sm leading-relaxed text-base-content outline-none ring-1 ring-base-content/[0.06] transition-all duration-200 placeholder:text-base-content/30 hover:ring-base-content/10 focus:bg-base-100 focus:ring-2 focus:ring-primary/25"
-        :value="String(modelValue ?? '')"
-        @input="handleChange(($event.target as HTMLTextAreaElement).value)"
+        :value="typeof modelValue === 'object' ? JSON.stringify(modelValue, null, 2) : String(modelValue ?? '')"
+        @input="handleTextareaChange(($event.target as HTMLTextAreaElement).value)"
         placeholder="{{ '{{' }} expression {{ '}}' }}"
         :disabled="field.disabled"
         :readonly="field.readOnly"
@@ -45,8 +50,11 @@ import { computed } from 'vue';
 
 import StringField from './StringField.vue';
 import NumberField from './NumberField.vue';
+import JsonField from './JsonField.vue';
 import SelectField from './SelectField.vue';
 import SearchField from './SearchField.vue';
+import CredentialField from './CredentialField.vue';
+import ResourceMapperField from './ResourceMapperField.vue';
 
 import type { ConfigField } from '@/types/configSchema';
 
@@ -57,14 +65,17 @@ const props = defineProps<{
   nodeId: string;
 }>();
 
-const emit = defineEmits(['update:modelValue']);
+const emit = defineEmits(['update:modelValue', 'validation']);
 
 const componentMap: Record<string, any> = {
   'string': StringField,
   'text': StringField,
   'number': NumberField,
+  'json': JsonField,
   'select': SelectField,
   'search': SearchField,
+  'resource_locator': StringField,
+  'resource_mapper': ResourceMapperField,
   // Fallbacks:
   'default': StringField
 };
@@ -74,7 +85,18 @@ const uiComponent = computed(() => {
   return componentMap[comp] ? comp : 'default';
 });
 
+const isCredentialField = computed(() => props.field?.ui?.component === 'credential');
+
 const handleChange = (val: unknown) => {
   emit('update:modelValue', val);
+};
+
+const handleValidation = (error: string | null) => {
+  emit('validation', error);
+};
+
+const handleTextareaChange = (val: string) => {
+  emit('validation', null);
+  handleChange(val);
 };
 </script>

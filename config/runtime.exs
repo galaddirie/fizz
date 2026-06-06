@@ -23,9 +23,58 @@ if System.get_env("PHX_SERVER") do
   config :fizz, FizzWeb.Endpoint, server: true
 end
 
+if config_env() == :dev do
+  System.put_env(
+    "LITESTREAM_ACCESS_KEY_ID",
+    System.get_env("LITESTREAM_ACCESS_KEY_ID", "minioadmin")
+  )
+
+  System.put_env(
+    "LITESTREAM_SECRET_ACCESS_KEY",
+    System.get_env("LITESTREAM_SECRET_ACCESS_KEY", "minioadmin")
+  )
+end
+
 config :fizz, FizzWeb.Endpoint, http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+workflow_data_dir_default =
+  case config_env() do
+    :dev -> "priv/workflow_data"
+    _ -> "priv/workflow_data"
+  end
+
+litestream_bucket_default =
+  case config_env() do
+    :dev -> "fizz-workflows-dev"
+    _ -> nil
+  end
+
+litestream_endpoint_default =
+  case config_env() do
+    :dev -> "http://127.0.0.1:9000"
+    _ -> nil
+  end
+
+workflow_idle_timeout_default =
+  case config_env() do
+    :dev -> 60_000
+    _ -> 60_000
+  end
+
+workflow_passivation_idle_threshold_default =
+  case config_env() do
+    :dev -> 60_000
+    _ -> 10 * 60 * 1_000
+  end
+
 config :fizz,
+  workflow_data_dir: System.get_env("WORKFLOW_DATA_DIR", workflow_data_dir_default),
+  litestream_s3_bucket: System.get_env("LITESTREAM_S3_BUCKET", litestream_bucket_default),
+  litestream_s3_prefix: System.get_env("LITESTREAM_S3_PREFIX", "workflows"),
+  litestream_aws_region: System.get_env("LITESTREAM_AWS_REGION", "us-east-1"),
+  litestream_s3_endpoint: System.get_env("LITESTREAM_S3_ENDPOINT", litestream_endpoint_default),
+  litestream_s3_skip_verify: System.get_env("LITESTREAM_S3_SKIP_VERIFY") in ~w(1 true TRUE),
+  litestream_log_level: System.get_env("LITESTREAM_LOG_LEVEL", "warn"),
   workos_sync_enabled: System.get_env("WORKOS_SYNC_ENABLED") in ~w(1 true TRUE),
   workos_authkit_provider: System.get_env("WORKOS_AUTHKIT_PROVIDER", "authkit"),
   workos_authkit_redirect_uri: System.get_env("WORKOS_AUTHKIT_REDIRECT_URI"),
@@ -35,18 +84,37 @@ config :fizz,
     owner: System.get_env("WORKOS_ROLE_SLUG_OWNER", "owner"),
     admin: System.get_env("WORKOS_ROLE_SLUG_ADMIN", "admin"),
     member: System.get_env("WORKOS_ROLE_SLUG_MEMBER", "member")
-  },
-  sprites_api_key: System.get_env("SPRITES_API_KEY"),
-  sprites_api_base_url: System.get_env("SPRITES_API_BASE_URL", "https://api.sprites.dev"),
-  sprites_default_region: System.get_env("SPRITES_DEFAULT_REGION"),
-  sprites_log_retention_days:
-    String.to_integer(System.get_env("SPRITES_LOG_RETENTION_DAYS", "14")),
-  sprites_checkpoint_retention_days:
-    String.to_integer(System.get_env("SPRITES_CHECKPOINT_RETENTION_DAYS", "14")),
-  sprites_service_log_tail_lines:
-    String.to_integer(System.get_env("SPRITES_SERVICE_LOG_TAIL_LINES", "200")),
-  sprites_exec_timeout_ms_default:
-    String.to_integer(System.get_env("SPRITES_EXEC_TIMEOUT_MS_DEFAULT", "30000"))
+  }
+
+config :fizz, Fizz.Workflows,
+  idle_timeout_ms:
+    String.to_integer(
+      System.get_env("WORKFLOW_IDLE_TIMEOUT_MS", Integer.to_string(workflow_idle_timeout_default))
+    )
+
+config :fizz, Fizz.Workflows.PassivationSweeper,
+  idle_threshold_ms:
+    String.to_integer(
+      System.get_env(
+        "WORKFLOW_PASSIVATION_IDLE_THRESHOLD_MS",
+        Integer.to_string(workflow_passivation_idle_threshold_default)
+      )
+    )
+
+config :fizz, :workspaces, provider: System.get_env("WORKSPACE_PROVIDER", "sprites")
+
+config :fizz, Fizz.Workspaces.Providers.Sprites,
+  api_key: System.get_env("WORKSPACE_SPRITES_API_KEY"),
+  api_base_url: System.get_env("WORKSPACE_SPRITES_API_BASE_URL", "https://api.sprites.dev"),
+  default_region: System.get_env("WORKSPACE_SPRITES_DEFAULT_REGION"),
+  log_retention_days:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_LOG_RETENTION_DAYS", "14")),
+  checkpoint_retention_days:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_CHECKPOINT_RETENTION_DAYS", "14")),
+  service_log_tail_lines:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_SERVICE_LOG_TAIL_LINES", "200")),
+  exec_timeout_ms_default:
+    String.to_integer(System.get_env("WORKSPACE_SPRITES_EXEC_TIMEOUT_MS_DEFAULT", "30000"))
 
 if api_key = System.get_env("WORKOS_API_KEY") do
   config :workos, WorkOS.Client,

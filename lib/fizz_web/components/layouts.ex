@@ -64,10 +64,10 @@ defmodule FizzWeb.Layouts do
                   </li>
                   <li>
                     <.link
-                      href={~p"/workspaces"}
-                      class={["gap-2", workspace_nav_active?(@current_path) && "active"]}
+                      href={~p"/projects"}
+                      class={["gap-2", project_nav_active?(@current_path) && "active"]}
                     >
-                      <.icon name="hero-rectangle-group" class="size-4" /> Workspaces
+                      <.icon name="hero-rectangle-group" class="size-4" /> projects
                     </.link>
                   </li>
 
@@ -117,13 +117,13 @@ defmodule FizzWeb.Layouts do
                 </li>
                 <li>
                   <.link
-                    href={~p"/workspaces"}
+                    href={~p"/projects"}
                     class={[
                       "btn btn-ghost gap-2",
-                      workspace_nav_active?(@current_path) && "btn-active"
+                      project_nav_active?(@current_path) && "btn-active"
                     ]}
                   >
-                    <.icon name="hero-rectangle-group" class="size-5" /> Workspaces
+                    <.icon name="hero-rectangle-group" class="size-5" /> projects
                   </.link>
                 </li>
               </ul>
@@ -281,8 +281,8 @@ defmodule FizzWeb.Layouts do
     """
   end
 
-  defp workspace_nav_active?(path) when is_binary(path),
-    do: String.starts_with?(path, "/workspaces")
+  defp project_nav_active?(path) when is_binary(path),
+    do: String.starts_with?(path, "/projects")
 
-  defp workspace_nav_active?(_path), do: false
+  defp project_nav_active?(_path), do: false
 end

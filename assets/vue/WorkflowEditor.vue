@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { useLiveEvent } from 'live_vue';
+import { useLiveEvent, useLiveVue } from 'live_vue';
 import EditorToolbar from '@/components/flow/EditorToolbar.vue';
 import ExecutionTracePanel from '@/components/flow/ExecutionTracePanel.vue';
 import AddStepPicker from '@/components/flow/AddStepPicker.vue';
 import NodeLibrary from '@/components/flow/NodeLibrary.vue';
 import PublishModal from '@/components/flow/PublishModal.vue';
+import CredentialLaunchModal from '@/components/flow/CredentialLaunchModal.vue';
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import Avatar from '@/components/ui/Avatar.vue';
@@ -14,10 +15,15 @@ import { useWorkflowEditor } from '@/composables/workflow/useWorkflowEditor';
 import type {
   WorkflowEditorCommandType,
   WorkflowEditorEmits,
-  WorkflowEditorLiveEmits,
   WorkflowEditorProps,
 } from '@/types/workflowEditor';
-import { BugAntIcon, SlashIcon, ChevronDoubleRightIcon } from '@heroicons/vue/24/outline';
+import type { TriggerImpact, WorkflowValidationError } from '@/types/workflow';
+import {
+  BugAntIcon,
+  SlashIcon,
+  ChevronDoubleRightIcon,
+  ExclamationCircleIcon,
+} from '@heroicons/vue/24/outline';
 
 const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   stepTypes: () => [],
@@ -28,20 +34,57 @@ const props = withDefaults(defineProps<WorkflowEditorProps>(), {
   presences: () => [],
   currentUserId: undefined,
   collabSeq: 0,
+  saveStatus: 'saved',
+  saveError: null,
   expressionPreviews: () => ({}),
   credentialOptions: () => [],
   debugExecutionId: null,
+  validationErrors: () => ({}),
+  widgetToken: null,
 });
 
-const emitToLiveView = defineEmits<WorkflowEditorLiveEmits>();
+const live = useLiveVue();
+const compilationErrors = ref<WorkflowValidationError[]>([]);
+const publishStateResetCommands = new Set<WorkflowEditorCommandType>([
+  'add_step',
+  'add_group',
+  'update_group',
+  'remove_group',
+  'set_group_membership',
+  'commit_drag_layout',
+  'duplicate_steps',
+  'update_step',
+  'remove_step',
+  'move_step',
+  'move_steps',
+  'add_connection',
+  'remove_connection',
+  'undo',
+  'redo',
+  'tidy_layout',
+  'save_workflow',
+]);
 
 function emitCommand(type: WorkflowEditorCommandType, payload?: unknown) {
+  if (publishStateResetCommands.has(type)) {
+    publishError.value = null;
+    publishValidationErrors.value = [];
+    publishTriggerImpact.value = null;
+    publishExecutionHashChanged.value = null;
+    isValidatingPublish.value = false;
+    compilationErrors.value = [];
+  }
+
+  if (type === 'run_test' || type === 'run_node') {
+    compilationErrors.value = [];
+  }
+
   const normalizedPayload =
     payload !== null && typeof payload === 'object'
       ? (payload as Record<string, unknown>)
       : {};
 
-  emitToLiveView('editor_command', { type, payload: normalizedPayload });
+  live.pushEvent('editor_command', { type, payload: normalizedPayload });
 }
 
 const emit = ((event: WorkflowEditorCommandType, payload?: unknown) => {
@@ -177,6 +220,12 @@ const handleEditorResize = () => {
   nodeLibraryWidth.value = clampNodeLibraryWidth(nodeLibraryWidth.value);
 };
 
+const handleBeforeUnload = () => {
+  if ((props.saveStatus ?? 'saved') !== 'saved') {
+    emit('save_workflow');
+  }
+};
+
 onMounted(() => {
   if (typeof window === 'undefined') return;
 
@@ -191,6 +240,7 @@ onMounted(() => {
   isNodeLibraryCollapsed.value = storedCollapsed;
 
   window.addEventListener('resize', handleEditorResize);
+  window.addEventListener('beforeunload', handleBeforeUnload);
   lastSavedClock.value = Date.now();
   lastSavedTimer = window.setInterval(() => {
     lastSavedClock.value = Date.now();
@@ -200,6 +250,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', handleEditorResize);
+    window.removeEventListener('beforeunload', handleBeforeUnload);
     if (lastSavedTimer !== null) {
       window.clearInterval(lastSavedTimer);
       lastSavedTimer = null;
@@ -211,24 +262,136 @@ onBeforeUnmount(() => {
 // Publish modal state
 const isPublishModalOpen = ref(false);
 const isPublishing = ref(false);
+const isValidatingPublish = ref(false);
 const publishError = ref<string | null>(null);
+const publishValidationErrors = ref<WorkflowValidationError[]>([]);
+const publishTriggerImpact = ref<TriggerImpact | null>(null);
+const publishExecutionHashChanged = ref<boolean | null>(null);
+
+// Credential launch modal state
+interface CredentialCandidate {
+  id: string;
+  provider?: string;
+  provider_label?: string;
+  auth_type?: string;
+  owner_user_id?: string;
+  owner_display_name?: string;
+  display_name?: string;
+  requires_reauth?: boolean;
+  requires_reauthorization?: boolean;
+  status?: string;
+}
+interface CredentialBindingDescriptor {
+  step_id: string;
+  requirement_key: string;
+  provider: string;
+  auth_type: string;
+  candidates: CredentialCandidate[];
+}
+const isCredentialLaunchModalOpen = ref(false);
+const credentialLaunchTargetStepId = ref<string | null>(null);
+const credentialLaunchDescriptors = ref<CredentialBindingDescriptor[]>([]);
+
+useLiveEvent<{ target_step_id: string | null; descriptors: CredentialBindingDescriptor[] }>(
+  'credential_bindings_needed',
+  payload => {
+    credentialLaunchTargetStepId.value = payload.target_step_id ?? null;
+    credentialLaunchDescriptors.value = payload.descriptors ?? [];
+    isCredentialLaunchModalOpen.value = true;
+  }
+);
+
+useLiveEvent<{ target_step_id: string | null }>('credential_bindings_resolved', payload => {
+  if (payload.target_step_id === credentialLaunchTargetStepId.value) {
+    credentialLaunchDescriptors.value = [];
+    isCredentialLaunchModalOpen.value = false;
+  }
+});
+
+function closeCredentialLaunchModal() {
+  isCredentialLaunchModalOpen.value = false;
+}
+
+function handleReauthConnected(payload: { target_step_id: string | null }) {
+  emit('reauth_connected', payload);
+}
+
+function handleSubmitCredentialBindings(payload: {
+  target_step_id: string | null;
+  bindings: Array<{
+    step_id: string;
+    requirement_key: string;
+    binding_data: Record<string, unknown>;
+  }>;
+}) {
+  emit('submit_credential_bindings', payload);
+  isCredentialLaunchModalOpen.value = false;
+}
 
 function openPublishModal() {
   publishError.value = null;
+  publishValidationErrors.value = [];
+  publishTriggerImpact.value = null;
+  publishExecutionHashChanged.value = null;
+  isValidatingPublish.value = true;
   isPublishModalOpen.value = true;
+  emit('validate_draft');
 }
 
 function closePublishModal() {
   if (!isPublishing.value) {
     isPublishModalOpen.value = false;
+    isValidatingPublish.value = false;
   }
 }
 
-function handlePublish(payload: { version_tag: string; changelog: string }) {
+function handlePublish() {
   isPublishing.value = true;
   publishError.value = null;
-  emit('publish_workflow', payload);
+  emit('publish_workflow');
 }
+
+const editorValidationErrors = computed<WorkflowValidationError[]>(() =>
+  Object.values(props.validationErrors ?? {}).flat()
+);
+
+const activeToolbarErrors = computed(() =>
+  compilationErrors.value.length > 0
+    ? compilationErrors.value
+    : publishValidationErrors.value.length > 0
+      ? publishValidationErrors.value
+      : editorValidationErrors.value
+);
+
+const toolbarValidationErrors = computed(() =>
+  activeToolbarErrors.value.map(error => {
+    const location = error.field ? `${error.field}: ` : '';
+    return `${location}${error.message}`;
+  })
+);
+
+const inlineValidationErrors = computed(() => {
+  if (compilationErrors.value.length > 0) {
+    return compilationErrors.value;
+  }
+
+  if (isPublishModalOpen.value || publishValidationErrors.value.length > 0) {
+    return [];
+  }
+
+  return editorValidationErrors.value;
+});
+
+const inlineValidationTitle = computed(() =>
+  inlineValidationErrors.value.some(error => error.code === 'compile_error')
+    ? 'Execution blocked'
+    : 'Draft issues'
+);
+
+const formatValidationError = (error: WorkflowValidationError) => {
+  const location = error.field ? `${error.field}: ` : '';
+  return `${location}${error.message}`;
+};
 
 const isDebugMode = computed(() => !!props.debugExecutionId);
 
@@ -287,6 +450,38 @@ const lastSavedExact = computed(() => {
   return `Saved ${date.toLocaleString(undefined, exactTimestampFormat)}`;
 });
 
+const saveStatus = computed(() => props.saveStatus ?? 'saved');
+const saveIndicatorDetail = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'Saving\u2026';
+    case 'error':
+      return 'Save failed \u00b7 retrying';
+    default:
+      return `Saved ${lastSaved.value}`;
+  }
+});
+const saveIndicatorTitle = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'Saving workflow draft';
+    case 'error':
+      return props.saveError ?? 'Saving failed. Retrying automatically.';
+    default:
+      return lastSavedExact.value;
+  }
+});
+const saveIndicatorDotClass = computed(() => {
+  switch (saveStatus.value) {
+    case 'saving':
+      return 'bg-amber-500 animate-pulse';
+    case 'error':
+      return 'bg-rose-500';
+    default:
+      return 'bg-emerald-500';
+  }
+});
+
 const debugExecutionShortId = computed(() => {
   const id = props.debugExecutionId ?? props.execution?.id ?? '';
   return id ? id.slice(0, 8) : '';
@@ -314,29 +509,88 @@ const debugStatusBadge = computed(() => {
 });
 const debugExecutionLink = computed(() => {
   const workflow = editor.workflow as any;
-  if (!workflow?.id || !workflow?.workspace_id || !props.debugExecutionId) return null;
-  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/execution/${props.debugExecutionId}`;
+  if (!workflow?.id || !workflow?.project_id || !props.debugExecutionId) return null;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}/runs/${props.debugExecutionId}`;
 });
 const workflowExecutionsLink = computed(() => {
   const workflow = editor.workflow as any;
-  if (!workflow?.id || !workflow?.workspace_id) return null;
-  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}`;
+  if (!workflow?.id || !workflow?.project_id) return null;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}`;
 });
 const debugExitLink = computed(() => {
   const workflow = editor.workflow as any;
-  if (!workflow?.id || !workflow?.workspace_id) return null;
-  return `/workspaces/${workflow.workspace_id}/workflows/${workflow.id}/edit`;
+  if (!workflow?.id || !workflow?.project_id) return null;
+  return `/projects/${workflow.project_id}/workflows/${workflow.id}/edit`;
+});
+const workflowStatus = computed<'draft' | 'active' | 'archived'>(() => {
+  const workflow = editor.workflow;
+
+  if (workflow?.archived_at) {
+    return 'archived';
+  }
+
+  if (workflow?.draft?.status === 'draft') {
+    return 'draft';
+  }
+
+  return 'active';
+});
+const publishVersionNumber = computed(() => editor.workflow?.draft?.version ?? null);
+
+useLiveEvent<{
+  valid: boolean;
+  validation_errors?: WorkflowValidationError[];
+  trigger_impact?: TriggerImpact | null;
+  execution_hash_changed?: boolean | null;
+  error?: string;
+}>('workflow:validation_result', payload => {
+  isValidatingPublish.value = false;
+  publishValidationErrors.value = payload.validation_errors ?? [];
+  publishTriggerImpact.value = payload.trigger_impact ?? null;
+  publishExecutionHashChanged.value = payload.execution_hash_changed ?? null;
+  publishError.value = payload.error ?? null;
 });
 
-useLiveEvent<{ success: boolean; error?: string }>(
+useLiveEvent<{
+  errors?: Array<{
+    step_id?: string | null;
+    message?: string;
+  }>;
+}>('compilation_errors', payload => {
+  compilationErrors.value = (payload.errors ?? []).map(error => ({
+    step_id: error.step_id ?? null,
+    field: null,
+    message: error.message ?? 'Compilation failed',
+    severity: 'error',
+    code: 'compile_error',
+  }));
+});
+
+useLiveEvent<{
+  success: boolean;
+  error?: string;
+  validation_errors?: WorkflowValidationError[];
+  trigger_impact?: TriggerImpact | null;
+  execution_hash_changed?: boolean | null;
+}>(
   'workflow:publish_result',
   payload => {
     isPublishing.value = false;
     if (payload.success) {
       isPublishModalOpen.value = false;
-    } else if (payload.error) {
-      publishError.value = payload.error;
+      publishValidationErrors.value = [];
+      publishTriggerImpact.value = null;
+      publishExecutionHashChanged.value = null;
+      publishError.value = null;
+      return;
     }
+
+    publishValidationErrors.value = payload.validation_errors ?? [];
+    publishTriggerImpact.value = payload.trigger_impact ?? null;
+    publishExecutionHashChanged.value = payload.execution_hash_changed ?? null;
+    publishError.value =
+      payload.error ??
+      (publishValidationErrors.value.length > 0 ? 'Fix validation errors before publishing.' : null);
   }
 );
 </script>
@@ -347,7 +601,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
       v-if="!isNodeLibraryCollapsed"
       :library-items="editor.nodeLibraryItems"
       :workflow-name="editor.workflow?.name ?? 'Untitled Workflow'"
-      :workflow-status="editor.workflow?.status ?? 'draft'"
+      :workflow-status="workflowStatus"
       :style="{ width: `${nodeLibraryWidth}px` }"
       class="z-20 shrink-0 relative"
       @resize-start="handleNodeLibraryResizeStart"
@@ -388,13 +642,12 @@ useLiveEvent<{ success: boolean; error?: string }>(
 
       <div class="absolute right-0 top-[14px] z-30 flex items-start">
         <EditorToolbar
-          :presences="editor.presences"
-          :can-undo="editor.undoStore.canUndo"
-          :can-redo="editor.undoStore.canRedo"
-          :undo-tooltip="editor.undoStore.undoTooltip"
-          :redo-tooltip="editor.undoStore.redoTooltip"
-          :is-undo-pending="editor.undoStore.isPending"
-          @save="editor.handleSave"
+          :can-undo="editor.canUndo"
+          :can-redo="editor.canRedo"
+          :undo-tooltip="editor.undoTooltip"
+          :redo-tooltip="editor.redoTooltip"
+          :is-undo-pending="editor.isUndoPending"
+          :validation-errors="toolbarValidationErrors"
           @undo="editor.handleUndo"
           @redo="editor.handleRedo"
           @run-test="editor.handleRunTest"
@@ -410,10 +663,10 @@ useLiveEvent<{ success: boolean; error?: string }>(
           <div class="px-1.5 py-0.5">
             <div class="flex items-center gap-2">
               <a
-                :href="`/workspaces/${(editor.workflow as any)?.workspace_id}`"
+                :href="`/projects/${(editor.workflow as any)?.project_id}`"
                 class="pointer-events-auto select-none text-base-content/60 hover:text-base-content/80 text-xs font-medium transition-colors"
               >
-                {{ (editor.workflow as any)?.workspace?.name || 'Workspace' }}
+                {{ (editor.workflow as any)?.project?.name || 'project' }}
               </a>
               <SlashIcon class="pointer-events-none text-base-content/30 h-3.5 w-3.5" stroke-width="2.5" />
               <span class="pointer-events-none text-base-content/90 text-xs font-semibold">
@@ -425,13 +678,13 @@ useLiveEvent<{ success: boolean; error?: string }>(
             </div>
           </div>
 
-          <button
-            class="pointer-events-auto ml-1 inline-flex select-none items-center gap-1 px-0.5 py-0 text-[10px] font-medium text-base-content/45 transition-colors hover:text-base-content/70"
-            :title="lastSavedExact"
-            @click="emit('save_workflow')"
+          <p
+            class="pointer-events-auto ml-2 select-none text-[11px] tracking-wide text-base-content/60"
+            :title="saveIndicatorTitle"
           >
-            Last saved: {{ lastSaved }}
-          </button>
+            <span class="inline-block h-1 w-1 rounded-full align-middle mr-1.5" :class="saveIndicatorDotClass"></span>
+            <span>{{ saveIndicatorDetail }}</span>
+          </p>
 
           <!-- Debug Mode Floating Pill -->
           <div
@@ -474,6 +727,33 @@ useLiveEvent<{ success: boolean; error?: string }>(
               </div>
             </div>
           </div>
+
+          <div
+            v-if="inlineValidationErrors.length > 0"
+            class="pointer-events-auto mt-3 max-w-lg rounded-2xl border border-error/20 bg-error/6 px-4 py-3 shadow-sm backdrop-blur-sm"
+          >
+            <div class="flex items-center gap-2 text-[11px] font-semibold text-error/80">
+              <ExclamationCircleIcon class="h-4 w-4" />
+              <span>{{ inlineValidationTitle }}</span>
+              <span class="text-error/35">&middot;</span>
+              <span class="font-medium">{{ inlineValidationErrors.length }} issue<span v-if="inlineValidationErrors.length !== 1">s</span></span>
+            </div>
+            <ul class="mt-2 space-y-1.5">
+              <li
+                v-for="(error, index) in inlineValidationErrors.slice(0, 3)"
+                :key="`${error.code}-${error.step_id ?? 'global'}-${index}`"
+                class="text-[11px] leading-relaxed text-error/75"
+              >
+                {{ formatValidationError(error) }}
+              </li>
+            </ul>
+            <p
+              v-if="inlineValidationErrors.length > 3"
+              class="mt-2 text-[10px] font-medium uppercase tracking-[0.16em] text-error/45"
+            >
+              + {{ inlineValidationErrors.length - 3 }} more
+            </p>
+          </div>
         </div>
 
         <div class="relative flex min-w-0 flex-1 flex-col">
@@ -497,6 +777,7 @@ useLiveEvent<{ success: boolean; error?: string }>(
               :set-canvas-ref="editor.setCanvasRef"
               :set-vue-flow-ref="editor.setVueFlowRef"
               :handle-pane-mouse-move="editor.handlePaneMouseMove"
+              :handle-pane-mouse-leave="editor.handlePaneMouseLeave"
               :handle-node-click="editor.handleNodeClick"
               :handle-node-double-click="editor.handleNodeDoubleClick"
               :handle-node-context-menu="editor.handleNodeContextMenu"
@@ -551,7 +832,6 @@ useLiveEvent<{ success: boolean; error?: string }>(
         @run_node="editor.handleRunNode"
         @pin_output="editor.handlePinOutput"
         @unpin_output="editor.handleUnpinOutput"
-        @toggle_webhook_test="editor.handleToggleWebhookTest"
       />
 
       <ContextMenu
@@ -575,11 +855,25 @@ useLiveEvent<{ success: boolean; error?: string }>(
       <PublishModal
         :is-open="isPublishModalOpen"
         :workflow-name="editor.workflow?.name ?? 'Workflow'"
-        :current-version-tag="editor.workflow?.current_version_tag"
+        :version-number="publishVersionNumber"
         :is-publishing="isPublishing"
+        :is-validating="isValidatingPublish"
         :publish-error="publishError"
+        :validation-errors="publishValidationErrors"
+        :trigger-impact="publishTriggerImpact"
+        :execution-hash-changed="publishExecutionHashChanged"
         @close="closePublishModal"
         @publish="handlePublish"
+      />
+
+      <CredentialLaunchModal
+        :is-open="isCredentialLaunchModalOpen"
+        :target-step-id="credentialLaunchTargetStepId"
+        :descriptors="credentialLaunchDescriptors"
+        :widget-token="widgetToken"
+        @close="closeCredentialLaunchModal"
+        @reauth-connected="handleReauthConnected"
+        @submit="handleSubmitCredentialBindings"
       />
     </div>
   </div>

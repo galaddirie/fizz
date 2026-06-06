@@ -1,148 +1,95 @@
 defmodule FizzWeb.WorkspacesLive.Index do
   use FizzWeb, :live_view
 
-  alias Fizz.Accounts
+  alias Fizz.Workspaces
 
   @impl true
-  def mount(_params, _session, socket) do
-    organizations = Accounts.ensure_personal_organization(socket.assigns.current_scope)
-    selected_organization_id = default_organization_id(organizations)
-
+  def mount(%{"project_id" => project_id}, _session, socket) do
     socket =
       socket
+      |> assign(:project_id, project_id)
       |> assign(:page_title, "Workspaces")
-      |> assign(:organizations, organizations)
-      |> assign(:organization_options, organization_options(organizations))
-      |> assign(:selected_organization_id, selected_organization_id)
-      |> assign(:organization_form, organization_form(selected_organization_id))
-      |> assign(:create_form, to_form(%{"name" => "", "description" => ""}, as: :workspace))
-      |> assign(:resolve_workspace_scope, nil)
-      |> assign(:workspace_error, nil)
+      |> assign(:create_form, to_form(%{"name" => ""}, as: :workspace))
       |> stream(:workspaces, [])
 
-    {:ok, load_workspaces(socket)}
+    {:ok, load_project_workspaces(socket)}
   end
 
   @impl true
-  def handle_event(
-        "change_organization",
-        %{"organization" => %{"organization_id" => organization_id}},
-        socket
-      ) do
-    selected_organization_id =
-      validate_selected_organization_id(organization_id, socket.assigns.organizations)
-
-    {:noreply,
-     socket
-     |> assign(:selected_organization_id, selected_organization_id)
-     |> assign(:organization_form, organization_form(selected_organization_id))
-     |> assign(:resolve_workspace_scope, nil)
-     |> load_workspaces()}
+  def handle_params(%{"project_id" => project_id}, _uri, socket) do
+    {:noreply, socket |> assign(:project_id, project_id) |> load_project_workspaces()}
   end
 
+  @impl true
   def handle_event("validate_create_workspace", %{"workspace" => params}, socket) do
     {:noreply, assign(socket, :create_form, to_form(params, as: :workspace))}
   end
 
   def handle_event("create_workspace", %{"workspace" => params}, socket) do
-    case socket.assigns.resolve_workspace_scope do
-      nil ->
+    case Workspaces.create_workspace(
+           socket.assigns.current_scope,
+           socket.assigns.project_id,
+           params
+         ) do
+      {:ok, _workspace} ->
         {:noreply,
-         put_flash(socket, :error, "Select an organization before creating a workspace.")}
+         socket
+         |> put_flash(:info, "Workspace created")
+         |> assign(:create_form, to_form(%{"name" => ""}, as: :workspace))
+         |> load_project_workspaces()}
 
-      scope ->
-        case Accounts.create_workspace(scope, params) do
-          {:ok, _workspace} ->
-            {:noreply,
-             socket
-             |> put_flash(:info, "Workspace created")
-             |> assign(
-               :create_form,
-               to_form(%{"name" => "", "description" => ""}, as: :workspace)
-             )
-             |> load_workspaces()}
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            {:noreply, assign(socket, :create_form, to_form(changeset, as: :workspace))}
-
-          {:error, reason} ->
-            {:noreply,
-             put_flash(socket, :error, "Could not create workspace: #{inspect(reason)}")}
-        end
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not create workspace: #{inspect(reason)}")}
     end
   end
 
-  defp load_workspaces(%{assigns: %{selected_organization_id: nil}} = socket) do
-    socket
-    |> assign(:resolve_workspace_scope, nil)
-    |> assign(:workspace_error, :no_organization)
-    |> stream(:workspaces, [], reset: true)
+  def handle_event("delete_workspace", %{"id" => workspace_id}, socket) do
+    case Workspaces.delete_workspace(
+           socket.assigns.current_scope,
+           socket.assigns.project_id,
+           workspace_id
+         ) do
+      {:ok, _workspace} ->
+        {:noreply, socket |> put_flash(:info, "Workspace deleted") |> load_project_workspaces()}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not delete workspace: #{inspect(reason)}")}
+    end
   end
 
-  defp load_workspaces(socket) do
-    case Accounts.build_scope(
+  defp load_project_workspaces(socket) do
+    case Workspaces.list_project_workspaces(
            socket.assigns.current_scope,
-           socket.assigns.selected_organization_id
+           socket.assigns.project_id
          ) do
-      {:ok, resolve_workspace_scope} ->
-        case Accounts.list_workspaces(resolve_workspace_scope) do
-          {:ok, workspaces} ->
-            socket
-            |> assign(:resolve_workspace_scope, resolve_workspace_scope)
-            |> assign(:workspace_error, nil)
-            |> stream(:workspaces, workspaces, reset: true)
+      {:ok, workspaces} ->
+        socket
+        |> assign(:resolve_project_scope, resolve_project_scope(socket))
+        |> stream(:workspaces, workspaces, reset: true)
 
-          {:error, reason} ->
-            socket
-            |> assign(:resolve_workspace_scope, nil)
-            |> assign(:workspace_error, reason)
-            |> stream(:workspaces, [], reset: true)
-        end
+      {:error, :forbidden} ->
+        socket
+        |> put_flash(:error, "You do not have access to this project")
+        |> redirect(to: ~p"/")
+
+      {:error, :project_not_found} ->
+        socket
+        |> put_flash(:error, "project not found")
+        |> redirect(to: ~p"/")
 
       {:error, reason} ->
         socket
-        |> assign(:resolve_workspace_scope, nil)
-        |> assign(:workspace_error, reason)
-        |> stream(:workspaces, [], reset: true)
+        |> put_flash(:error, "Could not load workspaces: #{inspect(reason)}")
     end
   end
 
-  defp organization_form(selected_organization_id) do
-    to_form(%{"organization_id" => selected_organization_id || ""}, as: :organization)
-  end
-
-  defp default_organization_id([%{organization_id: organization_id} | _]), do: organization_id
-  defp default_organization_id(_organizations), do: nil
-
-  defp organization_options(organizations) do
-    Enum.map(organizations, fn organization ->
-      {organization.organization_name, organization.organization_id}
-    end)
-  end
-
-  defp validate_selected_organization_id(requested_organization_id, organizations) do
-    if Enum.any?(organizations, fn organization ->
-         organization.organization_id == requested_organization_id
-       end) do
-      requested_organization_id
-    else
-      default_organization_id(organizations)
+  defp resolve_project_scope(socket) do
+    case Workspaces.resolve_project_scope(
+           socket.assigns.current_scope,
+           socket.assigns.project_id
+         ) do
+      {:ok, resolved_scope} -> resolved_scope
+      _ -> socket.assigns.current_scope
     end
-  end
-
-  defp workspace_error_message(:no_organization) do
-    "No organization could be resolved for this account."
-  end
-
-  defp workspace_error_message(:missing_workos_user_id) do
-    "This account is missing a WorkOS user id."
-  end
-
-  defp workspace_error_message(:forbidden) do
-    "You do not have workspace access in the selected organization."
-  end
-
-  defp workspace_error_message(_reason) do
-    "Could not load workspaces for this organization right now."
   end
 end

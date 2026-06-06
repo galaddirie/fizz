@@ -4,31 +4,52 @@ import type { Component } from 'vue';
 // Workflow Types
 // =============================================================================
 
+export interface WorkflowProjectSummary {
+  name?: string | null;
+}
+
 export interface Workflow {
   id: string;
+  project_id: string;
   name: string;
-  description?: string;
-  status: 'draft' | 'active' | 'archived';
-  public: boolean;
-  current_version_tag?: string;
-  published_version_id?: string;
-  user_id: string;
+  description?: string | null;
+  created_by_user_id: string;
+  archived_at?: string | null;
+  latest_version?: number | null;
+  published_version_id?: string | null;
   draft?: WorkflowDraft;
+  project?: WorkflowProjectSummary;
   inserted_at: string;
   updated_at: string;
 }
 
-export interface WorkflowDraft {
+export type WorkflowDefinitionVersionStatus = 'draft' | 'published' | 'archived';
+
+export interface WorkflowViewport {
+  x: number;
+  y: number;
+  zoom: number;
+  [key: string]: unknown;
+}
+
+export interface WorkflowDefinitionVersionDraft {
   id: string;
-  workflow_id: string;
+  workflow_definition_id: string;
+  version: number;
+  status: WorkflowDefinitionVersionStatus;
   steps: Step[];
   connections: Connection[];
-  groups: NodeGroup[];
-  triggers: Trigger[];
+  step_groups: StepGroup[];
+  viewport: WorkflowViewport;
   settings: Record<string, unknown>;
+  compiled_hash?: string | null;
+  published_at?: string | null;
+  published_by_user_id?: string | null;
   inserted_at?: string;
   updated_at?: string;
 }
+
+export type WorkflowDraft = WorkflowDefinitionVersionDraft;
 
 export interface Step {
   id: string;
@@ -47,35 +68,36 @@ export interface Connection {
   target_input: string;
 }
 
-export interface NodeGroup {
+export interface StepGroup {
   id: string;
   name: string;
   step_ids: string[];
-  output_step_id: string;
   position: { x?: number; y?: number; width?: number; height?: number };
   color?: string | null;
   font_size?: number | null;
   collapsed: boolean;
 }
 
-export interface WorkflowVersion {
+export type NodeGroup = StepGroup;
+
+export interface WorkflowDefinitionVersion {
   id: string;
-  version_tag: string;
-  source_hash?: string;
-  changelog?: string | null;
+  workflow_definition_id: string;
+  version: number;
+  status: WorkflowDefinitionVersionStatus;
+  compiled_hash?: string | null;
   published_at?: string | null;
-  published_by?: string | null;
+  published_by_user_id?: string | null;
   steps: Step[];
   connections: Connection[];
-  groups: NodeGroup[];
+  step_groups: StepGroup[];
+  viewport: WorkflowViewport;
+  settings: Record<string, unknown>;
+  inserted_at?: string;
+  updated_at?: string;
 }
 
-export interface Trigger {
-  id: string;
-  type: string;
-  config: Record<string, unknown>;
-  enabled: boolean;
-}
+export type WorkflowVersion = WorkflowDefinitionVersion;
 
 export interface CredentialOption {
   id: string;
@@ -95,18 +117,24 @@ export interface CredentialOption {
 // =============================================================================
 
 export type StepKind = 'trigger' | 'action' | 'transform' | 'control_flow';
-export type NodeRole = 'root' | 'subnode';
 
-export interface StepSubnodeSlot {
+export interface StepInputHandle {
   id: string;
+  key?: string;
   title?: string;
   description?: string;
+  kind: 'flow' | 'dependency';
   required?: boolean;
   cardinality?: 'one' | 'many';
   accepts?: {
-    type_ids?: string[];
+    provides?: string[];
   };
-  input_key?: string;
+}
+
+export interface StepOutputHandle {
+  id: string;
+  kind: 'flow' | 'dependency';
+  provides: string[];
 }
 
 export interface AddStepAutoConnect {
@@ -116,14 +144,14 @@ export interface AddStepAutoConnect {
   target_input?: string;
 }
 
-export type HandleQuickAddFilterMode = 'output' | 'subnode_slot';
+export type HandleQuickAddFilterMode = 'output' | 'dependency_input';
 
 export interface StepHandleQuickAddRequest {
   screenPoint: { x: number; y: number };
   autoConnect: AddStepAutoConnect;
   filter: {
     mode: HandleQuickAddFilterMode;
-    accepted_type_ids?: string[];
+    accepted_provides?: string[];
   };
 }
 
@@ -134,11 +162,9 @@ export interface StepType {
   category: string;
   icon?: string;
   step_kind: StepKind;
-  node_role?: NodeRole;
   config_schema?: Record<string, unknown>;
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
-  subnode_slots?: StepSubnodeSlot[];
 }
 
 export interface NodeLibraryItem {
@@ -148,7 +174,8 @@ export interface NodeLibraryItem {
   category: string;
   icon: string;
   step_kind: StepKind;
-  node_role?: NodeRole;
+  input_schema?: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
 }
 
 // =============================================================================
@@ -164,14 +191,13 @@ export interface StepNodeData {
   icon?: string;
   category?: string;
   step_kind?: StepKind;
-  node_role?: NodeRole;
   status?: StepExecutionStatus;
   stats?: {
     duration_us?: number;
     bytes?: number;
     out?: number;
   };
-  subnode_slots?: StepSubnodeSlot[];
+  dependency_inputs?: StepInputHandle[];
   // Fan-out item stats for multi-item steps
   itemStats?: {
     isMultiItem: boolean;
@@ -185,6 +211,7 @@ export interface StepNodeData {
   disabled?: boolean;
   pinned?: boolean;
   locked_by?: string;
+  validation_errors?: WorkflowValidationError[];
   selected_by?: Array<{
     id: string;
     name: string;
@@ -266,30 +293,34 @@ export type StepExecutionStatus =
   | 'skipped'
   | 'cancelled';
 
-export interface Execution {
+export interface WorkflowRun {
   id: string;
-  workflow_id: string;
-  workflow_version_id?: string;
+  workflow_definition_id: string;
+  workflow_definition_version_id?: string | null;
+  project_id?: string | null;
   status: ExecutionStatus;
-  execution_type: 'production' | 'preview' | 'partial';
   trigger: {
     type: string;
     data: Record<string, unknown>;
   };
-  context?: Record<string, unknown>;
-  output?: Record<string, unknown>;
+  triggered_by?: Record<string, unknown> | null;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown> | null;
   error?: {
     type: string;
     message: string;
     details?: Record<string, unknown>;
-  };
+  } | null;
   metadata?: Record<string, unknown>;
+  compiled_hash?: string | null;
   triggered_by_user_id?: string;
-  started_at?: string;
-  completed_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
   inserted_at: string;
   updated_at: string;
 }
+
+export type Execution = WorkflowRun;
 
 export interface StepExecution {
   id: string;
@@ -370,14 +401,30 @@ export interface EditorState {
   pinned_outputs?: Record<string, unknown>;
   disabled_steps?: string[];
   step_locks?: Record<string, string>;
-  webhook_test?: WebhookTestState | null;
 }
 
-export interface WebhookTestState {
-  step_id?: string;
-  path: string;
-  method?: string;
-  enabled_by?: string;
+export interface WorkflowValidationError {
+  step_id?: string | null;
+  field?: string | null;
+  message: string;
+  severity: 'error' | 'warning';
+  code: string;
+}
+
+export interface TriggerImpactEntry {
+  step_id: string;
+  type_id?: string | null;
+  kind: string;
+}
+
+export interface TriggerImpact {
+  added: TriggerImpactEntry[];
+  updated: TriggerImpactEntry[];
+  removed: Array<{
+    step_id: string;
+    kind: string;
+  }>;
+  unchanged_count: number;
 }
 
 // =============================================================================

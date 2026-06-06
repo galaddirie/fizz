@@ -29,6 +29,12 @@ defmodule FizzWeb.Router do
     post "/workos", WorkOSWebhookController, :create
   end
 
+  scope "/triggers", FizzWeb.Triggers do
+    pipe_through :api
+
+    post "/wh/:webhook_path", WebhookController, :receive
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", FizzWeb do
   #   pipe_through :api
@@ -51,15 +57,6 @@ defmodule FizzWeb.Router do
     end
   end
 
-  ## Authentication routes
-  scope "/api", FizzWeb do
-    pipe_through :api
-
-    get "/workflows/:id/contract", WorkflowContractController, :show
-    match :*, "/hooks/*path", Plugs.WebhookHandler, :handle
-    match :*, "/hook-test/*path", Plugs.WebhookHandler, :handle
-  end
-
   scope "/", FizzWeb do
     pipe_through [:browser]
 
@@ -75,20 +72,29 @@ defmodule FizzWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{FizzWeb.UserAuth, :require_authenticated}] do
       live "/settings/", UserManagementLive, :index
-      live "/workspaces", WorkspacesLive.Index, :index
-      live "/workspaces/:workspace_id", WorkspacesLive.Show, :show
-      live "/workspaces/:workspace_id/sprites", SpritesLive.Index, :index
-      live "/workspaces/:workspace_id/sprites/:sprite_id", SpritesLive.Show, :show
+      live "/projects", ProjectsLive.Index, :index
+      live "/projects/:project_id", ProjectsLive.Show, :show
+      live "/projects/:project_id/workflows", WorkflowsLive.Index, :index
+      live "/projects/:project_id/workflows/:definition_id", WorkflowsLive.Show, :show
 
-      live "/workspaces/:workspace_id/workflows", WorkflowLive.Index, :index
-      live "/workspaces/:workspace_id/workflows/:id", WorkflowLive.Show, :show
-
-      live "/workspaces/:workspace_id/workflows/:workflow_id/execution/:execution_id",
-           ExecutionLive.Show,
+      live "/projects/:project_id/workflows/:definition_id/runs/:run_id",
+           WorkflowsLive.RunShow,
            :show
 
-      live "/workspaces/:workspace_id/workflows/:id/edit", WorkflowLive.Edit, :edit
-      live "/workspaces/:workspace_id/workflows/:id/revisions", WorkflowLive.Revision, :index
+      live "/projects/:project_id/workflows/:definition_id/edit",
+           WorkflowsLive.Editor,
+           :edit
+
+      live "/projects/:project_id/workflows/:definition_id/edit/revisions",
+           WorkflowsLive.Revisions,
+           :show
+
+      live "/projects/:project_id/workflows/:definition_id/edit/runs/:run_id",
+           WorkflowsLive.Editor,
+           :debug
+
+      live "/projects/:project_id/workspaces", WorkspacesLive.Index, :index
+      live "/projects/:project_id/workspaces/:workspace_id", WorkspacesLive.Show, :show
     end
   end
 end

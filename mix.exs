@@ -61,7 +61,7 @@ defmodule Fizz.MixProject do
        depth: 1},
       {:swoosh, "~> 1.16"},
       {:req, "~> 0.5"},
-      {:req_llm, "~> 1.5"},
+      {:req_llm, "~> 1.12"},
       {:workos, "~> 1.1"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
@@ -70,12 +70,16 @@ defmodule Fizz.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:nvir, "~> 0.16"},
-      {:runic, git: "https://github.com/galaddirie/runic.git", branch: "main"},
+      {:runic, path: "vendor/runic"},
+      {:libgraph, "0.16.1-mg.1", hex: :multigraph, override: true},
       {:jsv, "~> 0.13.1"},
       {:oban, "~> 2.20"},
+      {:crontab, "~> 1.1"},
+      {:exqlite, "~> 0.25"},
       {:sprites, git: "https://github.com/superfly/sprites-ex.git"},
       {:flame, "~> 0.5.3"},
-      {:solid, "~> 1.2"}
+      {:solid, "~> 1.2"},
+      {:gen_stage, "~> 1.3"}
     ]
   end
 

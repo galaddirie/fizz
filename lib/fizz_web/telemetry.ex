@@ -51,11 +51,11 @@ defmodule FizzWeb.Telemetry do
         tags: [:event],
         unit: {:native, :millisecond}
       ),
-      counter("fizz.sprites.sprite.created.count"),
-      counter("fizz.sprites.sprite.deleted.count"),
-      counter("fizz.sprites.job.queued.count"),
-      counter("fizz.sprites.job.state.count"),
-      counter("fizz.sprites.console.closed.count"),
+      counter("fizz.workspaces.workspace.created.count"),
+      counter("fizz.workspaces.workspace.deleted.count"),
+      counter("fizz.workspaces.job.queued.count"),
+      counter("fizz.workspaces.job.state.count"),
+      counter("fizz.workspaces.console.closed.count"),
 
       # Database Metrics
       summary("fizz.repo.query.total_time",

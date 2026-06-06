@@ -2,6 +2,7 @@
 import { getBezierPath, useVueFlow, Position } from '@vue-flow/core';
 import { computed, type CSSProperties } from 'vue';
 import { lightenColor, colorMap, type NodeStatus, oklchToHex } from '@/lib/color';
+import { EDGE_LABEL_POSITION } from '@/constants/layout';
 import { useThemeStore } from '@/stores/theme';
 
 interface EdgeData {
@@ -79,24 +80,15 @@ const gradientId = computed(() => `edge-gradient-${props.id}`);
 const sourceStats = computed(() => sourceNode.value?.data?.stats);
 const outputCount = computed(() => sourceStats.value?.out);
 
-// Format stats for display
 const statsText = computed(() => {
   const count = outputCount.value;
-  if (
-    count === undefined ||
-    count === null ||
-    count === 0 ||
-    count === 'undefined' ||
-    count === 'null' ||
-    count === 'nil'
-  )
-    return null;
+  if (typeof count !== 'number' || !Number.isFinite(count) || count <= 0) return null;
   return `${count} ${count === 1 ? 'item' : 'items'}`;
 });
 
-// Calculate text position along the path (70% along the curve)
+// Calculate text position along the path
 const textPosition = computed(() => {
-  const t = 0.6; // Position at 60% along the line
+  const t = EDGE_LABEL_POSITION;
   const x = props.sourceX + (props.targetX - props.sourceX) * t;
   const y = props.sourceY + (props.targetY - props.sourceY) * t;
   return { x, y };
@@ -150,18 +142,6 @@ const textPosition = computed(() => {
       stroke-linecap="round"
       :marker-end="`url(#arrow-${props.id})`"
       class="vue-flow__edge-interaction"
-    />
-
-    <!-- Stats text background -->
-    <rect
-      v-if="statsText"
-      :x="textPosition.x - 20"
-      :y="textPosition.y - 6"
-      width="40"
-      height="12"
-      fill="var(--color-base-300)"
-      stroke="none"
-      rx="3"
     />
 
     <!-- Stats text -->

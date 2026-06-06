@@ -1,0 +1,97 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_path={~p"/projects/#{@project_id}"}
+>
+  <:page_header>
+    <div class="space-y-2">
+      <.link
+        navigate={~p"/projects"}
+        class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content"
+      >
+        <.icon name="hero-arrow-left" class="size-4" /> Back to projects
+      </.link>
+      <h1 class="text-3xl font-semibold">{(@project && @project.name) || "project"}</h1>
+      <p class="text-sm text-muted">project details and quick links for the current scope.</p>
+    </div>
+  </:page_header>
+
+  <%= if @project do %>
+    <div id="project-show-page" class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <section class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <h2 class="text-lg font-semibold">Details</h2>
+
+        <dl class="mt-4 grid gap-4 sm:grid-cols-2">
+          <div id="project-show-id">
+            <dt class="text-xs uppercase tracking-wide text-muted">project ID</dt>
+            <dd class="mt-1 text-sm font-mono">{@project.id}</dd>
+          </div>
+          <div id="project-show-slug">
+            <dt class="text-xs uppercase tracking-wide text-muted">Slug</dt>
+            <dd class="mt-1 text-sm">{@project.slug}</dd>
+          </div>
+          <div id="project-show-org-id">
+            <dt class="text-xs uppercase tracking-wide text-muted">Organization ID</dt>
+            <dd class="mt-1 text-sm font-mono">{@project.workos_organization_id}</dd>
+          </div>
+          <div id="project-show-inserted-at">
+            <dt class="text-xs uppercase tracking-wide text-muted">Created</dt>
+            <dd class="mt-1 text-sm">{to_string(@project.inserted_at)}</dd>
+          </div>
+        </dl>
+
+        <p
+          :if={@project.description && @project.description != ""}
+          id="project-show-description"
+          class="mt-4 rounded-box border border-base-300 bg-base-200/40 p-3 text-sm"
+        >
+          {@project.description}
+        </p>
+      </section>
+
+      <aside class="rounded-box border border-base-300 bg-base-100 p-4 sm:p-6">
+        <h2 class="text-lg font-semibold">Quick Actions</h2>
+
+        <div class="mt-4 space-y-2">
+          <.link
+            id="project-show-open-workflows"
+            navigate={~p"/projects/#{@project.id}/workflows"}
+            class="btn btn-primary btn-sm w-full"
+          >
+            Workflows
+          </.link>
+          <.link
+            id="project-show-open-workspaces"
+            navigate={~p"/projects/#{@project.id}/workspaces"}
+            class="btn btn-outline btn-sm w-full"
+          >
+            Workspaces
+          </.link>
+          <.link
+            id="project-show-back"
+            navigate={~p"/projects"}
+            class="btn btn-ghost btn-sm w-full"
+          >
+            All projects
+          </.link>
+        </div>
+
+        <div class="mt-6 space-y-3">
+          <p class="text-xs uppercase tracking-wide text-muted">Access scope</p>
+          <div class="flex items-center justify-between gap-3 text-sm">
+            <span>Organization role</span>
+            <span class="badge badge-outline">
+              {@resolve_project_scope.organization_role || :none}
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3 text-sm">
+            <span>project role</span>
+            <span class="badge badge-outline">
+              {@resolve_project_scope.project_role || :none}
+            </span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  <% end %>
+</Layouts.app>

@@ -1,0 +1,350 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_path={~p"/projects/#{@project_id}"}
+>
+  <:page_header>
+    <div class="w-full space-y-6">
+      <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div class="space-y-3">
+          <.link
+            navigate={~p"/projects/#{@project_id}/workflows/#{@definition_id}"}
+            class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content transition-colors"
+          >
+            <.icon name="hero-arrow-left" class="size-4" />
+            Back to {if @definition, do: @definition.name, else: "workflow"}
+          </.link>
+          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Execution</p>
+          <div class="flex items-center gap-3">
+            <h1 class="text-3xl font-semibold tracking-tight text-base-content">
+              Run {short_id(@run_id)}
+            </h1>
+            <%= if @run do %>
+              <% {label, badge_class} = run_status_badge(@run.status) %>
+              <span class={["badge", badge_class]}>{label}</span>
+            <% end %>
+          </div>
+        </div>
+
+        <div :if={@run} class="flex gap-3">
+          <.link
+            navigate={
+              ~p"/projects/#{@project_id}/workflows/#{@definition_id}/edit/runs/#{@run_id}"
+            }
+            class="btn btn-sm btn-primary btn-soft gap-2"
+          >
+            <.icon name="hero-bug-ant" class="size-4" />
+            <span>Open in Editor</span>
+          </.link>
+        </div>
+      </div>
+    </div>
+  </:page_header>
+
+  <div :if={@run} class="space-y-8">
+    <%!-- Run Metadata --%>
+    <section class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="card border border-base-300 rounded-2xl bg-base-100 p-5 shadow-sm ring-1 ring-base-300/70">
+        <p class="text-xs font-medium uppercase tracking-wider text-muted">Started</p>
+        <p class="mt-1.5 text-sm font-medium text-base-content">
+          {formatted_timestamp(@run.started_at)}
+        </p>
+      </div>
+
+      <div class="card border border-base-300 rounded-2xl bg-base-100 p-5 shadow-sm ring-1 ring-base-300/70">
+        <p class="text-xs font-medium uppercase tracking-wider text-muted">Completed</p>
+        <p class="mt-1.5 text-sm font-medium text-base-content">
+          {formatted_timestamp(@run.completed_at)}
+        </p>
+      </div>
+
+      <div class="card border border-base-300 rounded-2xl bg-base-100 p-5 shadow-sm ring-1 ring-base-300/70">
+        <p class="text-xs font-medium uppercase tracking-wider text-muted">Duration</p>
+        <p class="mt-1.5 text-sm font-medium text-base-content">
+          {run_duration(@run)}
+        </p>
+      </div>
+
+      <div class="card border border-base-300 rounded-2xl bg-base-100 p-5 shadow-sm ring-1 ring-base-300/70">
+        <p class="text-xs font-medium uppercase tracking-wider text-muted">Steps Executed</p>
+        <p class="mt-1.5 text-sm font-medium text-base-content">
+          {length(@step_executions)}
+        </p>
+      </div>
+    </section>
+
+    <%!-- Error Display --%>
+    <%= if @run.error do %>
+      <section>
+        <div class="card border border-error/30 rounded-2xl bg-error/5 shadow-sm ring-1 ring-error/20 overflow-hidden">
+          <div class="border-b border-error/20 px-5 py-3 flex items-center gap-2">
+            <.icon name="hero-exclamation-triangle" class="size-4 text-error" />
+            <h2 class="text-sm font-semibold text-error">Error</h2>
+          </div>
+          <div class="p-5">
+            <pre class="text-xs text-error/90 whitespace-pre-wrap break-all font-mono bg-error/5 rounded-lg p-3"><%= format_data(@run.error) %></pre>
+          </div>
+        </div>
+      </section>
+    <% end %>
+
+    <%!-- Input/Output --%>
+    <section class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      <div class="card border border-base-300 rounded-2xl bg-base-100 shadow-sm ring-1 ring-base-300/70 overflow-hidden">
+        <div class="border-b border-base-200 px-5 py-3">
+          <h2 class="text-sm font-semibold text-base-content">Input</h2>
+        </div>
+        <div class="p-5">
+          <pre class="text-xs text-base-content/80 whitespace-pre-wrap break-all font-mono bg-base-200/50 rounded-lg p-3 max-h-64 overflow-auto"><%= format_data(@run.input) %></pre>
+        </div>
+      </div>
+
+      <div class="card border border-base-300 rounded-2xl bg-base-100 shadow-sm ring-1 ring-base-300/70 overflow-hidden">
+        <div class="border-b border-base-200 px-5 py-3">
+          <h2 class="text-sm font-semibold text-base-content">Output</h2>
+        </div>
+        <div class="p-5">
+          <%= if @run.output do %>
+            <pre class="text-xs text-base-content/80 whitespace-pre-wrap break-all font-mono bg-base-200/50 rounded-lg p-3 max-h-64 overflow-auto"><%= format_data(@run.output) %></pre>
+          <% else %>
+            <p class="text-xs text-muted">No output data available.</p>
+          <% end %>
+        </div>
+      </div>
+    </section>
+
+    <%!-- Step Execution Timeline --%>
+    <section>
+      <div class="card border border-base-300 rounded-2xl bg-base-100 shadow-sm ring-1 ring-base-300/70 overflow-hidden">
+        <div class="border-b border-base-200 px-5 py-3 flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-base-content">
+            Step Executions
+            <span class="text-muted font-normal">({length(@step_executions)})</span>
+          </h2>
+          <div :if={@step_executions != []} class="flex gap-2">
+            <button
+              type="button"
+              phx-click="expand_all"
+              class="btn btn-ghost btn-xs gap-1"
+            >
+              <.icon name="hero-chevron-double-down" class="size-3" /> Expand all
+            </button>
+            <button
+              type="button"
+              phx-click="collapse_all"
+              class="btn btn-ghost btn-xs gap-1"
+            >
+              <.icon name="hero-chevron-double-up" class="size-3" /> Collapse all
+            </button>
+          </div>
+        </div>
+
+        <%= if @step_executions == [] do %>
+          <div class="flex flex-col items-center justify-center gap-3 py-10 text-base-content/70">
+            <div class="rounded-full bg-base-200 p-3">
+              <.icon name="hero-queue-list" class="size-6" />
+            </div>
+            <div class="space-y-1 text-center">
+              <p class="text-sm font-semibold text-base-content">No step executions</p>
+              <p class="text-xs">Step execution data is not available for this run.</p>
+            </div>
+          </div>
+        <% else %>
+          <div class="divide-y divide-base-200">
+            <%= for {step, index} <- Enum.with_index(@step_executions) do %>
+              <% expanded? = MapSet.member?(@expanded_steps, step.id) %>
+              <div id={"step-execution-#{step.id}"}>
+                <%!-- Step Header (clickable) --%>
+                <button
+                  type="button"
+                  phx-click="toggle_step"
+                  phx-value-step_id={step.id}
+                  class="w-full flex items-center gap-4 px-5 py-3 hover:bg-base-200/50 transition-colors text-left"
+                >
+                  <span class="text-xs font-mono text-base-content/40 w-6 text-right shrink-0">
+                    {index + 1}
+                  </span>
+                  <span class={["size-2.5 shrink-0 rounded-full", step_status_dot(step.status)]}>
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium text-base-content truncate">
+                        {step.step_name}
+                      </span>
+                      <span class="badge badge-xs badge-ghost shrink-0">
+                        {step_type_label(step.step_type_id)}
+                      </span>
+                    </div>
+                  </div>
+                  <span class="text-xs text-base-content/50 shrink-0">
+                    {step_status_label(step.status)}
+                  </span>
+                  <span class="text-xs font-mono text-base-content/50 w-16 text-right shrink-0">
+                    {format_step_duration(step.duration_us)}
+                  </span>
+                  <.icon
+                    name={if expanded?, do: "hero-chevron-up", else: "hero-chevron-down"}
+                    class="size-4 text-base-content/30 shrink-0"
+                  />
+                </button>
+
+                <%!-- Expanded Detail --%>
+                <div
+                  :if={expanded?}
+                  class="border-t border-base-200/50 bg-base-200/20 px-5 py-4"
+                >
+                  <div class="ml-10 space-y-4">
+                    <%!-- Step Metadata --%>
+                    <div class="grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-4">
+                      <div>
+                        <p class="text-[11px] uppercase tracking-wider text-muted">Step ID</p>
+                        <p class="mt-0.5 font-mono text-xs text-base-content/70">
+                          {short_id(step.step_id)}
+                        </p>
+                      </div>
+                      <div>
+                        <p class="text-[11px] uppercase tracking-wider text-muted">Attempt</p>
+                        <p class="mt-0.5 text-xs text-base-content/70">{step.attempt}</p>
+                      </div>
+                      <div>
+                        <p class="text-[11px] uppercase tracking-wider text-muted">Started</p>
+                        <p class="mt-0.5 text-xs text-base-content/70">
+                          {formatted_timestamp(step.started_at)}
+                        </p>
+                      </div>
+                      <div>
+                        <p class="text-[11px] uppercase tracking-wider text-muted">Completed</p>
+                        <p class="mt-0.5 text-xs text-base-content/70">
+                          {formatted_timestamp(step.completed_at)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <%!-- Error (if failed) --%>
+                    <%= if step.error do %>
+                      <div>
+                        <p class="text-[11px] uppercase tracking-wider text-error mb-1">Error</p>
+                        <pre class="text-xs text-error/90 whitespace-pre-wrap break-all font-mono bg-error/5 border border-error/20 rounded-lg p-3"><%= format_data(step.error) %></pre>
+                      </div>
+                    <% end %>
+
+                    <%!-- I/O Data --%>
+                    <% io = Map.get(@step_io, step.id) %>
+                    <%= if io do %>
+                      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                        <div>
+                          <p class="text-[11px] uppercase tracking-wider text-muted mb-1">
+                            Input
+                          </p>
+                          <pre class="text-xs text-base-content/70 whitespace-pre-wrap break-all font-mono bg-base-100 border border-base-300 rounded-lg p-3 max-h-48 overflow-auto"><%= format_data(io.input_data) %></pre>
+                        </div>
+                        <div>
+                          <p class="text-[11px] uppercase tracking-wider text-muted mb-1">
+                            Output
+                          </p>
+                          <pre class="text-xs text-base-content/70 whitespace-pre-wrap break-all font-mono bg-base-100 border border-base-300 rounded-lg p-3 max-h-48 overflow-auto"><%= format_data(io.output_data) %></pre>
+                        </div>
+                      </div>
+                    <% else %>
+                      <div class="flex items-center gap-2 text-xs text-muted">
+                        <.icon name="hero-arrow-path" class="size-3 animate-spin" />
+                        Loading I/O data...
+                      </div>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </section>
+
+    <%!-- Run Details --%>
+    <section>
+      <div class="card border border-base-300 rounded-2xl bg-base-100 shadow-sm ring-1 ring-base-300/70">
+        <div class="border-b border-base-200 px-5 py-3">
+          <h2 class="text-sm font-semibold text-base-content">Run Details</h2>
+        </div>
+        <div class="divide-y divide-base-200">
+          <div class="flex items-center justify-between px-5 py-3">
+            <span class="text-xs text-muted">Run ID</span>
+            <span class="font-mono text-xs text-base-content/70">{@run.id}</span>
+          </div>
+          <div class="flex items-center justify-between px-5 py-3">
+            <span class="text-xs text-muted">Workflow</span>
+            <.link
+              navigate={~p"/projects/#{@project_id}/workflows/#{@definition_id}"}
+              class="text-xs text-primary hover:underline"
+            >
+              {@definition.name}
+            </.link>
+          </div>
+          <div class="flex items-center justify-between px-5 py-3">
+            <span class="text-xs text-muted">Version</span>
+            <span class="text-xs text-base-content/70">
+              {short_id(@run.workflow_definition_version_id)}
+            </span>
+          </div>
+          <div class="flex items-center justify-between px-5 py-3">
+            <span class="text-xs text-muted">Compiled Hash</span>
+            <span class="font-mono text-xs text-base-content/70">
+              {short_id(@run.compiled_hash || "")}
+            </span>
+          </div>
+          <div class="flex items-center justify-between px-5 py-3">
+            <span class="text-xs text-muted">Created</span>
+            <span class="text-xs text-base-content/70">
+              {formatted_timestamp(@run.inserted_at)}
+            </span>
+          </div>
+          <div class="flex items-center justify-between px-5 py-3">
+            <span class="text-xs text-muted">Last Active</span>
+            <span class="text-xs text-base-content/70">
+              {formatted_timestamp(@run.last_active_at)}
+            </span>
+          </div>
+          <%= if @run.triggered_by do %>
+            <div class="flex items-center justify-between px-5 py-3">
+              <span class="text-xs text-muted">Triggered By</span>
+              <span class="text-xs text-base-content/70">{inspect(@run.triggered_by)}</span>
+            </div>
+          <% end %>
+          <%= if @run.continued_from_run_id do %>
+            <div class="flex items-center justify-between px-5 py-3">
+              <span class="text-xs text-muted">Continued From</span>
+              <.link
+                navigate={
+                  ~p"/projects/#{@project_id}/workflows/#{@definition_id}/runs/#{@run.continued_from_run_id}"
+                }
+                class="font-mono text-xs text-primary hover:underline"
+              >
+                {short_id(@run.continued_from_run_id)}
+              </.link>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </section>
+
+    <%!-- Raw Debug JSON --%>
+    <section>
+      <details class="group">
+        <summary class="cursor-pointer list-none flex items-center gap-2 text-xs text-muted hover:text-base-content transition-colors py-2">
+          <.icon
+            name="hero-chevron-right"
+            class="size-3 transition-transform group-open:rotate-90"
+          /> Raw JSON (debug)
+        </summary>
+        <div class="mt-2 card border border-base-300 rounded-2xl bg-base-100 shadow-sm ring-1 ring-base-300/70 overflow-hidden">
+          <div class="p-4">
+            <pre
+              id="debug-json"
+              class="text-xs text-base-content/70 whitespace-pre-wrap break-all font-mono bg-base-200/50 rounded-lg p-4 max-h-[600px] overflow-auto select-all"
+            ><%= debug_json(@run, @step_executions) %></pre>
+          </div>
+        </div>
+      </details>
+    </section>
+  </div>
+</Layouts.app>

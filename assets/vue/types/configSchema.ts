@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 /** Supported UI component types for field rendering. */
-export type UIComponent = 'select' | 'search' | 'string' | 'number';
+export type UIComponent = 'select' | 'search' | 'string' | 'number' | 'json' | 'credential' | 'resource_locator' | 'resource_mapper' | 'hidden';
 
 /** Resolver-based configuration for dynamic option loading. */
 export interface UIResolverConfig {
@@ -34,13 +34,25 @@ export interface UIResponseConfig {
 }
 
 /** The `ui` extension on a config schema field property. */
-export interface FieldUIConfig extends UIResolverConfig {
+export interface FieldUIConfig extends Partial<UIResolverConfig> {
     /** Which component to render. Inferred from JSON Schema if omitted. */
     component?: UIComponent;
     /** Static options for select fields (alternative to resolver). */
     options?: Array<{ label: string; value: unknown }>;
     /** Response mapping config for search result shaping. */
     responseConfig?: UIResponseConfig;
+    /** For component='credential': provider identifier. */
+    provider?: string;
+    /** For component='credential': supported auth type. */
+    auth_type?: string;
+    /** For component='credential': stable identifier within the step. */
+    requirement_key?: string;
+    /** Field keys that must be present before resolver-backed UI can load. */
+    depends_on?: string[];
+    /** Resource locator metadata for generic resource fields. */
+    resource_locator?: Record<string, unknown>;
+    /** Resource mapper metadata for generic table/row mapping fields. */
+    resource_mapper?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -56,6 +68,10 @@ export interface ConfigSchemaField {
     description?: string;
     placeholder?: string;
     enum?: unknown[];
+    depends_on?: string[];
+    display?: Record<string, unknown>;
+    resource_locator?: Record<string, unknown>;
+    resource_mapper?: Record<string, unknown>;
     ui?: FieldUIConfig;
 }
 
@@ -71,7 +87,7 @@ export interface ConfigSchema {
 // ---------------------------------------------------------------------------
 
 /** Field types after UI component inference. */
-export type ExtendedFieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json' | 'search' | 'select';
+export type ExtendedFieldType = 'text' | 'number' | 'boolean' | 'textarea' | 'json' | 'search' | 'select' | 'resource_locator' | 'resource_mapper';
 
 /** A config field with all metadata needed for rendering. */
 export interface ConfigField {
@@ -80,6 +96,10 @@ export interface ConfigField {
     type: ExtendedFieldType;
     description?: string;
     placeholder?: string;
+    depends_on?: string[];
+    display?: Record<string, unknown>;
+    resource_locator?: Record<string, unknown>;
+    resource_mapper?: Record<string, unknown>;
     expressionCapable: boolean;
     disabled?: boolean;
     readOnly?: boolean;

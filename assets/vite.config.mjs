@@ -1,10 +1,25 @@
+import crypto from "crypto";
+import fs from "fs";
 import { defineConfig } from 'vite'
 import path from 'path';
 import vue from "@vitejs/plugin-vue";
 import liveVuePlugin from "live_vue/vitePlugin";
 import tailwindcss from "@tailwindcss/vite";
 
+const viteCacheKey = crypto
+  .createHash("sha256")
+  .update(
+    ["../mix.lock", "../package-lock.json"]
+      .map((file) => fs.readFileSync(path.resolve(__dirname, file), "utf8"))
+      .join("\n"),
+  )
+  .digest("hex")
+  .slice(0, 8);
+
 export default defineConfig({
+  // Linked Phoenix JS packages live under ../deps, so key the Vite cache to the
+  // lockfiles that change when those versions change.
+  cacheDir: path.resolve(__dirname, `../node_modules/.vite-${viteCacheKey}`),
   server: {
     host: "127.0.0.1",
     port: 5173,

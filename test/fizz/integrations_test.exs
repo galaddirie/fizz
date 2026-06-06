@@ -5,8 +5,8 @@ defmodule Fizz.IntegrationsTest do
   alias Fizz.Accounts.ExternalAuth, as: AccountExternalAuth
   alias Fizz.Accounts.ApiCredential
   alias Fizz.Integrations
-  alias Fizz.Integrations.ProviderCatalog
-  alias Fizz.Integrations.Providers.OpenAIApiKey
+  alias Fizz.Integrations.Auth.ProviderCatalog
+  alias Fizz.Integrations.Library.OpenAI.Client, as: OpenAIClient
   alias Fizz.WorkOSHTTPMock
 
   import Fizz.AccountsFixtures
@@ -44,7 +44,7 @@ defmodule Fizz.IntegrationsTest do
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    _workspace = workspace_fixture(owner_scope, %{name: "Workspace A"})
+    _project = project_fixture(owner_scope, %{name: "Project A"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
@@ -102,12 +102,95 @@ defmodule Fizz.IntegrationsTest do
     refute Repo.get(ApiCredential, credential.id)
   end
 
+  test "credential lifecycle accepts legacy direct value secret aliases" do
+    user = user_fixture()
+    org_id = "org_value_alias"
+
+    _owner_scope =
+      organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
+
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "vault_obj_value_alias",
+           "metadata" => %{"version_id" => "version_1"}
+         }
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok, %Req.Response{status: 200, body: %{"metadata" => %{"version_id" => "version_2"}}}}
+    ])
+
+    assert {:ok, credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               "provider" => "openai_api_key",
+               "provider_label" => "OpenAI Value Alias",
+               "value" => "sk-value-create"
+             })
+
+    assert_receive {:workos_http_request, membership_request}
+    assert membership_request[:url] == "/user_management/organization_memberships"
+
+    assert_receive {:workos_http_request, create_request}
+    assert create_request[:url] == "/vault/v1/kv"
+    assert create_request[:json][:value] == "sk-value-create"
+
+    assert {:ok, rotated} =
+             AccountExternalAuth.rotate_credential(scope, org_id, credential.id, %{
+               value: "sk-value-rotate"
+             })
+
+    assert rotated.vault_version == "version_2"
+
+    assert_receive {:workos_http_request, rotate_membership_request}
+    assert rotate_membership_request[:url] == "/user_management/organization_memberships"
+
+    assert_receive {:workos_http_request, rotate_request}
+    assert rotate_request[:url] == "/vault/v1/kv/vault_obj_value_alias"
+    assert rotate_request[:json][:value] == "sk-value-rotate"
+  end
+
   test "provider catalog resolves openai API-key module" do
-    assert {:ok, Fizz.Integrations.Providers.OpenAIApiKey} =
+    assert {:ok, Fizz.Integrations.Auth.Providers.OpenAIApiKey} =
              ProviderCatalog.api_key_provider_module("openai_api_key")
 
     assert {:ok, ["api.openai.com"]} =
              Integrations.network_domains_for_provider("openai_api_key")
+  end
+
+  test "provider catalog exposes definition-only API-key providers without runtime modules" do
+    assert {:ok, %{label: "Anthropic", type: :api_key}} =
+             ProviderCatalog.provider("anthropic_api_key")
+
+    assert {:error, :provider_not_implemented} =
+             ProviderCatalog.api_key_provider_module("anthropic_api_key")
+
+    assert {:error, :provider_not_implemented} =
+             ProviderCatalog.api_key_provider_module("custom_api_key")
+  end
+
+  test "provider catalog resolves typed OAuth providers only" do
+    assert {:ok, Fizz.Integrations.Auth.Providers.SlackOAuth} =
+             ProviderCatalog.oauth_provider_module("slack_oauth")
+
+    assert {:ok, Fizz.Integrations.Auth.Providers.GoogleOAuth} =
+             ProviderCatalog.oauth_provider_module("google_oauth")
+
+    assert {:ok, Fizz.Integrations.Auth.Providers.MicrosoftOAuth} =
+             ProviderCatalog.oauth_provider_module("microsoft_oauth")
+
+    assert {:ok, Fizz.Integrations.Auth.Providers.NotionOAuth} =
+             ProviderCatalog.oauth_provider_module("notion_oauth")
+
+    assert {:ok, Fizz.Integrations.Auth.Providers.BoxOAuth} =
+             ProviderCatalog.oauth_provider_module("box_oauth")
+
+    assert {:error, :unknown_provider} = ProviderCatalog.oauth_provider_module("slack")
+    refute ProviderCatalog.provider_supported?("openai")
   end
 
   test "openai API-key provider fetches vault-backed user credential" do
@@ -220,23 +303,23 @@ defmodule Fizz.IntegrationsTest do
     }
 
     assert {:ok, %{operation: :generate_text}} =
-             OpenAIApiKey.generate_text(
+             OpenAIClient.generate_text(
                scope,
                org_id,
-               "openai:gpt-4o-mini",
+               "openai:gpt-5.5",
                "Say hello",
                temperature: 0.2,
                credential_ref: credential_ref
              )
 
-    assert_receive {:req_llm_called, :generate_text, "openai:gpt-4o-mini", "Say hello",
+    assert_receive {:req_llm_called, :generate_text, "openai:gpt-5.5", "Say hello",
                     generate_text_opts}
 
     assert generate_text_opts[:api_key] == "sk-openai-req-llm"
     assert generate_text_opts[:temperature] == 0.2
 
     assert {:ok, %{operation: :generate_text}} =
-             OpenAIApiKey.generate_text(
+             OpenAIClient.generate_text(
                scope,
                org_id,
                "gpt-5",
@@ -250,32 +333,32 @@ defmodule Fizz.IntegrationsTest do
     assert bare_generate_text_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :stream_text}} =
-             OpenAIApiKey.stream_text(scope, org_id, "openai:gpt-4o-mini", "Stream hello",
+             OpenAIClient.stream_text(scope, org_id, "openai:gpt-5.5", "Stream hello",
                credential_ref: credential_ref
              )
 
-    assert_receive {:req_llm_called, :stream_text, "openai:gpt-4o-mini", "Stream hello",
+    assert_receive {:req_llm_called, :stream_text, "openai:gpt-5.5", "Stream hello",
                     stream_text_opts}
 
     assert stream_text_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :generate_object}} =
-             OpenAIApiKey.generate_object(
+             OpenAIClient.generate_object(
                scope,
                org_id,
-               "openai:gpt-4o-mini",
+               "openai:gpt-5.5",
                "Generate a person",
                [name: [type: :string, required: true]],
                credential_ref: credential_ref
              )
 
-    assert_receive {:req_llm_called, :generate_object, "openai:gpt-4o-mini", "Generate a person",
+    assert_receive {:req_llm_called, :generate_object, "openai:gpt-5.5", "Generate a person",
                     [name: [type: :string, required: true]], generate_object_opts}
 
     assert generate_object_opts[:api_key] == "sk-openai-req-llm"
 
     assert {:ok, %{operation: :generate_image}} =
-             OpenAIApiKey.generate_image(
+             OpenAIClient.generate_image(
                scope,
                org_id,
                "openai:gpt-image-1",
@@ -294,22 +377,116 @@ defmodule Fizz.IntegrationsTest do
     scope = Scope.for_user(user)
 
     assert {:error, :credential_ref_required} =
-             OpenAIApiKey.generate_text(
+             OpenAIClient.generate_text(
                scope,
                "org_missing_ref",
-               "openai:gpt-4o-mini",
+               "openai:gpt-5.5",
                "Say hello"
              )
   end
 
-  test "fetch_token_for_sprite/3 resolves api_key auth directly from credentials" do
+  test "resolve_org_auth_for_execution/4 resolves explicit API credential refs" do
+    user = user_fixture()
+    org_id = "org_openai_org_auth"
+    scope = Scope.for_user(user)
+
+    put_workos_responses([
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 201,
+         body: %{
+           "id" => "vault_obj_openai_org_auth",
+           "metadata" => %{"version_id" => "version_1"}
+         }
+       }},
+      membership_response(user.workos_user_id, org_id),
+      {:ok,
+       %Req.Response{
+         status: 200,
+         body: %{"id" => "vault_obj_openai_org_auth", "value" => "sk-org-auth"}
+       }}
+    ])
+
+    assert {:ok, credential} =
+             AccountExternalAuth.create_credential(scope, org_id, %{
+               provider: "openai_api_key",
+               provider_label: "OpenAI Org Auth",
+               credentials: %{"secret" => "sk-org-auth"}
+             })
+
+    credential_ref = %{
+      id: credential.id,
+      provider: "openai_api_key",
+      auth_type: "api_key",
+      owner_user_id: user.id
+    }
+
+    assert {:ok, auth} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               org_id,
+               "openai_api_key",
+               credential_ref
+             )
+
+    assert auth.auth_method == :api_key
+    assert auth.api_key == "sk-org-auth"
+    assert auth.api_credential_id == credential.id
+  end
+
+  test "resolve_org_auth_for_execution/4 validates credential refs before organization lookup" do
+    user = user_fixture()
+    other_user = user_fixture()
+    scope = Scope.for_user(user)
+
+    assert {:error, :credential_ref_required} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               "org_no_lookup",
+               "openai_api_key",
+               nil
+             )
+
+    owner_mismatch_ref = %{
+      id: Ecto.UUID.generate(),
+      provider: "openai_api_key",
+      auth_type: "api_key",
+      owner_user_id: other_user.id
+    }
+
+    assert {:error, :credential_ref_owner_mismatch} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               "org_no_lookup",
+               "openai_api_key",
+               owner_mismatch_ref
+             )
+
+    provider_mismatch_ref = %{
+      id: Ecto.UUID.generate(),
+      provider: "anthropic_api_key",
+      auth_type: "api_key",
+      owner_user_id: user.id
+    }
+
+    assert {:error, :credential_ref_provider_mismatch} =
+             Integrations.resolve_org_auth_for_execution(
+               scope,
+               "org_no_lookup",
+               "openai_api_key",
+               provider_mismatch_ref
+             )
+  end
+
+  test "fetch_token_for_execution/3 resolves api_key auth directly from credentials" do
     user = user_fixture()
     org_id = "org_234"
 
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    workspace = workspace_fixture(owner_scope, %{name: "Workspace B"})
+    project = project_fixture(owner_scope, %{name: "Project B"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
@@ -334,21 +511,21 @@ defmodule Fizz.IntegrationsTest do
              })
 
     assert {:ok, token_result} =
-             Integrations.fetch_token_for_sprite(scope, workspace.id, "openai_api_key")
+             Integrations.fetch_token_for_execution(scope, project.id, "openai_api_key")
 
     assert token_result.access_token == "sk-api-key"
     assert credential.provider == "openai_api_key"
   end
 
-  test "credential usage is organization-scoped across workspaces" do
+  test "credential usage is organization-scoped across projects" do
     user = user_fixture()
     org_id = "org_345"
 
     owner_scope =
       organization_scope_fixture(user: user, organization_id: org_id, organization_role: :owner)
 
-    _workspace_a = workspace_fixture(owner_scope, %{name: "Workspace C"})
-    _workspace_b = workspace_fixture(owner_scope, %{name: "Workspace D"})
+    _project_a = project_fixture(owner_scope, %{name: "Project C"})
+    _project_b = project_fixture(owner_scope, %{name: "Project D"})
     scope = Scope.for_user(user)
 
     put_workos_responses([
@@ -512,7 +689,7 @@ defmodule Fizz.IntegrationsTest do
     assert first_credential.provider_label == second_credential.provider_label
   end
 
-  test "credential usage is owner-scoped within workspace" do
+  test "credential usage is owner-scoped within project" do
     owner_user = user_fixture()
     member_user = user_fixture()
     org_id = "org_456"
@@ -524,10 +701,10 @@ defmodule Fizz.IntegrationsTest do
         organization_role: :owner
       )
 
-    workspace = workspace_fixture(owner_scope, %{name: "Workspace E"})
+    project = project_fixture(owner_scope, %{name: "Project E"})
 
     {:ok, _member_membership} =
-      Fizz.Accounts.add_workspace_member(owner_scope, workspace.id, member_user, %{role: :member})
+      Fizz.Accounts.add_project_member(owner_scope, project.id, member_user, %{role: :member})
 
     owner_runtime_scope = Scope.for_user(owner_user)
     member_runtime_scope = Scope.for_user(member_user)

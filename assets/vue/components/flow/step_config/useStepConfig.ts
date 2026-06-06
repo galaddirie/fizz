@@ -20,7 +20,6 @@ import { useExpressionPreviews } from './useExpressionPreviews';
 import { useSubnodes } from './useSubnodes';
 import { useStepExecution } from './useStepExecution';
 import { usePinnedOutputs } from './usePinnedOutputs';
-import { useWebhookTest } from './useWebhookTest';
 import { useInputData } from './useInputData';
 import { useExpressionHelpers } from './useExpressionHelpers';
 import { useContextExplorer } from './useContextExplorer';
@@ -44,6 +43,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
     // --- Core state ---
     const fieldModes = ref<Record<string, 'literal' | 'expression'>>({});
     const fieldValues = ref<Record<string, unknown>>({});
+    const fieldErrors = ref<Record<string, string>>({});
     const isEditingName = ref(false);
     const editName = ref('');
     const canEdit = computed(() => props.canEdit ?? true);
@@ -52,6 +52,7 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
     const originalValues = ref<Record<string, unknown>>({});
     const originalName = ref('');
     const showCloseConfirmation = ref(false);
+    const hasFieldErrors = computed(() => Object.keys(fieldErrors.value).length > 0);
 
     const hasUnsavedChanges = computed(() => {
         if (!canEdit.value) return false;
@@ -69,39 +70,64 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         return false;
     });
 
+    const isManualTriggerStep = computed(() => {
+        return props.stepType?.id === 'manual_input' || props.node?.data?.type_id === 'manual_input';
+    });
+
+    const initializeFromNode = (node: Node<StepNodeData>) => {
+        const nodeData = node.data!;
+        const config = nodeData.config || {};
+        const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
+        const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
+
+        if (isManualTriggerStep.value && !Object.prototype.hasOwnProperty.call(config, 'test_data')) {
+            allKeys.delete('test_data');
+        }
+
+        const modes: Record<string, 'literal' | 'expression'> = {};
+        const values: Record<string, unknown> = {};
+
+        allKeys.forEach(key => {
+            const schemaField = schema[key] ?? {};
+            const rawValue = config[key] ?? schemaField.default;
+            const isSearchField = schemaField.ui?.component === 'search';
+            const isExpr =
+                !isSearchField &&
+                typeof rawValue === 'string' &&
+                (rawValue.includes('{{') || rawValue.includes('{%'));
+
+            modes[key] = isExpr ? 'expression' : 'literal';
+            values[key] = rawValue ?? null;
+        });
+
+        fieldModes.value = modes;
+        fieldValues.value = values;
+        fieldErrors.value = {};
+        editName.value = nodeData.name || '';
+        isEditingName.value = false;
+
+        originalValues.value = { ...values };
+        originalName.value = editName.value;
+        showCloseConfirmation.value = false;
+    };
+
     // --- Init watcher: populate fields/modes on open ---
     watch(
-        [() => props.node, () => props.isOpen],
-        ([newNode, open]) => {
-            if (open && newNode && newNode.data) {
-                const config = newNode.data.config || {};
-                const schema = (props.stepType?.config_schema as ConfigSchema | undefined)?.properties || {};
-                const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
-                const modes: Record<string, 'literal' | 'expression'> = {};
-                const values: Record<string, unknown> = {};
+        [() => props.node?.id ?? null, () => props.node?.data?.type_id ?? null, () => props.isOpen],
+        ([nodeId, _typeId, open], previousValues) => {
+            const [previousNodeId, previousTypeId, wasOpen] = previousValues ?? [null, null, false];
+            const node = props.node;
 
-                allKeys.forEach(key => {
-                    const schemaField = schema[key] ?? {};
-                    const rawValue = config[key] ?? schemaField.default;
-                    const isSearchField = schemaField.ui?.component === 'search';
-                    const isExpr =
-                        !isSearchField &&
-                        typeof rawValue === 'string' &&
-                        (rawValue.includes('{{') || rawValue.includes('{%'));
+            if (!open || !node || !node.data) return;
 
-                    modes[key] = isExpr ? 'expression' : 'literal';
-                    values[key] = rawValue ?? null;
-                });
+            const shouldInitialize =
+                !wasOpen ||
+                nodeId !== previousNodeId ||
+                props.node?.data?.type_id !== previousTypeId;
 
-                fieldModes.value = modes;
-                fieldValues.value = values;
-                editName.value = newNode.data.name || '';
-                isEditingName.value = false;
+            if (!shouldInitialize) return;
 
-                originalValues.value = { ...values };
-                originalName.value = editName.value;
-                showCloseConfirmation.value = false;
-            }
+            initializeFromNode(node);
         },
         { immediate: true }
     );
@@ -156,6 +182,8 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
             closeModal();
             return;
         }
+        if (hasFieldErrors.value) return;
+
         emit('save', {
             id: props.node?.id,
             name: editName.value,
@@ -173,6 +201,46 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         fieldModes.value[field] = mode;
     };
 
+    const handleFieldValidationUpdate = (fieldKey: string, error: string | null) => {
+        if (error) {
+            fieldErrors.value[fieldKey] = error;
+            return;
+        }
+
+        delete fieldErrors.value[fieldKey];
+    };
+
+    const isStructuredValue = (value: unknown) =>
+        Array.isArray(value) || (value !== null && typeof value === 'object');
+
+    const manualTriggerTestDataField = computed<ConfigField | null>(() => {
+        if (!isManualTriggerStep.value) return null;
+
+        const schema =
+            (props.stepType?.config_schema as ConfigSchema | undefined)?.properties?.test_data ?? {};
+
+        return {
+            ...schema,
+            key: 'test_data',
+            label: schema.title || 'Test Data',
+            description:
+                schema.description ||
+                'Saved on this trigger and used for Run Test and Run from Here.',
+            type: 'json',
+            expressionCapable: false,
+        };
+    });
+
+    const manualTriggerInputSchema = computed(() => {
+        const value =
+            fieldValues.value['input_schema'] ??
+            props.node?.data?.config?.input_schema ??
+            null;
+
+        if (value === null || value === undefined) return null;
+        return value;
+    });
+
     const fields = computed<ConfigField[]>(() => {
         if (!props.node || !props.node.data) return [];
 
@@ -180,29 +248,47 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         const config = props.node.data.config || {};
         const allKeys = new Set([...Object.keys(schema), ...Object.keys(config)]);
 
-        return Array.from(allKeys).map(key => {
+        if (isManualTriggerStep.value) {
+            allKeys.delete('test_data');
+        }
+
+        return Array.from(allKeys).flatMap(key => {
             const schemaField: ConfigSchemaField = schema[key] ?? {};
             const uiComponent = (schemaField as any).ui?.component;
             const format = schemaField.format;
             const typeStr = schemaField.type;
+            const rawValue = config[key] ?? schemaField.default;
 
-            let inferredType = 'text';
-            if (uiComponent === 'search') inferredType = 'search';
+            if (uiComponent === 'hidden') return [];
+
+            let inferredType: ExtendedFieldType = 'text';
+            if (uiComponent === 'credential') inferredType = 'json';
+            else if (uiComponent === 'resource_mapper') inferredType = 'resource_mapper';
+            else if (uiComponent === 'resource_locator') inferredType = 'resource_locator';
+            else if (uiComponent === 'search') inferredType = 'search';
             else if (uiComponent === 'select') inferredType = 'select';
+            else if (uiComponent === 'json') inferredType = 'json';
             else if (schemaField.enum && schemaField.enum.length > 0) inferredType = 'select';
-            else if (format === 'json') inferredType = 'json';
+            else if (
+                format === 'json' ||
+                typeStr === 'object' ||
+                typeStr === 'array' ||
+                isStructuredValue(rawValue)
+            ) {
+                inferredType = 'json';
+            }
             else if (typeStr === 'string' && format === 'textarea') inferredType = 'textarea';
             else if (typeStr === 'number' || typeStr === 'integer') inferredType = 'number';
             else if (typeStr === 'boolean') inferredType = 'boolean';
 
-            return {
+            return [{
                 ...schemaField,
                 key,
                 label: schemaField.title || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
                 description: schemaField.description,
                 type: inferredType as ExtendedFieldType,
-                expressionCapable: true,
-            };
+                expressionCapable: uiComponent !== 'credential',
+            }];
         });
     });
 
@@ -222,7 +308,18 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         }
     };
 
+    const handleManualTriggerTestDataUpdate = (value: unknown) => {
+        if (value === null) {
+            const { test_data: _removed, ...rest } = fieldValues.value;
+            fieldValues.value = rest;
+            return;
+        }
+
+        fieldValues.value['test_data'] = value;
+    };
+
     const nodeId = computed(() => props.node?.id ?? '');
+    const stepNameById = computed(() => props.stepNameById ?? {});
 
     // --- Sub-composables ---
     const previews = useExpressionPreviews({
@@ -254,14 +351,6 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         editorState: () => props.editorState,
         canEdit,
         activeStepExecution: execution.activeStepExecution,
-        emit,
-    });
-
-    const webhook = useWebhookTest({
-        node: () => props.node,
-        editorState: () => props.editorState,
-        canEdit,
-        fieldValues,
         emit,
     });
 
@@ -302,29 +391,36 @@ export function useStepConfig(props: UseStepConfigProps, emit: (...args: any[]) 
         // Core (inline)
         fieldModes,
         fieldValues,
+        fieldErrors,
         isEditingName,
         editName,
         canEdit,
         originalValues,
         originalName,
         showCloseConfirmation,
+        hasFieldErrors,
         hasUnsavedChanges,
         closeModal,
         confirmClose,
         cancelClose,
         saveConfig,
         setFieldMode,
+        handleFieldValidationUpdate,
         fields,
         fieldByKey,
         handleFieldValueUpdate,
+        isManualTriggerStep,
+        manualTriggerTestDataField,
+        manualTriggerInputSchema,
+        handleManualTriggerTestDataUpdate,
         nodeId,
+        stepNameById,
         evaluatedConfig,
         // Sub-composables
         ...previews,
         ...subnodes,
         ...executionPublic,
         ...pinned,
-        ...webhook,
         ...inputData,
         ...expressionHelpers,
         ...contextExplorer,

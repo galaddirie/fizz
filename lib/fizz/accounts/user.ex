@@ -16,7 +16,7 @@ defmodule Fizz.Accounts.User do
     field :authenticated_at, :utc_datetime, virtual: true
     field :workos_user_id, :string
 
-    has_many :workspace_memberships, Fizz.Accounts.WorkspaceMembership
+    has_many :project_memberships, Fizz.Accounts.ProjectMembership
 
     timestamps()
   end

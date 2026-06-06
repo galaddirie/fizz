@@ -11,10 +11,15 @@ import type {
   StepExecution,
   EditorState,
   UserPresence,
+  WorkflowValidationError,
 } from '@/types/workflow';
 
-import { useUndoStore } from '@/stores/undoStore';
-type UndoState = ReturnType<typeof useUndoStore>['state'];
+type UndoState = {
+  canUndo: boolean;
+  canRedo: boolean;
+  undoLabel: string | null;
+  redoLabel: string | null;
+};
 
 export interface WorkflowEditorProps {
   workflow: Workflow;
@@ -27,9 +32,13 @@ export interface WorkflowEditorProps {
   presences?: UserPresence[];
   currentUserId?: string;
   collabSeq?: number;
+  saveStatus?: 'saved' | 'saving' | 'error';
+  saveError?: string | null;
   expressionPreviews?: Record<string, unknown>;
   credentialOptions?: CredentialOption[];
   debugExecutionId?: string | null;
+  validationErrors?: Record<string, WorkflowValidationError[]>;
+  widgetToken?: string | null;
 }
 
 export type WorkflowEditorCommandType =
@@ -52,16 +61,19 @@ export type WorkflowEditorCommandType =
   | 'enable_step'
   | 'run_test'
   | 'run_node'
+  | 'submit_credential_bindings'
   | 'cancel_execution'
   | 'undo'
   | 'redo'
   | 'tidy_layout'
   | 'save_workflow'
+  | 'validate_draft'
   | 'publish_workflow'
+  | 'reauth_connected'
   | 'mouse_move'
+  | 'mouse_leave'
   | 'selection_changed'
   | 'preview_expression'
-  | 'toggle_webhook_test'
   | 'navigate_revisions';
 
 export interface WorkflowEditorCommand {
@@ -103,7 +115,6 @@ export type WorkflowEditorEmits = {
         name?: string;
         position?: { x?: number; y?: number; width?: number; height?: number };
         collapsed?: boolean;
-        output_step_id?: string;
         color?: string;
         font_size?: number;
       };
@@ -162,6 +173,17 @@ export type WorkflowEditorEmits = {
   (e: 'enable_step', payload: { step_id: string }): void;
   (e: 'run_test', payload?: { step_ids?: string[] }): void;
   (e: 'run_node', payload: { step_id: string }): void;
+  (
+    e: 'submit_credential_bindings',
+    payload: {
+      target_step_id: string | null;
+      bindings: Array<{
+        step_id: string;
+        requirement_key: string;
+        binding_data: Record<string, unknown>;
+      }>;
+    }
+  ): void;
   (e: 'cancel_execution'): void;
   (e: 'undo', payload: { count: number }): void;
   (e: 'redo', payload: { count: number }): void;
@@ -174,7 +196,9 @@ export type WorkflowEditorEmits = {
     }
   ): void;
   (e: 'save_workflow'): void;
-  (e: 'publish_workflow', payload: { version_tag: string; changelog?: string }): void;
+  (e: 'validate_draft'): void;
+  (e: 'publish_workflow'): void;
+  (e: 'reauth_connected', payload: { target_step_id: string | null }): void;
   (
     e: 'mouse_move',
     payload: {
@@ -187,14 +211,11 @@ export type WorkflowEditorEmits = {
       > | null;
     }
   ): void;
+  (e: 'mouse_leave'): void;
   (e: 'selection_changed', payload: { step_ids: string[] }): void;
   (
     e: 'preview_expression',
     payload: { step_id: string; field_key: string; expression: string }
-  ): void;
-  (
-    e: 'toggle_webhook_test',
-    payload: { step_id: string; action: 'start' | 'stop'; path?: string; method?: string }
   ): void;
   (e: 'navigate_revisions'): void;
 };

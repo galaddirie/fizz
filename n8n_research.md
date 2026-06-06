@@ -1,0 +1,94 @@
+# n8n Research
+
+Scratch checkout: `/tmp/fizz-n8n-research`.
+
+## 0. Fizz Decisions Applied So Far
+
+The following n8n-inspired ideas have now been applied in Fizz:
+
+- integration metadata is moving toward generated manifests and validated definitions
+- dynamic field values are routed through a backend dispatcher instead of component-specific
+  LiveView branches
+- resource locators and resource mappers are generic field types
+- credential requirements are explicit first-class declarations rather than generic runtime
+  slots
+- credential option loading is edit-time field resolution, while runtime auth resolution
+  remains a separate concern
+
+One n8n idea deliberately not copied: n8n has broad node parameter state in the frontend
+store. Fizz should keep LiveView as the source of truth and use Vue only for transient
+request/loading state unless we need cross-client field-state replay.
+
+## 1. Node and Integration Architecture
+
+n8n defines integrations as node types with a small runtime contract and a large metadata contract. The core `INodeType` contract requires `description` and optionally provides runtime entry points such as `execute`, `poll`, `trigger`, `webhook`, `supplyData`, `methods`, `webhookMethods`, and `customOperations` (`packages/workflow/src/interfaces.ts:2057`). The metadata contract, `INodeTypeDescription`, carries version, display metadata, inputs, outputs, parameters, credentials, request defaults, declarative request operations, and webhooks (`packages/workflow/src/interfaces.ts:2584`). The key design choice is that UI shape, credential needs, routing hints, and execution hooks are all visible from one node description.
+
+The module layout is layered. `packages/workflow` owns interfaces and helpers. `packages/core/src/nodes-loader` loads node and credential classes. `packages/cli` aggregates loaders and exposes runtime registries. `packages/nodes-base` contains built-in integrations. Registration begins from package metadata: `packages/nodes-base/package.json` declares `n8n.credentials` and `n8n.nodes` arrays (`package.json:25`, `package.json:426`). Individual node files are not discovered by scanning arbitrary code at runtime; they are listed and loaded through the package contract.
+
+Discovery is loader-driven. `PackageDirectoryLoader` reads the package manifest and loads each declared node/credential (`packages/core/src/nodes-loader/package-directory-loader.ts:27`). `DirectoryLoader` infers exported class names from filenames, instantiates classes, validates descriptions, stores known types, and builds credential-to-node mappings (`directory-loader.ts:150`, `directory-loader.ts:166`, `directory-loader.ts:235`). `load-nodes-and-credentials.ts` aggregates built-ins, custom directories, and module-provided loaders (`packages/cli/src/load-nodes-and-credentials.ts:93`) and prefixes public node names with package identity (`load-nodes-and-credentials.ts:521`).
+
+Versioning is explicit. Slack uses a thin `VersionedNodeType` wrapper that maps supported versions to implementation classes and sets a default version (`packages/nodes-base/nodes/Slack/Slack.node.ts:7`). `VersionedNodeType` resolves the right implementation for a requested version (`packages/workflow/src/versioned-node-type.ts:10`). This keeps old workflows stable while new node behavior evolves.
+
+Patterns worth adopting: one metadata-first definition per integration operation, explicit registration through a manifest, build-time validation of definitions, versioned operation definitions, and lazy loading of runtime modules. For Elixir, this should become behaviours plus structs plus generated manifests, not dynamic package loading or TypeScript class inheritance.
+
+## 2. Credentials and Auth
+
+n8n models credentials separately from nodes. The core `ICredentialType` contract declares `name`, `displayName`, optional `extends`, `properties`, `authenticate`, `preAuthentication`, `test`, `genericAuth`, `httpRequestNode`, and `supportedNodes` (`packages/workflow/src/interfaces.ts:356`). Nodes reference credential requirements with `INodeCredentialDescription`, including `displayOptions` and `testedBy` (`interfaces.ts:2233`). During loading, n8n records which nodes support which credentials and attaches supported-node metadata back to credential types (`packages/core/src/nodes-loader/directory-loader.ts:235`, `directory-loader.ts:271`).
+
+The layout keeps credential declaration, persistence, and runtime auth separate. Credential definitions live under `packages/nodes-base/credentials`; nodes consume those definitions under `packages/nodes-base/nodes`; interface contracts live in `packages/workflow`; execution helpers live in `packages/core`; and persistence/OAuth controller logic lives in `packages/cli`. Credential encryption/decryption is centralized by `packages/core/src/credentials.ts:19`.
+
+OAuth is layered through reusable base credentials. `OAuth2Api.credentials.ts` defines generic grant type, auth URL, token URL, client fields, scopes, PKCE, SSL, JWE, and dynamic client registration support (`packages/nodes-base/credentials/OAuth2Api.credentials.ts:3`). Provider credentials extend it and mostly override defaults. Google supplies auth/token URLs and offline consent (`GoogleOAuth2Api.credentials.ts:3`), Google Sheets pins scopes (`GoogleSheetsOAuth2Api.credentials.ts:9`), and Slack adds signing-secret and scope details (`SlackOAuth2Api.credentials.ts:29`).
+
+API-key auth is often declarative. GitHub injects an authorization header and defines a `/user` credential test (`GithubApi.credentials.ts:38`). Slack injects bearer auth and tests `users.profile.get` with response-body rules (`SlackApi.credentials.ts:47`). Generic HTTP auth types such as bearer, header, basic, query, and custom JSON are first-class and marked as generic auth (`HttpBearerAuth.credentials.ts:4`, `HttpCustomAuth.credentials.ts:5`).
+
+At execution time, request helpers inspect credential parent types: OAuth routes through OAuth helpers, while non-OAuth credentials run optional `preAuthentication` and then `authenticate` (`request-helper-functions.ts:1157`). OAuth tokens are refreshed and persisted centrally (`request-helper-functions.ts:945`).
+
+Patterns worth adopting: credential definitions should be provider-owned but not node-owned; auth resolution should return a typed auth material struct; credential tests should be discoverable from credential metadata; generic API-key/header/bearer auth should not require a provider module unless custom behavior is needed.
+
+## 3. Execution Model
+
+n8n separates execution contracts from orchestration. Node extension points are declared in `INodeType`: `execute`, `poll`, `trigger`, `webhook`, `webhookMethods`, and `customOperations` (`packages/workflow/src/interfaces.ts:2057`). The runtime orchestration lives mainly under `packages/core/src/execution-engine`, while persistence, webhook registration, queueing, activation, and API surfaces live under `packages/cli`.
+
+Normal workflow execution is stack based. `WorkflowExecute` initializes a `nodeExecutionStack` with the start node (`workflow-execute.ts:161`), then `processRunExecutionData` loops until the stack is empty (`workflow-execute.ts:1514`). Each stack item is routed through `runNode`, which dispatches to normal execution, polling, triggers, webhook pass-through, or declarative routing (`workflow-execute.ts:1273`). `executeNode` builds an execution context, invokes the node implementation, and runs close hooks without masking the original error (`workflow-execute.ts:1011`). Multi-input nodes can wait in `waitingExecution` until all required input data is present (`workflow-execute.ts:412`).
+
+Errors are explicit execution data. Nodes can set `retryOnFail`, `maxTries`, `waitBetweenTries`, `continueOnFail`, and `onError` (`packages/workflow/src/interfaces.ts:1369`). The engine caps retry counts and wait intervals (`workflow-execute.ts:1716`). Failures become `taskData.error`; `continueOnFail` and `onError` can pass input through or route failures to an error output (`workflow-execute.ts:1941`). Failed executions can also be retried from persisted execution data with `retryOf` metadata (`packages/cli/src/executions/execution.service.ts:223`).
+
+Activation is separate from execution. `ActiveWorkflowManager` distinguishes database-registered webhooks from in-memory triggers and pollers (`active-workflow-manager.ts:618`). Pollers derive schedules from node parameters and emit workflow runs (`active-workflows.ts:151`). Webhook helpers prepare run data, start a `WorkflowRunner`, and support multiple response modes (`webhook-helpers.ts:418`). Long waits persist execution state through `putExecutionToWait` (`base-execute-context.ts:110`) and are resumed by `WaitTracker` polling waiting executions (`wait-tracker.ts:43`).
+
+Patterns worth adopting: keep activation, execution, and persistence separate; make operation execution context typed; model errors and retries as operation metadata; use Oban/OTP supervision for durable retries and waits instead of ad-hoc timers; and preserve resumability at workflow-run boundaries.
+
+## 4. UI for Integrations
+
+n8n's integration UI is schema-driven. Node parameters use shared property types such as `options`, `collection`, `fixedCollection`, `resourceLocator`, `resourceMapper`, `filter`, and `assignmentCollection` (`packages/workflow/src/interfaces.ts:1566`). `INodeProperties` includes `type`, `default`, `options`, `typeOptions`, `displayOptions`, and `routing` (`interfaces.ts:1778`). Visibility is declarative through `displayOptions.show/hide`, including special keys such as `@version` and `@feature` and operators such as `_cnd.gte` and `_cnd.regex` (`interfaces.ts:1735`).
+
+The frontend consumes compiled node descriptions instead of hardcoding provider forms. Node type descriptions are fetched from `types/nodes.json` and stored by name/version (`packages/frontend/editor-ui/src/app/stores/nodeTypes.store.ts:375`). The node details panel reads `nodeType.properties` directly (`NodeSettings.vue:232`), splits fields into tabs (`ndv.utils.ts:734`), then renders `ParameterInputList` (`NodeSettings.vue:767`).
+
+Rendering dispatch is generic. `ParameterInputList` filters parameters through `shouldDisplayNodeParameter` and then dispatches by schema `type` to components such as collection, fixed collection, resource mapper, filters, assignment collection, button parameter, or a full parameter input (`ParameterInputList.vue:174`, `ParameterInputList.vue:761`). The shared visibility engine is `NodeHelpers.displayParameter`, which evaluates `displayOptions` against current parameters and handles expression-backed dependencies conservatively (`packages/workflow/src/node-helpers.ts:412`). The frontend wrapper adds product-specific hiding, auth-field movement, cloud flags, and expression resolution before delegating to the shared visibility logic (`useNodeSettingsParameters.ts:186`).
+
+Provider-specific dynamic UI is still schema-addressed. `ParameterInput` calls `getNodeParameterOptions` using `typeOptions.loadOptionsMethod` (`ParameterInput.vue:820`). `ResourceLocator` calls `searchListMethod` (`ResourceLocator.vue:826`). `ResourceMapper` calls `resourceMapperMethod` (`ResourceMapper.vue:357`). Backend routes mirror those concepts with `/options`, `/resource-locator-results`, `/resource-mapper-fields`, and `/action-result` (`dynamic-node-parameters.controller.ts:18`).
+
+Patterns worth adopting: keep a small registry of generic UI field components, let operation definitions declare dynamic resolver names, add declarative field visibility, and isolate provider-specific widgets behind generic field types rather than per-provider modal code.
+
+## 5. Testing Patterns
+
+n8n's strongest integration testing primitive is `NodeTestHarness`. It turns exported workflow JSON fixtures into executable Jest tests. It discovers workflow JSON files beside the test, requires pinned data, converts pin data into expected node output, runs `WorkflowExecute`, and compares node output while stripping volatile fields unless requested (`packages/core/nodes-testing/node-test-harness.ts:45`, `node-test-harness.ts:103`, `node-test-harness.ts:298`). `WorkflowTestData` is the shared contract for workflow fixtures, expected data, optional `nock` mocks, triggers, and credentials (`packages/workflow/src/interfaces.ts:3323`).
+
+Tests stay close to integrations. Node tests live under `packages/nodes-base/nodes/<Node>/test`, `__test__`, or `__tests__`, often split by resource/action. Slack action tests live beside workflow JSON fixtures (`packages/nodes-base/nodes/Slack/test/v2/node/message/post.test.ts:49`, `post.workflow.json:58`). Larger integrations keep fixtures such as API responses next to workflow tests, as Baserow does (`Baserow/__tests__/workflow/workflow.test.ts:4`, `apiResponses.ts:1`).
+
+Isolation is layered. Global setup blocks real network calls with `nock` (`packages/nodes-base/test/globalSetup.ts:3`). Workflow tests can define raw interceptors or structured mocks, as Azure Storage does (`Microsoft/Storage/test/blob/get.test.ts:7`). Operation-level tests fake execution context functions and call actions directly (`packages/nodes-base/test/nodes/Helpers.ts:5`, `Merge/test/v3/operations.test.ts:100`). Transport and dynamic-option helpers mock HTTP request helpers, credentials, and node parameters (`NocoDB/test/v2/transport/transport.test.ts:8`, `listSearch.test.ts:11`).
+
+Credential tests exist at multiple levels. Workflow tests inject credentials into harness runs, while isolated credential tests verify auth behavior directly. Azure shared-key credentials test header cleanup and signature generation (`Microsoft/Storage/test/credentials/sharedKey.test.ts:10`, `sharedKey.test.ts:42`). Core credential encryption/decryption is tested separately (`packages/core/src/__tests__/credentials.test.ts:15`).
+
+Patterns worth adopting: add an ExUnit workflow fixture harness, keep operation fixtures beside integration modules, use `Req.Test` consistently for HTTP isolation, provide fake operation contexts for direct unit tests, and use golden workflow outputs for regression coverage.
+
+## 6. Scaling to Thousands of Nodes
+
+n8n scales its node catalog through manifests and lazy metadata. Each node package declares credentials and nodes under an `n8n` package manifest (`packages/nodes-base/package.json:25`, `package.json:426`). Runtime loading is abstracted behind a `NodeLoader` contract that exposes lightweight `known` metadata, `types`, and on-demand `getNode/getCredential` functions (`packages/workflow/src/interfaces.ts:2821`). `LazyPackageDirectoryLoader` reads generated `dist/known/*.json` and `dist/types/*.json` files without importing every implementation (`packages/core/src/nodes-loader/lazy-package-directory-loader.ts:7`). Concrete node code is loaded only when requested (`directory-loader.ts:243`).
+
+The repository layout uses package boundaries for large catalogs. The monorepo is split in `pnpm-workspace.yaml` (`pnpm-workspace.yaml:1`). Built-in integrations live in `packages/nodes-base`, while LangChain integrations live in `packages/@n8n/nodes-langchain` with their own manifest and category folders (`packages/@n8n/nodes-langchain/package.json:44`). Large integrations are split internally: Slack has a thin version wrapper (`Slack.node.ts:7`), while feature slices live in separate description files and are composed into the node definition (`Slack/V2/SlackV2.node.ts:146`).
+
+Extension points are deliberate. Community packages are discovered through `n8n-nodes-*` naming conventions (`packages/core/src/nodes-loader/scan-directory-for-packages.ts:22`). Custom directories load `*.node.js` and `*.credentials.js` recursively (`custom-directory-loader.ts:20`). Backend modules can register synthetic loaders through `ModuleRegistry.nodeLoaders` (`packages/@n8n/backend-common/src/modules/module-registry.ts:20`), and the MCP registry uses that to generate node types from external server records (`packages/cli/src/modules/mcp-registry/mcp-registry-node-loader.ts:29`).
+
+Build tooling prevents rot. `nodes-base` runs static asset copying, translation generation, metadata generation, and node-definition generation in its build chain (`packages/nodes-base/package.json:11`). `generate-metadata` writes known/type/method-reference JSON files (`packages/core/bin/generate-metadata:67`). Node docs/assets live beside code, such as Slack's `.node.json` category and docs metadata (`Slack.node.json:1`). Validation catches bad metadata early (`packages/core/src/nodes-loader/validate-node-description.ts:46`).
+
+Patterns worth adopting: generated manifests, compile/build-time validation, scaffolded integration structure, colocated docs/assets/tests, append-only catalog extension, and lazy runtime dispatch through module names stored in validated definitions.

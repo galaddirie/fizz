@@ -14,6 +14,7 @@ import {
   StopIcon,
 } from '@heroicons/vue/24/outline';
 import { unwrapData } from '@/lib/dataUtils';
+import { buildStepRootPath } from '@/lib/expressionPath';
 import DataViewer from '@/components/ui/data-viewer/DataViewer.vue';
 
 // Props from LiveView
@@ -106,6 +107,17 @@ const formatTraceTimestamp = (execution: StepExecution): string => {
   return '';
 };
 
+const hasDuplicateStepName = (stepName?: string | null) => {
+  if (typeof stepName !== 'string' || stepName.trim().length === 0) {
+    return false;
+  }
+
+  return Object.values(props.stepNameById).filter(name => name === stepName).length > 1;
+};
+
+const outputRootPath = (stepName?: string | null, stepId?: string | null) =>
+  buildStepRootPath(hasDuplicateStepName(stepName) ? undefined : stepName, stepId);
+
 // Computed traces from props or mock
 const traces = computed<TraceEntry[]>(() => {
   if (props.stepExecutions.length > 0) {
@@ -117,11 +129,12 @@ const traces = computed<TraceEntry[]>(() => {
 
     const result: TraceEntry[] = [];
 
-    for (const [stepId, executions] of executionsByStep.entries()) {
+    for (const [stepId, executions] of Array.from(executionsByStep.entries())) {
       const firstExecution = executions[0];
       const baseName = props.stepNameById?.[stepId] || stepId;
 
-      const isMultiItem = firstExecution.items_total && firstExecution.items_total > 1;
+      const itemsTotal = firstExecution.items_total ?? executions.length;
+      const isMultiItem = itemsTotal > 1 || executions.length > 1;
 
       if (isMultiItem) {
         const completedCount = executions.filter(se => se.status === 'completed').length;
@@ -151,7 +164,7 @@ const traces = computed<TraceEntry[]>(() => {
           duration_us: totalDuration,
           timestamp: formatTraceTimestamp(earliestExecution),
           item_index: null,
-          items_total: firstExecution.items_total,
+          items_total: itemsTotal,
           isMultiItem: true,
           iterations: executions
             .map(se => ({
@@ -198,9 +211,15 @@ const traces = computed<TraceEntry[]>(() => {
   return [];
 });
 
+type TracePanelStatus = ExecutionStatus | 'idle';
+
 // Execution status
-const executionStatus = computed<ExecutionStatus>(() => props.execution?.status ?? 'pending');
-const isRunning = computed(() => executionStatus.value === 'running' || executionStatus.value === 'pending');
+const executionStatus = computed<TracePanelStatus>(() => props.execution?.status ?? 'idle');
+const isRunning = computed(
+  () =>
+    !!props.execution &&
+    (executionStatus.value === 'running' || executionStatus.value === 'pending')
+);
 
 // Status counts (iteration-aware)
 const statusCounts = computed(() => {
@@ -225,7 +244,8 @@ const statusCounts = computed(() => {
 });
 
 // Minimal status badge config
-const statusBadgeConfig: Record<ExecutionStatus, { class: string; label: string }> = {
+const statusBadgeConfig: Record<TracePanelStatus, { class: string; label: string }> = {
+  idle: { class: 'bg-base-200 text-base-content/60', label: 'Idle' },
   pending: { class: 'bg-base-200 text-base-content/70', label: 'Pending' },
   running: { class: 'bg-primary/15 text-primary', label: 'Running' },
   paused: { class: 'bg-warning/15 text-warning', label: 'Paused' },
@@ -251,10 +271,18 @@ const stepStatusClass = (status: StepExecutionStatus): string => {
 
 // Format duration
 const formatDuration = (us?: number): string => {
-  if (typeof us !== 'number' || !Number.isFinite(us) || us <= 0) return '';
+  if (typeof us !== 'number' || !Number.isFinite(us) || us < 0) return '';
+  if (us <= 0) return '<1µs';
   if (us < 1000) return `${us}µs`;
   if (us < 1_000_000) return `${(us / 1000).toFixed(1)}ms`;
-  return `${(us / 1_000_000).toFixed(2)}s`;
+  const seconds = us / 1_000_000;
+  if (seconds < 60) return `${seconds.toFixed(2)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  if (minutes < 60) return `${minutes}m ${secs}s`;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
 };
 
 const selectStep = (stepId: string) => {
@@ -522,7 +550,7 @@ const stepMetaLine = (trace: TraceEntry) => {
               <div class="overflow-hidden rounded-lg border border-base-200">
                 <DataViewer
                   :data="unwrapData(getIterationData(activeIterationId || selectedTraceEntry.iterations[0].id, activeTab))"
-                  :rootPath="activeTab === 'input' ? 'json' : `steps.${selectedTraceEntry.step_name}`"
+                  :rootPath="activeTab === 'input' ? 'json' : outputRootPath(selectedTraceEntry.step_name, selectedTraceEntry.step_id)"
                 />
               </div>
             </div>
@@ -551,7 +579,7 @@ const stepMetaLine = (trace: TraceEntry) => {
                 <div v-if="selectedStepExecution?.output_data" class="overflow-hidden rounded-lg border border-base-200">
                   <DataViewer
                     :data="unwrapData(selectedStepExecution.output_data)"
-                    :rootPath="`steps.${selectedTraceEntry?.step_name || localSelectedStepId}`"
+                    :rootPath="outputRootPath(selectedTraceEntry?.step_name, localSelectedStepId)"
                   />
                 </div>
                 <div v-else class="rounded-lg border border-base-200 bg-base-100 p-4 text-sm text-base-content/55">

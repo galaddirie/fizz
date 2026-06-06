@@ -7,7 +7,7 @@
 
 3. [High] Execution runs under workflow owner scope, not triggering user scope.
     lib/fizz/runtime/execution/server.ex:271 builds runtime scope from execution.workflow.user and
-    workspace, while execution records track triggered_by_user_id from request time (lib/fizz/
+    project, while execution records track triggered_by_user_id from request time (lib/fizz/
     executions.ex:221).
     This can produce permission drift for preview/partial runs.
     Better pattern: resolve runtime scope from triggered_by_user_id when present, fallback to system
@@ -114,4 +114,62 @@ for the demo we will show a workflow that constantly adds + 1 to a number stored
 
 simple email agent with human in the loop for deletion of emails 
 
-add a chat endpoint that can use natural language to determine which workflow to run based on the user's input. it will use workflow names, descriptions, and workspaces to determine the best workflow to run. could run multiple workflows - this is a ux feature
+add a chat endpoint that can use natural language to determine which workflow to run based on the user's input. it will use workflow names, descriptions, and projects to determine the best workflow to run. could run multiple workflows - this is a ux feature
+
+
+
+workflow example idea
+
+A bot that starts an a/b experiment and updates the experiments based on events and signals from Google Analytics or the website itself updating the experiment continuously.
+
+ bot that can detect errors, triage them, and update the website, then emails the user the issue and the fix.
+
+
+
+ - [ ] Users should be able to pin data without needing to run a node. they should be able to paste a payload of their shape 
+ - [ ] add loop zone like ui from blender to spliter aggregate pairs. add ux that lets user paginate through the iterations 
+
+
+ bugs 
+
+
+- When we open a a debug workflow mode by visting workflow/<workflow_id>/edit/runs/<run_id>, it does not rebuild the graph from the logs, it shows the current a view with the currentdraft model ( have not tested with published workflows )
+
+
+what should the debug view show? what should the user experience be? how will users debug and pin workflows on published versions or previous drafts if they drift significantly from the current draft?
+
+c/workflows/\/edit/runs/648c061d-0b09-4cbe-9765-09fd578de200
+
+
+BUG
+Pinned outputs dont actually work. they appear to work in the ui on the pinned node (showing the input and the correct pinned output) but when you look at the downstream nodes, they are using real live output, not the pinned output.
+
+we honestly shouldnt even be executing nodes with pinned outputs so how is this happening.
+
+- Research workflow execution check points during live runs
+- Research post-terminal SQLite /litestream/minio compaction: checkpoint completed/cancelled/failed workflows
+- Research workflow compute scaling: LeaseManager start-run contention, repo pool pressure, and Litestream memory/file-watch growth under high concurrency.
+  Current benchmark snapshot: simple runs sustained ~80 runs/s, 500 sleeping workers stayed stable, but 1000-run launch bursts degraded sharply and a 200-concurrent start burst timed out in LeaseManager.acquire/1.
+  Validate whether the next bottleneck is the single GenServer lease path, Repo pool_size=10 in dev, or Litestream recursively watching too many terminal SQLite files.
+Should we merge all field, resolver, and input logic into the slot system? extending it where needed?
+
+
+working on integrations, I was wondering if oauth was correct for some apps. 
+We currently support oauth for google, slack, notion, box, github, and custom api keys like openai, anthropic, etc. we do have api keys for platforms that also have oauth like microsoft, github, etc.
+
+but is this correct for all apps? what would it look like if users wanted make a slack/discord bot, what about a github app? what about google?
+
+add settings page, need to reconcile ux on how we we will display editor/owner settings like workflow name, deleting the workflow etc. and how to handle viewers/runners who need to manage things like what credentials they have bound.
+
+
+
+issues
+- for fields like a object inut, we shouldnt show tree and table views, just json, that also means hide the otions/tab selectors 
+-rename structured schema sub node slot to schema
+- do we need to differentiate between fixed and expression? might be unnecessary
+    - but what about special ui inputs like Row Values @MapEditor for google sheets append row? what if we dont want a special ui input and just want to send json, ex. you get a table structure from a upstream node, doesnt make sense to put that in a single cell via map editor input 
+    map editor is already a "fixed" input but evaluates expressions inside the table.
+
+-cant ctrl c + p copy and paste from step config model
+
+- how should we organize custom ui? specific to a integration/provider like google

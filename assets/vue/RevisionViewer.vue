@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { reactive } from 'vue';
+import { useLiveVue } from 'live_vue';
 import type { Connection, Edge, GraphNode, NodeMouseEvent } from '@vue-flow/core';
 
 import StepConfigModal from '@/components/flow/step_config/StepConfigModal.vue';
 import WorkflowCanvas from '@/components/flow/WorkflowCanvas.vue';
 import { useRevisionViewer } from '@/composables/workflow/useRevisionViewer';
 import { GRID_SIZE } from '@/constants/layout';
-import type { RevisionViewerEmits, RevisionViewerProps } from '@/types/revisionViewer';
+import type { RevisionSelectionPayload, RevisionViewerProps } from '@/types/revisionViewer';
 import type { EdgeData, WorkflowNodeData } from '@/types/workflow';
 import { ArrowLeftIcon, SlashIcon } from '@heroicons/vue/24/outline';
 
@@ -16,8 +17,20 @@ const props = withDefaults(defineProps<RevisionViewerProps>(), {
   stepTypes: () => [],
 });
 
-const emit = defineEmits<RevisionViewerEmits>();
+const live = useLiveVue();
 const viewer = reactive(useRevisionViewer(props));
+
+const selectRevision = (payload: RevisionSelectionPayload) => {
+  live.pushEvent('select_revision', payload);
+};
+
+const applyRevision = () => {
+  live.pushEvent('apply_revision', {});
+};
+
+const navigateBack = () => {
+  live.pushEvent('navigate_back', {});
+};
 
 const noopMouse = (_event: MouseEvent) => {};
 const noopDrag = (_event: DragEvent) => {};
@@ -32,7 +45,7 @@ const noop = () => {};
     <!-- Left Panel — Logo + Back to Editor -->
     <aside class="bg-base-100 relative z-20 flex h-full w-52 shrink-0 flex-col">
       <div class="shrink-0 px-4 py-3.5">
-        <a :href="`/workspaces/${(props.workflow as any)?.workspace_id}`" class="group flex items-center gap-2.5">
+        <a :href="`/projects/${(props.workflow as any)?.project_id}`" class="group flex items-center gap-2.5">
           <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 transition-colors duration-200 group-hover:bg-primary/15">
             <svg class="h-4.5 w-4.5 text-primary" viewBox="0 0 1080 700" fill="currentColor">
               <path d="M1041.6,218.5h0c0-101.3-82.1-183.4-183.4-183.4h-332.6c-27.2,0-49.2,22-49.2,49.2v26.5c0,9.9,2,19.6,5.9,28.7l54.4,127.3c25.2,59.2,33.1,125.2-6.5,176.8l-40.9,53.3c-8.4,10.9-12.9,24.3-12.9,38v80.7c0,27.2,22,49.2,49.2,49.2h437.2c43.5,0,78.7-35.2,78.7-78.7v-6.8c0-14.2,7.9-137.2-13.2-174.9-21.1-37.7-95.8,8.6-115.4,8.6s-19.3-46.6-19.3-46.6c81.7,0,147.9-66.2,147.9-147.9ZM830.2,193.9c-1.3-41.1,32.3-74.7,73.4-73.4,37.2,1.2,67.6,31.5,68.8,68.8,1.3,41.1-32.3,74.7-73.4,73.4-37.2-1.2-67.6-31.5-68.8-68.8Z"/>
@@ -45,7 +58,7 @@ const noop = () => {};
       <div class="px-4 pt-1">
         <button
           class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-medium text-base-content/60 transition-colors hover:bg-base-200/80 hover:text-base-content"
-          @click="emit('navigate_back')"
+          @click="navigateBack"
         >
           <ArrowLeftIcon class="h-3.5 w-3.5" />
           Back to Editor
@@ -61,7 +74,7 @@ const noop = () => {};
           <button
             class="btn btn-primary btn-xs rounded-xl px-4 shadow-sm"
             :disabled="!viewer.canApply"
-            @click="emit('apply_revision')"
+            @click="applyRevision"
           >
             Apply
           </button>
@@ -75,10 +88,10 @@ const noop = () => {};
           <div class="px-1.5 py-0.5">
             <div class="flex items-center gap-2">
               <a
-                :href="`/workspaces/${(props.workflow as any)?.workspace_id}`"
+                :href="`/projects/${(props.workflow as any)?.project_id}`"
                 class="pointer-events-auto select-none text-base-content/60 hover:text-base-content/80 text-xs font-medium transition-colors"
               >
-                {{ (props.workflow as any)?.workspace?.name || 'Workspace' }}
+                {{ (props.workflow as any)?.project?.name || 'project' }}
               </a>
               <SlashIcon class="pointer-events-none text-base-content/30 h-3.5 w-3.5" stroke-width="2.5" />
               <span class="pointer-events-none text-base-content/90 text-xs font-semibold">
@@ -110,6 +123,7 @@ const noop = () => {};
             :set-canvas-ref="viewer.setCanvasRef"
             :set-vue-flow-ref="viewer.setVueFlowRef"
             :handle-pane-mouse-move="noopMouse"
+            :handle-pane-mouse-leave="noop"
             :handle-node-click="viewer.handleNodeClick"
             :handle-node-double-click="viewer.handleNodeDoubleClick"
             :handle-node-context-menu="noopNodeMouse"
@@ -163,7 +177,7 @@ const noop = () => {};
                 ? 'border-primary/40 bg-primary/10 text-primary'
                 : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
             ]"
-            @click="emit('select_revision', { kind: 'current' })"
+            @click="selectRevision({ kind: 'current' })"
           >
             <div>
               <div class="text-sm font-semibold text-base-content">Current draft</div>
@@ -171,8 +185,8 @@ const noop = () => {};
                 Last updated {{ viewer.formatRevisionTimestamp(viewer.workflowUpdatedAt) }}
               </div>
             </div>
-            <span v-if="props.workflow.current_version_tag" class="badge badge-ghost badge-xs">
-              v{{ props.workflow.current_version_tag }}
+            <span v-if="props.draft.version" class="badge badge-ghost badge-xs">
+              v{{ props.draft.version }}
             </span>
           </button>
         </section>
@@ -197,7 +211,7 @@ const noop = () => {};
                   ? 'border-primary/40 bg-primary/10 text-primary'
                   : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
               ]"
-              @click="emit('select_revision', { kind: 'undo', depth: entry.depth })"
+              @click="selectRevision({ kind: 'undo', depth: entry.depth })"
             >
               <div>
                 <div class="text-sm font-semibold text-base-content">
@@ -234,16 +248,16 @@ const noop = () => {};
                   ? 'border-primary/40 bg-primary/10 text-primary'
                   : 'border-base-200 hover:border-base-300 hover:bg-base-200/60',
               ]"
-              @click="emit('select_revision', { kind: 'version', id: version.id })"
+              @click="selectRevision({ kind: 'version', id: version.id })"
             >
               <div>
-                <div class="text-sm font-semibold text-base-content">v{{ version.version_tag }}</div>
+                <div class="text-sm font-semibold text-base-content">v{{ version.version }}</div>
                 <div class="text-[11px] text-base-content/50">
                   {{ viewer.formatRevisionTimestamp(version.published_at) }}
                 </div>
               </div>
               <span
-                v-if="props.workflow.current_version_tag === version.version_tag"
+                v-if="props.draft.version === version.version"
                 class="badge badge-xs"
               >
                 Current

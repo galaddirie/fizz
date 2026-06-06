@@ -4,33 +4,33 @@ defmodule Fizz.Accounts do
 
   ## Entity hierarchy
 
-      Organizations (WorkOS) → Workspaces (local) → Memberships (local)
+      Organizations (WorkOS) → Projects (local) → Memberships (local)
 
   **Organizations** are managed entirely in WorkOS — they are never stored locally.
   An organization represents a company, team, or billing entity. Users belong to
   one or more organizations via WorkOS organization memberships.
 
-  **Workspaces** are a local sub-organizational unit scoped to a single WorkOS
+  **Projects** are a local sub-organizational unit scoped to a single WorkOS
   organization. They provide a generic grouping concept for related resources and
   work — more focused than an organization, more generic than a "project". In a
-  B2B SaaS context a client typically maps to one workspace, or to multiple
-  workspaces for larger clients.
+  B2B SaaS context a client typically maps to one project, or to multiple
+  projects for larger clients.
 
-  **Workspace memberships** link a user to a workspace with a specific role
+  **Project memberships** link a user to a project with a specific role
   (`:admin`, `:member`, or `:viewer`).
 
   ## Authorization
 
   All operations require a `Fizz.Accounts.Scope` struct carrying the resolved
-  user, organization, and workspace context. The scope is built via `build_scope/3`
-  after the user selects an organization and (optionally) a workspace.
+  user, organization, and project context. The scope is built via `build_scope/3`
+  after the user selects an organization and (optionally) a project.
 
   ## Roles
 
   * **Organization roles** (sourced from WorkOS): `:owner` > `:admin` > `:member`
-  * **Workspace roles** (local): `:admin` > `:member` > `:viewer`
+  * **Project roles** (local): `:admin` > `:member` > `:viewer`
 
-  Organization owners and admins implicitly have access to all workspaces in
+  Organization owners and admins implicitly have access to all projects in
   their organization.
 
   ## WorkOS integration
@@ -47,13 +47,13 @@ defmodule Fizz.Accounts do
     Scope,
     User,
     WorkOS,
-    Workspace,
-    WorkspaceMembership
+    Project,
+    ProjectMembership
   }
 
   alias Fizz.Repo
 
-  ## Organization & Workspace
+  ## Organization & project
 
   @doc """
   Organizations are owned by WorkOS and are no longer stored locally.
@@ -119,7 +119,7 @@ defmodule Fizz.Accounts do
   def ensure_personal_organization(_scope), do: []
 
   @doc """
-  Builds a WorkOS organization/workspace-aware scope for the current user.
+  Builds a WorkOS organization/project-aware scope for the current user.
   """
   def build_scope(scope, organization_id, opts \\ [])
 
@@ -129,24 +129,24 @@ defmodule Fizz.Accounts do
         opts
       )
       when is_binary(workos_user_id) and is_binary(organization_id) do
-    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
 
     with {:ok, membership} <-
            WorkOS.get_user_organization_membership(workos_user_id, organization_id),
          organization_role <- organization_role_from_membership(membership),
-         {:ok, workspace_membership, workspace} <-
-           fetch_workspace_membership(
+         {:ok, project_membership, project} <-
+           fetch_project_membership(
              organization_id,
              user_id,
-             workspace_id,
+             project_id,
              organization_role
            ) do
       resolved_scope =
         scope
         |> Scope.with_organization_id(organization_id)
         |> Scope.with_organization_role(organization_role)
-        |> maybe_put_workspace(workspace)
-        |> Scope.with_workspace_role(workspace_role(workspace_membership))
+        |> maybe_put_project(project)
+        |> Scope.with_project_role(project_role(project_membership))
 
       {:ok, resolved_scope}
     else
@@ -160,35 +160,35 @@ defmodule Fizz.Accounts do
   def build_scope(_scope, _organization_id, _opts), do: {:error, :unauthenticated}
 
   @doc """
-  Creates a workspace inside the active WorkOS organization.
+  Creates a project inside the active WorkOS organization.
   """
-  def create_workspace(%Scope{organization_id: organization_id} = scope, attrs)
+  def create_project(%Scope{organization_id: organization_id} = scope, attrs)
       when is_binary(organization_id) do
     with :ok <- require_organization_admin(scope) do
-      workspace_attrs =
+      project_attrs =
         attrs
         |> normalize_attrs()
         |> ensure_slug(:name)
 
       Repo.transaction(fn ->
-        workspace_changeset =
-          %Workspace{workos_organization_id: organization_id}
-          |> Workspace.changeset(workspace_attrs)
+        project_changeset =
+          %Project{workos_organization_id: organization_id}
+          |> Project.changeset(project_attrs)
 
-        with {:ok, workspace} <- Repo.insert(workspace_changeset),
-             {:ok, _membership} <- maybe_add_workspace_admin_membership(workspace, scope.user),
+        with {:ok, project} <- Repo.insert(project_changeset),
+             {:ok, _membership} <- maybe_add_project_admin_membership(project, scope.user),
              :ok <-
                maybe_emit_audit_event(
                  organization_id,
                  scope.user,
-                 "workspace.created",
+                 "project.created",
                  [
                    %{type: "organization", id: organization_id},
-                   %{type: "workspace", id: to_string(workspace.id)}
+                   %{type: "project", id: to_string(project.id)}
                  ],
-                 %{workspace_slug: workspace.slug}
+                 %{project_slug: project.slug}
                ) do
-          workspace
+          project
         else
           {:error, reason} -> Repo.rollback(reason)
         end
@@ -197,60 +197,62 @@ defmodule Fizz.Accounts do
     end
   end
 
-  def create_workspace(_scope, _attrs), do: {:error, :organization_scope_required}
+  def create_project(_scope, _attrs), do: {:error, :organization_scope_required}
 
   @doc """
-  Lists workspaces for the active WorkOS organization and current user scope.
+  Lists projects for the active WorkOS organization and current user scope.
   """
-  def list_workspaces(%Scope{organization_id: organization_id, user: %User{id: user_id}} = scope)
+  def list_projects(%Scope{organization_id: organization_id, user: %User{id: user_id}} = scope)
       when is_binary(organization_id) do
     query =
       if Scope.organization_admin?(scope) do
-        from(w in Workspace,
-          where: w.workos_organization_id == ^organization_id,
-          order_by: [asc: w.name]
+        from(project in Project,
+          where: project.workos_organization_id == ^organization_id,
+          order_by: [asc: project.name]
         )
       else
-        from(w in Workspace,
-          join: wm in WorkspaceMembership,
-          on: wm.workspace_id == w.id,
-          where: w.workos_organization_id == ^organization_id and wm.user_id == ^user_id,
-          order_by: [asc: w.name]
+        from(project in Project,
+          join: membership in ProjectMembership,
+          on: membership.project_id == project.id,
+          where:
+            project.workos_organization_id == ^organization_id and
+              membership.user_id == ^user_id,
+          order_by: [asc: project.name]
         )
       end
 
     {:ok, Repo.all(query)}
   end
 
-  def list_workspaces(_scope), do: {:error, :organization_scope_required}
+  def list_projects(_scope), do: {:error, :organization_scope_required}
 
   @doc """
-  Fetches a workspace by local id.
+  Fetches a project by local id.
   """
-  @spec get_workspace(String.t()) :: Workspace.t() | nil
-  def get_workspace(workspace_id) when is_binary(workspace_id) do
-    Repo.get(Workspace, workspace_id)
+  @spec get_project(String.t()) :: Project.t() | nil
+  def get_project(project_id) when is_binary(project_id) do
+    Repo.get(Project, project_id)
   end
 
-  def get_workspace(_workspace_id), do: nil
+  def get_project(_project_id), do: nil
 
   @doc """
-  Builds and returns a workspace-aware scope for the given workspace id.
+  Builds and returns a project-aware scope for the given project id.
   """
-  @spec build_scope_for_workspace(Scope.t() | nil, String.t()) ::
+  @spec build_scope_for_project(Scope.t() | nil, String.t()) ::
           {:ok, Scope.t()}
-          | {:error, :workspace_not_found | :forbidden | :unauthenticated | term()}
-  def build_scope_for_workspace(%Scope{} = scope, workspace_id) when is_binary(workspace_id) do
-    case Repo.get(Workspace, workspace_id) do
-      %Workspace{} = workspace ->
-        build_scope(scope, workspace.workos_organization_id, workspace_id: workspace.id)
+          | {:error, :project_not_found | :forbidden | :unauthenticated | term()}
+  def build_scope_for_project(%Scope{} = scope, project_id) when is_binary(project_id) do
+    case Repo.get(Project, project_id) do
+      %Project{} = project ->
+        build_scope(scope, project.workos_organization_id, project_id: project.id)
 
       nil ->
-        {:error, :workspace_not_found}
+        {:error, :project_not_found}
     end
   end
 
-  def build_scope_for_workspace(_scope, _workspace_id), do: {:error, :unauthenticated}
+  def build_scope_for_project(_scope, _project_id), do: {:error, :unauthenticated}
 
   @doc """
   Adds or updates organization membership for a user in WorkOS.
@@ -293,35 +295,35 @@ defmodule Fizz.Accounts do
   def add_organization_member(_scope, _user, _attrs), do: {:error, :organization_scope_required}
 
   @doc """
-  Adds or updates workspace membership for a user.
+  Adds or updates project membership for a user.
   """
-  def add_workspace_member(
+  def add_project_member(
         %Scope{organization_id: organization_id, user: %User{id: actor_user_id}} = scope,
-        workspace_id,
+        project_id,
         %User{} = user,
         attrs
       )
       when is_binary(organization_id) do
     attrs = normalize_attrs(attrs)
 
-    with {:ok, workspace} <- fetch_workspace(organization_id, workspace_id),
-         :ok <- require_workspace_admin(scope, workspace.id, actor_user_id) do
+    with {:ok, project} <- fetch_project(organization_id, project_id),
+         :ok <- require_project_admin(scope, project.id, actor_user_id) do
       attrs = Map.take(attrs, [:role, :access_purpose])
 
       membership =
-        Repo.get_by(WorkspaceMembership, workspace_id: workspace.id, user_id: user.id) ||
-          %WorkspaceMembership{workspace_id: workspace.id, user_id: user.id}
+        Repo.get_by(ProjectMembership, project_id: project.id, user_id: user.id) ||
+          %ProjectMembership{project_id: project.id, user_id: user.id}
 
       Repo.transaction(fn ->
         with {:ok, membership} <-
-               membership |> WorkspaceMembership.changeset(attrs) |> Repo.insert_or_update(),
+               membership |> ProjectMembership.changeset(attrs) |> Repo.insert_or_update(),
              :ok <-
                maybe_emit_audit_event(
                  organization_id,
                  scope.user,
-                 "workspace.member_upserted",
+                 "project.member_upserted",
                  [
-                   %{type: "workspace", id: to_string(workspace.id)},
+                   %{type: "project", id: to_string(project.id)},
                    %{type: "user", id: to_string(user.id)}
                  ],
                  %{role: to_string(membership.role)}
@@ -337,7 +339,7 @@ defmodule Fizz.Accounts do
     end
   end
 
-  def add_workspace_member(_scope, _workspace_id, _user, _attrs),
+  def add_project_member(_scope, _project_id, _user, _attrs),
     do: {:error, :organization_scope_required}
 
   @doc """
@@ -352,38 +354,38 @@ defmodule Fizz.Accounts do
 
   def sync_user_to_workos(_scope), do: {:error, :unauthenticated}
 
-  defp fetch_workspace_membership(_organization_id, _user_id, nil, _organization_role),
+  defp fetch_project_membership(_organization_id, _user_id, nil, _organization_role),
     do: {:ok, nil, nil}
 
-  defp fetch_workspace_membership(organization_id, user_id, workspace_id, organization_role) do
-    with {:ok, workspace} <- fetch_workspace(organization_id, workspace_id) do
-      case Repo.get_by(WorkspaceMembership, workspace_id: workspace.id, user_id: user_id) do
-        %WorkspaceMembership{} = membership -> {:ok, membership, workspace}
-        nil when organization_role in [:owner, :admin] -> {:ok, nil, workspace}
-        nil -> {:error, :workspace_forbidden}
+  defp fetch_project_membership(organization_id, user_id, project_id, organization_role) do
+    with {:ok, project} <- fetch_project(organization_id, project_id) do
+      case Repo.get_by(ProjectMembership, project_id: project.id, user_id: user_id) do
+        %ProjectMembership{} = membership -> {:ok, membership, project}
+        nil when organization_role in [:owner, :admin] -> {:ok, nil, project}
+        nil -> {:error, :project_forbidden}
       end
     end
   end
 
-  defp fetch_workspace(organization_id, %Workspace{id: workspace_id}) do
-    fetch_workspace(organization_id, workspace_id)
+  defp fetch_project(organization_id, %Project{id: project_id}) do
+    fetch_project(organization_id, project_id)
   end
 
-  defp fetch_workspace(organization_id, workspace_id)
-       when is_binary(organization_id) and is_binary(workspace_id) do
-    case Repo.get_by(Workspace, id: workspace_id, workos_organization_id: organization_id) do
-      %Workspace{} = workspace -> {:ok, workspace}
-      nil -> {:error, :workspace_not_found}
+  defp fetch_project(organization_id, project_id)
+       when is_binary(organization_id) and is_binary(project_id) do
+    case Repo.get_by(Project, id: project_id, workos_organization_id: organization_id) do
+      %Project{} = project -> {:ok, project}
+      nil -> {:error, :project_not_found}
     end
   end
 
-  defp fetch_workspace(_organization_id, _workspace_id), do: {:error, :workspace_not_found}
+  defp fetch_project(_organization_id, _project_id), do: {:error, :project_not_found}
 
-  defp workspace_role(nil), do: nil
-  defp workspace_role(%WorkspaceMembership{role: role}), do: role
+  defp project_role(nil), do: nil
+  defp project_role(%ProjectMembership{role: role}), do: role
 
-  defp maybe_put_workspace(scope, nil), do: scope
-  defp maybe_put_workspace(scope, workspace), do: Scope.with_workspace(scope, workspace)
+  defp maybe_put_project(scope, nil), do: scope
+  defp maybe_put_project(scope, project), do: Scope.with_project(scope, project)
 
   defp require_organization_admin(scope) do
     if Scope.organization_admin?(scope) do
@@ -393,31 +395,31 @@ defmodule Fizz.Accounts do
     end
   end
 
-  defp require_workspace_admin(scope, workspace_id, actor_user_id) do
+  defp require_project_admin(scope, project_id, actor_user_id) do
     cond do
       Scope.organization_admin?(scope) ->
         :ok
 
-      scope.workspace && scope.workspace.id == workspace_id && Scope.workspace_admin?(scope) ->
+      scope.project && scope.project.id == project_id && Scope.project_admin?(scope) ->
         :ok
 
       true ->
-        case Repo.get_by(WorkspaceMembership, workspace_id: workspace_id, user_id: actor_user_id) do
-          %WorkspaceMembership{role: :admin} -> :ok
+        case Repo.get_by(ProjectMembership, project_id: project_id, user_id: actor_user_id) do
+          %ProjectMembership{role: :admin} -> :ok
           _ -> {:error, :forbidden}
         end
     end
   end
 
-  defp maybe_add_workspace_admin_membership(_workspace, nil), do: {:ok, :noop}
+  defp maybe_add_project_admin_membership(_project, nil), do: {:ok, :noop}
 
-  defp maybe_add_workspace_admin_membership(%Workspace{id: workspace_id}, %User{id: user_id}) do
+  defp maybe_add_project_admin_membership(%Project{id: project_id}, %User{id: user_id}) do
     membership =
-      Repo.get_by(WorkspaceMembership, workspace_id: workspace_id, user_id: user_id) ||
-        %WorkspaceMembership{workspace_id: workspace_id, user_id: user_id}
+      Repo.get_by(ProjectMembership, project_id: project_id, user_id: user_id) ||
+        %ProjectMembership{project_id: project_id, user_id: user_id}
 
     membership
-    |> WorkspaceMembership.changeset(%{role: :admin})
+    |> ProjectMembership.changeset(%{role: :admin})
     |> Repo.insert_or_update()
   end
 
@@ -661,7 +663,7 @@ defmodule Fizz.Accounts do
   @doc """
   No-op local session revocation. WorkOS is the session source of truth.
 
-  We keep this function for compatibility with existing webhook handling paths.
+  WorkOS webhook handling calls this during user revocation events.
   """
   def revoke_user_sessions_by_workos_user_id(workos_user_id) when is_binary(workos_user_id),
     do: :ok

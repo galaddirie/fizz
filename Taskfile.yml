@@ -4,6 +4,7 @@ tasks:
   init:
     desc: Initialize development environment
     cmds:
+      - docker compose -f docker-compose.resources.yml up -d
       - mix deps.get
       - mix ecto.create
       - mix ecto.migrate
@@ -11,26 +12,26 @@ tasks:
       - mix assets.build
 
   up:
-    desc: Start development services (PostgreSQL + Adminer)
+    desc: Start development services (PostgreSQL + MinIO + Adminer)
     cmds:
-      - docker-compose -f docker-compose.resources.yml up -d
+      - docker compose -f docker-compose.resources.yml up -d
 
   down:
     desc: Stop development services
     cmds:
-      - docker-compose -f docker-compose.resources.yml down
+      - docker compose -f docker-compose.resources.yml down
 
   logs:
     desc: Show logs from development services
     cmds:
-      - docker-compose -f docker-compose.resources.yml logs -f
+      - docker compose -f docker-compose.resources.yml logs -f
 
   restart:
     desc: Restart development services
     cmds:
-      - docker-compose -f docker-compose.resources.yml restart
+      - docker compose -f docker-compose.resources.yml restart
 
   status:
     desc: Show status of development services
     cmds:
-      - docker-compose -f docker-compose.resources.yml ps
+      - docker compose -f docker-compose.resources.yml ps

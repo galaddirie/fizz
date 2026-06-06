@@ -127,7 +127,7 @@ const onDragStart = (event: DragEvent, typeId: string) => {
     <!-- Header -->
     <div class="shrink-0 border-b border-base-200 px-4 py-3.5">
       <div class="flex items-center justify-between gap-2">
-        <a href="/workspaces" class="group flex items-center gap-2.5">
+        <a href="/projects" class="group flex items-center gap-2.5">
           <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 transition-colors duration-200 group-hover:bg-primary/15">
             <svg class="h-4.5 w-4.5 text-primary" viewBox="0 0 1080 700" fill="currentColor">
               <path d="M1041.6,218.5h0c0-101.3-82.1-183.4-183.4-183.4h-332.6c-27.2,0-49.2,22-49.2,49.2v26.5c0,9.9,2,19.6,5.9,28.7l54.4,127.3c25.2,59.2,33.1,125.2-6.5,176.8l-40.9,53.3c-8.4,10.9-12.9,24.3-12.9,38v80.7c0,27.2,22,49.2,49.2,49.2h437.2c43.5,0,78.7-35.2,78.7-78.7v-6.8c0-14.2,7.9-137.2-13.2-174.9-21.1-37.7-95.8,8.6-115.4,8.6s-19.3-46.6-19.3-46.6c81.7,0,147.9-66.2,147.9-147.9ZM830.2,193.9c-1.3-41.1,32.3-74.7,73.4-73.4,37.2,1.2,67.6,31.5,68.8,68.8,1.3,41.1-32.3,74.7-73.4,73.4-37.2-1.2-67.6-31.5-68.8-68.8Z"/>

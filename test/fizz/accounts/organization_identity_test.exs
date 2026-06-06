@@ -2,7 +2,7 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
   use Fizz.DataCase
 
   alias Fizz.Accounts
-  alias Fizz.Accounts.{Scope, WorkspaceMembership}
+  alias Fizz.Accounts.{Scope, ProjectMembership}
   alias Fizz.Repo
 
   import Fizz.AccountsFixtures
@@ -42,7 +42,7 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
     :ok
   end
 
-  describe "organization/workspace primitives" do
+  describe "organization/project primitives" do
     setup do
       user = user_fixture()
 
@@ -82,30 +82,30 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
       assert request[:url] == "/user_management/organization_memberships"
     end
 
-    test "create_workspace/2 creates admin workspace membership for creator", %{
+    test "create_project/2 creates admin project membership for creator", %{
       owner_scope: owner_scope
     } do
-      {:ok, workspace} = Accounts.create_workspace(owner_scope, %{name: "Client A"})
+      {:ok, project} = Accounts.create_project(owner_scope, %{name: "Client A"})
 
-      assert workspace.workos_organization_id == "org_123"
+      assert project.workos_organization_id == "org_123"
 
-      assert %WorkspaceMembership{role: :admin} =
-               Repo.get_by(WorkspaceMembership,
-                 workspace_id: workspace.id,
+      assert %ProjectMembership{role: :admin} =
+               Repo.get_by(ProjectMembership,
+                 project_id: project.id,
                  user_id: owner_scope.user.id
                )
     end
 
-    test "list_workspaces/1 limits members to assigned workspaces", %{
+    test "list_projects/1 limits members to assigned projects", %{
       owner_scope: owner_scope
     } do
-      {:ok, workspace_a} = Accounts.create_workspace(owner_scope, %{name: "Client A"})
-      {:ok, _workspace_b} = Accounts.create_workspace(owner_scope, %{name: "Client B"})
+      {:ok, project_a} = Accounts.create_project(owner_scope, %{name: "Client A"})
+      {:ok, _project_b} = Accounts.create_project(owner_scope, %{name: "Client B"})
 
       user = user_fixture()
 
-      {:ok, _workspace_membership} =
-        Accounts.add_workspace_member(owner_scope, workspace_a.id, user, %{role: :member})
+      {:ok, _project_membership} =
+        Accounts.add_project_member(owner_scope, project_a.id, user, %{role: :member})
 
       Process.put(:workos_http_responses, [
         {:ok,
@@ -125,9 +125,9 @@ defmodule Fizz.Accounts.OrganizationIdentityTest do
       ])
 
       {:ok, user_scope} = Accounts.build_scope(Scope.for_user(user), "org_123")
-      {:ok, workspaces} = Accounts.list_workspaces(user_scope)
+      {:ok, projects} = Accounts.list_projects(user_scope)
 
-      assert Enum.map(workspaces, & &1.id) == [workspace_a.id]
+      assert Enum.map(projects, & &1.id) == [project_a.id]
     end
 
     test "organization members cannot manage organization membership", %{owner_scope: owner_scope} do

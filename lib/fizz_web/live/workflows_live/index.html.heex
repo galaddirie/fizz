@@ -1,0 +1,136 @@
+<Layouts.app
+  flash={@flash}
+  current_scope={@current_scope}
+  current_path={~p"/projects/#{@project_id}"}
+>
+  <:page_header>
+    <div class="w-full space-y-6">
+      <div class="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+        <div class="space-y-3">
+          <.link
+            navigate={~p"/projects/#{@project_id}"}
+            class="inline-flex items-center gap-2 text-sm text-muted hover:text-base-content"
+          >
+            <.icon name="hero-arrow-left" class="size-4" /> Back to project
+          </.link>
+          <p class="text-xs font-semibold uppercase tracking-[0.3em] text-muted">Automation</p>
+          <h1 class="text-3xl font-semibold tracking-tight text-base-content">Workflows</h1>
+          <p class="max-w-2xl text-sm text-muted">
+            Design, publish, and monitor automations.
+            Drafts stay private until you publish them.
+          </p>
+        </div>
+
+        <div class="flex gap-3">
+          <button
+            type="button"
+            id="workflow-create-button"
+            phx-click="create_workflow"
+            phx-disable-with="Creating..."
+            class="btn btn-sm btn-primary gap-2"
+          >
+            <.icon name="hero-plus" class="size-5" />
+            <span>New Workflow</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </:page_header>
+
+  <div class="space-y-8">
+    <section>
+      <div class="card relative overflow-hidden transition-all duration-300 border border-base-300 rounded-2xl shadow-sm ring-1 ring-base-300/70 bg-base-100 p-3">
+        <.data_table
+          id="definitions"
+          rows={@streams.definitions}
+          rows_empty?={@definitions_empty?}
+          tbody_class="divide-y divide-base-200"
+          row_click={
+            fn {_dom_id, definition} ->
+              JS.navigate(~p"/projects/#{@project_id}/workflows/#{definition.id}")
+            end
+          }
+          row_class="cursor-pointer hover:bg-neutral/10"
+        >
+          <:col :let={definition} label="Workflow">
+            <div class="space-y-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="text-sm font-semibold text-base-content">{definition.name}</p>
+              </div>
+              <p
+                :if={definition.description && definition.description != ""}
+                class="text-xs leading-relaxed text-base-content/70 line-clamp-2"
+              >
+                {definition.description}
+              </p>
+              <p class="text-[11px] font-mono uppercase tracking-wide text-base-content/50">
+                {short_id(definition.id)}
+              </p>
+            </div>
+          </:col>
+
+          <:col :let={definition} label="Updated" width="16%">
+            <div class="flex items-center gap-2 text-xs text-base-content/70">
+              <.icon name="hero-clock" class="size-4 opacity-70" />
+              <span>{formatted_timestamp(definition.updated_at)}</span>
+            </div>
+          </:col>
+
+          <:col :let={definition} label="Created" width="16%">
+            <div class="text-xs text-base-content/60">
+              {formatted_timestamp(definition.inserted_at)}
+            </div>
+          </:col>
+
+          <:col :let={definition} label="Actions" width="10%" align="center">
+            <div
+              class="relative"
+              phx-click-away={JS.hide(to: "#workflow-actions-#{definition.id}")}
+            >
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm btn-circle"
+                popovertarget={"workflow-actions-#{definition.id}"}
+                style={"anchor-name:--workflow-actions-#{definition.id}"}
+                phx-click={JS.toggle(to: "#workflow-actions-#{definition.id}")}
+                onclick="event.stopPropagation()"
+              >
+                <.icon name="hero-ellipsis-horizontal" class="size-4" />
+              </button>
+              <ul
+                class="dropdown menu w-52 rounded-box bg-base-100 shadow-sm"
+                popover
+                id={"workflow-actions-#{definition.id}"}
+                style={"position-anchor:--workflow-actions-#{definition.id}"}
+              >
+                <li>
+                  <button
+                    type="button"
+                    phx-click="open_workflow"
+                    phx-value-definition_id={definition.id}
+                    class="flex items-center gap-2"
+                  >
+                    <.icon name="hero-pencil-square" class="size-4" />
+                    <span>Edit</span>
+                  </button>
+                </li>
+              </ul>
+            </div>
+          </:col>
+
+          <:empty_state>
+            <div class="flex flex-col items-center justify-center gap-3 py-10 text-base-content/70">
+              <div class="rounded-full bg-base-200 p-3">
+                <.icon name="hero-rocket-launch" class="size-6" />
+              </div>
+              <div class="space-y-1 text-center">
+                <p class="text-sm font-semibold text-base-content">No workflows yet</p>
+                <p class="text-xs">Create one above to get started.</p>
+              </div>
+            </div>
+          </:empty_state>
+        </.data_table>
+      </div>
+    </section>
+  </div>
+</Layouts.app>

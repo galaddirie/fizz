@@ -53,7 +53,7 @@ export function useGrouping(options: UseGroupingOptions) {
 
   const groupByStepId = computed(() => {
     const map = new Map<string, string>();
-    for (const group of options.activeDraft()?.groups || []) {
+    for (const group of options.activeDraft()?.step_groups || []) {
       for (const stepId of group.step_ids || []) {
         map.set(stepId, group.id);
       }
@@ -153,7 +153,7 @@ export function useGrouping(options: UseGroupingOptions) {
 
   const buildGroupName = () => {
     const existingNames = new Set(
-      (options.workflow().draft?.groups || [])
+      (options.workflow().draft?.step_groups || [])
         .map(group => group.name)
         .filter((name): name is string => !!name)
     );

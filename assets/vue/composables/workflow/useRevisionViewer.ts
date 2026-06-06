@@ -33,6 +33,7 @@ export function useRevisionViewer(props: RevisionViewerProps) {
     stepTypes: () => props.stepTypes,
     stepExecutions: () => [],
     editorState: () => props.editorState,
+    validationErrors: () => ({}),
     presences: () => [],
     currentUserId: () => undefined,
     canEdit: () => false,
@@ -43,8 +44,20 @@ export function useRevisionViewer(props: RevisionViewerProps) {
     stepExecutions: () => [],
   });
 
+  const revisionSyncKey = computed(() => {
+    switch (props.revision.kind) {
+      case 'undo':
+        return `undo:${props.revision.depth}:${props.draft.updated_at ?? ''}`;
+      case 'version':
+        return `version:${props.revision.id}:${props.draft.updated_at ?? ''}`;
+      default:
+        return `current:${props.draft.updated_at ?? ''}`;
+    }
+  });
+
   const draftSync = useDraftSync({
     activeDraft: () => props.draft,
+    collabSeq: () => revisionSyncKey.value,
     nodes: () => nodes.value as Node<WorkflowNodeData>[],
     edges: () => edges.value as Edge<EdgeData>[],
     setNodes,
@@ -63,7 +76,9 @@ export function useRevisionViewer(props: RevisionViewerProps) {
   const revisionLabel = computed(() => props.revision.label);
   const canApply = computed(() => props.revision.kind !== 'current');
   const isCurrentDraft = computed(() => props.revision.kind === 'current');
-  const workflowUpdatedAt = computed(() => props.workflow.updated_at);
+  const workflowUpdatedAt = computed(
+    () => props.workflow.draft?.updated_at ?? props.workflow.updated_at ?? props.draft.updated_at
+  );
   const undoStack = computed(() => props.undoStack);
   const versions = computed(() => props.versions);
 

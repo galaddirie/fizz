@@ -4,14 +4,9 @@ defmodule FizzWeb.WorkspacesLiveTest do
   import Phoenix.LiveViewTest
 
   test "workspaces index requires authentication", %{conn: conn} do
-    assert {:error, {:redirect, %{to: "/auth/workos"}}} =
-             live(conn, ~p"/workspaces")
-  end
-
-  test "workspace show requires authentication", %{conn: conn} do
-    workspace_id = Ecto.UUID.generate()
+    project_id = Ecto.UUID.generate()
 
     assert {:error, {:redirect, %{to: "/auth/workos"}}} =
-             live(conn, ~p"/workspaces/#{workspace_id}")
+             live(conn, ~p"/projects/#{project_id}/workspaces")
   end
 end

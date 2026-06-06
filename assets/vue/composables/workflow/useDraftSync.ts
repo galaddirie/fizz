@@ -5,11 +5,12 @@ import type { EdgeData, WorkflowDraft, WorkflowNodeData } from '@/types/workflow
 
 interface UseDraftSyncOptions {
   activeDraft: () => WorkflowDraft | undefined;
-  collabSeq?: () => number;
+  collabSeq?: () => number | string;
   nodes: () => Node<WorkflowNodeData>[];
   edges: () => Edge<EdgeData>[];
   setNodes: (nodes: Node<WorkflowNodeData>[]) => void;
   setEdges: (edges: Edge<EdgeData>[]) => void;
+  isDragging?: () => boolean;
   onSyncComplete?: () => void;
 }
 
@@ -17,10 +18,11 @@ export function useDraftSync(options: UseDraftSyncOptions) {
   const isMounted = ref(false);
   const isSyncingDraft = ref(false);
   const lastSyncKey = ref<string | null>(null);
+  const pendingSync = ref(false);
 
   const buildSyncKey = () => {
     if (options.collabSeq) {
-      return `seq:${options.collabSeq() ?? 0}`;
+      return `seq:${String(options.collabSeq() ?? 0)}`;
     }
 
     const draft = options.activeDraft();
@@ -28,18 +30,24 @@ export function useDraftSync(options: UseDraftSyncOptions) {
       draft?.updated_at ?? '',
       draft?.steps?.length ?? 0,
       draft?.connections?.length ?? 0,
-      draft?.groups?.length ?? 0,
+      draft?.step_groups?.length ?? 0,
     ].join(':');
   };
 
   const syncDraftState = async () => {
     if (!isMounted.value) return;
 
+    if (options.isDragging?.()) {
+      pendingSync.value = true;
+      return;
+    }
+
     const syncKey = buildSyncKey();
     if (lastSyncKey.value === syncKey) return;
     lastSyncKey.value = syncKey;
 
     isSyncingDraft.value = true;
+    pendingSync.value = false;
     options.setNodes(options.nodes());
     options.setEdges(options.edges());
     await nextTick();
@@ -53,6 +61,18 @@ export function useDraftSync(options: UseDraftSyncOptions) {
       syncDraftState();
     }
   );
+
+  // Flush any deferred sync once dragging ends
+  if (options.isDragging) {
+    watch(
+      () => options.isDragging!(),
+      (dragging) => {
+        if (!dragging && pendingSync.value) {
+          syncDraftState();
+        }
+      }
+    );
+  }
 
   onMounted(() => {
     isMounted.value = true;

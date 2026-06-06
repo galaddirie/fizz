@@ -40,6 +40,7 @@ interface Props {
   setCanvasRef: VNodeRef;
   setVueFlowRef: VNodeRef;
   handlePaneMouseMove: (event: MouseEvent) => void;
+  handlePaneMouseLeave: () => void;
   handleNodeClick: (event: NodeMouseEvent) => void;
   handleNodeDoubleClick: (event: NodeMouseEvent) => void;
   handleNodeContextMenu: (event: NodeMouseEvent) => void;
@@ -85,9 +86,10 @@ onBeforeUnmount(() => {
 <template>
   <div
     :ref="setCanvasRef"
-    class="relative min-w-0 flex-1 overflow-hidden"
+    class="relative isolate min-w-0 flex-1 overflow-hidden"
     :class="{ 'selection-modifier-active': isSelectionModifierPressed }"
-    @mousemove="handlePaneMouseMove"
+    @pointermove.capture="handlePaneMouseMove"
+    @pointerleave.capture="handlePaneMouseLeave"
   >
     <VueFlow
       :ref="setVueFlowRef"

@@ -26,7 +26,7 @@ export function useCollaboration(options: UseCollaborationOptions) {
     return options.presences().filter(p => p.user.id !== options.currentUserId());
   });
 
-  const emitInteraction = useThrottleFn(
+  const emitInteractionThrottled = useThrottleFn(
     (
       x?: number | null,
       y?: number | null,
@@ -58,6 +58,19 @@ export function useCollaboration(options: UseCollaborationOptions) {
     },
     CURSOR_THROTTLE_MS
   );
+
+  const emitInteraction = (
+    x?: number | null,
+    y?: number | null,
+    dragging_steps?: Record<string, { x: number; y: number }> | null,
+    dragging_groups?: Record<string, { x: number; y: number; width: number; height: number }> | null
+  ) => {
+    emitInteractionThrottled(x, y, dragging_steps, dragging_groups);
+  };
+
+  const clearInteraction = () => {
+    options.emit('mouse_leave');
+  };
 
   const handleSelectionChange = ({ nodes }: { nodes: Node<WorkflowNodeData>[] }) => {
     if (!options.canEdit()) return;
@@ -105,6 +118,7 @@ export function useCollaboration(options: UseCollaborationOptions) {
 
   return {
     otherUserPresences,
+    clearInteraction,
     emitInteraction,
     handleSelectionChange,
     withSelectionLock,
