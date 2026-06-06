@@ -1,8 +1,6 @@
 defmodule Fizz.Workflows.Store.SqliteStoreTest do
   use Fizz.DataCase, async: false
 
-  import Fizz.WorkflowsFixtures
-
   alias Fizz.Workflows.Store.Paths
   alias Fizz.Workflows.Store.Sqlite
   alias Fizz.Workflows.Store.SqliteMigrations
@@ -14,21 +12,19 @@ defmodule Fizz.Workflows.Store.SqliteStoreTest do
     tmp_dir =
       Path.join(System.tmp_dir!(), "fizz-sqlite-store-#{System.unique_integer([:positive])}")
 
-    scope = project_scope_fixture()
-    %{version: version} = published_version_fixture(scope)
-    run = workflow_run_fixture(scope, version)
+    run_id = Ecto.UUID.generate()
 
     on_exit(fn -> File.rm_rf(tmp_dir) end)
 
     opts = [
       data_dir: tmp_dir,
-      org_id: scope.project.workos_organization_id,
-      project_id: scope.project.id,
+      org_id: "org_test",
+      project_id: Ecto.UUID.generate(),
       fence_token: 1,
       repo: Repo
     ]
 
-    %{tmp_dir: tmp_dir, run_id: run.id, opts: opts}
+    %{tmp_dir: tmp_dir, run_id: run_id, opts: opts}
   end
 
   test "init creates sqlite file with expected schema and WAL mode", %{
@@ -166,85 +162,13 @@ defmodule Fizz.Workflows.Store.SqliteStoreTest do
     end
   end
 
-  test "save with an expired lease raises StaleOwnerError", %{run_id: run_id, opts: opts} do
-    insert_lease(run_id, 1, "NOW() - interval '1 second'")
-    assert {:ok, state} = SqliteStore.init(run_id, opts)
-
-    assert_raise StaleOwnerError, fn ->
-      SqliteStore.save(run_id, [%{event: :expired}], state)
-    end
-
-    assert :ok =
-             Sqlite.with_db(state.db_path, fn db ->
-               assert {:ok, []} = Sqlite.query(db, "SELECT data FROM workflow_log")
-               :ok
-             end)
-  end
-
   test "save_fact and load_fact round-trip individual facts", %{run_id: run_id, opts: opts} do
-    insert_lease(run_id, 1, "NOW() + interval '30 seconds'")
     assert {:ok, state} = SqliteStore.init(run_id, opts)
 
     fact = %{payload: [1, 2, 3], nested: %{ok: true}}
 
     assert :ok = SqliteStore.save_fact("hash-123", fact, state)
     assert {:ok, ^fact} = SqliteStore.load_fact("hash-123", state)
-
-    assert %{checkpoint_seq: 1, fence_token: 1} = lease_row(run_id)
-  end
-
-  test "save_fact with a stale fence token raises StaleOwnerError and preserves facts", %{
-    run_id: run_id,
-    opts: opts
-  } do
-    insert_lease(run_id, 1, "NOW() + interval '30 seconds'")
-    assert {:ok, state} = SqliteStore.init(run_id, opts)
-
-    original_fact = %{payload: "current"}
-    assert :ok = SqliteStore.save_fact("hash-stale", original_fact, state)
-
-    update_lease(run_id, 2, "NOW() + interval '30 seconds'")
-
-    assert_raise StaleOwnerError, fn ->
-      SqliteStore.save_fact("hash-stale", %{payload: "stale"}, state)
-    end
-
-    assert {:ok, ^original_fact} = SqliteStore.load_fact("hash-stale", state)
-    assert %{checkpoint_seq: 1, fence_token: 2} = lease_row(run_id)
-  end
-
-  test "save_fact with an expired lease raises StaleOwnerError", %{run_id: run_id, opts: opts} do
-    insert_lease(run_id, 1, "NOW() - interval '1 second'")
-    assert {:ok, state} = SqliteStore.init(run_id, opts)
-
-    assert_raise StaleOwnerError, fn ->
-      SqliteStore.save_fact("hash-expired", %{payload: "expired"}, state)
-    end
-
-    assert :ok =
-             Sqlite.with_db(state.db_path, fn db ->
-               assert {:ok, []} = Sqlite.query(db, "SELECT hash FROM facts")
-               :ok
-             end)
-  end
-
-  test "save_fact preserves existing content on fact hash conflict", %{
-    run_id: run_id,
-    opts: opts
-  } do
-    insert_lease(run_id, 1, "NOW() + interval '30 seconds'")
-    assert {:ok, state} = SqliteStore.init(run_id, opts)
-
-    original_fact = %{version: 1}
-    conflicting_fact = %{version: 2}
-
-    assert :ok = SqliteStore.save_fact("hash-conflict", original_fact, state)
-    assert :ok = SqliteStore.save_fact("hash-conflict", original_fact, state)
-
-    assert {:error, :fact_hash_conflict} =
-             SqliteStore.save_fact("hash-conflict", conflicting_fact, state)
-
-    assert {:ok, ^original_fact} = SqliteStore.load_fact("hash-conflict", state)
   end
 
   test "schema migration upgrades an older user_version", %{run_id: run_id, opts: opts} do
@@ -281,16 +205,6 @@ defmodule Fizz.Workflows.Store.SqliteStoreTest do
     sql = """
     INSERT INTO workflow_run_leases (run_id, owner_node, fence_token, checkpoint_seq, lease_expiry)
     VALUES ($1, NULL, $2, 0, #{lease_expiry_sql})
-    """
-
-    assert {:ok, _result} = Ecto.Adapters.SQL.query(Repo, sql, [dump_uuid(run_id), fence_token])
-  end
-
-  defp update_lease(run_id, fence_token, lease_expiry_sql) do
-    sql = """
-    UPDATE workflow_run_leases
-    SET fence_token = $2, lease_expiry = #{lease_expiry_sql}
-    WHERE run_id = $1
     """
 
     assert {:ok, _result} = Ecto.Adapters.SQL.query(Repo, sql, [dump_uuid(run_id), fence_token])

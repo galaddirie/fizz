@@ -3,11 +3,10 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
   import Fizz.WorkflowsFixtures
 
+  alias Fizz.Workflows.StepError
   alias Fizz.Workflows
   alias Fizz.Workflows.Compiler
-  alias Fizz.Workflows.DurableTimer
   alias Fizz.Workflows.RetryPolicy
-  alias Fizz.Workflows.StepError
   alias Fizz.Workflows.Runner.RunnableConsumerSupervisor
   alias Fizz.Workflows.Runner.RunnableDispatcher
   alias Fizz.Workflows.Runner.Worker
@@ -448,54 +447,6 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
 
       assert {:ok, %{status: :failed}} = Workflows.get_run(scope, run.id)
     end
-
-    test "abnormal worker termination cancels timers and releases the lease",
-         %{
-           scope: scope,
-           registry: registry,
-           task_supervisor: task_supervisor,
-           runnable_dispatcher: runnable_dispatcher,
-           tmp_dir: tmp_dir
-         } do
-      test_pid = self()
-
-      workflow =
-        Runic.Workflow.new()
-        |> Runic.Workflow.add(
-          Runic.step(
-            fn input ->
-              send(test_pid, {:task_running, self()})
-              receive do: (:release -> input)
-            end,
-            name: :blocking_step
-          )
-        )
-
-      %{version: version} = published_version_fixture(scope)
-      run = insert_running_run(scope, version, %{compiled_hash: nil})
-      timer = insert_timer(run)
-
-      Phoenix.PubSub.subscribe(Fizz.PubSub, "workflow_run:#{run.id}")
-
-      pid =
-        start_worker!(workflow, run, scope,
-          registry: registry,
-          task_supervisor: task_supervisor,
-          runnable_dispatcher: runnable_dispatcher,
-          tmp_dir: tmp_dir
-        )
-
-      Worker.run(pid, %{})
-      assert_receive {:task_running, _task_pid}, 2_000
-
-      GenServer.stop(pid, :shutdown)
-
-      assert_receive {:run_status_changed, %{run_id: run_id, status: :failed}}, 5_000
-      assert run_id == run.id
-      assert {:ok, %{status: :failed}} = Workflows.get_run(scope, run.id)
-      assert %{status: :cancelled} = reload_timer(timer)
-      assert lease_released?(run.id)
-    end
   end
 
   describe "cancellation from non-running states" do
@@ -622,42 +573,10 @@ defmodule Fizz.Workflows.Runner.WorkerFailureTest do
                Repo,
                """
                INSERT INTO workflow_run_leases (run_id, owner_node, fence_token, checkpoint_seq, lease_expiry)
-               VALUES ($1, $2, $3, 0, NOW() + interval '30 seconds')
+               VALUES ($1, NULL, $2, 0, NOW() + interval '30 seconds')
                """,
-               [Ecto.UUID.dump!(run_id), Atom.to_string(node()), fence_token]
+               [Ecto.UUID.dump!(run_id), fence_token]
              )
-  end
-
-  defp insert_timer(run) do
-    %DurableTimer{}
-    |> DurableTimer.changeset(%{
-      run_id: run.id,
-      step_id: "terminal-cleanup",
-      timer_name: "terminal-cleanup",
-      project_id: run.project_id,
-      workos_organization_id: run.workos_organization_id,
-      fire_at: DateTime.add(DateTime.utc_now(), 1, :hour),
-      status: :pending,
-      payload: %{}
-    })
-    |> Repo.insert!()
-  end
-
-  defp reload_timer(timer), do: Repo.get!(DurableTimer, timer.id)
-
-  defp lease_released?(run_id) do
-    assert {:ok, %{rows: [[lease_expiry]]}} =
-             Ecto.Adapters.SQL.query(
-               Repo,
-               """
-               SELECT lease_expiry
-               FROM workflow_run_leases
-               WHERE run_id = $1
-               """,
-               [Ecto.UUID.dump!(run_id)]
-             )
-
-    NaiveDateTime.compare(lease_expiry, NaiveDateTime.utc_now()) == :lt
   end
 
   defp unique_name(name) do

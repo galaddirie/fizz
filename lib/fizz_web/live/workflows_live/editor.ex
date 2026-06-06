@@ -13,14 +13,15 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   alias Fizz.Workflows.StepExecutor, as: StepExecutorBehaviour
   alias Fizz.Workflows.Compiler
   alias Fizz.Workflows.DraftValidator
+  alias Fizz.Workflows.DraftSession
+  alias Fizz.Workflows.DraftSession.Operation
   alias Fizz.Workflows.Expressions
   alias Fizz.Workflows.Readiness
   alias Fizz.Workflows.WorkflowDefinition
   alias Fizz.Workflows.WorkflowDefinitionVersion
   alias Fizz.Workflows.WorkflowRun
-  alias Fizz.Workflows.Embeds.{Step, StepGroup}
+  alias Fizz.Workflows.Embeds.{Connection, Step, StepGroup}
   alias FizzWeb.Presence
-  alias FizzWeb.WorkflowsLive.Payload
   alias Phoenix.Socket.Broadcast
 
   @preview_debounce_ms 300
@@ -55,7 +56,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :workflow, workflow_payload(assigns))
+    assigns = assign(assigns, :workflow, workflow_prop(assigns))
 
     ~H"""
     <%= if @workflow do %>
@@ -352,8 +353,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       |> assign(:page_title, definition.name || "Workflow Editor")
       |> assign(:definition, definition)
       |> assign(:draft, draft)
-      |> assign(:step_types, Enum.map(step_types, &Payload.step_type/1))
-      |> assign(:node_library_items, Enum.map(step_types, &Payload.node_library_item/1))
+      |> assign(:step_types, Enum.map(step_types, &encode_step_type/1))
+      |> assign(:node_library_items, Enum.map(step_types, &encode_node_library_item/1))
       |> assign(:collab_seq, seq)
       |> assign(:presences, presences)
       |> assign(:editor_state, Map.put(editor_state, :workflow_id, definition.id))
@@ -405,8 +406,8 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       run_topic = run_topic(run_id)
 
       with {:ok, joined_draft, seq, undo_state, editor_state} <-
-             Workflows.join_draft_session(draft.id, scope, user_id),
-           {:ok, persistence} <- Workflows.get_draft_persistence_state(draft.id),
+             DraftSession.join(draft.id, scope, user_id),
+           {:ok, persistence} <- DraftSession.get_persistence_state(draft.id),
            :ok <- Phoenix.PubSub.subscribe(Fizz.PubSub, draft_topic),
            :ok <- maybe_subscribe_to_run_topic(run_topic) do
         updated_socket =
@@ -445,7 +446,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp load_execution(scope, run_id, :debug) when is_binary(run_id) do
     with {:ok, run} <- Workflows.get_run(scope, run_id),
          {:ok, step_executions} <- Workflows.list_run_step_executions(scope, run_id) do
-      {:ok, Payload.execution(run), step_executions, run_id}
+      {:ok, encode_execution(run), step_executions, run_id}
     else
       {:error, reason} -> {:error, reason}
     end
@@ -453,7 +454,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp apply_structural_operation(socket, type, payload) do
     with {:ok, draft, seq, undo_state} <-
-           Workflows.apply_draft_operation(
+           DraftSession.apply_operation(
              socket.assigns.draft.id,
              socket.assigns.current_user_id,
              %{
@@ -473,7 +474,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp undo_operation(socket) do
-    case Workflows.undo_draft_operation(socket.assigns.draft.id, socket.assigns.current_user_id) do
+    case DraftSession.undo(socket.assigns.draft.id, socket.assigns.current_user_id) do
       {:ok, draft, seq, undo_state} ->
         socket
         |> assign_draft_state(draft, seq, undo_state)
@@ -487,7 +488,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp redo_operation(socket) do
-    case Workflows.redo_draft_operation(socket.assigns.draft.id, socket.assigns.current_user_id) do
+    case DraftSession.redo(socket.assigns.draft.id, socket.assigns.current_user_id) do
       {:ok, draft, seq, undo_state} ->
         socket
         |> assign_draft_state(draft, seq, undo_state)
@@ -501,7 +502,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp persist_draft(socket) do
-    case Workflows.persist_draft_now(socket.assigns.draft.id) do
+    case DraftSession.persist_now(socket.assigns.draft.id) do
       {:ok, draft, seq} ->
         socket
         |> assign(:draft, draft)
@@ -535,13 +536,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
       {:error, errors} ->
         socket
-        |> assign(
-          :validation_errors,
-          Payload.validation_error_map(errors, @global_validation_key)
-        )
+        |> assign(:validation_errors, validation_error_map(errors))
         |> push_event("workflow:validation_result", %{
           valid: false,
-          validation_errors: Payload.validation_errors(errors),
+          validation_errors: Enum.map(errors, &encode_validation_error/1),
           trigger_impact: trigger_impact,
           execution_hash_changed: execution_hash_changed
         })
@@ -552,7 +550,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     version_id = socket.assigns.draft.id
     scope = socket.assigns.current_scope
 
-    with {:ok, draft, seq} <- Workflows.persist_draft_now(version_id),
+    with {:ok, draft, seq} <- DraftSession.persist_now(version_id),
          {:ok, persisted_draft} <- Workflows.get_version(scope, version_id) do
       trigger_impact = compute_trigger_impact(persisted_draft, scope)
 
@@ -591,13 +589,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
           |> assign(:collab_seq, seq)
           |> assign(:save_status, "saved")
           |> assign(:save_error, nil)
-          |> assign(
-            :validation_errors,
-            Payload.validation_error_map(errors, @global_validation_key)
-          )
+          |> assign(:validation_errors, validation_error_map(errors))
           |> push_event("workflow:publish_result", %{
             success: false,
-            validation_errors: Payload.validation_errors(errors),
+            validation_errors: Enum.map(errors, &encode_validation_error/1),
             trigger_impact: trigger_impact,
             execution_hash_changed: execution_hash_changed
           })
@@ -680,7 +675,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp run_editor_execution(socket, target_step_id) do
-    with {:ok, draft, seq} <- Workflows.persist_draft_now(socket.assigns.draft.id),
+    with {:ok, draft, seq} <- DraftSession.persist_now(socket.assigns.draft.id),
          {:ok, execution_draft} <- editor_execution_draft(draft, target_step_id) do
       socket =
         socket
@@ -783,11 +778,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp handle_run_validation_errors(socket, errors) do
-    assign(
-      socket,
-      :validation_errors,
-      Payload.validation_error_map(errors, @global_validation_key)
-    )
+    assign(socket, :validation_errors, validation_error_map(errors))
   end
 
   defp handle_compilation_errors(socket, errors) do
@@ -904,7 +895,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       false ->
         case Workflows.cancel_run(socket.assigns.current_scope, run_id) do
           {:ok, cancelled_run} ->
-            assign(socket, :execution, Payload.execution(cancelled_run))
+            assign(socket, :execution, encode_execution(cancelled_run))
 
           {:error, _reason} ->
             socket
@@ -1044,7 +1035,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       output_data =
         Map.get(payload, "output_data", Map.get(payload, :output_data))
 
-      case Workflows.pin_draft_step_output(socket.assigns.draft.id, step_id, output_data) do
+      case DraftSession.pin_output(socket.assigns.draft.id, step_id, output_data) do
         {:ok, editor_state} -> merge_editor_state(socket, editor_state)
         {:error, _reason} -> socket
       end
@@ -1057,7 +1048,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
 
     if is_binary(step_id) do
-      case Workflows.unpin_draft_step_output(socket.assigns.draft.id, step_id) do
+      case DraftSession.unpin_output(socket.assigns.draft.id, step_id) do
         {:ok, editor_state} -> merge_editor_state(socket, editor_state)
         {:error, _reason} -> socket
       end
@@ -1070,7 +1061,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
 
     if is_binary(step_id) do
-      case Workflows.disable_draft_step(socket.assigns.draft.id, step_id) do
+      case DraftSession.disable_step(socket.assigns.draft.id, step_id) do
         {:ok, editor_state} -> merge_editor_state(socket, editor_state)
         {:error, _reason} -> socket
       end
@@ -1083,7 +1074,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     step_id = Map.get(payload, "step_id") || Map.get(payload, :step_id)
 
     if is_binary(step_id) do
-      case Workflows.enable_draft_step(socket.assigns.draft.id, step_id) do
+      case DraftSession.enable_step(socket.assigns.draft.id, step_id) do
         {:ok, editor_state} -> merge_editor_state(socket, editor_state)
         {:error, _reason} -> socket
       end
@@ -1101,7 +1092,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   end
 
   defp refresh_draft_state(socket) do
-    case Workflows.get_draft_snapshot(socket.assigns.draft.id, socket.assigns.current_user_id) do
+    case DraftSession.snapshot(socket.assigns.draft.id, socket.assigns.current_user_id) do
       {:ok,
        %{
          draft: draft,
@@ -1128,7 +1119,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
          %{operation: operation}
        )
        when seq == socket.assigns.collab_seq + 1 do
-    case Workflows.apply_draft_operation_to_snapshot(socket.assigns.draft, operation) do
+    case Operation.apply(socket.assigns.draft, operation) do
       {:ok, draft, _inverse_operation} ->
         socket
         |> assign(:draft, draft)
@@ -1160,7 +1151,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp assign_save_status(socket, _persistence), do: socket
 
   defp refresh_undo_state(socket) do
-    case Workflows.get_draft_undo_state(socket.assigns.draft.id, socket.assigns.current_user_id) do
+    case DraftSession.get_undo_state(socket.assigns.draft.id, socket.assigns.current_user_id) do
       {:ok, undo_state} ->
         assign(socket, :undo_state, undo_state)
 
@@ -1208,7 +1199,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp load_execution_snapshot(scope, run_id) when is_binary(run_id) do
     with {:ok, run} <- Workflows.get_run(scope, run_id),
          {:ok, step_executions} <- Workflows.list_run_step_executions(scope, run_id) do
-      {:ok, Payload.execution(run), step_executions}
+      {:ok, encode_execution(run), step_executions}
     end
   end
 
@@ -1216,7 +1207,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
          %{assigns: %{execution: nil}} = socket,
          %WorkflowRun{} = run
        ) do
-    assign(socket, :execution, Payload.execution(run))
+    assign(socket, :execution, encode_execution(run))
   end
 
   defp maybe_assign_started_execution(socket, _run), do: socket
@@ -1293,14 +1284,14 @@ defmodule FizzWeb.WorkflowsLive.Editor do
        when is_map(execution) do
     completed_at =
       if terminal_status?(status) do
-        Payload.datetime(Map.get(payload, :timestamp) || Map.get(payload, "timestamp"))
+        encode_datetime(Map.get(payload, :timestamp) || Map.get(payload, "timestamp"))
       else
         nil
       end
 
     execution =
       execution
-      |> Map.put(:status, Payload.execution_status(status))
+      |> Map.put(:status, encode_execution_status(status))
       |> maybe_put(:completed_at, completed_at)
 
     assign(socket, :execution, execution)
@@ -1322,7 +1313,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       step_executions =
         Enum.map(socket.assigns.step_executions, fn step_exec ->
           if step_exec.status in ["running", "pending"] do
-            %{step_exec | status: "cancelled", completed_at: Payload.datetime(DateTime.utc_now())}
+            %{step_exec | status: "cancelled", completed_at: encode_datetime(DateTime.utc_now())}
           else
             step_exec
           end
@@ -1339,9 +1330,9 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       base_step_execution(socket, payload)
       |> Map.put(:status, "running")
       |> Map.put(:input_data, payload_value(payload, "input"))
-      |> Map.put(:queued_at, Payload.datetime(payload_value(payload, "started_at")))
-      |> Map.put(:started_at, Payload.datetime(payload_value(payload, "started_at")))
-      |> Map.put(:inserted_at, Payload.datetime(payload_value(payload, "started_at")))
+      |> Map.put(:queued_at, encode_datetime(payload_value(payload, "started_at")))
+      |> Map.put(:started_at, encode_datetime(payload_value(payload, "started_at")))
+      |> Map.put(:inserted_at, encode_datetime(payload_value(payload, "started_at")))
       |> put_step_execution_metadata(%{
         input_fact_hash: payload_value(payload, "input_fact_hash"),
         output_fact_hash: nil,
@@ -1366,7 +1357,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
         payload_value(payload, "output_item_count") || output_item_count(output)
       )
       |> Map.put(:duration_us, payload_value(payload, "duration_us"))
-      |> Map.put(:completed_at, Payload.datetime(payload_value(payload, "completed_at")))
+      |> Map.put(:completed_at, encode_datetime(payload_value(payload, "completed_at")))
       |> put_step_execution_metadata(%{
         input_fact_hash: payload_value(payload, "input_fact_hash"),
         output_fact_hash: payload_value(payload, "output_fact_hash"),
@@ -1385,7 +1376,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       |> Map.put(:input_data, existing_or_payload(step_executions, payload, :input_data, "input"))
       |> Map.put(:error, payload_value(payload, "error"))
       |> Map.put(:duration_us, payload_value(payload, "duration_us"))
-      |> Map.put(:completed_at, Payload.datetime(payload_value(payload, "failed_at")))
+      |> Map.put(:completed_at, encode_datetime(payload_value(payload, "failed_at")))
       |> put_step_execution_metadata(%{
         input_fact_hash: payload_value(payload, "input_fact_hash"),
         output_fact_hash: nil,
@@ -1398,7 +1389,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp upsert_step_cancelled(step_executions, payload) do
     runnable_id = payload_value(payload, "runnable_id")
     run_id = payload_value(payload, "run_id")
-    cancelled_at = Payload.datetime(payload_value(payload, "cancelled_at"))
+    cancelled_at = encode_datetime(payload_value(payload, "cancelled_at"))
 
     Enum.map(step_executions, fn step_exec ->
       if String.starts_with?(step_exec.id, "#{run_id}:#{runnable_id}:") do
@@ -1411,7 +1402,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
 
   defp base_step_execution(socket, payload) do
     step_id = payload_value(payload, "step_id")
-    started_at = Payload.datetime(payload_value(payload, "started_at"))
+    started_at = encode_datetime(payload_value(payload, "started_at"))
     step_execution_id = step_execution_id(payload)
 
     %{
@@ -1433,7 +1424,7 @@ defmodule FizzWeb.WorkflowsLive.Editor do
       started_at: started_at,
       completed_at: nil,
       metadata: %{},
-      inserted_at: started_at || Payload.datetime(DateTime.utc_now())
+      inserted_at: started_at || encode_datetime(DateTime.utc_now())
     }
   end
 
@@ -1607,19 +1598,19 @@ defmodule FizzWeb.WorkflowsLive.Editor do
        })
        when is_binary(version_id) and is_binary(user_id) do
     maybe_persist_before_leave(version_id, user_id)
-    _ = Workflows.leave_draft_session(version_id, user_id)
+    _ = DraftSession.leave(version_id, user_id)
     :ok
   end
 
   defp maybe_leave_draft_session(_socket), do: :ok
 
   defp maybe_persist_before_leave(version_id, _user_id) do
-    case Workflows.get_draft_persistence_state(version_id) do
+    case DraftSession.get_persistence_state(version_id) do
       {:ok, %{status: :saved}} ->
         :ok
 
       {:ok, _persistence} ->
-        _ = Workflows.persist_draft_now(version_id)
+        _ = DraftSession.persist_now(version_id)
         :ok
 
       {:error, _reason} ->
@@ -1633,18 +1624,211 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     |> redirect(to: to)
   end
 
-  defp workflow_payload(assigns) do
+  defp workflow_prop(assigns) do
     definition = Map.get(assigns, :definition)
     draft = Map.get(assigns, :draft)
 
     case {definition, draft} do
       {%WorkflowDefinition{} = definition, %WorkflowDefinitionVersion{} = draft} ->
-        Payload.workflow(definition, draft, Map.get(assigns, :project_name))
+        %{
+          id: definition.id,
+          project_id: definition.project_id,
+          name: definition.name,
+          description: definition.description,
+          created_by_user_id: definition.created_by_user_id,
+          archived_at: encode_datetime(definition.archived_at),
+          latest_version: latest_version(definition, draft),
+          published_version_id: published_version_id(definition),
+          inserted_at: encode_datetime(definition.inserted_at),
+          updated_at: encode_datetime(definition.updated_at),
+          draft: encode_draft(draft),
+          project: %{name: Map.get(assigns, :project_name)}
+        }
 
       _ ->
         nil
     end
   end
+
+  defp latest_version(
+         %WorkflowDefinition{versions: versions},
+         %WorkflowDefinitionVersion{} = draft
+       )
+       when is_list(versions) do
+    versions
+    |> Enum.map(& &1.version)
+    |> List.insert_at(0, draft.version)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.max(fn -> nil end)
+  end
+
+  defp latest_version(_definition, %WorkflowDefinitionVersion{version: version}), do: version
+  defp latest_version(_definition, _draft), do: nil
+
+  defp published_version_id(%WorkflowDefinition{versions: versions}) when is_list(versions) do
+    versions
+    |> Enum.filter(&(&1.status == :published))
+    |> Enum.max_by(& &1.version, fn -> nil end)
+    |> case do
+      %WorkflowDefinitionVersion{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  defp published_version_id(_definition), do: nil
+
+  defp encode_draft(%WorkflowDefinitionVersion{} = draft) do
+    %{
+      id: draft.id,
+      workflow_definition_id: draft.workflow_definition_id,
+      version: draft.version,
+      status: encode_version_status(draft.status),
+      steps: Enum.map(draft.steps, &encode_step/1),
+      connections: Enum.map(draft.connections, &encode_connection/1),
+      step_groups: Enum.map(draft.step_groups, &encode_group/1),
+      settings: draft.settings || %{},
+      viewport: draft.viewport || %{},
+      compiled_hash: draft.compiled_hash,
+      published_at: encode_datetime(draft.published_at),
+      published_by_user_id: draft.published_by_user_id,
+      inserted_at: encode_datetime(draft.inserted_at),
+      updated_at: encode_datetime(draft.updated_at)
+    }
+  end
+
+  defp encode_version_status(status) when is_atom(status), do: Atom.to_string(status)
+  defp encode_version_status(status) when is_binary(status), do: status
+
+  defp encode_step(%Step{} = step) do
+    %{
+      id: step.id,
+      type_id: step.type_id,
+      name: step.name,
+      config: step.config || %{},
+      position: step.position || %{},
+      notes: step.notes
+    }
+  end
+
+  defp encode_connection(%Connection{} = connection) do
+    %{
+      id: connection.id,
+      source_step_id: connection.source_step_id,
+      source_output: connection.source_output,
+      target_step_id: connection.target_step_id,
+      target_input: connection.target_input
+    }
+  end
+
+  defp encode_group(%StepGroup{} = group) do
+    %{
+      id: group.id,
+      name: group.name,
+      step_ids: group.step_ids || [],
+      position: group.position || %{},
+      color: group.color,
+      font_size: group.font_size,
+      collapsed: group.collapsed
+    }
+  end
+
+  defp encode_step_type(%StepType{} = type) do
+    %{
+      id: type.id,
+      name: type.name,
+      description: type.description,
+      category: type.category,
+      icon: type.icon,
+      step_kind: Atom.to_string(type.step_kind),
+      config_schema: type.config_schema || %{},
+      input_schema: type.input_schema || %{},
+      output_schema: type.output_schema || %{}
+    }
+  end
+
+  defp encode_node_library_item(%StepType{} = type) do
+    %{
+      type_id: type.id,
+      name: type.name,
+      description: type.description,
+      icon: type.icon,
+      category: type.category,
+      step_kind: Atom.to_string(type.step_kind),
+      input_schema: type.input_schema || %{},
+      output_schema: type.output_schema || %{}
+    }
+  end
+
+  defp encode_execution(%WorkflowRun{} = run) do
+    %{
+      id: run.id,
+      workflow_definition_id: run.workflow_definition_id,
+      workflow_definition_version_id: run.workflow_definition_version_id,
+      project_id: run.project_id,
+      status: encode_execution_status(run.status),
+      trigger: %{
+        type: trigger_type(run.triggered_by),
+        data: run.triggered_by || %{}
+      },
+      triggered_by: run.triggered_by || %{},
+      input: run.input || %{},
+      output: run.output,
+      error: encode_execution_error(run.error),
+      metadata: %{},
+      compiled_hash: run.compiled_hash,
+      triggered_by_user_id: triggered_by_user_id(run.triggered_by),
+      started_at: encode_datetime(run.started_at),
+      completed_at: encode_datetime(run.completed_at),
+      inserted_at: encode_datetime(run.inserted_at),
+      updated_at: encode_datetime(run.updated_at)
+    }
+  end
+
+  defp encode_execution_status(:pending), do: "pending"
+  defp encode_execution_status(:running), do: "running"
+  defp encode_execution_status(:sleeping), do: "paused"
+  defp encode_execution_status(:passivated), do: "paused"
+  defp encode_execution_status(:completed), do: "completed"
+  defp encode_execution_status(:failed), do: "failed"
+  defp encode_execution_status(:cancelled), do: "cancelled"
+  defp encode_execution_status(:continued), do: "completed"
+  defp encode_execution_status(status) when is_binary(status), do: status
+  defp encode_execution_status(status), do: Atom.to_string(status)
+
+  defp trigger_type(%{} = triggered_by) do
+    Map.get(triggered_by, :type) ||
+      Map.get(triggered_by, "type") ||
+      Map.get(triggered_by, :kind) ||
+      Map.get(triggered_by, "kind") ||
+      "manual"
+  end
+
+  defp trigger_type(_triggered_by), do: "manual"
+
+  defp triggered_by_user_id(%{} = triggered_by) do
+    Map.get(triggered_by, :user_id) || Map.get(triggered_by, "user_id")
+  end
+
+  defp triggered_by_user_id(_triggered_by), do: nil
+
+  defp encode_execution_error(nil), do: nil
+
+  defp encode_execution_error(%{} = error) do
+    %{
+      type: Map.get(error, :type) || Map.get(error, "type") || "runtime_error",
+      message: Map.get(error, :message) || Map.get(error, "message") || inspect(error),
+      details: error
+    }
+  end
+
+  defp encode_execution_error(error) do
+    %{type: "runtime_error", message: inspect(error), details: %{}}
+  end
+
+  defp encode_datetime(nil), do: nil
+  defp encode_datetime(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp encode_datetime(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp encode_datetime(value), do: value
 
   defp initial_editor_state(workflow_id) do
     %{
@@ -2146,6 +2330,20 @@ defmodule FizzWeb.WorkflowsLive.Editor do
   defp encode_save_status(status) when is_binary(status), do: status
   defp encode_save_status(_status), do: "saved"
 
+  defp encode_validation_error(%DraftValidator.ValidationError{} = error) do
+    %{
+      step_id: error.step_id,
+      field: error.field,
+      message: error.message,
+      severity: Atom.to_string(error.severity),
+      code: Atom.to_string(error.code)
+    }
+  end
+
+  defp validation_error_map(errors) do
+    Enum.group_by(errors, fn error -> error.step_id || @global_validation_key end, & &1)
+  end
+
   defp credential_declaration_validation_errors(issues) do
     Enum.map(issues, fn issue ->
       %DraftValidator.ValidationError{
@@ -2167,13 +2365,10 @@ defmodule FizzWeb.WorkflowsLive.Editor do
     case DraftValidator.validate_for_publish(draft, scope) do
       {:error, errors} ->
         socket
-        |> assign(
-          :validation_errors,
-          Payload.validation_error_map(errors, @global_validation_key)
-        )
+        |> assign(:validation_errors, validation_error_map(errors))
         |> push_event("workflow:publish_result", %{
           success: false,
-          validation_errors: Payload.validation_errors(errors),
+          validation_errors: Enum.map(errors, &encode_validation_error/1),
           trigger_impact: trigger_impact,
           execution_hash_changed: execution_hash_changed
         })

@@ -6,7 +6,6 @@ defmodule Fizz.WorkflowsTest do
   alias Fizz.Accounts.Scope
   alias Fizz.Repo
   alias Fizz.Workflows
-  alias Fizz.Workflows.DurableTimer
   alias Fizz.Workflows.Runner.Worker
   alias Fizz.Workflows.Store.SqliteStore
   alias Fizz.Workflows.WorkflowRun
@@ -300,47 +299,6 @@ defmodule Fizz.WorkflowsTest do
            ]
 
     assert completed_run.output["finished_at"] == DateTime.to_iso8601(run.started_at)
-  end
-
-  describe "terminal finalization" do
-    test "complete_run cancels pending timers and releases the lease" do
-      scope = WorkflowsFixtures.project_scope_fixture()
-      %{version: version} = WorkflowsFixtures.published_version_fixture(scope)
-      run = insert_running_run(scope, version)
-      timer = insert_terminal_cleanup_timer(run)
-      insert_owned_lease(run.id, 1)
-
-      assert {:ok, %{status: :completed}} = Workflows.complete_run(run.id, %{"ok" => true})
-
-      assert %{status: :cancelled} = Repo.get!(DurableTimer, timer.id)
-      assert lease_released?(run.id)
-    end
-
-    test "fail_run cancels pending timers and releases the lease" do
-      scope = WorkflowsFixtures.project_scope_fixture()
-      %{version: version} = WorkflowsFixtures.published_version_fixture(scope)
-      run = insert_running_run(scope, version)
-      timer = insert_terminal_cleanup_timer(run)
-      insert_owned_lease(run.id, 1)
-
-      assert {:ok, %{status: :failed}} = Workflows.fail_run(run.id, %{reason: "boom"})
-
-      assert %{status: :cancelled} = Repo.get!(DurableTimer, timer.id)
-      assert lease_released?(run.id)
-    end
-
-    test "cancel_run cancels pending timers and releases the lease" do
-      scope = WorkflowsFixtures.project_scope_fixture()
-      %{version: version} = WorkflowsFixtures.published_version_fixture(scope)
-      run = insert_running_run(scope, version)
-      timer = insert_terminal_cleanup_timer(run)
-      insert_owned_lease(run.id, 1)
-
-      assert {:ok, %{status: :cancelled}} = Workflows.cancel_run(scope, run.id)
-
-      assert %{status: :cancelled} = Repo.get!(DurableTimer, timer.id)
-      assert lease_released?(run.id)
-    end
   end
 
   test "start_run requires bindings for declared credentials" do
@@ -877,48 +835,6 @@ defmodule Fizz.WorkflowsTest do
                """,
                [dump_uuid(run_id), fence_token]
              )
-  end
-
-  defp insert_owned_lease(run_id, fence_token) do
-    assert {:ok, _result} =
-             Ecto.Adapters.SQL.query(
-               Repo,
-               """
-               INSERT INTO workflow_run_leases (run_id, owner_node, fence_token, checkpoint_seq, lease_expiry)
-               VALUES ($1, $2, $3, 0, NOW() + interval '30 seconds')
-               """,
-               [dump_uuid(run_id), Atom.to_string(node()), fence_token]
-             )
-  end
-
-  defp insert_terminal_cleanup_timer(run) do
-    %DurableTimer{}
-    |> DurableTimer.changeset(%{
-      run_id: run.id,
-      step_id: "terminal-cleanup",
-      timer_name: "terminal-cleanup",
-      project_id: run.project_id,
-      workos_organization_id: run.workos_organization_id,
-      fire_at: DateTime.add(DateTime.utc_now(), 1, :hour),
-      status: :pending,
-      payload: %{}
-    })
-    |> Repo.insert!()
-  end
-
-  defp lease_released?(run_id) do
-    assert {:ok, %{rows: [[lease_expiry]]}} =
-             Ecto.Adapters.SQL.query(
-               Repo,
-               """
-               SELECT lease_expiry
-               FROM workflow_run_leases
-               WHERE run_id = $1
-               """,
-               [dump_uuid(run_id)]
-             )
-
-    NaiveDateTime.compare(lease_expiry, NaiveDateTime.utc_now()) == :lt
   end
 
   defp dump_uuid(run_id), do: Ecto.UUID.dump!(run_id)

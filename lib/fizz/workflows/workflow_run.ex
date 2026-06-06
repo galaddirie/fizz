@@ -18,9 +18,6 @@ defmodule Fizz.Workflows.WorkflowRun do
   @type t :: %__MODULE__{}
 
   @statuses ~w(pending running sleeping passivated completed failed cancelled continued)a
-  @status_by_string @statuses
-                    |> Enum.map(fn status -> {Atom.to_string(status), status} end)
-                    |> Map.new()
   @terminal_statuses ~w(completed failed cancelled continued)a
   @transition_graph %{
     pending: MapSet.new([:running, :cancelled]),
@@ -193,8 +190,10 @@ defmodule Fizz.Workflows.WorkflowRun do
     |> String.trim()
     |> case do
       "" -> :error
-      value -> Map.fetch(@status_by_string, value)
+      value -> value |> String.to_existing_atom() |> normalize_status()
     end
+  rescue
+    ArgumentError -> :error
   end
 
   defp normalize_status(_status), do: :error

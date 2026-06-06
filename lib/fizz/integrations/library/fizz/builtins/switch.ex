@@ -82,21 +82,21 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Switch do
     cases = Map.get(config, "cases", [])
     default_output = Map.get(config, "default_output", "default")
 
+    # Find matching case
+    matched_case =
+      Enum.find(cases, fn case_def ->
+        match_value = Map.get(case_def, "match")
+        normalize_for_match(value) == normalize_for_match(match_value)
+      end)
+
     output =
-      value
-      |> matched_branch(cases)
-      |> output_for_branch(cases, default_output)
+      case matched_case do
+        nil -> default_output
+        case_def -> Map.get(case_def, "output", "matched")
+      end
 
     # Return tagged output for routing
     {:ok, {:branch, output, input}}
-  end
-
-  @doc false
-  def matched_branch(value, cases) when is_list(cases) do
-    case Enum.find_index(cases, &case_matches?(&1, value)) do
-      nil -> :default
-      index -> {:case, index}
-    end
   end
 
   @impl true
@@ -128,19 +128,6 @@ defmodule Fizz.Integrations.Library.Fizz.Builtins.Switch do
   # ===========================================================================
   # Private Helpers
   # ===========================================================================
-
-  defp output_for_branch(:default, _cases, default_output), do: default_output
-
-  defp output_for_branch({:case, index}, cases, _default_output) do
-    cases
-    |> Enum.at(index, %{})
-    |> Map.get("output", "matched")
-  end
-
-  defp case_matches?(case_def, value) do
-    match_value = Map.get(case_def, "match")
-    normalize_for_match(value) == normalize_for_match(match_value)
-  end
 
   defp validate_cases(cases, errors) do
     Enum.reduce(cases, {errors, 0}, fn case_def, {errs, idx} ->

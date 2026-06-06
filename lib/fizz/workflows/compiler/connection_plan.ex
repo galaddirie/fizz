@@ -18,8 +18,13 @@ defmodule Fizz.Workflows.Compiler.ConnectionPlan do
     end)
     |> case do
       {:ok, plan} ->
-        with :ok <- validate_dependency_inputs(ir, plan) do
-          {:ok, Map.put(ir, :connection_plan, plan)}
+        case validate_dependency_inputs(ir, plan) do
+          {:ok, required_dependencies} ->
+            plan = %{plan | required_dependencies: required_dependencies}
+            {:ok, Map.put(ir, :connection_plan, plan)}
+
+          {:error, errors} ->
+            {:error, errors}
         end
 
       {:error, errors} ->
@@ -30,7 +35,9 @@ defmodule Fizz.Workflows.Compiler.ConnectionPlan do
   defp initial_plan do
     %{
       connections: %{},
-      dependency_inputs_by_target: %{}
+      by_target_step: %{},
+      by_source_step: %{},
+      required_dependencies: %{}
     }
   end
 
@@ -145,47 +152,71 @@ defmodule Fizz.Workflows.Compiler.ConnectionPlan do
   defp add_connection(plan, planned_connection) do
     plan
     |> put_in([:connections, planned_connection.id], planned_connection)
-    |> update_dependency_inputs_by_target(planned_connection)
+    |> update_by_source_step(planned_connection)
+    |> update_by_target_step(planned_connection)
   end
 
-  defp update_dependency_inputs_by_target(plan, %{kind: :dependency} = planned_connection) do
-    dependency_inputs =
-      Map.get(plan.dependency_inputs_by_target, planned_connection.target_step_id, %{})
+  defp update_by_source_step(plan, planned_connection) do
+    update_in(plan, [:by_source_step, planned_connection.source_step_id], fn
+      nil -> [planned_connection.id]
+      connection_ids -> connection_ids ++ [planned_connection.id]
+    end)
+  end
 
-    connection_ids =
-      Map.get(dependency_inputs, planned_connection.target_input, []) ++ [planned_connection.id]
-
-    dependency_inputs =
-      Map.put(dependency_inputs, planned_connection.target_input, connection_ids)
+  defp update_by_target_step(plan, %{kind: :flow} = planned_connection) do
+    target_entry = Map.get(plan.by_target_step, planned_connection.target_step_id, %{})
+    connection_ids = Map.get(target_entry, :flow, []) ++ [planned_connection.id]
+    target_entry = Map.put(target_entry, :flow, connection_ids)
 
     %{
       plan
-      | dependency_inputs_by_target:
-          Map.put(
-            plan.dependency_inputs_by_target,
-            planned_connection.target_step_id,
-            dependency_inputs
-          )
+      | by_target_step:
+          Map.put(plan.by_target_step, planned_connection.target_step_id, target_entry)
     }
   end
 
-  defp update_dependency_inputs_by_target(plan, _planned_connection), do: plan
+  defp update_by_target_step(plan, %{kind: :dependency} = planned_connection) do
+    target_entry = Map.get(plan.by_target_step, planned_connection.target_step_id, %{})
+    dependencies = Map.get(target_entry, :dependencies, %{})
+
+    connection_ids =
+      Map.get(dependencies, planned_connection.target_input, []) ++ [planned_connection.id]
+
+    dependencies = Map.put(dependencies, planned_connection.target_input, connection_ids)
+    target_entry = Map.put(target_entry, :dependencies, dependencies)
+
+    %{
+      plan
+      | by_target_step:
+          Map.put(plan.by_target_step, planned_connection.target_step_id, target_entry)
+    }
+  end
 
   defp validate_dependency_inputs(ir, plan) do
-    errors =
-      Enum.flat_map(ir.steps, fn {step_id, step} ->
-        dependency_errors_for_step(step_id, step, plan)
+    {required_dependencies, errors} =
+      Enum.reduce(ir.steps, {%{}, []}, fn {step_id, step}, {required_acc, errors_acc} ->
+        {required, errors} = dependency_errors_for_step(step_id, step, plan)
+
+        {
+          Map.put(required_acc, step_id, required),
+          errors_acc ++ errors
+        }
       end)
 
     case errors do
-      [] -> :ok
+      [] -> {:ok, required_dependencies}
       _ -> {:error, errors}
     end
   end
 
   defp dependency_errors_for_step(step_id, step, plan) do
     incoming_dependencies =
-      Map.get(plan.dependency_inputs_by_target, step_id, %{})
+      plan
+      |> get_in([:by_target_step, step_id, :dependencies])
+      |> case do
+        nil -> %{}
+        dependencies -> dependencies
+      end
 
     handles =
       step
@@ -228,6 +259,6 @@ defmodule Fizz.Workflows.Compiler.ConnectionPlan do
         }
       end)
 
-    cardinality_errors ++ missing_errors
+    {required, cardinality_errors ++ missing_errors}
   end
 end

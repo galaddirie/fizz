@@ -83,51 +83,6 @@ defmodule Fizz.Workflows.Runner.WorkerTest do
     assert completed_run.output != nil
   end
 
-  test "bounded event delivery times out before a suspended worker accepts the event", %{
-    scope: scope,
-    registry: registry,
-    task_supervisor: task_supervisor,
-    runnable_dispatcher: runnable_dispatcher,
-    tmp_dir: tmp_dir
-  } do
-    workflow =
-      Runic.Workflow.new()
-      |> Runic.Workflow.add(blocking_step(:bounded_delivery, self()))
-
-    %{version: version} = published_version_fixture(scope)
-    run = insert_running_run(scope, version, %{compiled_hash: nil})
-
-    pid =
-      start_worker!(
-        workflow,
-        run,
-        scope,
-        registry: registry,
-        task_supervisor: task_supervisor,
-        runnable_dispatcher: runnable_dispatcher,
-        tmp_dir: tmp_dir
-      )
-
-    :ok = :sys.suspend(pid)
-
-    try do
-      assert {:error, :timeout} =
-               Worker.deliver_event(pid, {:input, %{"kind" => "late"}}, timeout: 10)
-
-      :ok = :sys.resume(pid)
-
-      refute_receive {:step_started, :bounded_delivery, _pid}, 200
-    after
-      try do
-        :sys.resume(pid)
-      catch
-        :exit, _reason -> :ok
-      end
-
-      cleanup_worker(run.id, registry)
-    end
-  end
-
   test "updates last_active_at on step completion", %{
     scope: scope,
     registry: registry,

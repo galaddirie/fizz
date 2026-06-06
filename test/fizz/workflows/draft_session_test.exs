@@ -968,6 +968,23 @@ defmodule Fizz.Workflows.DraftSessionTest do
     assert length(editor_state2.disabled_steps) == 1
   end
 
+  defp draft_fixture(scope, snapshot_attrs \\ nil) do
+    {:ok, %{definition: definition, draft: draft}} =
+      Workflows.create_definition(scope, %{
+        name: "Workflow #{System.unique_integer([:positive])}",
+        description: "Draft session"
+      })
+
+    case snapshot_attrs do
+      nil ->
+        %{definition: definition, draft: draft}
+
+      attrs ->
+        {:ok, saved_draft} = Workflows.save_draft(scope, draft, attrs)
+        %{definition: definition, draft: saved_draft}
+    end
+  end
+
   defp base_snapshot_attrs do
     entry_step =
       step(%{

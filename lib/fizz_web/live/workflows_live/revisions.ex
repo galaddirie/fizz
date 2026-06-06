@@ -5,6 +5,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
   alias Fizz.Accounts
   alias Fizz.Integrations.Steps.Registry, as: StepRegistry
   alias Fizz.Workflows
+  alias Fizz.Workflows.DraftSession
   alias Fizz.Workflows.WorkflowDefinitionVersion
   alias FizzWeb.WorkflowsLive.Payload
 
@@ -154,7 +155,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
   defp maybe_connect_draft_session(socket, scope, draft) do
     case connected?(socket) do
       true ->
-        case Workflows.join_draft_session(draft.id, scope, scope.user.id) do
+        case DraftSession.join(draft.id, scope, scope.user.id) do
           {:ok, joined_draft, _seq, undo_state, editor_state} ->
             {:ok, joined_draft, undo_state, editor_state, true}
 
@@ -196,7 +197,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
          {:ok, undo_entry} <- fetch_undo_entry(socket.assigns.undo_stack, depth),
          true <- socket.assigns.draft_session_joined?,
          {:ok, preview_draft} <-
-           Workflows.preview_draft_revision(
+           DraftSession.preview_revision(
              socket.assigns.current_draft.id,
              socket.assigns.current_user_id,
              {:undo, depth}
@@ -255,7 +256,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
           }
         }
 
-        case Workflows.apply_draft_operation(current_draft.id, current_user_id, operation) do
+        case DraftSession.apply_operation(current_draft.id, current_user_id, operation) do
           {:ok, updated_draft, _seq, undo_state} ->
             updated_socket =
               socket
@@ -299,7 +300,7 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
          version_id
        )
        when is_binary(current_user_id) and is_binary(version_id) do
-    Workflows.preview_draft_revision(current_draft.id, current_user_id, {:version, version_id})
+    DraftSession.preview_revision(current_draft.id, current_user_id, {:version, version_id})
   end
 
   defp load_version_revision(
@@ -404,19 +405,19 @@ defmodule FizzWeb.WorkflowsLive.Revisions do
        })
        when is_binary(version_id) and is_binary(user_id) do
     maybe_persist_before_leave(version_id)
-    _ = Workflows.leave_draft_session(version_id, user_id)
+    _ = DraftSession.leave(version_id, user_id)
     :ok
   end
 
   defp maybe_leave_draft_session(_socket), do: :ok
 
   defp maybe_persist_before_leave(version_id) do
-    case Workflows.get_draft_persistence_state(version_id) do
+    case DraftSession.get_persistence_state(version_id) do
       {:ok, %{status: :saved}} ->
         :ok
 
       {:ok, _persistence} ->
-        _ = Workflows.persist_draft_now(version_id)
+        _ = DraftSession.persist_now(version_id)
         :ok
 
       {:error, _reason} ->

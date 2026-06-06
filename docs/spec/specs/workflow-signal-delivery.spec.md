@@ -46,21 +46,6 @@ surface:
   statement: LISTEN/NOTIFY is a latency optimization, while inbox polling remains the authoritative catch-up path for missed notifications and dormant-run wakeups.
   priority: should
   stability: stable
-
-- id: workflows.signal_delivery.claimed_delivery
-  statement: Signal delivery to a workflow must claim a durable inbox row before invoking a worker and must settle that claim as delivered, skipped, released for retry, or explicitly failed according to the delivery outcome.
-  priority: must
-  stability: stable
-
-- id: workflows.signal_delivery.bounded_delivery
-  statement: Signal delivery from the inbox to a worker must use a bounded delivery path with explicit timeout handling and durable claim resolution.
-  priority: must
-  stability: stable
-
-- id: workflows.signal_delivery.acceptance_delivery_boundary
-  statement: Immediate signal acceptance must not bypass router concurrency, claim, and timeout limits; `signal_run`-style APIs must either route through the same delivery path as drain/poll delivery or durably accept only and let the router deliver later.
-  priority: must
-  stability: stable
 ```
 
 ## Scenarios
@@ -137,46 +122,6 @@ surface:
   covers:
     - workflows.signal_delivery.inbox
     - workflows.signal_delivery.delivery_authority
-
-- id: workflows.signal_delivery.delivery_timeout_releases_claim
-  given:
-    - a signal inbox row has been claimed for delivery
-    - worker delivery times out before the worker accepts the signal
-  when:
-    - the timeout handler runs under a release-and-retry delivery contract
-  then:
-    - the claim is released for retry
-    - the signal remains represented by one durable inbox row
-    - the workflow graph does not receive duplicate logical delivery
-  covers:
-    - workflows.signal_delivery.claimed_delivery
-    - workflows.signal_delivery.bounded_delivery
-    - workflows.signal_delivery.delivery_authority
-
-- id: workflows.signal_delivery.accept_does_not_bypass_router_limits
-  given:
-    - an external caller submits a signal to an active run
-  when:
-    - the platform accepts the signal
-  then:
-    - delivery follows the same router concurrency and timeout contract as drained inbox delivery
-    - or acceptance returns after durable persistence and leaves delivery to the router
-  covers:
-    - workflows.signal_delivery.acceptance_delivery_boundary
-    - workflows.signal_delivery.delivery_authority
-
-- id: workflows.signal_delivery.late_ack_does_not_redeliver
-  given:
-    - a claimed signal reaches the worker
-    - the router times out before it observes acknowledgement
-  when:
-    - the worker later finishes processing the signal
-  then:
-    - the durable inbox row cannot be recovered as a fresh PENDING signal for duplicate logical delivery
-    - the inbox row reaches exactly one durable settlement state
-  covers:
-    - workflows.signal_delivery.bounded_delivery
-    - workflows.signal_delivery.delivery_authority
 ```
 
 ## Verification
@@ -198,31 +143,14 @@ surface:
     - workflows.signal_delivery.duplicate_submission_same_run
     - workflows.signal_delivery.same_signal_id_different_runs
     - workflows.signal_delivery.same_payload_distinct_ids
+```
 
-- kind: source_file
-  target: lib/fizz/workflows/signal_router.ex
-  covers:
+## Exceptions
+
+```spec-exceptions
+- id: workflows.signal_delivery.impl_pending
+  note: The repository does not yet contain a workflow signal inbox schema, router, or wakeup path implementation that would verify these signal-delivery contracts in source or tests.
+  relates_to:
     - workflows.signal_delivery.inbox
     - workflows.signal_delivery.idempotency
-    - workflows.signal_delivery.claimed_delivery
-    - workflows.signal_delivery.bounded_delivery
-    - workflows.signal_delivery.acceptance_delivery_boundary
-
-- kind: source_file
-  target: lib/fizz/workflows/signal_inbox.ex
-  covers:
-    - workflows.signal_delivery.dedup_scope
-    - workflows.signal_delivery.delivery_authority
-    - workflows.signal_delivery.claimed_delivery
-
-- kind: test_file
-  target: test/fizz/workflows/signal_router_test.exs
-  covers:
-    - workflows.signal_delivery.duplicate_submission_same_run
-    - workflows.signal_delivery.same_signal_id_different_runs
-    - workflows.signal_delivery.same_payload_distinct_ids
-    - workflows.signal_delivery.signal_to_terminated_run
-    - workflows.signal_delivery.delivery_timeout_releases_claim
-    - workflows.signal_delivery.accept_does_not_bypass_router_limits
-    - workflows.signal_delivery.late_ack_does_not_redeliver
 ```

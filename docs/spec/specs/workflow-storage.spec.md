@@ -38,23 +38,8 @@ surface:
   priority: must
   stability: stable
 
-- id: workflows.storage.passivation_preserves_uncheckpointed_files
-  statement: Passivation may delete local SQLite, WAL, or SHM files only after the final checkpoint and WAL checkpoint have succeeded, or after an equivalent replication proof exists. If WAL checkpointing fails, local files must remain available for retry, local recovery, and operator inspection.
-  priority: must
-  stability: stable
-
 - id: workflows.storage.fact_level_persistence
-  statement: When hybrid or lazy rehydration is enabled for an execution, the store adapter must persist individual fact values keyed by content hash alongside the canonical full-log checkpoint — for example as a `facts(hash, value)` table in the per-execution SQLite file. The full-log checkpoint remains the canonical recovery path and integrity guarantee; the fact table is a supplementary index that enables `FactResolver.resolve/2` to load individual values without deserializing the entire log. Fact rows written as part of a checkpoint must be committed in the same SQLite transaction as the log blob; fact rows written through an explicit store call must share the same fenced write authorization as canonical checkpoint writes.
-  priority: must
-  stability: stable
-
-- id: workflows.storage.fact_hash_immutability
-  statement: A fact hash represents content identity. Once a fact row exists for a hash, later writes for the same hash must either confirm the same value or leave the existing row unchanged; stale owners must never be able to overwrite fact content by reusing a hash.
-  priority: must
-  stability: draft
-
-- id: workflows.storage.fenced_fact_writes
-  statement: Standalone fact persistence must require a current unexpired run lease and matching fence token before mutating the per-run SQLite `facts` table.
+  statement: When hybrid or lazy rehydration is enabled for an execution, the store adapter must persist individual fact values keyed by content hash alongside the canonical full-log checkpoint — for example as a `facts(hash, value)` table in the per-execution SQLite file. The full-log checkpoint remains the canonical recovery path and integrity guarantee; the fact table is a supplementary index that enables `FactResolver.resolve/2` to load individual values without deserializing the entire log. Fact rows are written during the same checkpoint transaction that writes the log blob, so they share the same durability properties as the checkpoint strategy in effect.
   priority: must
   stability: stable
 
@@ -112,21 +97,8 @@ surface:
     - the Postgres control plane is updated with PASSIVATED status and the lease is released
   covers:
     - workflows.storage.passivation_tiers
-    - workflows.storage.passivation_preserves_uncheckpointed_files
     - workflows.storage.litestream_replication
     - workflows.storage.litestream_directory_layout
-
-- id: workflows.storage.wal_checkpoint_failure_preserves_local_files
-  given:
-    - a run is selected for passivation
-    - the local SQLite file has WAL or SHM state that must be checkpointed before cold eviction
-  when:
-    - WAL checkpointing fails
-  then:
-    - local SQLite, WAL, and SHM files are not deleted
-    - the run remains recoverable from local storage
-  covers:
-    - workflows.storage.passivation_preserves_uncheckpointed_files
 
 - id: workflows.storage.cold_restore_from_s3
   given:
@@ -172,30 +144,6 @@ surface:
     - the workflow resumes normally on the upgraded schema
   covers:
     - workflows.storage.schema_versioning
-
-- id: workflows.storage.fenced_standalone_fact_write
-  given:
-    - a per-run SQLite store was opened by a worker with an old fence token
-    - another owner has acquired the run with a newer fence token
-  when:
-    - the old store attempts to save a standalone fact row
-  then:
-    - the write is rejected before the SQLite `facts` table changes
-    - later lazy fact resolution sees the value written by the current owner, if any
-  covers:
-    - workflows.storage.fact_level_persistence
-    - workflows.storage.fenced_fact_writes
-
-- id: workflows.storage.fact_hash_conflict_preserves_content
-  given:
-    - a fact row already exists for hash H
-  when:
-    - a later write attempts to store a different serialized value for H
-  then:
-    - the existing content is not overwritten
-    - the writer either receives a conflict error or the write is treated as an idempotent no-op only if the content matches
-  covers:
-    - workflows.storage.fact_hash_immutability
 ```
 
 ## Verification
@@ -215,7 +163,6 @@ surface:
     - workflows.storage.schema_versioning
     - workflows.storage.checkpoint_and_restore
     - workflows.storage.passivation_to_cold
-    - workflows.storage.wal_checkpoint_failure_preserves_local_files
     - workflows.storage.cold_restore_from_s3
     - workflows.storage.schema_migration_on_wake
     - workflows.storage.litestream_auto_discovery
@@ -235,38 +182,8 @@ surface:
     - workflows.storage.one_to_one_sqlite
     - workflows.storage.checkpoint_format
     - workflows.storage.passivation_tiers
-    - workflows.storage.passivation_preserves_uncheckpointed_files
     - workflows.storage.passivation_to_cold
     - workflows.storage.cold_restore_from_s3
-
-- kind: source_file
-  target: lib/fizz/workflows/store/sqlite_store.ex
-  covers:
-    - workflows.storage.checkpoint_format
-    - workflows.storage.fact_level_persistence
-    - workflows.storage.fenced_fact_writes
-    - workflows.storage.fact_hash_immutability
-    - workflows.storage.schema_versioning
-
-- kind: source_file
-  target: lib/fizz/workflows/passivation_sweeper.ex
-  covers:
-    - workflows.storage.passivation_tiers
-    - workflows.storage.passivation_preserves_uncheckpointed_files
-
-- kind: test_file
-  target: test/fizz/workflows/store/sqlite_store_test.exs
-  covers:
-    - workflows.storage.checkpoint_and_restore
-    - workflows.storage.fenced_standalone_fact_write
-    - workflows.storage.fact_hash_conflict_preserves_content
-    - workflows.storage.schema_migration_on_wake
-
-- kind: test_file
-  target: test/fizz/workflows/passivation_sweeper_test.exs
-  covers:
-    - workflows.storage.passivation_to_cold
-    - workflows.storage.wal_checkpoint_failure_preserves_local_files
 ```
 
 ## Exceptions

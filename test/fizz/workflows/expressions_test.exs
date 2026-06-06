@@ -11,14 +11,6 @@ defmodule Fizz.Workflows.ExpressionsTest do
     assert Expressions.classify("{{ input.total | gt: 100 }}") == :predicate
   end
 
-  test "detects expression marker strings" do
-    assert Expressions.expression_string?("{{ input.orders }}")
-    assert Expressions.expression_string?("{% if input.ok %}ok{% endif %}")
-
-    refute Expressions.expression_string?("plain text")
-    refute Expressions.expression_string?(42)
-  end
-
   test "resolves value expressions while preserving native types" do
     orders = [%{"id" => 1}, %{"id" => 2}]
     plan = access_plan!("{{ input.orders }}")

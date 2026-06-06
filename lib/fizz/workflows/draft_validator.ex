@@ -8,6 +8,7 @@ defmodule Fizz.Workflows.DraftValidator do
 
   defmodule ValidationError do
     @derive {Jason.Encoder, only: [:step_id, :field, :message, :severity, :code]}
+    @derive {LiveVue.Encoder, only: [:step_id, :field, :message, :severity, :code]}
     defstruct [:step_id, :field, :message, :severity, :code]
 
     @type t :: %__MODULE__{

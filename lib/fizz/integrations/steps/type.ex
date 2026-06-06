@@ -48,6 +48,23 @@ defmodule Fizz.Integrations.Steps.Type do
           updated_at: DateTime.t() | nil
         }
 
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :version,
+             :name,
+             :category,
+             :description,
+             :icon,
+             :provider,
+             :integration,
+             :step_kind,
+             :executor,
+             :default_config,
+             :config_schema,
+             :input_schema,
+             :output_schema
+           ]}
   @enforce_keys [:id, :name, :category, :description, :icon, :executor, :step_kind]
   defstruct [
     :id,

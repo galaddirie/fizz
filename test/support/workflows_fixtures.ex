@@ -5,7 +5,6 @@ defmodule Fizz.WorkflowsFixtures do
 
   alias Fizz.Accounts.Scope
   alias Fizz.Workflows
-  alias Fizz.Workflows.WorkflowRun
 
   def project_scope_fixture do
     user = user_fixture()
@@ -30,47 +29,6 @@ defmodule Fizz.WorkflowsFixtures do
     {:ok, version} = Workflows.publish_draft(scope, saved_draft)
 
     %{definition: definition, draft: saved_draft, version: version}
-  end
-
-  def draft_fixture(scope, snapshot_attrs \\ nil) do
-    {:ok, %{definition: definition, draft: draft}} =
-      Workflows.create_definition(scope, %{
-        name: "Workflow #{System.unique_integer([:positive])}",
-        description: "Workflow draft"
-      })
-
-    case snapshot_attrs do
-      nil ->
-        %{definition: definition, draft: draft}
-
-      attrs ->
-        {:ok, saved_draft} = Workflows.save_draft(scope, draft, attrs)
-        %{definition: definition, draft: saved_draft}
-    end
-  end
-
-  def workflow_run_fixture(scope, version, attrs \\ %{}) do
-    now = DateTime.utc_now()
-
-    attrs =
-      Map.merge(
-        %{
-          user_id: scope.user.id,
-          workflow_definition_id: version.workflow_definition_id,
-          workflow_definition_version_id: version.id,
-          project_id: scope.project.id,
-          workos_organization_id: scope.project.workos_organization_id,
-          status: :running,
-          input: %{},
-          last_active_at: now,
-          started_at: now
-        },
-        attrs
-      )
-
-    %WorkflowRun{}
-    |> WorkflowRun.changeset(attrs)
-    |> Fizz.Repo.insert!()
   end
 
   def valid_snapshot_attrs do

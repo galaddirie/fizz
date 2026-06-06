@@ -2,7 +2,7 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
   use ExUnit.Case, async: true
 
   alias Fizz.Accounts.Scope
-  alias Fizz.Workflows.Compiler.RuntimeCallbacks
+  alias Fizz.Workflows.Compiler.Assembler
 
   test "executor context carries runtime identity and scope values" do
     scope = %Scope{user: %{id: "user_123"}, organization_id: "org_123"}
@@ -12,7 +12,7 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
     end
 
     resolution_context =
-      RuntimeCallbacks.resolution_context(
+      Assembler.resolution_context(
         %{"input" => true},
         %{
           workflow: %{
@@ -34,7 +34,7 @@ defmodule Fizz.Workflows.Compiler.AssemblerContextTest do
       )
 
     context =
-      RuntimeCallbacks.executor_context(
+      Assembler.executor_context(
         %{"input" => true},
         resolution_context,
         %{step_id: "step_123", step_name: "Step", type_id: "debug"}

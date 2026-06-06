@@ -1,40 +1,28 @@
 defmodule Fizz.Workflows.LeaseManagerTest do
   use Fizz.DataCase, async: false
 
-  import Fizz.WorkflowsFixtures
-
   alias Fizz.Workflows.LeaseManager
 
   setup do
     manager_a = unique_name(:manager_a)
     manager_b = unique_name(:manager_b)
-    scope = project_scope_fixture()
-    %{version: version} = published_version_fixture(scope)
 
     start_supervised!({LeaseManager, name: manager_a, owner_node: "node-a", repo: Repo})
     start_supervised!({LeaseManager, name: manager_b, owner_node: "node-b", repo: Repo})
 
-    %{manager_a: manager_a, manager_b: manager_b, scope: scope, version: version}
+    %{manager_a: manager_a, manager_b: manager_b}
   end
 
-  test "acquire lease returns an incremented fence token", %{
-    manager_a: manager_a,
-    scope: scope,
-    version: version
-  } do
-    run_id = workflow_run_fixture(scope, version).id
+  test "acquire lease returns an incremented fence token", %{manager_a: manager_a} do
+    run_id = Ecto.UUID.generate()
     insert_lease(run_id, "old-node", 0, "NOW() - interval '1 second'")
 
     assert {:ok, 1} = LeaseManager.acquire(run_id, server: manager_a)
     assert %{owner_node: "node-a", fence_token: 1} = lease_row(run_id)
   end
 
-  test "renewal extends lease expiry", %{
-    manager_a: manager_a,
-    scope: scope,
-    version: version
-  } do
-    run_id = workflow_run_fixture(scope, version).id
+  test "renewal extends lease expiry", %{manager_a: manager_a} do
+    run_id = Ecto.UUID.generate()
     insert_lease(run_id, "old-node", 0, "NOW() - interval '1 second'")
 
     assert {:ok, 1} = LeaseManager.acquire(run_id, server: manager_a)
@@ -60,11 +48,9 @@ defmodule Fizz.Workflows.LeaseManagerTest do
 
   test "expired lease can be claimed by another node", %{
     manager_a: manager_a,
-    manager_b: manager_b,
-    scope: scope,
-    version: version
+    manager_b: manager_b
   } do
-    run_id = workflow_run_fixture(scope, version).id
+    run_id = Ecto.UUID.generate()
     insert_lease(run_id, "old-node", 0, "NOW() - interval '1 second'")
 
     assert {:ok, 1} = LeaseManager.acquire(run_id, server: manager_a)
@@ -86,11 +72,9 @@ defmodule Fizz.Workflows.LeaseManagerTest do
 
   test "concurrent acquisition allows only one winner", %{
     manager_a: manager_a,
-    manager_b: manager_b,
-    scope: scope,
-    version: version
+    manager_b: manager_b
   } do
-    run_id = workflow_run_fixture(scope, version).id
+    run_id = Ecto.UUID.generate()
     insert_lease(run_id, "old-node", 0, "NOW() - interval '1 second'")
 
     task_a =

@@ -26,6 +26,18 @@ defmodule Fizz.Accounts.Project do
              :inserted_at,
              :updated_at
            ]}
+  @derive {LiveVue.Encoder,
+           only: [
+             :id,
+             :name,
+             :slug,
+             :description,
+             :metadata,
+             :workos_organization_id,
+             :inserted_at,
+             :updated_at
+           ]}
+
   schema "projects" do
     field :name, :string
     field :slug, :string
